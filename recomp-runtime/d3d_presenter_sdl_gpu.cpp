@@ -745,7 +745,7 @@ bool uploadTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *texture, const
 }
 
 /* Copies the guest back buffer (resolving it) into a snapshot texture. */
-void copyGuestBuffer(RecompD3dPresenter *presenter, SDL_GPUTexture *target)
+void copyGuestBuffer(RecompD3dPresenter *presenter, SDL_GPUTexture *target, bool mips = true)
 {
     resolveMain(presenter);
     if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commandBuffer(presenter))) {
@@ -755,7 +755,29 @@ void copyGuestBuffer(RecompD3dPresenter *presenter, SDL_GPUTexture *target)
             mainWidth(presenter), mainHeight(presenter), 1u, false);
         SDL_EndGPUCopyPass(pass);
     }
-    if (presenter->copy_mips) SDL_GenerateMipmapsForGPUTexture(commandBuffer(presenter), target);
+    if (mips && presenter->copy_mips) SDL_GenerateMipmapsForGPUTexture(commandBuffer(presenter), target);
+}
+
+/* A main-sized offscreen target has the main target's host size, so the
+   resolved frame copies whole into the view that draws sample. */
+RecompD3dPresenterError submitCopyMainColor(RecompD3dPresenter *presenter, const RecompD3dTextureDesc &destination)
+{
+    if (destination.width != presenter->config.width || destination.height != presenter->config.height)
+        return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+    RecompD3dPresenterTarget target{};
+    target.offscreen = true;
+    target.no_depth = true;
+    target.color = destination;
+    BoundTarget bound;
+    const RecompD3dPresenterError error = bindTarget(presenter, target, bound);
+    if (error != RECOMP_D3D_PRESENTER_OK) return error;
+    // The snapshot must hold every queued draw to the back buffer.
+    flushSegment(presenter);
+    copyGuestBuffer(presenter, bound.entry->resolve, false);
+    /* shortcut: with MSAA only the resolved view holds the copy, so a later draw
+       into this target would resolve over it; copy the samples if a game does. */
+    bound.entry->resolved = true;
+    return RECOMP_D3D_PRESENTER_OK;
 }
 
 SDL_GPUTexture *lookupBackBufferTexture(RecompD3dPresenter *presenter,
@@ -3018,6 +3040,8 @@ RecompD3dPresenterError d3d_backend_submit(RecompD3dPresenter *presenter, const 
         }
         return endVisibility(presenter, command->data.visibility_index, last);
     }
+    case RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR:
+        return submitCopyMainColor(presenter, command->data.copy_destination);
     default:
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }

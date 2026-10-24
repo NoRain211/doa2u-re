@@ -692,7 +692,9 @@ static void persist_display(void)
 /* D3DDevice_CopyRects (0x344aa0, stdcall, 5 arguments). After a mode Reset
    the game (0x2823f0) copies the saved display back into a 720-wide back
    buffer so the next Swap repeats the last frame. The host back buffer already
-   holds those pixels, so that copy is complete without host work. */
+   holds those pixels, so that copy is complete without host work. A shattering
+   stage mirror (0x277670) copies the whole back buffer into a render-target
+   texture of its size and format, then draws the shards with that texture. */
 static void copy_rects(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -710,8 +712,21 @@ static void copy_rects(void)
         bound = count == 1u && rect[0] == 0u && rect[1] == 0u && rect[2] != 0u && rect[3] != 0u &&
             rect[2] <= target.width && rect[3] <= target.height;
     }
-    /* shortcut: only the saved-display restore is bound; other copies (such as
-       0x277670's render-target snapshot) need a presenter copy command. */
+    if (!bound && source != 0u && rects == 0u && points == 0u &&
+        device_state.scale[0] == 1u && device_state.scale[1] == 1u) {
+        RecompD3dTextureDesc copied;
+        target_surface(source, false, &copied);
+        bound = copied.data == main_color.data && target.data != main_color.data &&
+            target.width == main_color.width && target.height == main_color.height &&
+            target.format_byte == main_color.format_byte;
+        if (bound) {
+            RecompD3dPresenterCommand command = {.type = RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR};
+            command.data.copy_destination = target;
+            recomp_d3d8_submit(&command);
+        }
+    }
+    /* shortcut: only the restore and whole main-target snapshots are bound;
+       partial or scaled copies need a presenter rectangle copy. */
     if (!bound) recomp_stop(2, "d3d8:copy-rects-unbound:%08" PRIx32 "->%08" PRIx32, source, destination);
     recomp_runtime.registers.esp = entry + 24u;
 }

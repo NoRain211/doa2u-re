@@ -25,6 +25,7 @@ enum {
     OFFSCREEN = 0x2400u,
     OFFSCREEN_DEPTH = 0x2500u,
     BLOOM_SOURCE = 0x2600u,
+    SNAPSHOT = 0x2700u,
     ENTRY_ESP = 0x8000u,
     DEVICE_GLOBAL = 0x3554f8u,
     DEVICE = 0x355500u,
@@ -851,6 +852,18 @@ int main(void)
     arguments[0] = 0u; arguments[1] = 0u; arguments[2] = 0xf3u;
     passed &= call(0x347920u, arguments, 6u, NULL);
     passed &= call(0x344aa0u, copy, 5u, "d3d8:copy-rects-unbound");
+    /* A shattering mirror (0x277670) copies the whole back buffer into a texture. */
+    const RecompD3dSurfaceHeader shards = {0x50001u, 0x280000u, 0u, 0x11229u, 0x2f1df2cfu, 0u};
+    memcpy(recomp_memory(SNAPSHOT, sizeof shards), &shards, sizeof shards);
+    const uint32_t snapshot[5] = {COLOR_HEADER, 0u, 1u, SNAPSHOT, 0u};
+    passed &= call(0x344aa0u, snapshot, 5u, NULL);
+    passed &= expect("back buffer snapshot copies the main target into the texture",
+        recomp_runtime.registers.esp == ENTRY_ESP + 24u &&
+        submitted.type == RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR &&
+        submitted.data.copy_destination.data == 0x280000u &&
+        submitted.data.copy_destination.width == 720u);
+    const uint32_t partial[5] = {COLOR_HEADER, RECT_SOURCE, 1u, SNAPSHOT, 0u};
+    passed &= call(0x344aa0u, partial, 5u, "d3d8:copy-rects-unbound");
     passed &= coverage_tests();
     recomp_d3d8_shutdown();
     passed &= expect("shutdown destroys presenter once", destroy_count == 1u);

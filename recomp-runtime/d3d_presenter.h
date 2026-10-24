@@ -38,6 +38,9 @@ typedef enum RecompD3dPresenterCommandType {
     RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_BEGIN,
     RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_END,
     RECOMP_D3D_PRESENTER_COMMAND_DRAW_COVERAGE,
+    /* Copies the main color target into a main-sized offscreen target, so
+       later draws sampling that texture see the frame (a CopyRects snapshot). */
+    RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR,
 } RecompD3dPresenterCommandType;
 
 /* Resolved by the adapter. Surface wrappers sharing pixel storage have the
@@ -291,6 +294,7 @@ typedef struct RecompD3dPresenterCommand {
         /* Xbox gamma ramp: separate 256-entry 8-bit red, green, blue planes. */
         uint8_t gamma[3][256];
         uint32_t visibility_index;
+        RecompD3dTextureDesc copy_destination;
     } data;
 } RecompD3dPresenterCommand;
 

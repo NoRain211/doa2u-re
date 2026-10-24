@@ -1089,6 +1089,33 @@ RecompD3dPresenterError bindTarget(
     return RECOMP_D3D_PRESENTER_OK;
 }
 
+/* A main-sized offscreen target has the main target's host size, samples and
+   format, so the frame copies whole; sampling it later resolves the copy. */
+RecompD3dPresenterError submitCopyMainColor(
+    RecompD3dPresenter *presenter,
+    const RecompD3dTextureDesc &destination)
+{
+    if (destination.width != presenter->config.width ||
+        destination.height != presenter->config.height) {
+        return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+    }
+    RecompD3dPresenterTarget target{};
+    target.offscreen = true;
+    target.no_depth = true;
+    target.color = destination;
+    ID3D11RenderTargetView *color_view = nullptr;
+    ID3D11DepthStencilView *depth_view = nullptr;
+    const RecompD3dPresenterError error = bindTarget(presenter, target, color_view, depth_view);
+    if (error != RECOMP_D3D_PRESENTER_OK) return error;
+    ID3D11Resource *source = nullptr, *copy = nullptr;
+    presenter->render_target_view->GetResource(&source);
+    color_view->GetResource(&copy);
+    presenter->context->CopyResource(copy, source);
+    releaseCom(copy);
+    releaseCom(source);
+    return RECOMP_D3D_PRESENTER_OK;
+}
+
 RecompD3dPresenterError submitClear(
     RecompD3dPresenter *presenter,
     const RecompD3dPresenterClearCommand &clear)
@@ -3663,6 +3690,8 @@ RecompD3dPresenterError d3d_backend_submit(
         return beginVisibility(presenter);
     case RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_END:
         return endVisibility(presenter, command->data.visibility_index);
+    case RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR:
+        return submitCopyMainColor(presenter, command->data.copy_destination);
     default:
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
