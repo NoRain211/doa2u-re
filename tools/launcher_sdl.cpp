@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Linux launcher: pick resolution, anti-aliasing, widescreen and the intro
-// skip, remember them in private/launcher.json, then exit 0 so run_game.py
+// Linux launcher: pick resolution, anti-aliasing, widescreen, the intro skip
+// and 5.1 surround, remember them in private/launcher.json, then exit 0 so run_game.py
 // starts the game. Mirrors tools/launcher.ps1, with MSAA up to SDL_GPU's 8x. Adapted from the DOA3 launcher
 // (NoRain211/doa3-re tools/launcher_sdl.cpp). Gamepad,
 // keyboard, mouse and touch all work, so it runs from Steam Game Mode.
@@ -20,12 +20,12 @@ namespace {
 // so SDL's 8x8 debug font stays sharp: 2x on the Steam Deck's 1280x800.
 constexpr int kWidth = 640, kHeight = 400;
 constexpr float kRowX = 120, kRowW = 400, kRowH = 26, kFirstRowY = 108, kRowGap = 32;
-constexpr float kButtonY = kFirstRowY + 5 * kRowGap + 10, kButtonW = 194, kButtonH = 30;
+constexpr float kButtonY = kFirstRowY + 6 * kRowGap + 10, kButtonW = 194, kButtonH = 30;
 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SKIP_INTRO, PLAY, QUIT, ITEM_COUNT };
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SKIP_INTRO, SURROUND, PLAY, QUIT, ITEM_COUNT };
 
 // launcher.ps1's defaults: the screen height, the most MSAA, widescreen on.
 struct Settings {
@@ -34,6 +34,7 @@ struct Settings {
     bool smaa = true;
     bool widescreen = true;
     bool skip_intro = false;
+    bool surround = false;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -65,6 +66,7 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "smaa", value)) settings.smaa = value == "true";
     if (jsonValue(text, "widescreen", value)) settings.widescreen = value == "true";
     if (jsonValue(text, "skipIntro", value)) settings.skip_intro = value == "true";
+    if (jsonValue(text, "surround", value)) settings.surround = value == "true";
     return settings;
 }
 
@@ -74,7 +76,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
     file << "{\n  \"height\": " << settings.height << ",\n  \"msaa\": " << settings.msaa
          << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
          << ",\n  \"widescreen\": " << (settings.widescreen ? "true" : "false")
-         << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false") << "\n}\n";
+         << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
+         << ",\n  \"surround\": " << (settings.surround ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
 
@@ -94,7 +97,7 @@ SDL_FRect itemRect(int item)
 
 struct Launcher {
     SDL_Renderer *renderer = nullptr;
-    int choice[5] = {};
+    int choice[PLAY] = {};
     int selected = PLAY;
 
     std::string valueText(int item) const
@@ -112,14 +115,14 @@ struct Launcher {
     void change(int item, int step)
     {
         static const int counts[] = {static_cast<int>(std::size(kHeights)),
-            static_cast<int>(std::size(kSamples)), 2, 2, 2};
+            static_cast<int>(std::size(kSamples)), 2, 2, 2, 2};
         if (item < PLAY) choice[item] = (choice[item] + counts[item] + step) % counts[item];
     }
 
     // Play and Quit share the bottom row.
     void move(int dy, int dx)
     {
-        if (dy < 0 && selected > RESOLUTION) selected = selected >= PLAY ? SKIP_INTRO : selected - 1;
+        if (dy < 0 && selected > RESOLUTION) selected = selected >= PLAY ? PLAY - 1 : selected - 1;
         if (dy > 0 && selected < PLAY) ++selected;
         if (dx != 0) {
             if (selected >= PLAY) selected = dx > 0 ? QUIT : PLAY;
@@ -158,7 +161,8 @@ struct Launcher {
         centered(56, "2 ULTIMATE", kText, 2);
         centered(82, "Native port settings", kMuted);
 
-        static const char *labels[] = {"Resolution", "MSAA", "SMAA Ultra", "Widescreen (16:9)", "Skip intro movies"};
+        static const char *labels[] = {"Resolution", "MSAA", "SMAA Ultra", "Widescreen (16:9)",
+            "Skip intro movies", "Surround 5.1"};
         for (int item = RESOLUTION; item < PLAY; ++item) {
             const SDL_FRect row = itemRect(item);
             const bool active = item == selected;
@@ -251,6 +255,7 @@ int main(int argc, char **argv)
     launcher.choice[SMAA] = settings.smaa ? 1 : 0;
     launcher.choice[WIDESCREEN] = settings.widescreen ? 1 : 0;
     launcher.choice[SKIP_INTRO] = settings.skip_intro ? 1 : 0;
+    launcher.choice[SURROUND] = settings.surround ? 1 : 0;
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -338,6 +343,7 @@ int main(int argc, char **argv)
         settings.smaa = launcher.choice[SMAA] != 0;
         settings.widescreen = launcher.choice[WIDESCREEN] != 0;
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
+        settings.surround = launcher.choice[SURROUND] != 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             result = 1;

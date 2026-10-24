@@ -72,7 +72,8 @@ static bool checkReverbCapture(Capture *recording, uint32_t channels, bool wet)
 int main()
 {
     if (!check("environment", _putenv_s("RECOMP_AUDIO_GAIN", "1") == 0 &&
-            _putenv_s("RECOMP_AUDIO_CAPTURE", "") == 0)) return 1;
+            _putenv_s("RECOMP_AUDIO_CAPTURE", "") == 0 &&
+            _putenv_s("RECOMP_AUDIO_SURROUND", "0") == 0)) return 1;
     recomp_audio_output_initialize();
     bool passed = check("endpoint", recomp_audio_output_enabled() && recomp_audio_output_ready());
     if (passed) passed = check("master mute", SUCCEEDED(master->SetVolume(0.0f)));

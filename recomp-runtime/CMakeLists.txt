@@ -244,12 +244,15 @@ elseif(SDL3_FOUND)
     add_test(NAME recomp-runtime-input-host-sdl COMMAND recomp_input_host_test)
 endif()
 if(WIN32)
-    add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_capture_xapo.cpp)
+    add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_xtalk_xapo.cpp
+        audio_capture_xapo.cpp dsound_hrtf.c)
     target_include_directories(recomp_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     # mingw-w64 names the Windows 10 XAudio2 import library xaudio2_9.
     set(RECOMP_XAUDIO2 $<IF:$<BOOL:${MINGW}>,xaudio2_9,xaudio2>)
     target_link_libraries(recomp_audio PUBLIC ${RECOMP_XAUDIO2} ole32)
-    add_executable(recomp_audio_output_test audio_output_xaudio2_test.cpp)
+    add_executable(recomp_audio_output_test audio_output_xaudio2_test.cpp
+        audio_xtalk_xapo.cpp dsound_hrtf.c)
+    target_link_libraries(recomp_audio_output_test PRIVATE ole32)
     add_test(NAME recomp-runtime-audio-output COMMAND recomp_audio_output_test)
     # CXAPOBase (the audio recorder) and the SDK reverb reference exist only with MSVC.
     if(MSVC)
@@ -258,6 +261,7 @@ if(WIN32)
         target_link_libraries(recomp_audio_capture_test PRIVATE xapobase)
         add_test(NAME recomp-runtime-audio-capture COMMAND recomp_audio_capture_test)
         add_executable(recomp_audio_host_test audio_output_xaudio2_host_test.cpp)
+        target_sources(recomp_audio_host_test PRIVATE audio_xtalk_xapo.cpp dsound_hrtf.c)
         target_link_libraries(recomp_audio_host_test PRIVATE xaudio2 xapobase ole32)
         if(RECOMP_NATIVE_AUDIO_TEST)
             add_test(NAME recomp-runtime-audio-host COMMAND recomp_audio_host_test)
@@ -267,7 +271,7 @@ if(WIN32)
         add_test(NAME recomp-runtime-xaudio2-reverb COMMAND recomp_xaudio2_reverb_test)
     endif()
 else()
-    add_library(recomp_audio STATIC audio_output_sdl.cpp audio_reverb.cpp)
+    add_library(recomp_audio STATIC audio_output_sdl.cpp audio_reverb.cpp dsound_hrtf.c)
     target_include_directories(recomp_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     recomp_use_sdl3(recomp_audio)
     add_executable(recomp_audio_output_test audio_output_sdl_test.cpp)
@@ -463,7 +467,7 @@ if(RECOMP_PROGRAM_DIR)
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        dsound_hrtf.c xbox_adpcm.c
+        xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")

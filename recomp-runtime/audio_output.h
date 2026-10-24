@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+/* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Reads the
+   environment only, so it is valid before initialize and without a device.
+   Keep this in step with the kernel's XC_AUDIO speaker setting. */
+uint32_t recomp_audio_output_speakers(void);
 /* Call on the runtime thread. Initialization is attempted once per process;
    an unavailable device or shutdown leaves guest audio timing unchanged.
    RECOMP_AUDIO_GAIN is the host master gain (0..1, default 1); zero stays muted.
@@ -36,15 +40,17 @@ typedef struct RecompAudioReverb {
 
 /* Owner-thread calls. Nonzero on success or explicit mute; invalid parameters,
    shutdown and backend failures return zero. A wet send requires set_reverb.
-   Matrices target stereo output: [source + destination * channels]. Mono uses
-   two entries, stereo four. An unconfigured slot uses the default dry send.
+   Matrices use [source + destination * channels]. dry has channels * speakers
+   entries; with 6 speakers the destinations are WAVE order FL, FR, C, LFE, BL,
+   BR. wet stays stereo (channels * 2) and reaches the reverb submix. An
+   unconfigured slot maps its source to FL/FR (the default dry send).
    Routing survives source format recreation; reset_voice clears it. */
 int recomp_audio_output_set_reverb(const RecompAudioReverb *parameters);
 int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t channels,
     const float *dry, const float *wet);
 
 /* Copies PCM before returning; never retains a guest-memory pointer.
-   Slots: 0..255. PCM: 1000..200000 Hz, mono/stereo, unsigned 8 bit, signed
+   Slots: 0..255. PCM: 1000..200000 Hz, 1-3 channels, unsigned 8 bit, signed
    16 bit, or 32-bit IEEE float (1.0 = full scale; values beyond +/-1 allowed).
    Each submission is frame-aligned and at most 160000 bytes. A full queue
    drops the incoming chunk without waiting. A new or starved voice first

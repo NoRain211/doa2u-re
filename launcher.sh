@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # macOS and Linux counterpart of play.cmd without arguments: pick resolution,
-# anti-aliasing, widescreen and the intro skip (saved to private/launcher.json),
-# then play with those choices.
+# anti-aliasing, widescreen, the intro skip and 5.1 surround (saved to
+# private/launcher.json), then play with those choices.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

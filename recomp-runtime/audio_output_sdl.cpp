@@ -5,12 +5,14 @@
    device's real consumption rate.
 
    XAudio2 sends each voice through an output matrix to the master and, when
-   wet, to an I3DL2 reverb submix. Here a routed voice is converted to stereo
-   float with its dry matrix on the way in, and its wet half goes to a twin
-   stream on a second logical device whose post-mix callback runs the reverb
-   (audio_reverb.h) over the summed wet signal, as the submix does. */
+   wet, to an I3DL2 reverb submix. Here a routed voice is converted to float
+   for the device's speaker count with its dry matrix on the way in, and its
+   wet half goes to a stereo twin stream on a second logical device whose
+   post-mix callback runs the reverb (audio_reverb.h) over the summed wet
+   signal, as the submix does. */
 #include "audio_output.h"
 #include "audio_reverb.h"
+#include "dsound_hrtf.h"
 
 #include <SDL3/SDL.h>
 
@@ -41,7 +43,7 @@ constexpr int kOutputRate = 48000;
 
 struct VoiceRouting {
     uint32_t channels;
-    float dry[4], wet[4];
+    float dry[3 * 6], wet[3 * 2];
 };
 
 struct SdlVoice {
@@ -60,11 +62,12 @@ VoiceRouting routing[kVoiceCount];
 bool reported_nonzero[kVoiceCount];
 bool attempted, summary_printed, muted, reverb_ready;
 std::atomic<std::thread::id> owner_thread{};
-std::vector<uint8_t> silence_buffer;
+std::vector<uint8_t> silence_buffer, wet_silence_buffer;
 std::vector<float> dry_frames, wet_frames;
 
 std::mutex reverb_mutex;
 RecompAudioReverbState *reverb;
+RecompXtalk xtalk;
 
 unsigned long long submitted_buffers, submitted_bytes, nonzero_buffers;
 unsigned long long dropped_buffers, underruns, voice_resets;
@@ -108,6 +111,8 @@ void SDLCALL reverbPostmix(void *, const SDL_AudioSpec *spec, float *buffer, int
         return;
     }
     recomp_audio_reverb_process(reverb, buffer, frames);
+    /* shortcut: the 11-sample delay and pole assume 48 kHz; resample for other device rates. */
+    recomp_xtalk_process_block(&xtalk, buffer, static_cast<uint32_t>(frames));
 }
 
 void dropBuffer(uint32_t slot, const char *reason)
@@ -145,20 +150,18 @@ float sampleAt(const uint8_t *pcm, uint32_t bits, uint32_t index)
 }
 
 /* Applies one output matrix ([source + destination * channels], as XAudio2)
-   to whole frames, giving interleaved stereo float. */
-void mixStereo(const uint8_t *pcm, uint32_t frames, uint32_t channels, uint32_t bits,
-    const float *matrix, std::vector<float> &out)
+   to whole frames, giving interleaved float for the given speaker count. */
+void mixOutput(const uint8_t *pcm, uint32_t frames, uint32_t channels, uint32_t bits,
+    const float *matrix, uint32_t speakers, std::vector<float> &out)
 {
-    out.resize(static_cast<size_t>(frames) * 2u);
+    out.assign(static_cast<size_t>(frames) * speakers, 0.0f);
     for (uint32_t frame = 0u; frame < frames; ++frame) {
-        float left = 0.0f, right = 0.0f;
+        float *mixed = out.data() + static_cast<size_t>(frame) * speakers;
         for (uint32_t source = 0u; source < channels; ++source) {
             const float sample = sampleAt(pcm, bits, frame * channels + source);
-            left += sample * matrix[source];
-            right += sample * matrix[source + channels];
+            for (uint32_t destination = 0u; destination < speakers; ++destination)
+                mixed[destination] += sample * matrix[source + destination * channels];
         }
-        out[frame * 2u] = left;
-        out[frame * 2u + 1u] = right;
     }
 }
 
@@ -204,6 +207,7 @@ bool openReverbDevice()
     {
         std::lock_guard<std::mutex> lock(reverb_mutex);
         reverb = recomp_audio_reverb_create(spec.freq > 0 ? spec.freq : kOutputRate);
+        xtalk = {};
     }
     if (reverb == nullptr || !SDL_SetAudioPostmixCallback(reverb_device, reverbPostmix, nullptr)) {
         std::fprintf(stderr, "[audio-output] reverb unavailable: %s\n", SDL_GetError());
@@ -217,6 +221,12 @@ bool openReverbDevice()
 }
 
 } // namespace
+
+extern "C" uint32_t recomp_audio_output_speakers(void)
+{
+    const char *surround = std::getenv("RECOMP_AUDIO_SURROUND");
+    return surround && std::strcmp(surround, "0") != 0 ? 6u : 2u;
+}
 
 extern "C" int recomp_audio_output_on_owner_thread(void)
 {
@@ -265,7 +275,8 @@ extern "C" void recomp_audio_output_initialize(void)
     }
     /* Float output keeps headroom while SDL sums voices; it is CoreAudio's
        native format, so no extra integer conversion stage is added. */
-    const SDL_AudioSpec want{SDL_AUDIO_F32, 2, kOutputRate};
+    const SDL_AudioSpec want{SDL_AUDIO_F32,
+        static_cast<int>(recomp_audio_output_speakers()), kOutputRate};
     audio_device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want);
     if (audio_device == 0) {
         std::fprintf(stderr, "[audio-output] SDL open audio device failed: %s\n", SDL_GetError());
@@ -315,6 +326,7 @@ extern "C" void recomp_audio_output_shutdown(void)
         std::lock_guard<std::mutex> reverb_lock(reverb_mutex);
         recomp_audio_reverb_destroy(reverb);
         reverb = nullptr;
+        xtalk = {};
     }
     reverb_ready = false;
     if (audio_device != 0) {
@@ -389,14 +401,17 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
     const float *dry, const float *wet)
 {
     if (!recomp_audio_output_on_owner_thread() || slot >= kVoiceCount ||
-        (channels != 1 && channels != 2) || !dry || !wet) return 0;
+        (channels < 1 || channels > 3) || !dry || !wet) return 0;
     VoiceRouting route{};
     route.channels = channels;
+    const uint32_t speakers = recomp_audio_output_speakers();
     bool wet_send = false;
-    for (uint32_t i = 0; i < channels * 2; ++i) {
-        if (!inRange(dry[i], -kMaxVolumeLevel, kMaxVolumeLevel) ||
-            !inRange(wet[i], -kMaxVolumeLevel, kMaxVolumeLevel)) return 0;
+    for (uint32_t i = 0; i < channels * speakers; ++i) {
+        if (!inRange(dry[i], -kMaxVolumeLevel, kMaxVolumeLevel)) return 0;
         route.dry[i] = dry[i];
+    }
+    for (uint32_t i = 0; i < channels * 2; ++i) {
+        if (!inRange(wet[i], -kMaxVolumeLevel, kMaxVolumeLevel)) return 0;
         route.wet[i] = wet[i];
         wet_send |= wet[i] != 0.0f;
     }
@@ -423,7 +438,7 @@ extern "C" void recomp_audio_output_submit(
     if (audio_device == 0 || bytes == 0) return;
     if (slot >= kVoiceCount || !pcm || bytes > kMaxBufferBytes ||
         sample_rate < kMinSampleRate || sample_rate > kMaxSampleRate ||
-        (channels != 1 && channels != 2) ||
+        (channels < 1 || channels > 3) ||
         (bits_per_sample != 8 && bits_per_sample != 16 && bits_per_sample != 32)) {
         dropBuffer(slot, "invalid-pcm");
         return;
@@ -442,6 +457,7 @@ extern "C" void recomp_audio_output_submit(
         return;
     }
     const bool routed = route.channels != 0u;
+    const uint32_t speakers = recomp_audio_output_speakers();
     bool wet_send = false;
     for (uint32_t i = 0; routed && i < channels * 2u; ++i) wet_send |= route.wet[i] != 0.0f;
     if (voice.stream && (voice.sample_rate != sample_rate || voice.channels != channels ||
@@ -451,17 +467,18 @@ extern "C" void recomp_audio_output_submit(
     }
     if (!voice.stream) {
         /* 32-bit voices are IEEE float, 1.0 full scale (the HRTF mix). A
-           routed voice arrives as the stereo float its matrices produce. */
+           routed voice arrives as the float its dry matrix produces; the wet
+           stream stays stereo because the reverb device is. */
         const SDL_AudioFormat format = routed ? SDL_AUDIO_F32
             : bits_per_sample == 8 ? SDL_AUDIO_U8 : bits_per_sample == 16 ? SDL_AUDIO_S16LE : SDL_AUDIO_F32LE;
-        const uint32_t stream_channels = routed ? 2u : channels;
+        const uint32_t stream_channels = routed ? speakers : channels;
         voice.stream = openStream(audio_device, format, stream_channels, sample_rate);
         if (!voice.stream) {
             dropBuffer(slot, "create-stream");
             return;
         }
         if (wet_send && reverb_device != 0) {
-            voice.wet_stream = openStream(reverb_device, format, stream_channels, sample_rate);
+            voice.wet_stream = openStream(reverb_device, format, 2u, sample_rate);
             if (!voice.wet_stream) {
                 dropBuffer(slot, "create-wet-stream");
                 destroyVoice(voice);
@@ -488,7 +505,8 @@ extern "C" void recomp_audio_output_submit(
     }
 
     const uint32_t frames = bytes / block_align;
-    const uint32_t stream_align = routed ? 8u : block_align;
+    const uint32_t stream_align = routed ? speakers * 4u : block_align;
+    const uint32_t wet_align = 2u * 4u;
     const int queued = SDL_GetAudioStreamQueued(voice.stream);
     if (queued > 0 && static_cast<uint32_t>(queued) >= kMaxBufferBytes * stream_align / block_align) {
         dropBuffer(slot, "queue-full");
@@ -503,7 +521,14 @@ extern "C" void recomp_audio_output_submit(
         const uint32_t preroll = sample_rate * kPrerollMs / 1000 * stream_align;
         if (silence_buffer.size() < preroll) silence_buffer.resize(preroll);
         std::memset(silence_buffer.data(), silence, preroll);
-        if (!putData(voice, slot, silence_buffer.data(), preroll, silence_buffer.data(), preroll)) return;
+        const uint32_t wet_preroll = sample_rate * kPrerollMs / 1000 * wet_align;
+        const uint8_t *wet_silence = nullptr;
+        if (voice.wet_stream) {
+            if (wet_silence_buffer.size() < wet_preroll) wet_silence_buffer.resize(wet_preroll);
+            std::memset(wet_silence_buffer.data(), 0, wet_preroll);
+            wet_silence = wet_silence_buffer.data();
+        }
+        if (!putData(voice, slot, silence_buffer.data(), preroll, wet_silence, wet_preroll)) return;
         queued_ms = static_cast<float>(kPrerollMs);
         voice.level_ms = queued_ms;
     }
@@ -517,10 +542,12 @@ extern "C" void recomp_audio_output_submit(
         if (voice.wet_stream) SDL_SetAudioStreamFrequencyRatio(voice.wet_stream, ratio);
     }
     if (routed) {
-        mixStereo(pcm, frames, channels, bits_per_sample, route.dry, dry_frames);
-        if (voice.wet_stream) mixStereo(pcm, frames, channels, bits_per_sample, route.wet, wet_frames);
-        const uint32_t stereo_bytes = frames * 8u;
-        if (!putData(voice, slot, dry_frames.data(), stereo_bytes, wet_frames.data(), stereo_bytes)) return;
+        mixOutput(pcm, frames, channels, bits_per_sample, route.dry, speakers, dry_frames);
+        if (voice.wet_stream)
+            mixOutput(pcm, frames, channels, bits_per_sample, route.wet, 2u, wet_frames);
+        const uint32_t dry_bytes = frames * speakers * 4u;
+        const uint32_t wet_bytes = frames * 2u * 4u;
+        if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
     } else if (!putData(voice, slot, pcm, bytes, nullptr, 0u)) {
         return;
     }

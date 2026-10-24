@@ -29,17 +29,18 @@ foreach ($enabled in @($true, $false)) {
     $settingsPath = Join-Path $env:RECOMP_LAUNCHER_TEST_ROOT 'launcher.json'
     $resolution.SelectedIndex = if ($enabled) { 4 } else { 0 }
     $msaa.SelectedIndex = if ($enabled) { 5 } else { 4 }
-    $smaa.Checked = $widescreen.Checked = $skipIntro.Checked = $enabled
+    $smaa.Checked = $widescreen.Checked = $skipIntro.Checked = $surround.Checked = $enabled
     Invoke-Expression $tail
     $saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
     $height = if ($enabled) { 2160 } else { 480 }
     $count = if ($enabled) { 32 } else { 16 }
     if ($saved.height -ne $height -or $saved.msaa -ne $count -or
         $saved.smaa -ne $enabled -or $saved.widescreen -ne $enabled -or
-        $saved.skipIntro -ne $enabled) { throw 'Wrong saved graphics settings' }
+        $saved.skipIntro -ne $enabled -or $saved.surround -ne $enabled) { throw 'Wrong saved graphics settings' }
     $wide = if ($enabled) { '--widescreen' } else { '--no-widescreen' }
     $smaaOption = if ($enabled) { '--smaa' } else { '--no-smaa' }
-    $expected = "--play --resolution $height --msaa $count $wide $smaaOption" + $(if ($enabled) { ' --skip-intro' } else { '' })
+    $surroundOption = if ($enabled) { '--surround' } else { '--no-surround' }
+    $expected = "--play --resolution $height --msaa $count $wide $smaaOption $surroundOption" + $(if ($enabled) { ' --skip-intro' } else { '' })
     if (($launched[1..($launched.Count - 1)] -join ' ') -ne $expected) { throw 'Wrong runner options' }
 }
 '''
@@ -85,6 +86,8 @@ foreach ($enabled in @($true, $false)) {
                 self.assertEqual(execute.call_args.args[0][-1], "--skip-intro")
                 self.assertEqual(run(None, unlock_all=False), 0)
                 self.assertEqual(execute.call_args.args[0][-1], "--no-unlock-all")
+                self.assertEqual(run(None, surround=True), 0)
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
                 execute.side_effect = [Mock(returncode=4), Mock(returncode=0)]
@@ -92,7 +95,7 @@ foreach ($enabled in @($true, $false)) {
                 self.assertEqual(execute.call_count, 2)
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
-            self.assertEqual(len(logs), 8)
+            self.assertEqual(len(logs), 9)
             self.assertIn("runner_sha256=hash", logs[0].read_text())
 
     def test_isolated_probe_uses_separate_saves_and_scripted_input(self):
@@ -139,9 +142,9 @@ foreach ($enabled in @($true, $false)) {
             with patch("run_game.ROOT", root):
                 self.assertEqual(saved_settings(), {})
                 settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False,
-                    "widescreen": True, "skipIntro": True}), encoding="utf-8")
+                    "widescreen": True, "skipIntro": True, "surround": True}), encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
-                    "widescreen": True, "skip_intro": True})
+                    "widescreen": True, "skip_intro": True, "surround": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

@@ -55,12 +55,12 @@ keeps running.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
   60 fps, including heavy rain-stage fights at 4K.
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
-  through the game's HRTF tables and I3DL2 reverb. The intro and story
-  movies play.
+  through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
+  own 5.1 surround mix. The intro and story movies play.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
-- **Launcher.** `play.cmd` picks resolution, anti-aliasing, widescreen and an
-  optional intro-movie skip, and remembers them.
+- **Launcher.** `play.cmd` picks resolution, anti-aliasing, widescreen, an
+  optional intro-movie skip and 5.1 surround, and remembers them.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
   character and costume starts unlocked. The game's soft reset
   (Start + Back + both triggers) restarts it.
@@ -117,8 +117,9 @@ Visual Studio or administrator approval.
 2. Drag your Disc 2 ISO onto `BuildGame.cmd` and wait for **Build complete**
    (about 15 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Run `play.cmd`, pick resolution, MSAA, SMAA, widescreen and whether to
-   skip the intro movies, then press **Play**. Your choices are remembered.
+3. Run `play.cmd`, pick resolution, MSAA, SMAA, widescreen, whether to
+   skip the intro movies and whether to use 5.1 surround, then press
+   **Play**. Your choices are remembered.
 
 The first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache

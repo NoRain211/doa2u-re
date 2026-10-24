@@ -56,8 +56,8 @@ same manifest hash as the Windows build, so a different lifter or input stops
 the build before it compiles. The ISO is extracted once into
 `private/imported-disc`, about 4.1 GB.
 
-`./launcher.sh` opens a window to pick resolution, MSAA, SMAA, widescreen and
-the intro skip, saves them to `private/launcher.json` and starts the game.
+`./launcher.sh` opens a window to pick resolution, MSAA, SMAA, widescreen,
+the intro skip and 5.1 surround, saves them to `private/launcher.json` and starts the game.
 `./run_game.sh` starts the game with the saved choices, and
 `./run_game.sh --play --resolution 1080 --msaa 4 --widescreen` with explicit
 ones. As on Windows, the game keeps its cache and saves in

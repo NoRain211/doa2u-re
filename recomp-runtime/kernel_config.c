@@ -19,6 +19,16 @@ static uint32_t video_flags(void)
         ? 0x004f0000u : 0x004e0000u;
 }
 
+/* XC_AUDIO: RECOMP_AUDIO_SURROUND selects surround with AC3 (discrete 5.1),
+   the setting that sends DOA2 and DSOUND down their 5.1 paths. Keep this in
+   step with recomp_audio_output_speakers(). */
+static uint32_t audio_flags(void)
+{
+    const char *surround = getenv("RECOMP_AUDIO_SURROUND");
+
+    return surround != NULL && strcmp(surround, "0") != 0 ? 0x00010002u : 0u;
+}
+
 uint32_t recomp_kernel_query_nonvolatile_setting(
     uint32_t value_index,
     uint32_t type,
@@ -26,7 +36,8 @@ uint32_t recomp_kernel_query_nonvolatile_setting(
     uint32_t value_length,
     uint32_t result_length)
 {
-    uint32_t dword_value = value_index == 0x08u ? video_flags() : 0u;
+    uint32_t dword_value = value_index == 0x08u ? video_flags()
+        : value_index == 0x09u ? audio_flags() : 0u;
     int dword_backed = value_length == sizeof dword_value;
 
     if (type != 0u) {

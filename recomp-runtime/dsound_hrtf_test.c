@@ -29,16 +29,19 @@ int main(void)
 
     /* Azimuth 30 at elevation 0 is map row 10, column 15; point it at pair 4. */
     map[2 * (10 * 31 + 15)] = 8;
-    bank[8 * 32] = 64;       /* ear0 tap 0 */
+    bank[8 * 32] = 0x40;     /* ear0 tap 0: exponent 4, mantissa 0 = 1/16 */
     bank[8 * 32 + 31] = 3;   /* ear0 delay byte */
-    bank[9 * 32 + 2] = 32;   /* ear1 tap 2 */
-    RecompHrtfFilter right = recomp_hrtf_lookup(bank, map, 30.0f, 0.0f);
+    bank[9 * 32 + 2] = 0x20; /* ear1 tap 2: exponent 2, mantissa 0 = 1/64 */
+    RecompHrtfFilter right = recomp_hrtf_lookup(bank, map, 30.0f, 0.0f, false);
     check(right.left == (const int8_t *)bank + 8 * 32 && right.delay == 3, "right-side source delays left ear");
-    RecompHrtfFilter left = recomp_hrtf_lookup(bank, map, -31.0f, 0.0f);
+    RecompHrtfFilter left = recomp_hrtf_lookup(bank, map, -31.0f, 0.0f, false);
     check(left.left == right.right && left.right == right.left && left.delay == -3, "left side mirrors ears");
+    /* Surround folds azimuth 150 onto the front response at 30. */
+    check(recomp_hrtf_lookup(bank, map, 150.0f, 0.0f, true).left == right.left, "surround folds rear");
+    check(recomp_hrtf_lookup(bank, map, 150.0f, 0.0f, false).left != right.left, "stereo keeps rear");
     /* 5849 truncates 1.5 + 1.5 to 3 (row 1); 3936's rounding chose row 0. */
     map[2 * (1 * 31 + 15)] = 10;
-    check(recomp_hrtf_lookup(bank, map, 1.5f, 0.0f).left == (const int8_t *)bank + 10 * 32,
+    check(recomp_hrtf_lookup(bank, map, 1.5f, 0.0f, false).left == (const int8_t *)bank + 10 * 32,
         "integer quantization ties truncate");
 
     /* A 48 kHz impulse comes out as each ear's taps, the far ear delayed. */
@@ -46,27 +49,42 @@ int main(void)
     memset(&voice, 0, sizeof voice);
     voice.filter = voice.rendered = right;
     int16_t input[8] = {0, 27100};
-    float out[16];
+    float out[24];
     check(recomp_hrtf_render(&voice, input, 8, 48000, out, 8) == 8, "frame count");
-    /* Output n is input n-1 (interpolation latency). Each ear is L1-normalized. */
-    check(out[2 * 2] == 0.0f && fabsf(out[2 * 5] - 27100.0f / 32768.0f) < 0.000001f,
+    /* Output n is input n-1 (interpolation latency). Taps apply unnormalized. */
+    check(out[3 * 2] == 0.0f && fabsf(out[3 * 5] - 27100.0f / 16.0f / 32768.0f) < 0.000001f,
         "left: tap 0 after 3-sample delay");
-    check(fabsf(out[2 * 4 + 1] - 27100.0f / 32768.0f) < 0.000001f, "right: tap 2, undelayed");
+    check(fabsf(out[3 * 4 + 1] - 27100.0f / 64.0f / 32768.0f) < 0.000001f, "right: tap 2, undelayed");
+    check(fabsf(out[3 * 2 + 2] - 27100.0f / 32768.0f) < 0.000001f && out[3 * 3 + 2] == 0.0f,
+        "third channel is the unfiltered voice");
 
     /* 24 kHz input doubles the frame count. */
     memset(&voice, 0, sizeof voice);
     voice.filter = voice.rendered = right;
     check(recomp_hrtf_render(&voice, input, 8, 24000, out, 8) == 8, "upsampled pieces stop at capacity");
 
-    /* Same-sign taps sum to the input peak: no ear exceeds full scale. */
-    const int8_t boost[32] = {127, 127, 64, 127};
-    const int8_t inverted[32] = {-127, -127, -64, -127};
+    /* 0x7F is the largest tap (31/32); bit 7 is a sign, not two's complement. */
+    const int8_t largest[32] = {0x7F};
+    const int8_t negative[32] = {(int8_t)0xFF};
     memset(&voice, 0, sizeof voice);
-    voice.filter = voice.rendered = (RecompHrtfFilter){boost, inverted, 0};
+    voice.filter = voice.rendered = (RecompHrtfFilter){largest, negative, 0};
     for (int i = 0; i < 8; ++i) input[i] = 32767;
     check(recomp_hrtf_render(&voice, input, 8, 48000, out, 8) == 8 &&
-        fabsf(out[14] - 32767.0f / 32768.0f) < 0.000001f &&
-        fabsf(out[15] + 32767.0f / 32768.0f) < 0.000001f, "ear gain is capped at the input peak");
+        fabsf(out[21] - 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f &&
+        fabsf(out[22] + 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f, "taps are sign-magnitude floats");
+
+    /* xtalkamp effect 14: a left-ear impulse reaches the right ear 11 samples
+       later scaled by the feed, then decays by the pole. */
+    const float pole = (float)0x7645a1 / 0x800000, feed = (float)(0xf88313 - 0x1000000) / 0x800000;
+    int16_t impulse[16] = {0, 27100};
+    float ringing[48];
+    memset(&voice, 0, sizeof voice);
+    voice.filter = voice.rendered = (RecompHrtfFilter){largest, NULL, 0};
+    check(recomp_hrtf_render(&voice, impulse, 16, 48000, ringing, 16) == 16, "canceller frames");
+    const float direct = 31.0f / 32.0f * 27100.0f / 32768.0f;
+    check(fabsf(ringing[3 * 2] - direct) < 0.000001f && ringing[3 * 12 + 1] == 0.0f &&
+        fabsf(ringing[3 * 13 + 1] - feed * direct) < 0.000001f &&
+        fabsf(ringing[3 * 14 + 1] - pole * feed * direct) < 0.000001f, "crosstalk canceller");
     puts("PASS dsound hrtf angles, lookup, mirroring, delay, render");
     return 0;
 }

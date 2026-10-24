@@ -23,6 +23,12 @@ int main()
 
     // Initially disabled before init
     CHECK(recomp_audio_output_enabled() == 0);
+    // The speaker count reads the environment only.
+    setenv("RECOMP_AUDIO_SURROUND", "0", 1);
+    CHECK(recomp_audio_output_speakers() == 2);
+    setenv("RECOMP_AUDIO_SURROUND", "1", 1);
+    CHECK(recomp_audio_output_speakers() == 6);
+    unsetenv("RECOMP_AUDIO_SURROUND");
 
     // Test with valid gain first so real SDL audio initialization is exercised
     setenv("RECOMP_AUDIO_GAIN", "0.5", 1);

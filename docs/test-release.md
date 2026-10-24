@@ -27,8 +27,8 @@ Build (once, about 15 minutes):
    A progress bar and clock show it is still working; keep the window
    open even when the bar moves slowly.
 
-Play: double-click play.cmd, pick resolution, MSAA, SMAA, widescreen and
-whether to skip the intro movies, and press Play; it remembers your
+Play: double-click play.cmd, pick resolution, MSAA, SMAA, widescreen,
+whether to skip the intro movies and whether to use 5.1 surround, and press Play; it remembers your
 choices. Widescreen uses the game's own 16:9 camera and menus. The first
 launch copies about 700 MB of the game's disc archives into its hard-disk
 cache, which takes a few seconds. Saves and the cache live in

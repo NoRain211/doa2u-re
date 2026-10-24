@@ -45,6 +45,8 @@ void recomp_audio_output_initialize(void) {}
 int recomp_audio_output_enabled(void) { return opened; }
 int recomp_audio_output_ready(void) { return ready; }
 int recomp_audio_output_on_owner_thread(void) { return on_owner; }
+static uint32_t speakers = 2u;
+uint32_t recomp_audio_output_speakers(void) { return speakers; }
 void recomp_audio_output_shutdown(void) { ++shutdown_count; ready = 0; }
 void recomp_dsound_buffers_pump(void) { ++pump_count; }
 void recomp_dsound_buffers_reset(void) { ++reset_count; }
@@ -118,6 +120,10 @@ int main(void)
     args[0] = handle; args[1] = output;
     call(0x364721u, args, 2u);
     CHECK(*recomp_memory_u32(output) == 0u && recomp_runtime.registers.esp == 0x100cu);
+    speakers = 6u;
+    call(0x364721u, args, 2u);
+    CHECK(*recomp_memory_u32(output) == 0x00010002u);
+    speakers = 2u;
     call(0x36492cu, args, 0u);
     CHECK(pump_count == 1 && recomp_runtime.registers.eax == 0x12345678u &&
         recomp_runtime.registers.esp == 0x1004u);

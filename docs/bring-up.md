@@ -744,12 +744,46 @@ full-HRTF routines DirectSoundUseFullHRTF installs (`0x366d1a`):
 `-2000·log10(1 + rolloff·(d/min − 1))` distance volume held at max distance,
 Doppler pitch `4096·log2(1 − v/342)` added to the base pitch and clamped, and
 the game's own HRTF bank (`0x36de70`) and map (`0x37f430`). It renders through
-DOA3's `dsound_hrtf.c`, with 5849 truncating quantization. Per-bin terms follow
+DOA3's `dsound_hrtf.c`, with 5849 truncating quantization. DSOUND writes the
+bank's bytes unchanged to the APU (`0x369cae`). Taps decode as sign, 3-bit
+exponent and 4-bit mantissa, unnormalized: of the readings tried, only this
+one gives DOA2's bank a louder near ear at every azimuth. Linear int8
+low-passed every 3D voice. Routes 0-3 of a 3D voice carry the ears and later
+routes the unfiltered voice; the center split (`0x366ae3`) pans a frontal
+source -3 dB into center and -6 dB into the ears. Per-bin terms follow
 `0x369565`. On stereo output the front/back split is off, so XTLK front bins
 6/7 carry the HRTF ears and back bins 8/9 are silent. DOA2's 3D bins
 `{6,8,7,9,2,10,3,22}` place center in slot 4, which enables the center term
-(`0x366ae3`). XTLK bins fold to stereo by side, with back bins at −3 dB, and
-skip the DSP crosstalk canceller. Bin 10 uses the existing I3DL2 send.
+(`0x366ae3`). Bin 10 uses the existing I3DL2 send.
+
+The launcher's Surround 5.1 option (`--surround`, `RECOMP_AUDIO_SURROUND=1`)
+selects 5.1. The kernel answers XC_AUDIO (setting
+9, read by `XGetAudioFlags` `0x2bb8c7`) and GetSpeakerConfig (`0x364721`)
+with surround plus AC3 (`0x00010002`), so the game and DSOUND take their own
+surround branches. The host opens a six-channel master (FL FR C LFE BL BR,
+the same order as bins 0-5) and routes those bins straight through. XTLK
+front 6/7 go to FL/FR and rear 8/9 to BL/BR, doubled. For 3D voices,
+`0x364b53` turns on the front/back split (`0x366a14`): with
+p = clamp(((|az|/90 − 1)(1 − |el|/90) + 1) − 0.5, 0, 1), front bins and
+center take 2000·log10(1 − p) and rear bins 2000·log10(p). Within half a
+meter (distance × distance factor) p eases toward 0.5. The HRTF lookup
+folds directions behind the listener onto the front response (`0x366bfe`
+with its fold flag set by `0x369cae`). The reverb return stays on the front
+pair. Stereo remains the default.
+
+DSOUND's GP kernel (`0x380670`, loaded at P:0) DMAs bins 0, 2, 1, 4, 5 and 3 to
+the encode processor; its stereo program (`0x01067d58`) mixes
+L = FL + 0.707·C + 0.707·SL and R = FR + 0.707·C + 0.707·SR, dropping LFE.
+The game's `xtalkamp.bin` effects 5-8 double XTLK bins 6-9 and effect 14
+cancels crosstalk: each ear adds a one-pole low-passed (pole 0x7645a1, feed
+0xf88313) copy of the other ear's output from 11 samples earlier, front pair
+into bins 0/1 and rear pair into 4/5. Its outputs address bins through a
+second X window (0xc00 + bin·0x20); the effects accumulate, so the window
+must be the per-frame mix bins. The runtime doubles XTLK routes and runs the
+canceller per 3D voice. The game's SetEffectData calls only touch effects
+1-4 and 15-18 (FX bins 23-30). The I3DL2 reverb return now passes through
+the same canceller as the front XTLK pair, left into bin 6 and right into
+bin 7, at unity gain.
 Deferred 3D values apply at once. MUTE3DATMAXDISTANCE, stereo 3D voices, cones,
 modes, orientation, listener factors and I3DL2 sources remain unbound; DOA2
 sets none of them.

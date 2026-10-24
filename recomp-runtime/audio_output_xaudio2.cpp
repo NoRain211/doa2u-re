@@ -1,5 +1,6 @@
 #include "audio_output.h"
 #include "audio_capture_xapo.h"
+#include "audio_xtalk_xapo.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -47,7 +48,7 @@ struct OutputVoice {
 
 struct VoiceRouting {
     uint32_t channels;
-    float dry[4], wet[4];
+    float dry[3 * 6], wet[3 * 2];
 };
 
 std::atomic<HRESULT> critical_error{S_OK};
@@ -158,9 +159,27 @@ bool applyRouting(OutputVoice &voice, const VoiceRouting &route)
         }
         voice.sends_reverb = reverb_voice != nullptr;
     }
-    error = voice.source->SetOutputMatrix(master, route.channels, 2, route.dry);
+    error = voice.source->SetOutputMatrix(master, route.channels,
+        recomp_audio_output_speakers(), route.dry);
     if (SUCCEEDED(error) && reverb_voice)
         error = voice.source->SetOutputMatrix(reverb_voice, route.channels, 2, route.wet);
+    if (FAILED(error)) {
+        disableOutput("SetOutputMatrix", error);
+        return false;
+    }
+    return true;
+}
+
+bool applyDefaultRouting(OutputVoice &voice)
+{
+    const uint32_t speakers = recomp_audio_output_speakers();
+    if (speakers != 6) return true;
+    /* An unrouted voice sits in front left/right; the other speakers stay silent. */
+    float dry[3 * 6] = {};
+    for (uint32_t source = 0; source < voice.channels && source < 2; ++source)
+        dry[source + source * voice.channels] = 1.0f;
+    const HRESULT error = voice.source->SetOutputMatrix(
+        master, voice.channels, speakers, dry);
     if (FAILED(error)) {
         disableOutput("SetOutputMatrix", error);
         return false;
@@ -207,6 +226,12 @@ bool queueBuffer(OutputVoice &voice, uint32_t slot, const uint8_t *pcm,
 }
 
 } // namespace
+
+extern "C" uint32_t recomp_audio_output_speakers(void)
+{
+    const char *surround = std::getenv("RECOMP_AUDIO_SURROUND");
+    return surround && std::strcmp(surround, "0") != 0 ? 6u : 2u;
+}
 
 extern "C" int recomp_audio_output_on_owner_thread(void)
 {
@@ -266,7 +291,10 @@ extern "C" void recomp_audio_output_initialize(void)
         return;
     }
     callback_registered = true;
-    error = engine->CreateMasteringVoice(&master, 2, 48000);
+    /* XAudio2 2.9 derives the mastering channel mask from this count:
+       6 selects KSAUDIO_SPEAKER_5POINT1 (FL, FR, C, LFE, BL, BR). */
+    error = engine->CreateMasteringVoice(
+        &master, recomp_audio_output_speakers(), 48000);
     if (FAILED(error)) {
         disableOutput("CreateMasteringVoice", error);
         return;
@@ -331,19 +359,37 @@ extern "C" int recomp_audio_output_set_reverb(const RecompAudioReverb *parameter
     if (muted) return 1;
     if (!recomp_audio_output_enabled()) return 0;
     if (!reverb_voice) {
-        IUnknown *effect = nullptr;
-        HRESULT error = XAudio2CreateReverb(&effect);
+        IUnknown *reverb = nullptr;
+        HRESULT error = XAudio2CreateReverb(&reverb);
         if (FAILED(error)) {
             disableOutput("XAudio2CreateReverb", error);
             return 0;
         }
-        XAUDIO2_EFFECT_DESCRIPTOR descriptor{effect, TRUE, 2};
-        XAUDIO2_EFFECT_CHAIN chain{1, &descriptor};
+        IUnknown *canceller = recomp_audio_xtalk_xapo_create();
+        if (!canceller) {
+            reverb->Release();
+            disableOutput("XtalkXapoCreate", E_OUTOFMEMORY);
+            return 0;
+        }
+        /* The canceller runs on the wet return, after the reverb, at unity. */
+        XAUDIO2_EFFECT_DESCRIPTOR descriptors[2] = {{reverb, TRUE, 2}, {canceller, TRUE, 2}};
+        XAUDIO2_EFFECT_CHAIN chain{2, descriptors};
         error = engine->CreateSubmixVoice(&reverb_voice, 2, 48000, 0, 0, nullptr, &chain);
-        effect->Release();
+        reverb->Release();
+        canceller->Release();
         if (FAILED(error)) {
             disableOutput("CreateSubmixVoice", error);
             return 0;
+        }
+        if (recomp_audio_output_speakers() == 6) {
+            /* The reverb return is stereo and belongs at front left/right. */
+            const float wet_to_master[2 * 6] = {1.0f, 0.0f, 0.0f, 1.0f,
+                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+            error = reverb_voice->SetOutputMatrix(master, 2, 6, wet_to_master);
+            if (FAILED(error)) {
+                disableOutput("ReverbSetOutputMatrix", error);
+                return 0;
+            }
         }
     }
     XAUDIO2FX_REVERB_I3DL2_PARAMETERS i3dl2{100.0f, p.room, p.room_hf,
@@ -366,14 +412,17 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
     const float *dry, const float *wet)
 {
     if (!recomp_audio_output_on_owner_thread() || slot >= kVoiceCount ||
-        (channels != 1 && channels != 2) || !dry || !wet) return 0;
+        (channels < 1 || channels > 3) || !dry || !wet) return 0;
     VoiceRouting route{};
     route.channels = channels;
+    const uint32_t speakers = recomp_audio_output_speakers();
     bool wet_send = false;
-    for (uint32_t i = 0; i < channels * 2; ++i) {
-        if (!inRange(dry[i], -XAUDIO2_MAX_VOLUME_LEVEL, XAUDIO2_MAX_VOLUME_LEVEL) ||
-            !inRange(wet[i], -XAUDIO2_MAX_VOLUME_LEVEL, XAUDIO2_MAX_VOLUME_LEVEL)) return 0;
+    for (uint32_t i = 0; i < channels * speakers; ++i) {
+        if (!inRange(dry[i], -XAUDIO2_MAX_VOLUME_LEVEL, XAUDIO2_MAX_VOLUME_LEVEL)) return 0;
         route.dry[i] = dry[i];
+    }
+    for (uint32_t i = 0; i < channels * 2; ++i) {
+        if (!inRange(wet[i], -XAUDIO2_MAX_VOLUME_LEVEL, XAUDIO2_MAX_VOLUME_LEVEL)) return 0;
         route.wet[i] = wet[i];
         wet_send |= wet[i] != 0.0f;
     }
@@ -390,11 +439,13 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
         routing_reported[slot] = true;
         std::fprintf(stderr,
             "[audio-output] routing slot=%u channels=%u "
-            "dry=%.3f,%.3f,%.3f,%.3f wet=%.3f,%.3f,%.3f,%.3f\n", slot, channels,
+            "dry=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f wet=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", slot, channels,
             static_cast<double>(route.dry[0]), static_cast<double>(route.dry[1]),
             static_cast<double>(route.dry[2]), static_cast<double>(route.dry[3]),
+            static_cast<double>(route.dry[4]), static_cast<double>(route.dry[5]),
             static_cast<double>(route.wet[0]), static_cast<double>(route.wet[1]),
-            static_cast<double>(route.wet[2]), static_cast<double>(route.wet[3]));
+            static_cast<double>(route.wet[2]), static_cast<double>(route.wet[3]),
+            static_cast<double>(route.wet[4]), static_cast<double>(route.wet[5]));
     }
     return 1;
 }
@@ -410,7 +461,7 @@ extern "C" void recomp_audio_output_submit(
     if (slot >= kVoiceCount || !pcm || bytes > kMaxBufferBytes ||
         sample_rate < XAUDIO2_MIN_SAMPLE_RATE ||
         sample_rate > XAUDIO2_MAX_SAMPLE_RATE ||
-        (channels != 1 && channels != 2) ||
+        (channels < 1 || channels > 3) ||
         (bits_per_sample != 8 && bits_per_sample != 16 && bits_per_sample != 32)) {
         dropBuffer(slot, "invalid-pcm");
         return;
@@ -450,6 +501,7 @@ extern "C" void recomp_audio_output_submit(
         voice.bits_per_sample = bits_per_sample;
         voice.level_ms = kPrerollMs;
         if (routing[slot].channels && !applyRouting(voice, routing[slot])) return;
+        if (!routing[slot].channels && !applyDefaultRouting(voice)) return;
         error = voice.source->Start();
         if (FAILED(error)) {
             dropBuffer(slot, "start-voice");

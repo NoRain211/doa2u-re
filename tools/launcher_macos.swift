@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen and the intro
-// skip, remember them in private/launcher.json, then exit 0 so launcher.sh
+// macOS launcher: pick resolution, anti-aliasing, widescreen, the intro skip
+// and 5.1 surround, remember them in private/launcher.json, then exit 0 so launcher.sh
 // starts the game. Mirrors tools/launcher.ps1, with MSAA up to SDL_GPU's 8x.
 // Exits 1 if the window is closed.
 // Adapted from the DOA3 launcher (NoRain211/doa3-re tools/launcher_macos.swift).
@@ -30,13 +30,14 @@ let screenHeight: Int = {
 }()
 
 final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 222),
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 248),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     let resolution = NSPopUpButton()
     let msaa = NSPopUpButton()
     let smaa = NSButton(checkboxWithTitle: "SMAA Ultra", target: nil, action: nil)
     let widescreen = NSButton(checkboxWithTitle: "Widescreen (16:9)", target: nil, action: nil)
     let skipIntro = NSButton(checkboxWithTitle: "Skip intro movies", target: nil, action: nil)
+    let surround = NSButton(checkboxWithTitle: "Surround 5.1", target: nil, action: nil)
     var launched = false
 
     func addRow(_ title: String, _ popup: NSPopUpButton, _ items: [String], _ index: Int, _ y: CGFloat) {
@@ -57,16 +58,18 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let nearest = heights.lastIndex(where: { $0 <= savedHeight }) ?? 0
         addRow("Resolution", resolution,
                heights.map { $0 == 480 ? "480p (windowed)" : $0 == 2160 ? "2160p (4K)" : "\($0)p" },
-               nearest, 180)
+               nearest, 206)
         let savedMsaa = min(intSetting("msaa", 8), 8)
         addRow("MSAA", msaa, samples.map { $0 == 1 ? "Off" : "\($0)x" },
-               samples.lastIndex(where: { $0 <= savedMsaa }) ?? 0, 148)
-        smaa.frame = NSRect(x: 104, y: 120, width: 170, height: 20)
+               samples.lastIndex(where: { $0 <= savedMsaa }) ?? 0, 174)
+        smaa.frame = NSRect(x: 104, y: 146, width: 170, height: 20)
         smaa.state = boolSetting("smaa", true) ? .on : .off
-        widescreen.frame = NSRect(x: 104, y: 94, width: 170, height: 20)
+        widescreen.frame = NSRect(x: 104, y: 120, width: 170, height: 20)
         widescreen.state = boolSetting("widescreen", true) ? .on : .off
-        skipIntro.frame = NSRect(x: 104, y: 68, width: 170, height: 20)
+        skipIntro.frame = NSRect(x: 104, y: 94, width: 170, height: 20)
         skipIntro.state = boolSetting("skipIntro", false) ? .on : .off
+        surround.frame = NSRect(x: 104, y: 68, width: 170, height: 20)
+        surround.state = boolSetting("surround", false) ? .on : .off
         let note = NSTextField(labelWithString: "Unsupported MSAA falls back to GPU support.")
         note.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
@@ -75,7 +78,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let play = NSButton(title: "Play", target: self, action: #selector(play))
         play.frame = NSRect(x: 180, y: 8, width: 88, height: 30)
         play.keyEquivalent = "\r"
-        for view in [smaa, widescreen, skipIntro, note, play] { window.contentView!.addSubview(view) }
+        for view in [smaa, widescreen, skipIntro, surround, note, play] { window.contentView!.addSubview(view) }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -89,6 +92,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
             "smaa": smaa.state == .on,
             "widescreen": widescreen.state == .on,
             "skipIntro": skipIntro.state == .on,
+            "surround": surround.state == .on,
         ]
         do {
             try FileManager.default.createDirectory(

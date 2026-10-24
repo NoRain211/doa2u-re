@@ -52,7 +52,7 @@ play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
 Play: ./launcher.sh opens a window to pick resolution, MSAA, SMAA,
-widescreen and whether to skip the intro movies, saves the choices and
+widescreen, whether to skip the intro movies and 5.1 surround, saves the choices and
 starts the game. ./run_game.sh plays again with the saved choices. The
 first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache live in

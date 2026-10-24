@@ -30,7 +30,7 @@ typedef struct Buffer {
     /* CTRL3D: the 5849 3D block fields DOA2 sets and their voice terms. */
     bool is3d;
     float position[3], velocity[3], min_distance, max_distance, distance_factor, rolloff;
-    int32_t distance_volume, center_front, center; /* hundredths of dB */
+    int32_t distance_volume, center_front, center, pan_front, pan_rear; /* hundredths of dB */
     int32_t doppler;                               /* 4096 per octave */
     RecompHrtfVoice hrtf;
 } Buffer;
@@ -113,15 +113,31 @@ static int32_t amplitude_db(float ratio)
     return !(ratio > 0.0f) ? -10000 : ratio < 1.0f ? to_int(2000.0f * log10f(ratio)) : 0;
 }
 
-/* 0x369565 per-bin 3D terms. Stereo output never sets the 0x364B53 front/back
-   split, so XTLK front bins take the whole HRTF signal and back bins none.
-   Cone and I3DL2 source terms stay zero at their defaults. */
+/* 0x369565 per-bin 3D terms. Cone and I3DL2 source terms stay zero at their
+   defaults. */
 static int32_t bin_3d(const Buffer *buffer, uint32_t bin)
 {
     const int32_t base = clamp_db(buffer->distance_volume);
-    if (bin == 2u) return clamp_db((int64_t)buffer->center + base);
-    if (bin == 6u || bin == 7u) return clamp_db((int64_t)buffer->center_front + base);
-    return bin == 8u || bin == 9u ? -10000 : base;
+    if (bin == 2u) return clamp_db((int64_t)buffer->center + buffer->pan_front + base);
+    if (bin == 6u || bin == 7u) return clamp_db((int64_t)buffer->center_front + buffer->pan_front + base);
+    return bin == 8u || bin == 9u ? clamp_db((int64_t)buffer->pan_rear + base) : base;
+}
+
+/* 0x366A14 front/back split. 0x364B53 enables it only for surround or AC3
+   speakers; stereo keeps the whole signal in front. */
+static void pan_3d(Buffer *buffer, float azimuth, float elevation, float distance, bool surround)
+{
+    buffer->pan_front = 0;
+    buffer->pan_rear = -10000;
+    if (!surround) return;
+    float p = ((fabsf(azimuth) * 0.011111111f - 1.0f) * (1.0f - fabsf(elevation) * 0.011111111f) + 1.0f) * 0.5f;
+    p = p + p - 0.5f;
+    p = !(p <= 1.0f) ? 1.0f : p < 0.0f ? 0.0f : p;
+    /* Within half a meter the split eases toward an even front/back share. */
+    const float meters = buffer->distance_factor * distance;
+    if (meters < 0.5f) p = ((p - 0.5f) * meters + 1.0f) * 0.5f;
+    buffer->pan_front = amplitude_db(1.0f - p);
+    buffer->pan_rear = amplitude_db(p);
 }
 
 /* 0x3697B9: base pitch plus the 3D Doppler term, clamped to [-32767, 8191]
@@ -136,15 +152,15 @@ static uint32_t pitch_hz(const Buffer *buffer)
 
 static void apply_routing(Buffer *buffer)
 {
-    uint32_t headroom[32], channels = buffer->is3d ? 2u : buffer->channels;
-    float dry[4], wet[4];
+    uint32_t headroom[32], channels = buffer->is3d ? 3u : buffer->channels;
+    float dry[18], wet[6];
     RecompDsoundMixModel mix = buffer->mix;
     for (uint32_t i = 0u; i < 32u; ++i) headroom[i] = recomp_dsound_effects_headroom(i);
-    /* 3D voices reach their bins as the two HRTF ears. */
+    /* 3D voices reach their bins as the two HRTF ears and the unfiltered voice. */
     for (uint32_t i = 0u; buffer->is3d && i < mix.count; ++i) {
         mix.volumes[mix.bins[i]] = clamp_db((int64_t)mix.volumes[mix.bins[i]] + bin_3d(buffer, mix.bins[i]));
     }
-    if (!recomp_dsound_mix_matrices(&mix, channels, headroom, dry, wet)) {
+    if (!recomp_dsound_mix_matrices(&mix, channels, recomp_audio_output_speakers(), headroom, dry, wet)) {
         recomp_stop(2, "dsound:signal-route-unbound");
     }
     if (!recomp_audio_output_set_voice_routing((uint32_t)(buffer - buffers), channels, dry, wet)) {
@@ -181,8 +197,8 @@ static uint32_t read_mix(RecompDsoundMixModel *mix, uint32_t address, bool repla
     RecompDsoundMixModel next = *mix;
     if (!recomp_dsound_mix_set(&next, pairs, words[0], replace)) return RECOMP_DSOUND_INVALID_PARAM;
     uint32_t headroom[32] = {0};
-    float dry[4], wet[4];
-    if (!recomp_dsound_mix_matrices(&next, 2u, headroom, dry, wet)) {
+    float dry[18], wet[6];
+    if (!recomp_dsound_mix_matrices(&next, 2u, 2u, headroom, dry, wet)) {
         recomp_stop(2, "dsound:signal-route-unbound");
     }
     *mix = next;
@@ -247,15 +263,15 @@ static void pump(Buffer *buffer, uint64_t now)
             buffer->format == 0x69u ? 16u : buffer->bits, buffer->volume);
     }
     /* The APU filters 3D voices at 48 kHz; pieces keep each submission in bounds. */
-    static float stereo[2u * 20000u];
+    static float ears[3u * 20000u];
     uint32_t limit = (uint32_t)((uint64_t)19000u * buffer->model.sample_rate / RECOMP_HRTF_RATE);
     if (!limit) limit = 1u;
     for (uint32_t done = 0u, frames = buffer->is3d ? bytes / 2u : 0u; done < frames;) {
         uint32_t piece = frames - done < limit ? frames - done : limit;
         uint32_t rendered = recomp_hrtf_render(&buffer->hrtf, samples + done, piece,
-            buffer->model.sample_rate, stereo, 20000u);
-        if (rendered) recomp_audio_output_submit(slot, (const uint8_t *)stereo, rendered * 8u,
-            RECOMP_HRTF_RATE, 2u, 32u, buffer->volume);
+            buffer->model.sample_rate, ears, 20000u);
+        if (rendered) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
+            RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
         done += piece;
     }
     if (!recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
@@ -290,7 +306,9 @@ static void update_3d(Buffer *buffer)
         center_table = (const float *)(const void *)recomp_memory(CENTER, CENTER_STEPS * sizeof(float));
     }
     recomp_hrtf_angles(n[0], n[1], n[2], &azimuth, &elevation);
-    buffer->hrtf.filter = recomp_hrtf_lookup(bank, map, azimuth, elevation);
+    const bool surround = recomp_audio_output_speakers() == 6u;
+    buffer->hrtf.filter = recomp_hrtf_lookup(bank, map, azimuth, elevation, surround);
+    pan_3d(buffer, azimuth, elevation, distance, surround);
 
     /* 0x366AE3, enabled by 0x364970 when mix slot 4 is the center bin. */
     buffer->center_front = buffer->center = 0;
@@ -437,7 +455,8 @@ static void create_buffer(void)
         .flags = desc[1], .format = tag, .channels = channels, .bits = bits, .align = align,
         .rate = rate, .frequency = rate, .headroom = (desc[1] & 0x382010u) ? 0u : 600u, .is3d = is3d,
         /* 3D defaults from the 5849 template at 0x3803B4. */
-        .min_distance = 1.0f, .max_distance = 1000000000.0f, .distance_factor = 1.0f, .rolloff = 1.0f};
+        .min_distance = 1.0f, .max_distance = 1000000000.0f, .distance_factor = 1.0f, .rolloff = 1.0f,
+        .pan_rear = -10000};
     if (!buffer->root || !buffer->settings) { dispose(buffer); kernel_return(4u, RECOMP_DSOUND_OUT_OF_MEMORY); return; }
     buffer->volume = -(int32_t)buffer->headroom;
     buffer->mix = mix;

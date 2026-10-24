@@ -91,6 +91,13 @@ int recomp_kernel_video_test(void)
         passed &= expect_u32("video setting length", *recomp_memory_u32(TEST_RESULT + 8u), 4u);
     }
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    for (unsigned surround = 0u; surround < 2u; ++surround) {
+        _putenv_s("RECOMP_AUDIO_SURROUND", surround ? "1" : "0");
+        recomp_kernel_query_nonvolatile_setting(9u, 0u, TEST_RESULT, 4u, 0u);
+        passed &= expect_u32("audio flags", *recomp_memory_u32(TEST_RESULT),
+            surround ? 0x00010002u : 0u);
+    }
+    _putenv_s("RECOMP_AUDIO_SURROUND", "");
     recomp_kernel_av_set_saved_data_address(0u);
     get_saved_data = recomp_kernel_video(1u);
     send_option = recomp_kernel_video(2u);

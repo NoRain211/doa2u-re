@@ -80,7 +80,8 @@ def saved_settings():
         options["resolution"] = saved["height"]
     if saved.get("msaa") in (1, 2, 4, 8, 16, 32):
         options["msaa"] = saved["msaa"]
-    for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("skipIntro", "skip_intro")):
+    for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("skipIntro", "skip_intro"),
+                        ("surround", "surround")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     return options
@@ -97,7 +98,7 @@ def open_launcher():
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
-        skip_intro=False, unlock_all=True):
+        skip_intro=False, unlock_all=True, surround=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -106,7 +107,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
         raise ValueError("Resolution must be 480, 720, 1080, 1440 or 2160")
     env = os.environ.copy()
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
-                        ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa)):
+                        ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
+                        ("RECOMP_AUDIO_SURROUND", surround)):
         if value is not None:
             env[name] = str(int(value))
     if resolution is not None:
@@ -210,6 +212,8 @@ if __name__ == "__main__":
                         help="MSAA samples (1 disables); falls back to GPU support")
     parser.add_argument("--smaa", action=argparse.BooleanOptionalAction, default=None,
                         help="Apply SMAA Ultra after MSAA resolve")
+    parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
+                        help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--input-start-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-a-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-buttons-pulse-at", type=int, nargs=2, action="append", default=[],
@@ -240,7 +244,8 @@ if __name__ == "__main__":
                              args.input_analog_pulse_at, pick("widescreen", args.widescreen),
                              pick("msaa", args.msaa), pick("smaa", args.smaa),
                              pick("resolution", args.resolution), args.story_finale,
-                             args.skip_intro or saved.get("skip_intro", False), args.unlock_all))
+                             args.skip_intro or saved.get("skip_intro", False), args.unlock_all,
+                             pick("surround", args.surround)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

@@ -23,7 +23,8 @@ static struct Allocation { uint32_t base, size; int live; } allocations[1024];
 static uint64_t now;
 static int ready = 1, muted;
 static uint32_t output_calls, resets;
-static float listener[6], route_dry[4], route_wet[4];
+static float listener[6], route_dry[18], route_wet[6];
+static uint32_t speakers = 2u;
 static uint32_t route_channels;
 static struct Output { uint32_t bytes, rate, channels, bits; int32_t volume; uint8_t pcm[160000]; } output;
 static jmp_buf stop_environment;
@@ -61,15 +62,16 @@ void recomp_dsound_require_device(uint32_t handle) { CHECK(handle == device && d
 void recomp_dsound_device_add_owner(void) { ++owners; }
 void recomp_dsound_device_release_owner(void) { CHECK(owners); if (!--owners) device = 0; }
 int recomp_audio_output_ready(void) { return ready; }
+uint32_t recomp_audio_output_speakers(void) { return speakers; }
 int recomp_audio_output_enabled(void) { return ready && !muted; }
 void recomp_audio_output_reset_voice(uint32_t slot) { CHECK(slot < 256); ++resets; }
 uint32_t recomp_dsound_effects_headroom(uint32_t bin) { CHECK(bin < 32u); return 0u; }
 void recomp_dsound_listener_vectors(float vectors[6]) { memcpy(vectors, listener, sizeof listener); }
 int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t channels, const float *dry, const float *wet)
 {
-    CHECK(slot < 256u && (channels == 1u || channels == 2u) && dry && wet);
+    CHECK(slot < 256u && channels >= 1u && channels <= 3u && dry && wet);
     route_channels = channels;
-    memcpy(route_dry, dry, 2u * channels * sizeof *dry);
+    memcpy(route_dry, dry, speakers * channels * sizeof *dry);
     memcpy(route_wet, wet, 2u * channels * sizeof *wet);
     return ready;
 }
@@ -355,9 +357,9 @@ static int near(float a, float b) { return fabsf(a - b) < 0.0001f; }
 
 static void test_3d(void)
 {
-    /* One flat ear pair for every direction; both 45-step center tables at 0.5. */
+    /* One flat 1/16 (0x40) ear pair for every direction; both 45-step center tables at 0.5. */
     memset(recomp_memory(0x36de70, 0x115c0 + 0xec6), 0, 0x115c0 + 0xec6);
-    *recomp_memory_i8(0x36de70) = 64; *recomp_memory_i8(0x36de90) = 64;
+    *recomp_memory_i8(0x36de70) = 0x40; *recomp_memory_i8(0x36de90) = 0x40;
     for (uint32_t i = 0; i < 45; ++i) { write32(0x36dd00 + 4 * i, fbits(.5f)); write32(0x36ddb8 + 4 * i, fbits(.5f)); }
     memset(listener, 0, sizeof listener);
     fixture(1, 1, 0); write32(DESC + 4, 0x40010);
@@ -371,23 +373,38 @@ static void test_3d(void)
     CHECK(CALL(0x36517d, handle, fbits(1), 1) == 0);
     CHECK(CALL(0x3651a1, handle, fbits(10), 0, 0, 0) == 0);
     now = 20; recomp_dsound_buffers_pump();
-    CHECK(output.bits == 32 && output.channels == 2 && output.rate == 48000 && output.bytes >= 900 * 8);
+    CHECK(output.bits == 32 && output.channels == 3 && output.rate == 48000 && output.bytes >= 900 * 12);
     const float *ears = (const float *)(const void *)output.pcm;
-    CHECK(near(ears[1600], 1000.f / 32768) && ears[1601] == ears[1600]);
-    CHECK(route_channels == 2 && near(route_dry[0], .1f) && route_dry[1] == 0 && route_dry[2] == 0 &&
-        near(route_dry[3], .1f) && near(route_wet[0], .1f) && near(route_wet[3], .1f));
+    /* Equal ears settle at in / (1 - feed / (1 - pole)) through the crosstalk canceller. */
+    const float pole = (float)0x7645a1 / 0x800000, feed = (float)(0xf88313 - 0x1000000) / 0x800000;
+    CHECK(near(ears[2400], 1000.f / 16 / 32768 / (1 - feed / (1 - pole))) && ears[2401] == ears[2400] &&
+        near(ears[2402], 1000.f / 32768));
+    /* Default 3D bins: doubled ears to their sides; I3DL2 (route 4) takes the unfiltered voice. */
+    CHECK(route_channels == 3 && near(route_dry[0], .2f) && route_dry[1] == 0 && route_dry[2] == 0 &&
+        route_dry[3] == 0 && near(route_dry[4], .2f) && route_dry[5] == 0 &&
+        route_wet[0] == 0 && near(route_wet[2], .1f) && near(route_wet[5], .1f));
     /* DOA2's 3D layout puts center in slot 4: ahead, center 0.25 (-12.04 dB) and front 0.75 (-2.49 dB). */
     CHECK(CALL(0x3651a1, handle, 0, 0, fbits(10), 1) == 0);
     const uint32_t bins[16] = {6,0, 8,0, 7,0, 9,0, 2,0, 10,0, 3,0, 22,(uint32_t)-10000};
     memcpy(recomp_memory(DATA + 0x2000, sizeof bins), bins, sizeof bins);
     write32(DATA + 0x1ff8, 8); write32(DATA + 0x1ffc, DATA + 0x2000);
     CHECK(CALL(0x36513d, handle, DATA + 0x1ff8) == 0);
-    const float front = powf(10, -2249 / 2000.f), center = powf(10, -3204 / 2000.f) * .70710678f;
-    CHECK(near(route_dry[0], front + center) && route_dry[1] == 0 && near(route_dry[2], center) &&
-        near(route_dry[3], front) && near(route_wet[0], .1f));
+    const float front = 2 * powf(10, -2249 / 2000.f), center = powf(10, -3204 / 2000.f) * .70710678f;
+    /* Center (route 4) folds the unfiltered voice into both sides. */
+    CHECK(near(route_dry[0], front) && route_dry[1] == 0 && near(route_dry[2], center) &&
+        route_dry[3] == 0 && near(route_dry[4], front) && near(route_dry[5], center) && near(route_wet[2], .1f));
+    /* 5.1: ahead stays on the front pair and center; behind moves to the back pair. */
+    speakers = 6; recomp_dsound_buffers_refresh_routing();
+    CHECK(near(route_dry[0], front) && near(route_dry[4], front) && route_dry[12] == 0 &&
+        route_dry[16] == 0 && near(route_dry[8], center / .70710678f));
+    CHECK(CALL(0x3651a1, handle, 0, 0, fbits(-10), 0) == 0);
+    recomp_dsound_buffers_refresh_routing();
+    CHECK(route_dry[0] == 0 && route_dry[8] == 0 && near(route_dry[12], .2f) && near(route_dry[16], .2f));
+    speakers = 2;
+    CHECK(CALL(0x3651a1, handle, 0, 0, fbits(10), 1) == 0);
     /* Listener commit: at the source, only the center split remains. */
     listener[2] = 10; recomp_dsound_buffers_refresh_routing();
-    CHECK(near(route_dry[3], powf(10, -249 / 2000.f)));
+    CHECK(near(route_dry[4], 2 * powf(10, -249 / 2000.f)));
     /* Approaching at half the speed of sound plays 1.5x: 1000 Hz becomes 1500 Hz. */
     listener[2] = 0; now = 100;
     CHECK(CALL(0x36489e, handle, OUTPUT, 0) == 0);

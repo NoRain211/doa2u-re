@@ -1,10 +1,12 @@
 #include "audio_output.h"
 #include "audio_capture_xapo.h"
+#include "audio_xtalk_xapo.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <objbase.h>
 #include <xaudio2.h>
+#include <xapo.h>
 #include "xaudio2_reverb.h"
 
 #include <atomic>
@@ -83,7 +85,7 @@ struct FakeSource {
         const float *values)
     {
         ++matrix_calls;
-        check(channels == format.nChannels && outputs == 2 && destination);
+        check(channels == format.nChannels && (outputs == 2 || outputs == 6) && destination);
         if (matrix_unavailable) return XAUDIO2_E_INVALID_CALL;
         matrices[destination] = std::vector<float>(values, values + channels * outputs);
         return S_OK;
@@ -101,7 +103,7 @@ static FakeSource *current_source;
 static std::map<void *, FakeSource *> allocations;
 static unsigned com_balance, create_calls, release_calls;
 static bool create_unavailable, master_unavailable;
-static const char *fake_gain;
+static const char *fake_gain, *fake_surround;
 static unsigned gain_reads;
 
 void FakeSource::GetState(XAUDIO2_VOICE_STATE *state, UINT32 flags)
@@ -114,6 +116,7 @@ void FakeSource::GetState(XAUDIO2_VOICE_STATE *state, UINT32 flags)
 
 struct FakeMaster {
     float volume = 1.0f;
+    UINT32 channels = 0;
     HRESULT SetVolume(float gain) { volume = gain; return S_OK; }
     void DestroyVoice()
     {
@@ -124,7 +127,15 @@ struct FakeMaster {
 
 struct FakeSubmix {
     bool destroyed = true;
+    std::map<void *, std::vector<float>> matrices;
     XAUDIO2FX_REVERB_PARAMETERS parameters{};
+    HRESULT SetOutputMatrix(void *destination, UINT32 channels, UINT32 outputs,
+        const float *values)
+    {
+        check(!destroyed && channels == 2 && destination);
+        matrices[destination] = std::vector<float>(values, values + channels * outputs);
+        return S_OK;
+    }
     HRESULT SetEffectParameters(UINT32 effect, const void *data, UINT32 bytes)
     {
         check(!destroyed && effect == 0 && bytes == sizeof parameters);
@@ -159,8 +170,9 @@ struct FakeEngine {
     }
     HRESULT CreateMasteringVoice(FakeMaster **out, UINT32 channels, UINT32 rate)
     {
-        check(channels == 2 && rate == 48000);
+        check((channels == 2 || channels == 6) && rate == 48000);
         if (master_unavailable) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+        master.channels = channels;
         *out = &master;
         return S_OK;
     }
@@ -169,10 +181,14 @@ struct FakeEngine {
         const XAUDIO2_EFFECT_CHAIN *chain)
     {
         check(channels == 2 && rate == 48000 && flags == 0 && stage == 0 && !sends &&
-            chain && chain->EffectCount == 1 &&
+            chain && chain->EffectCount == 2 &&
             chain->pEffectDescriptors->pEffect == &fake_effect &&
             chain->pEffectDescriptors->InitialState == TRUE &&
-            chain->pEffectDescriptors->OutputChannels == 2 && submix.destroyed);
+            chain->pEffectDescriptors->OutputChannels == 2 &&
+            chain->pEffectDescriptors[1].pEffect != nullptr &&
+            chain->pEffectDescriptors[1].pEffect != &fake_effect &&
+            chain->pEffectDescriptors[1].InitialState == TRUE &&
+            chain->pEffectDescriptors[1].OutputChannels == 2 && submix.destroyed);
         if (submix_unavailable) return E_OUTOFMEMORY;
         fake_effect.AddRef();
         submix.destroyed = false;
@@ -229,10 +245,12 @@ using std::memcmp;
 using std::memset;
 using std::memory_order_relaxed;
 using std::pow;
+using std::strcmp;
 using std::strtod;
 
 const char *getenv(const char *name)
 {
+    if (std::strcmp(name, "RECOMP_AUDIO_SURROUND") == 0) return fake_surround;
     check(std::strcmp(name, "RECOMP_AUDIO_GAIN") == 0);
     ++gain_reads;
     return fake_gain;
@@ -590,6 +608,76 @@ int main()
         recomp_audio_output_shutdown();
         *failure = false;
     }
+
+    /* Five point one: the master grows to six channels, source dry matrices
+       and the stereo reverb return are explicit, and unrouted voices stay on
+       front left/right. */
+    attempted = summary_printed = false;
+    critical_error = S_OK;
+    fake_surround = "1";
+    check(recomp_audio_output_speakers() == 6);
+    const float surround_dry[2 * 6] = {0.5f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const float surround_wet[2 * 2] = {0.25f, 0.0f, 0.0f, 0.25f};
+    check(recomp_audio_output_set_reverb(&reverb_parameters));
+    check(fake_engine.master.channels == 6 && recomp_audio_output_enabled());
+    check(fake_engine.submix.matrices[master] == std::vector<float>(
+        {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+    check(recomp_audio_output_set_voice_routing(30, 2, surround_dry, surround_wet));
+    recomp_audio_output_submit(30, pcm, sizeof pcm, 8000, 2, 16, 0);
+    source = voices[30].source;
+    check(source && source->matrices[master] ==
+        std::vector<float>(surround_dry, surround_dry + 12));
+    recomp_audio_output_submit(31, pcm, sizeof pcm, 8000, 2, 16, 0);
+    check(voices[31].source->matrices[master] == std::vector<float>(
+        {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+    recomp_audio_output_shutdown();
+    check(!engine && !reverb_voice && effect_balance == 0 && allocations.empty());
+    fake_surround = "0";
+    check(recomp_audio_output_speakers() == 2);
+    fake_surround = nullptr;
+    check(recomp_audio_output_speakers() == 2);
+
+    /* The reverb return's canceller XAPO: an impulse in the left ear reaches
+       the right ear 11 frames later, then decays by the pole. */
+    IXAPO *xtalk = static_cast<IXAPO *>(recomp_audio_xtalk_xapo_create());
+    check(xtalk != nullptr);
+    WAVEFORMATEX stereo_float{};
+    stereo_float.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+    stereo_float.nChannels = 2;
+    stereo_float.nSamplesPerSec = 48000;
+    stereo_float.wBitsPerSample = 32;
+    stereo_float.nBlockAlign = 8;
+    stereo_float.nAvgBytesPerSec = 384000;
+    WAVEFORMATEX mono_16 = stereo_float;
+    mono_16.nChannels = 1;
+    mono_16.wBitsPerSample = 16;
+    mono_16.nBlockAlign = 2;
+    mono_16.nAvgBytesPerSec = 96000;
+    check(xtalk->IsInputFormatSupported(&stereo_float, &stereo_float, nullptr) == S_OK);
+    check(FAILED(xtalk->IsOutputFormatSupported(&stereo_float, &mono_16, nullptr)));
+    XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS locked{&stereo_float, 32};
+    check(SUCCEEDED(xtalk->LockForProcess(1, &locked, 1, &locked)));
+    float impulse[64] = {};
+    impulse[0] = 1.0f;
+    XAPO_PROCESS_BUFFER_PARAMETERS input{impulse, XAPO_BUFFER_VALID, 32};
+    XAPO_PROCESS_BUFFER_PARAMETERS output{impulse, XAPO_BUFFER_VALID, 32};
+    xtalk->Process(1, &input, 1, &output, TRUE);
+    const float pole = (float)0x7645a1 / 0x800000;
+    const float feed = (float)(0xf88313 - 0x1000000) / 0x800000;
+    check(output.ValidFrameCount == 32 && impulse[0] == 1.0f && impulse[1] == 0.0f &&
+        std::fabs(impulse[2 * 11 + 1] - feed) < 0.000001f &&
+        std::fabs(impulse[2 * 12 + 1] - pole * feed) < 0.000001f);
+    /* Silent input still advances the canceller tail. */
+    float tail[2] = {};
+    XAPO_PROCESS_BUFFER_PARAMETERS silent_input{nullptr, XAPO_BUFFER_SILENT, 1};
+    XAPO_PROCESS_BUFFER_PARAMETERS silent_output{tail, XAPO_BUFFER_SILENT, 1};
+    xtalk->Process(1, &silent_input, 1, &silent_output, TRUE);
+    check(silent_output.BufferFlags == XAPO_BUFFER_VALID &&
+        std::fabs(tail[1] - feed * std::pow(pole, 21.0f)) < 0.000001f);
+    xtalk->UnlockForProcess();
+    xtalk->Release();
+
     for (auto *voice : fake_sources) delete voice;
     std::puts("PASS audio output ownership, FIFO, overflow, volume, native FX routing and failures");
     return 0;

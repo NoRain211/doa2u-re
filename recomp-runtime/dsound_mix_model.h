@@ -11,6 +11,8 @@ typedef struct RecompDsoundMixModel {
 void recomp_dsound_mix_default(RecompDsoundMixModel *model);
 bool recomp_dsound_mix_set(RecompDsoundMixModel *model, const RecompDsoundMixPair *pairs,
     uint32_t count, bool replace);
+/* speakers is 2 (stereo fold) or 6 (5.1, FL FR C LFE BL BR). dry holds
+   channels * speakers entries, wet channels * 2, as [source + destination * channels]. */
 bool recomp_dsound_mix_matrices(const RecompDsoundMixModel *model, uint32_t channels,
-    const uint32_t headroom[32], float dry[4], float wet[4]);
+    uint32_t speakers, const uint32_t headroom[32], float dry[18], float wet[6]);
 #endif
