@@ -230,6 +230,13 @@ int main()
     CHECK(packet.command(6).data.draw.texture_bytes != sources[2].data());
     CHECK(packet.command(6).data.draw.vertex_bytes != sources[0].data());
     packet.clear();
+    value = {};
+    value.type = RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR;
+    value.data.copy_destination.data = 0x280000u;
+    CHECK(packet.add(value) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(packet.command(0).data.copy_destination.data == 0x280000u);
+    packet.clear();
     input.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW_COVERAGE;
     input.data.draw.program_count = 0u;
     for (size_t i = 2u; i < sources.size(); ++i)

@@ -67,7 +67,7 @@ RecompD3dPresenterError D3dCapturePacket::add(
     const RecompD3dPresenterCommand &command)
 {
     if (sealed_ || static_cast<unsigned>(command.type) >
-        RECOMP_D3D_PRESENTER_COMMAND_DRAW_COVERAGE) {
+        RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR) {
         return RECOMP_D3D_PRESENTER_INVALID_ARGUMENT;
     }
 
