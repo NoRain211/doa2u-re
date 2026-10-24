@@ -427,7 +427,9 @@ static int line_tests(void)
     invoke(0x348240u, 2u, 2u, VERTICES, 16u);
     CHECK(!submitted.data.draw.line_antialias && submitted.data.draw.line_width == 1.25f);
     CHECK(recomp_d3d_set_edge_antialias(&state, 1u));
-    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 16u); return 1; }
+    invoke(0x348240u, 5u, 3u, VERTICES, 16u);
+    CHECK(submitted.data.draw.primitive_type == 5u && !submitted.data.draw.line_antialias);
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 1u, 3u, VERTICES, 16u); return 1; }
     CHECK(strncmp(stop_reason, "d3d8:draw-raster-state:", 22u) == 0);
     return 0;
 }

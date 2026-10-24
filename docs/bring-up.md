@@ -558,6 +558,8 @@ whole back buffer into a render-target texture of the same size and format,
 then draws the shards with it. The adapter sends that copy as a presenter
 command, which fills the texture's host target from the main target, so the
 shards sample it like any rendered target. Partial or scaled copies still stop.
+The shards (0x277950) are pretransformed triangles drawn with EdgeAntiAlias;
+the host draws them without edge alpha coverage and relies on MSAA instead.
 
 Reset's mode set (0x34d58d) raises device+0x1de0. The next Swap (0x34af40)
 then programs the mode and frees the persisted copy (0x34a600). Both mode

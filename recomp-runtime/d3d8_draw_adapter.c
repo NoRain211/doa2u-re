@@ -1583,8 +1583,10 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     const RecompD3dRenderStateModel *state = recomp_d3d8_state_model();
     const bool native_line = primitive == 2u && !program && draw->fvf == 0x42u &&
         *recomp_memory_u32(device + 0xf88u) == 0u && *recomp_memory_u32(0x3553f8u) == 0u;
+    /* shortcut: polygon EdgeAntiAlias (the mirror shards at 0x277950) draws
+       without edge alpha coverage; host MSAA smooths the edges instead. */
     if ((state->fill_mode != 0u && state->fill_mode != 0x1b02u) ||
-        (state->edge_antialias != 0u && !native_line) ||
+        (state->edge_antialias != 0u && !native_line && primitive < 5u) ||
         state->z_enable == 2u)
         recomp_stop(2, "d3d8:draw-raster-state:%x:%x:%x:ret=%08x", state->fill_mode,
             state->edge_antialias, state->z_enable, *recomp_memory_u32(recomp_runtime.registers.esp));
