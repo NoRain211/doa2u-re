@@ -48,14 +48,15 @@ int main(void)
     RecompHrtfVoice voice;
     memset(&voice, 0, sizeof voice);
     voice.filter = voice.rendered = right;
-    int16_t input[8] = {0, 27100};
-    float out[24];
-    check(recomp_hrtf_render(&voice, input, 8, 48000, out, 8) == 8, "frame count");
-    /* Output n is input n-1 (interpolation latency). Taps apply unnormalized. */
-    check(out[3 * 2] == 0.0f && fabsf(out[3 * 5] - 27100.0f / 16.0f / 32768.0f) < 0.000001f,
+    int16_t input[24] = {0, 27100};
+    float out[72];
+    check(recomp_hrtf_render(&voice, input, 24, 48000, out, 24) == 24, "frame count");
+    /* Output n is input n-5 (resampler latency). Taps apply unnormalized. */
+    check(out[3 * 8] == 0.0f && fabsf(out[3 * 9] - 27100.0f / 16.0f / 32768.0f) < 0.000001f,
         "left: tap 0 after 3-sample delay");
-    check(fabsf(out[3 * 4 + 1] - 27100.0f / 64.0f / 32768.0f) < 0.000001f, "right: tap 2, undelayed");
-    check(fabsf(out[3 * 2 + 2] - 27100.0f / 32768.0f) < 0.000001f && out[3 * 3 + 2] == 0.0f,
+    check(fabsf(out[3 * 8 + 1] - 27100.0f / 64.0f / 32768.0f) < 0.000001f, "right: tap 2, undelayed");
+    check(fabsf(out[3 * 6 + 2] - 27100.0f / 32768.0f) < 0.000001f && out[3 * 7 + 2] == 0.0f &&
+        out[3 * 5 + 2] == 0.0f,
         "third channel is the unfiltered voice");
 
     /* 24 kHz input doubles the frame count. */
@@ -63,28 +64,52 @@ int main(void)
     voice.filter = voice.rendered = right;
     check(recomp_hrtf_render(&voice, input, 8, 24000, out, 8) == 8, "upsampled pieces stop at capacity");
 
+    /* 8-point Lagrange keeps a 16 kHz voice's top octave: a 6 kHz tone loses
+       1.3 dB (linear interpolation lost 4). */
+    {
+        static int16_t tone[1600];
+        static float wide[3 * 4800];
+        for (int i = 0; i < 1600; ++i) tone[i] = (int16_t)(16000.0 * sin(2.0 * 3.14159265358979 * 6000.0 * i / 16000.0));
+        memset(&voice, 0, sizeof voice);
+        voice.filter = voice.rendered = right;
+        check(recomp_hrtf_render(&voice, tone, 1600, 16000, wide, 4800) >= 4700, "tone frames");
+        double energy = 0.0;
+        for (int i = 1000; i < 4000; ++i) energy += (double)wide[3 * i + 2] * wide[3 * i + 2];
+        const double rms = sqrt(energy / 3000.0), expected = 16000.0 / 32768.0 / sqrt(2.0);
+        check(fabs(20.0 * log10(rms / expected)) < 2.0, "6 kHz tone keeps its level");
+    }
+
     /* 0x7F is the largest tap (31/32); bit 7 is a sign, not two's complement. */
     const int8_t largest[32] = {0x7F};
     const int8_t negative[32] = {(int8_t)0xFF};
     memset(&voice, 0, sizeof voice);
     voice.filter = voice.rendered = (RecompHrtfFilter){largest, negative, 0};
-    for (int i = 0; i < 8; ++i) input[i] = 32767;
-    check(recomp_hrtf_render(&voice, input, 8, 48000, out, 8) == 8 &&
-        fabsf(out[21] - 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f &&
-        fabsf(out[22] + 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f, "taps are sign-magnitude floats");
+    for (int i = 0; i < 24; ++i) input[i] = 32767;
+    check(recomp_hrtf_render(&voice, input, 24, 48000, out, 24) == 24 &&
+        fabsf(out[33] - 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f &&
+        fabsf(out[34] + 31.0f / 32.0f * 32767.0f / 32768.0f) < 0.000001f, "taps are sign-magnitude floats");
+
+    /* A filter change steps in over 32 output samples, even across calls. */
+    memset(&voice, 0, sizeof voice);
+    voice.rendered = (RecompHrtfFilter){largest, NULL, 0};
+    voice.filter = (RecompHrtfFilter){negative, NULL, 0};
+    check(recomp_hrtf_render(&voice, input, 16, 48000, out, 16) == 16 && voice.fade == 16u &&
+        voice.rendered.left == largest, "fade is halfway after 16 samples");
+    check(recomp_hrtf_render(&voice, input, 16, 48000, out, 16) == 16 && voice.fade == 0u &&
+        voice.rendered.left == negative, "fade completes at 32 samples");
 
     /* xtalkamp effect 14: a left-ear impulse reaches the right ear 11 samples
        later scaled by the feed, then decays by the pole. */
     const float pole = (float)0x7645a1 / 0x800000, feed = (float)(0xf88313 - 0x1000000) / 0x800000;
-    int16_t impulse[16] = {0, 27100};
-    float ringing[48];
+    int16_t impulse[24] = {0, 27100};
+    float ringing[72];
     memset(&voice, 0, sizeof voice);
     voice.filter = voice.rendered = (RecompHrtfFilter){largest, NULL, 0};
-    check(recomp_hrtf_render(&voice, impulse, 16, 48000, ringing, 16) == 16, "canceller frames");
+    check(recomp_hrtf_render(&voice, impulse, 24, 48000, ringing, 24) == 24, "canceller frames");
     const float direct = 31.0f / 32.0f * 27100.0f / 32768.0f;
-    check(fabsf(ringing[3 * 2] - direct) < 0.000001f && ringing[3 * 12 + 1] == 0.0f &&
-        fabsf(ringing[3 * 13 + 1] - feed * direct) < 0.000001f &&
-        fabsf(ringing[3 * 14 + 1] - pole * feed * direct) < 0.000001f, "crosstalk canceller");
+    check(fabsf(ringing[3 * 6] - direct) < 0.000001f && ringing[3 * 16 + 1] == 0.0f &&
+        fabsf(ringing[3 * 17 + 1] - feed * direct) < 0.000001f &&
+        fabsf(ringing[3 * 18 + 1] - pole * feed * direct) < 0.000001f, "crosstalk canceller");
     puts("PASS dsound hrtf angles, lookup, mirroring, delay, render");
     return 0;
 }

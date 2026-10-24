@@ -749,7 +749,14 @@ full-HRTF routines DirectSoundUseFullHRTF installs (`0x366d1a`):
 `-2000·log10(1 + rolloff·(d/min − 1))` distance volume held at max distance,
 Doppler pitch `4096·log2(1 − v/342)` added to the base pitch and clamped, and
 the game's own HRTF bank (`0x36de70`) and map (`0x37f430`). It renders through
-DOA3's `dsound_hrtf.c`, with 5849 truncating quantization. DSOUND writes the
+DOA3's `dsound_hrtf.c`, with 5849 truncating quantization. DOA2's 3D voices
+are 11-22 kHz ADPCM; the APU resamples them in hardware, outside the game
+image, with 8-point Lagrange interpolation (retail measurements in xemu PR
+3105). Linear interpolation lost up to 7 dB in their top octave against the
+XAudio2-resampled 2D voices; the runtime now uses the same 8-point Lagrange
+(4 source samples of latency), and like the APU steps a new HRTF filter in
+over one 32-sample frame. Tap decoding below matches retail single-tap
+measurements (xemu PR 3105, nxdk-ex PR 36). DSOUND writes the
 bank's bytes unchanged to the APU (`0x369cae`). Taps decode as sign, 3-bit
 exponent and 4-bit mantissa, unnormalized: of the readings tried, only this
 one gives DOA2's bank a louder near ear at every azimuth. Linear int8

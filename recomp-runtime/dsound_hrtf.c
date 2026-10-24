@@ -3,6 +3,30 @@
 #include <math.h>
 #include <stdlib.h>
 
+enum { FADE_STEPS = 32 };
+
+/* The APU resamples in hardware with 8-point Lagrange interpolation (retail
+   measurements, xemu PR 3105), between the two middle points of the window.
+   Whole positions return a source sample exactly. */
+static float resample(const RecompHrtfVoice *voice)
+{
+    const double t = (RECOMP_HRTF_LAGRANGE_TAPS / 2 - 1) + voice->phase;
+    double sum = 0.0;
+    for (int j = 0; j < RECOMP_HRTF_LAGRANGE_TAPS; ++j) {
+        double weight = 1.0;
+        for (int m = 0; m < RECOMP_HRTF_LAGRANGE_TAPS; ++m)
+            if (m != j) weight *= (t - m) / (j - m);
+        sum += weight * voice->source[(voice->source_head + 1u + (uint32_t)j) % RECOMP_HRTF_LAGRANGE_TAPS];
+    }
+    return (float)sum;
+}
+
+static void push_source(RecompHrtfVoice *voice, int16_t sample)
+{
+    voice->source_head = (voice->source_head + 1u) % RECOMP_HRTF_LAGRANGE_TAPS;
+    voice->source[voice->source_head] = sample;
+}
+
 void recomp_hrtf_angles(float x, float y, float z, float *azimuth, float *elevation)
 {
     /* 5849 0x36662F: piecewise ratio approximations, not atan2/asin. */
@@ -96,38 +120,36 @@ uint32_t recomp_hrtf_render(RecompHrtfVoice *voice, const int16_t *input,
     uint32_t input_frames, uint32_t source_rate, float *out, uint32_t out_frames)
 {
     const double step = (double)source_rate / RECOMP_HRTF_RATE;
-    const RecompHrtfFilter from = voice->rendered, to = voice->filter;
-    const int fade = from.left != to.left || from.right != to.right || from.delay != to.delay;
-    const double span = (input_frames - voice->phase) / step;
-    const uint32_t total = (uint32_t)(span > 0.0 ? span : 0.0) + 1u;
     uint32_t written = 0u, consumed = 0u;
 
-    /* Linear interpolation between the previous and next source sample. */
     while (consumed < input_frames && written < out_frames) {
         if (voice->phase >= 1.0) {
-            voice->previous = input[consumed++];
+            push_source(voice, input[consumed++]);
             voice->phase -= 1.0;
             continue;
         }
-        float next = input[consumed];
         voice->head = (voice->head + 1u) % RECOMP_HRTF_HISTORY;
-        voice->history[voice->head] = voice->previous + (float)voice->phase * (next - voice->previous);
+        voice->history[voice->head] = resample(voice);
         voice->phase += step;
 
+        const RecompHrtfFilter from = voice->rendered, to = voice->filter;
         float left = tap(voice, to.left, to.delay > 0 ? to.delay : 0);
         float right = tap(voice, to.right, to.delay < 0 ? -to.delay : 0);
-        if (fade) {
-            float mix = (float)(written + 1u) / (float)(total > written ? total : written + 1u);
+        /* The APU steps a new filter's taps in over 32 samples (one frame). */
+        if (from.left != to.left || from.right != to.right || from.delay != to.delay) {
+            const float mix = (float)++voice->fade / FADE_STEPS;
             left = left * mix + tap(voice, from.left, from.delay > 0 ? from.delay : 0) * (1.0f - mix);
             right = right * mix + tap(voice, from.right, from.delay < 0 ? -from.delay : 0) * (1.0f - mix);
+            if (voice->fade == FADE_STEPS) voice->rendered = to;
         }
+        if (voice->rendered.left == to.left && voice->rendered.right == to.right &&
+            voice->rendered.delay == to.delay) voice->fade = 0u;
         recomp_xtalk_process(&voice->xtalk, &left, &right);
         out[3u * written] = left / 32768.0f;
         out[3u * written + 1u] = right / 32768.0f;
         out[3u * written + 2u] = voice->history[voice->head] / 32768.0f;
         ++written;
     }
-    while (consumed < input_frames) voice->previous = input[consumed++], voice->phase -= 1.0;
-    voice->rendered = to;
+    while (consumed < input_frames) push_source(voice, input[consumed++]), voice->phase -= 1.0;
     return written;
 }

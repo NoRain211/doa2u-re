@@ -11,7 +11,7 @@ extern "C" {
 /* DSOUND 5849 full HRTF, rendered natively from the game's own table.
    Ported from DOA3 (DSOUND 3936); each step names its 5849 routine. */
 enum { RECOMP_HRTF_TAPS = 31, RECOMP_HRTF_RATE = 48000, RECOMP_HRTF_HISTORY = 128,
-    RECOMP_XTALK_DELAY = 11 };
+    RECOMP_XTALK_DELAY = 11, RECOMP_HRTF_LAGRANGE_TAPS = 8 };
 
 typedef struct RecompHrtfFilter {
     const int8_t *left, *right; /* 32-byte ear records; NULL = silent */
@@ -32,8 +32,10 @@ typedef struct RecompHrtfVoice {
     RecompHrtfFilter filter, rendered;
     float history[RECOMP_HRTF_HISTORY]; /* mono input at 48 kHz */
     uint32_t head;
-    double phase;   /* source position between previous and next sample */
-    float previous; /* last source sample */
+    double phase; /* output position between the two middle source samples */
+    float source[RECOMP_HRTF_LAGRANGE_TAPS]; /* recent source samples, ring */
+    uint32_t source_head;                    /* newest source sample */
+    uint32_t fade;                           /* steps into a filter change */
     RecompXtalk xtalk;
 } RecompHrtfVoice;
 
@@ -52,12 +54,13 @@ void recomp_hrtf_angles(float x, float y, float z, float *azimuth, float *elevat
 RecompHrtfFilter recomp_hrtf_lookup(const uint8_t *bank, const uint8_t *map,
     float azimuth, float elevation, bool fold_rear);
 
-/* Resamples mono 16-bit input from source_rate to 48 kHz and filters it into
+/* Resamples mono 16-bit input from source_rate to 48 kHz (8-point Lagrange,
+   4 source samples of latency) and filters it into
    interleaved float left ear, right ear and the unfiltered resampled voice
    (1.0 = 32768 input units), without clipping or normalizing; taps use the
    APU's 8-bit sign-magnitude float encoding. The ears then pass DOA2's
    crosstalk canceller (xtalkamp.bin effect 14).
-   A filter change crossfades across this call's output.
+   A filter change steps in over 32 output samples, across calls.
    Returns frames written, at most out_frames; consumes all input. */
 uint32_t recomp_hrtf_render(RecompHrtfVoice *voice, const int16_t *input,
     uint32_t input_frames, uint32_t source_rate, float *out, uint32_t out_frames);
