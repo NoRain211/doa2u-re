@@ -20,16 +20,6 @@ AREA_LABELS = {
     "UNTAGGED": "Untagged",
 }
 AREA_ORDER = ("GAME", "CRI_MIDDLEWARE", "SDK_XAPI_CRT")
-ICONS = {
-    "named": u"\u2b1c",
-    "decompiled": u"\U0001f7e8",
-    "bound": u"\U0001f7e6",
-    "tested": u"\U0001f7e9",
-}
-STATUS_ORDER = ("named", "decompiled", "bound", "tested")
-SEPARATOR = u" \u00b7 "
-DASH = u" \u2014 "
-GRID_WIDTH = 40
 
 
 def ghidra_global(name):
@@ -124,7 +114,7 @@ def write(path, entries):
 
 
 def thousands(value):
-    return u"{:,}".format(value)
+    return "{:,}".format(value)
 
 
 def percentage(value, total):
@@ -133,28 +123,12 @@ def percentage(value, total):
     return (value * 100 + total // 2) // total
 
 
-def summary(row):
-    total = sum(row.values())
-    if not total:
-        return u"0 tracked"
-    parts = [
-        u"%s tracked" % thousands(total),
-        u"%s named" % thousands(row.get("named", 0)),
-    ]
-    for status in ("decompiled", "bound", "tested"):
-        if row.get(status):
-            parts.append(u"%s %s" % (thousands(row[status]), status))
-    ported = row.get("decompiled", 0) + row.get("bound", 0) + row.get("tested", 0)
-    parts.append(u"%d%% decompiled or ported" % percentage(ported, total))
-    return SEPARATOR.join(parts)
-
-
-def status_grid(entries):
+def status_table(entries):
     counts = {}
     for entry in entries:
         tag = entry.get("tag", "UNTAGGED")
         status = entry.get("status", "named")
-        if status not in ICONS:
+        if status not in ("named", "decompiled", "bound", "tested"):
             status = "named"
         row = counts.setdefault(tag, {})
         row[status] = row.get(status, 0) + 1
@@ -166,26 +140,43 @@ def status_grid(entries):
     tags.append("UNTAGGED")
 
     lines = [
-        u"Each square is one tracked function. " + SEPARATOR.join(
-            u"%s %s" % (ICONS[status], status) for status in STATUS_ORDER
-        ) + u".",
-        u"",
+        "| Area | Named | Decompiled | Bound / tested | Total | Progress |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    total = {status: 0 for status in STATUS_ORDER}
+    total_named = total_decompiled = total_ported = total_all = 0
     for tag in tags:
         row = counts.get(tag, {})
-        for status in STATUS_ORDER:
-            total[status] += row.get(status, 0)
+        named = row.get("named", 0)
+        decompiled = row.get("decompiled", 0)
+        ported = row.get("bound", 0) + row.get("tested", 0)
+        total = named + decompiled + ported
+        total_named += named
+        total_decompiled += decompiled
+        total_ported += ported
+        total_all += total
         label = AREA_LABELS.get(tag, tag.replace("_", " ").title())
-        lines.append(u"**%s**%s%s" % (label, DASH, summary(row)))
-        squares = u"".join(
-            ICONS[status] * row.get(status, 0) for status in STATUS_ORDER
+        lines.append(
+            "| %s | %d | %d | %d | %s | %d%% |"
+            % (
+                label,
+                named,
+                decompiled,
+                ported,
+                thousands(total),
+                percentage(decompiled + ported, total),
+            )
         )
-        for index in range(0, len(squares), GRID_WIDTH):
-            lines.append(squares[index:index + GRID_WIDTH] + u"<br>")
-        lines.append(u"")
-    lines.append(u"**Total**%s%s" % (DASH, summary(total)))
-    return u"\n".join(lines).rstrip()
+    lines.append(
+        "| **Total** | **%d** | **%d** | **%d** | **%s** | **%d%%** |"
+        % (
+            total_named,
+            total_decompiled,
+            total_ported,
+            thousands(total_all),
+            percentage(total_decompiled + total_ported, total_all),
+        )
+    )
+    return "\n".join(lines)
 
 
 def write_readme(repo, entries):
@@ -203,7 +194,7 @@ def write_readme(repo, entries):
         return
     start = text.index(GRID_START) + len(GRID_START)
     end = text.index(GRID_END, start)
-    updated = text[:start] + "\n" + status_grid(entries) + "\n" + text[end:]
+    updated = text[:start] + "\n" + status_table(entries) + "\n" + text[end:]
     if updated == text:
         return
     stream = open(path, "wb")

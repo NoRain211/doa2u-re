@@ -205,18 +205,8 @@ class ExportFunctionStatusTests(unittest.TestCase):
                 ],
             )
             readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Each square is one tracked function.", readme)
-        self.assertIn(
-            "**Game** \u2014 2 tracked \u00b7 1 named \u00b7 1 tested \u00b7 "
-            "50% decompiled or ported",
-            readme,
-        )
-        self.assertIn("\u2b1c\U0001f7e9<br>", readme)
-        self.assertIn(
-            "**Total** \u2014 2 tracked \u00b7 1 named \u00b7 1 tested \u00b7 "
-            "50% decompiled or ported",
-            readme,
-        )
+        self.assertIn("| Game | 1 | 0 | 1 | 2 | 50% |", readme)
+        self.assertIn("| **Total** | **1** | **0** | **1** | **2** | **50%** |", readme)
         self.assertIn("Before\n", readme)
         self.assertIn("\nAfter\n", readme)
 
