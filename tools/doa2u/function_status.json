@@ -1,0 +1,5416 @@
+[
+  {
+    "start": "0x00015BD0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0001FD20",
+    "name": "mt19937_seed",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0001FF90",
+    "name": "mt19937_construct",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x000238D0",
+    "name": "vector_constructor_iterator",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00026230",
+    "name": "std_error_construct_string",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x000262B0",
+    "name": "std_error_destruct",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x000262F0",
+    "name": "std_string_construct_cstr",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00027B10",
+    "name": "frontend_profile_menu_enter"
+  },
+  {
+    "start": "0x00027B40",
+    "name": "frontend_profile_menu_leave"
+  },
+  {
+    "start": "0x00027B60",
+    "name": "frontend_profile_menu_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0002AE20",
+    "name": "frontend_profile_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0004BA60",
+    "name": "noop",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0004BFD0",
+    "name": "return_zero",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0005D5E0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00069180",
+    "name": "movie_scene_tick",
+    "tag": "GAME",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "movie_scene_tick"
+  },
+  {
+    "start": "0x000D9140",
+    "name": "hdd_install_pause_and_wait",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000D9190",
+    "name": "hdd_install_resume_if_needed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000D92C0",
+    "name": "startup_legal_screen",
+    "tag": "GAME",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "skip_startup_legal"
+  },
+  {
+    "start": "0x000D9300",
+    "name": "startup_logo_movie",
+    "tag": "GAME",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "skip_startup_logo"
+  },
+  {
+    "start": "0x000F6C30",
+    "name": "hdd_install_pause",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6C50",
+    "name": "hdd_install_resume",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6C60",
+    "name": "hdd_install_gate",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6C70",
+    "name": "hdd_install_finish_if_done",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6CA0",
+    "name": "start_hdd_install_thread",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6CB0",
+    "name": "hdd_install_stop",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6CC0",
+    "name": "check_hdd_install",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6F00",
+    "name": "hdd_install_needed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6F30",
+    "name": "read_disc_archive_info",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6F90",
+    "name": "hdd_archive_count",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6FB0",
+    "name": "disc_archive_path",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F6FF0",
+    "name": "hdd_archive_path",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F7070",
+    "name": "disc_archive_file_time",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F70C0",
+    "name": "hdd_install_thread",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F7390",
+    "name": "start_hdd_install_thread",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F7450",
+    "name": "hdd_install_stop",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F7FB0",
+    "name": "adx_init_system",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F8210",
+    "name": "adx_remount_archives",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F8330",
+    "name": "game_movie_set_volume_and_mix_bins",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F9770",
+    "name": "mu_device_changes_poll",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F9A10",
+    "name": "movie_close",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000F9E10",
+    "name": "movie_open",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FA170",
+    "name": "movie_tick",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FA3D0",
+    "name": "task_yield",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FA440",
+    "name": "task_fiber_scheduler",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FA530",
+    "name": "task_fiber_entry",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FA570",
+    "name": "task_create",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FAC20",
+    "name": "input_frame_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FB200",
+    "name": "game_sfx_channel_gain",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FC410",
+    "name": "game_sfx_alloc_buffer",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FCD10",
+    "name": "game_load_dsp_effects_image",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FCF80",
+    "name": "game_sfx_channel_gain_mb",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FD620",
+    "name": "game_sfx_per_frame_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FD870",
+    "name": "game_sfx_volume_to_mb",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FD8F0",
+    "name": "game_is_dolby_digital_output",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FDDC0",
+    "name": "game_sfx_start_voice",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FEAA0",
+    "name": "game_update_speaker_dependent_gain",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FED90",
+    "name": "game_dsound_init_and_mixbin_headroom",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FEFC0",
+    "name": "frame_time_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FF300",
+    "name": "game_init",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FF3A0",
+    "name": "game_frame_loop",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x000FF420",
+    "name": "game_main",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0011AFD0",
+    "name": "frontend_options_menu_enter"
+  },
+  {
+    "start": "0x0011B0B0",
+    "name": "frontend_options_menu_leave"
+  },
+  {
+    "start": "0x0011B0D0",
+    "name": "frontend_options_menu_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B0F0",
+    "name": "frontend_options_menu_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B120",
+    "name": "frontend_display_regulator_enter"
+  },
+  {
+    "start": "0x0011B140",
+    "name": "frontend_display_regulator_leave"
+  },
+  {
+    "start": "0x0011B170",
+    "name": "frontend_display_regulator_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B180",
+    "name": "frontend_button_config_enter"
+  },
+  {
+    "start": "0x0011B260",
+    "name": "frontend_button_config_leave"
+  },
+  {
+    "start": "0x0011B290",
+    "name": "frontend_button_config_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B2A0",
+    "name": "frontend_hide_overlay",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B2B0",
+    "name": "frontend_button_config_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011B340",
+    "name": "frontend_ranking_reset_confirm_enter"
+  },
+  {
+    "start": "0x0011B370",
+    "name": "frontend_ranking_reset_confirm_leave"
+  },
+  {
+    "start": "0x0011B390",
+    "name": "frontend_software_info_enter"
+  },
+  {
+    "start": "0x0011B3B0",
+    "name": "frontend_software_info_leave"
+  },
+  {
+    "start": "0x0011B3E0",
+    "name": "frontend_software_info_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011CFC0",
+    "name": "frontend_options_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011D250",
+    "name": "frontend_display_regulator_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011D480",
+    "name": "frontend_button_config_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011D9D0",
+    "name": "frontend_ranking_reset_confirm_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0011DDF0",
+    "name": "frontend_software_info_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001241D0",
+    "name": "frontend_bonus_menu_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001248E0",
+    "name": "frontend_movie_player_enter"
+  },
+  {
+    "start": "0x00124920",
+    "name": "frontend_movie_player_leave"
+  },
+  {
+    "start": "0x00124AA0",
+    "name": "frontend_bonus_gallery_enter"
+  },
+  {
+    "start": "0x00124C60",
+    "name": "frontend_bonus_gallery_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001252A0",
+    "name": "frontend_bonus_menu_enter"
+  },
+  {
+    "start": "0x00125330",
+    "name": "frontend_bonus_menu_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00125340",
+    "name": "frontend_bonus_menu_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001254F0",
+    "name": "frontend_bonus_gallery_leave"
+  },
+  {
+    "start": "0x00125AE0",
+    "name": "frontend_movie_player_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00126880",
+    "name": "frontend_bonus_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00127500",
+    "name": "frontend_bonus_gallery_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FA50",
+    "name": "frontend_live_menu_enter",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FB20",
+    "name": "live_screen_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0012FBA0",
+    "name": "frontend_live_menu_leave"
+  },
+  {
+    "start": "0x0012FBB0",
+    "name": "frontend_live_menu_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FC30",
+    "name": "frontend_live_menu_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FC40",
+    "name": "frontend_live_menu_transition_begin",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FC70",
+    "name": "frontend_live_menu_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FCD0",
+    "name": "frontend_online_client_setup_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FD90",
+    "name": "frontend_online_match_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0012FFF0",
+    "name": "frontend_online_match_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130550",
+    "name": "frontend_online_character_setup_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001305F0",
+    "name": "frontend_online_character_setup_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001306E0",
+    "name": "frontend_offline_match_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001307D0",
+    "name": "is_live_menu_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130830",
+    "name": "frontend_live_overlay_leave"
+  },
+  {
+    "start": "0x00130860",
+    "name": "frontend_live_overlay_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130880",
+    "name": "frontend_live_overlay_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130890",
+    "name": "frontend_live_overlay_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130910",
+    "name": "frontend_online_host_setup_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130A30",
+    "name": "frontend_online_retry_close",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130A50",
+    "name": "frontend_online_retry_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00130B10",
+    "name": "frontend_online_retry_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001311B0",
+    "name": "frontend_online_client_setup_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00131370",
+    "name": "frontend_online_setup_leave"
+  },
+  {
+    "start": "0x001313E0",
+    "name": "frontend_online_client_setup_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00131470",
+    "name": "frontend_online_client_setup_transition_end",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00131720",
+    "name": "frontend_online_match_enter"
+  },
+  {
+    "start": "0x001318E0",
+    "name": "frontend_online_match_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00131DF0",
+    "name": "frontend_online_character_setup_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00132300",
+    "name": "frontend_online_character_setup_leave"
+  },
+  {
+    "start": "0x00132360",
+    "name": "frontend_online_character_setup_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001323E0",
+    "name": "frontend_offline_match_enter"
+  },
+  {
+    "start": "0x00132520",
+    "name": "frontend_offline_match_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132620",
+    "name": "frontend_versus_match_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132690",
+    "name": "frontend_versus_match_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132710",
+    "name": "frontend_offline_match_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132940",
+    "name": "frontend_live_overlay_enter",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001329B0",
+    "name": "frontend_online_host_setup_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00132B50",
+    "name": "frontend_online_host_setup_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132E00",
+    "name": "frontend_online_host_setup_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132E60",
+    "name": "frontend_online_host_setup_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00132FD0",
+    "name": "frontend_online_retry_enter"
+  },
+  {
+    "start": "0x001330E0",
+    "name": "frontend_online_retry_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001334C0",
+    "name": "frontend_online_client_setup_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001339A0",
+    "name": "frontend_online_character_setup_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001346E0",
+    "name": "set_frontend_title_layout",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134780",
+    "name": "initialize_frontend_scene_engine",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134830",
+    "name": "get_frontend_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134840",
+    "name": "get_frontend_transition_state",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134850",
+    "name": "frontend_transition_ready",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001348D0",
+    "name": "cancel_frontend_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134950",
+    "name": "begin_frontend_scene_leave",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001349E0",
+    "name": "enter_frontend_scene_deferred",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134A20",
+    "name": "begin_frontend_scene",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00134AA0",
+    "name": "schedule_frontend_scene_callback",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134B00",
+    "name": "reset_frontend_scene_history",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134B30",
+    "name": "refresh_frontend_pad_slots",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134B90",
+    "name": "reset_frontend_pad_assignments",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134BB0",
+    "name": "queue_frontend_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134BD0",
+    "name": "is_live_menu_frontend_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134BE0",
+    "name": "set_frontend_scene_table",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00134C40",
+    "name": "update_frontend_scene",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00134F50",
+    "name": "request_frontend_scene",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00134F70",
+    "name": "restart_frontend_scene",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00134FB0",
+    "name": "update_frontend_pad_state",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135A50",
+    "name": "frontend_main_menu_leave"
+  },
+  {
+    "start": "0x00135AC0",
+    "name": "frontend_main_menu_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135AE0",
+    "name": "frontend_main_menu_transition_cancel",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135B70",
+    "name": "frontend_main_menu_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135BA0",
+    "name": "frontend_main_menu_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135E00",
+    "name": "frontend_team_size_select_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135E20",
+    "name": "frontend_team_size_select_close",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135E40",
+    "name": "frontend_team_size_select_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00135F30",
+    "name": "frontend_character_select_enter"
+  },
+  {
+    "start": "0x00135FB0",
+    "name": "frontend_character_select_leave"
+  },
+  {
+    "start": "0x00135FD0",
+    "name": "frontend_character_select_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136000",
+    "name": "frontend_character_select_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136300",
+    "name": "frontend_match_leave"
+  },
+  {
+    "start": "0x00136330",
+    "name": "frontend_match_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136630",
+    "name": "frontend_post_match_select_leave"
+  },
+  {
+    "start": "0x00136660",
+    "name": "frontend_post_match_select_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001366B0",
+    "name": "frontend_post_match_select_transition_begin",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001366F0",
+    "name": "frontend_item_collection_enter"
+  },
+  {
+    "start": "0x001367B0",
+    "name": "frontend_item_collection_leave"
+  },
+  {
+    "start": "0x001367C0",
+    "name": "frontend_item_collection_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136CA0",
+    "name": "frontend_replay_player_enter"
+  },
+  {
+    "start": "0x00136D40",
+    "name": "frontend_replay_player_leave"
+  },
+  {
+    "start": "0x00136D60",
+    "name": "frontend_replay_player_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136DC0",
+    "name": "return_one",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00136E50",
+    "name": "frontend_gallery_viewer_enter"
+  },
+  {
+    "start": "0x00136FC0",
+    "name": "frontend_gallery_viewer_leave"
+  },
+  {
+    "start": "0x00136FD0",
+    "name": "frontend_gallery_viewer_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001370E0",
+    "name": "frontend_ranking_menu_enter"
+  },
+  {
+    "start": "0x001371F0",
+    "name": "frontend_ranking_menu_close",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00137230",
+    "name": "frontend_ranking_menu_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00137A00",
+    "name": "select_startup_frontend_scene",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00137CB0",
+    "name": "frontend_main_menu_enter"
+  },
+  {
+    "start": "0x00138870",
+    "name": "frontend_team_size_select_enter"
+  },
+  {
+    "start": "0x00138930",
+    "name": "frontend_team_size_select_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00138CA0",
+    "name": "frontend_character_select_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00138E10",
+    "name": "frontend_match_enter"
+  },
+  {
+    "start": "0x001390D0",
+    "name": "frontend_match_leave_complete",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00139660",
+    "name": "frontend_post_match_select_enter"
+  },
+  {
+    "start": "0x001397A0",
+    "name": "frontend_post_match_select_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001398E0",
+    "name": "frontend_theater_debug_overlay_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001399F0",
+    "name": "frontend_item_collection_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013A840",
+    "name": "frontend_replay_player_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013A890",
+    "name": "frontend_gallery_viewer_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013B850",
+    "name": "frontend_main_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013BD20",
+    "name": "frontend_match_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013BE20",
+    "name": "frontend_post_match_select_transition_end",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013C810",
+    "name": "frontend_ranking_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0013C9B0",
+    "name": "frontend_match_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x001A7520",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001A76C0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001AF370",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001D7DE0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001E3CD0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001EF4A0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x001EF730",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00208290",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00218080",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002181E0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00218330",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0021A860",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00231200",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002531C0",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00259450",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00259F10",
+    "name": "_rand",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00281E00",
+    "name": "frame_clear",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00281E60",
+    "name": "wait_vertical_blank_field",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00282940",
+    "name": "frame_swap",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00293570",
+    "name": "d3dxvec3_divide",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00294930",
+    "name": "get_match_role",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00294980",
+    "name": "set_match_role",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002949D0",
+    "name": "clear_match_role",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029BE80",
+    "name": "match_sync_complete",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F500",
+    "name": "online_task_continue",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F540",
+    "name": "online_friends_poll",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F6B0",
+    "name": "online_stats_poll",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F790",
+    "name": "online_session_active",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F7D0",
+    "name": "get_online_state",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F7E0",
+    "name": "online_logon",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F8F0",
+    "name": "online_state_commit",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029F940",
+    "name": "online_match_search_start",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x0029FB10",
+    "name": "get_match_search_count",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0000",
+    "name": "get_friend_count",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0200",
+    "name": "friend_answer_request",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0340",
+    "name": "friend_revoke_game_invite",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0390",
+    "name": "online_user_count",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0480",
+    "name": "get_recent_player_count",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0490",
+    "name": "get_recent_player_name",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A04B0",
+    "name": "get_recent_player_wide_name",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A04D0",
+    "name": "get_recent_player_id",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0500",
+    "name": "find_recent_player",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0540",
+    "name": "recent_player_add",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0620",
+    "name": "friend_invite_state",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0690",
+    "name": "player_feedback_send"
+  },
+  {
+    "start": "0x002A0750",
+    "name": "online_error_message_index",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0820",
+    "name": "get_friend_id",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0850",
+    "name": "find_friend",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0C30",
+    "name": "online_refresh_users",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0C50",
+    "name": "get_online_user",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0C70",
+    "name": "get_online_user_id",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0CA0",
+    "name": "find_online_user",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0F10",
+    "name": "session_matches_title",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0F60",
+    "name": "friend_has_joinable_game",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0F90",
+    "name": "has_pending_invite",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0FA0",
+    "name": "pending_invite_clear",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0FC0",
+    "name": "get_pending_invite",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A0FD0",
+    "name": "get_pending_invite_slot",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A1AD0",
+    "name": "online_match_session_poll",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A21F0",
+    "name": "online_startup",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A37F0",
+    "name": "get_friend_info",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A4010",
+    "name": "online_logoff",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A4300",
+    "name": "online_session_join",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A4740",
+    "name": "online_search_filter_results",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A48A0",
+    "name": "online_join_begin",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A5530",
+    "name": "online_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6420",
+    "name": "voicemail_is_recording",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6440",
+    "name": "voicemail_set_mode",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6A50",
+    "name": "voicemail_set_speaker",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6B60",
+    "name": "voicemail_set_effect",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6C90",
+    "name": "voicemail_start_play",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6D10",
+    "name": "voicemail_start_record",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A6DB0",
+    "name": "voicemail_stop",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A78E0",
+    "name": "input_stick_y",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A7B10",
+    "name": "input_stick_y",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A7C30",
+    "name": "input_stick_x",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A8460",
+    "name": "match_lobby_reset",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A8D50",
+    "name": "live_account_select_enter"
+  },
+  {
+    "start": "0x002A8E70",
+    "name": "live_account_select_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A8EA0",
+    "name": "live_account_select_begin_leave"
+  },
+  {
+    "start": "0x002A90D0",
+    "name": "live_logon_status_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A9160",
+    "name": "live_logon_status_show"
+  },
+  {
+    "start": "0x002A9190",
+    "name": "live_logon_status_begin_leave"
+  },
+  {
+    "start": "0x002A91B0",
+    "name": "live_main_menu_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002A9240",
+    "name": "live_main_menu_show"
+  },
+  {
+    "start": "0x002A9260",
+    "name": "live_main_menu_begin_leave"
+  },
+  {
+    "start": "0x002A92D0",
+    "name": "live_join_pending_begin_leave"
+  },
+  {
+    "start": "0x002A93D0",
+    "name": "live_search_setup_enter"
+  },
+  {
+    "start": "0x002A9400",
+    "name": "live_search_setup_begin_leave"
+  },
+  {
+    "start": "0x002A9420",
+    "name": "live_search_results_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002A9560",
+    "name": "live_search_results_enter"
+  },
+  {
+    "start": "0x002A95C0",
+    "name": "live_search_results_show"
+  },
+  {
+    "start": "0x002A9610",
+    "name": "live_search_results_begin_leave"
+  },
+  {
+    "start": "0x002A98C0",
+    "name": "live_join_setup_show"
+  },
+  {
+    "start": "0x002A9910",
+    "name": "live_join_setup_begin_leave"
+  },
+  {
+    "start": "0x002A9A40",
+    "name": "live_friend_list_enter"
+  },
+  {
+    "start": "0x002A9AA0",
+    "name": "live_friend_list_show"
+  },
+  {
+    "start": "0x002A9AE0",
+    "name": "live_friend_list_begin_leave"
+  },
+  {
+    "start": "0x002A9B90",
+    "name": "live_friend_detail_enter"
+  },
+  {
+    "start": "0x002A9D00",
+    "name": "live_friend_detail_show"
+  },
+  {
+    "start": "0x002A9D50",
+    "name": "live_friend_detail_begin_leave"
+  },
+  {
+    "start": "0x002A9F70",
+    "name": "live_friend_voice_mail_enter"
+  },
+  {
+    "start": "0x002A9FA0",
+    "name": "live_friend_voice_mail_begin_leave"
+  },
+  {
+    "start": "0x002AA080",
+    "name": "live_recent_player_feedback_enter",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AA0A0",
+    "name": "live_friend_feedback_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AA0E0",
+    "name": "live_recent_player_feedback_begin_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AA1C0",
+    "name": "live_recent_player_list_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AA220",
+    "name": "live_recent_player_list_show"
+  },
+  {
+    "start": "0x002AA260",
+    "name": "live_recent_player_list_begin_leave"
+  },
+  {
+    "start": "0x002AA2F0",
+    "name": "live_recent_player_detail_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AA3A0",
+    "name": "live_recent_player_detail_show"
+  },
+  {
+    "start": "0x002AA3F0",
+    "name": "live_recent_player_detail_begin_leave"
+  },
+  {
+    "start": "0x002AA4E0",
+    "name": "live_recent_player_confirm_show"
+  },
+  {
+    "start": "0x002AA520",
+    "name": "live_recent_player_confirm_begin_leave"
+  },
+  {
+    "start": "0x002AA560",
+    "name": "live_recent_player_voice_mail_enter"
+  },
+  {
+    "start": "0x002AA580",
+    "name": "live_recent_player_voice_mail_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AA5D0",
+    "name": "live_recent_player_voice_mail_begin_leave"
+  },
+  {
+    "start": "0x002AA5E0",
+    "name": "live_recent_player_feedback_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AA6E0",
+    "name": "live_voice_settings_enter"
+  },
+  {
+    "start": "0x002AA720",
+    "name": "live_voice_settings_show"
+  },
+  {
+    "start": "0x002AA750",
+    "name": "live_voice_settings_begin_leave"
+  },
+  {
+    "start": "0x002AA7C0",
+    "name": "live_volume_settings_enter"
+  },
+  {
+    "start": "0x002AA7F0",
+    "name": "live_volume_settings_show"
+  },
+  {
+    "start": "0x002AA820",
+    "name": "live_volume_settings_begin_leave"
+  },
+  {
+    "start": "0x002AA830",
+    "name": "live_volume_settings_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AA880",
+    "name": "live_player_slots_show"
+  },
+  {
+    "start": "0x002AA890",
+    "name": "live_player_slots_begin_leave"
+  },
+  {
+    "start": "0x002AA8A0",
+    "name": "live_session_lobby_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AAA00",
+    "name": "live_session_lobby_begin_leave"
+  },
+  {
+    "start": "0x002AAA10",
+    "name": "live_session_menu_enter"
+  },
+  {
+    "start": "0x002AAA40",
+    "name": "live_session_menu_show"
+  },
+  {
+    "start": "0x002AAA60",
+    "name": "live_session_menu_begin_leave"
+  },
+  {
+    "start": "0x002AAAB0",
+    "name": "live_session_settings_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AAB10",
+    "name": "live_session_settings_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AAB40",
+    "name": "live_session_settings_begin_leave"
+  },
+  {
+    "start": "0x002AAB60",
+    "name": "live_match_setup_enter"
+  },
+  {
+    "start": "0x002AABE0",
+    "name": "live_match_setup_show"
+  },
+  {
+    "start": "0x002AAD20",
+    "name": "live_match_wait_enter"
+  },
+  {
+    "start": "0x002AAD40",
+    "name": "live_match_wait_show"
+  },
+  {
+    "start": "0x002AAD50",
+    "name": "menu_axis_input",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AAEB0",
+    "name": "live_page_close",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AAF20",
+    "name": "live_page_apply_navigation",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AB160",
+    "name": "live_match_role_tick",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AB7C0",
+    "name": "live_join_pending_enter"
+  },
+  {
+    "start": "0x002AB840",
+    "name": "live_join_setup_enter",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002ABBD0",
+    "name": "live_friend_voice_mail_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002ABCD0",
+    "name": "live_recent_player_voice_mail_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002ABCF0",
+    "name": "live_player_slots_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002ABD80",
+    "name": "live_session_lobby_show",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC250",
+    "name": "live_match_setup_begin_leave",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC2D0",
+    "name": "live_match_wait_begin_leave"
+  },
+  {
+    "start": "0x002AC660",
+    "name": "input_accept_pressed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC6A0",
+    "name": "input_cancel_pressed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC6E0",
+    "name": "input_x_pressed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC720",
+    "name": "input_y_pressed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC760",
+    "name": "input_white_pressed",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AC7A0",
+    "name": "live_error_dialog_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002ACE30",
+    "name": "live_menu_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AD5B0",
+    "name": "live_pages_update",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x002AD650",
+    "name": "live_account_select_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002ADCA0",
+    "name": "live_logon_status_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AE270",
+    "name": "live_main_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AE760",
+    "name": "live_join_pending_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AEAA0",
+    "name": "live_search_setup_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AF610",
+    "name": "live_search_results_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AFC30",
+    "name": "live_friend_list_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002AFEE0",
+    "name": "live_friend_detail_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B08B0",
+    "name": "live_friend_voice_mail_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B0D50",
+    "name": "live_friend_feedback_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B0F20",
+    "name": "live_recent_player_list_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B11F0",
+    "name": "live_recent_player_detail_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B1850",
+    "name": "live_recent_player_confirm_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B1920",
+    "name": "live_recent_player_voice_mail_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B1CC0",
+    "name": "live_recent_player_feedback_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B1E90",
+    "name": "live_voice_settings_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B2170",
+    "name": "live_volume_settings_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B22F0",
+    "name": "live_session_lobby_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B27C0",
+    "name": "live_session_menu_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B29C0",
+    "name": "live_match_setup_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B2D80",
+    "name": "live_match_wait_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B2E80",
+    "name": "live_join_setup_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B3810",
+    "name": "live_session_settings_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B4C30",
+    "name": "live_ranking_resume_show"
+  },
+  {
+    "start": "0x002B5010",
+    "name": "live_ranking_resume_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B5370",
+    "name": "live_ranking_begin_leave",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B6380",
+    "name": "live_ranking_select_show"
+  },
+  {
+    "start": "0x002B6440",
+    "name": "live_ranking_list_show"
+  },
+  {
+    "start": "0x002B6EA0",
+    "name": "live_ranking_select_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B7D00",
+    "name": "live_ranking_list_update",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x002B7D8E",
+    "name": "XcSHAUpdate",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B7FF7",
+    "name": "XCalculateSignatureBeginEx",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8038",
+    "name": "XCalculateSignatureBegin",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B804C",
+    "name": "XCalculateSignatureUpdate",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B809A",
+    "name": "XCalculateSignatureEnd",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B81D3",
+    "name": "XapiSelectCachePartition",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B841E",
+    "name": "XMountUtilityDrive",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8523",
+    "name": "XMountAlternateTitleA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B86E6",
+    "name": "XUnmountAlternateTitleA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B87E2",
+    "name": "XMUNameFromDriveLetter",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8916",
+    "name": "XapipQueryTimeZoneInformation",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B89C0",
+    "name": "GetSystemTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8A24",
+    "name": "GetTickCount",
+    "tag": "SDK_XAPI_CRT",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "get_tick_count"
+  },
+  {
+    "start": "0x002B8A2C",
+    "name": "FileTimeToSystemTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8A97",
+    "name": "SystemTimeToFileTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8B0C",
+    "name": "CompareFileTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8D4D",
+    "name": "GetTimeZoneInformation",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8EFF",
+    "name": "GetLocalTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8F7E",
+    "name": "FileTimeToLocalFileTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FA9",
+    "name": "DebugBreak",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FAE",
+    "name": "GetSystemTimeAsFileTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FB4",
+    "name": "wvsprintfW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FCB",
+    "name": "wsprintfW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FDE",
+    "name": "CloseHandle",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B8FFC",
+    "name": "DuplicateHandle",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9022",
+    "name": "ReadFile",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B910F",
+    "name": "WriteFile",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B91E5",
+    "name": "SetEndOfFile",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9269",
+    "name": "SetFilePointer",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9363",
+    "name": "SetFilePointerEx",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B942B",
+    "name": "GetFileInformationByHandle",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9504",
+    "name": "SetFileTime",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9576",
+    "name": "FlushFileBuffers",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B959D",
+    "name": "GetFileSizeEx",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B95DB",
+    "name": "GetFileSize",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002B9BCA",
+    "name": "MoveFileA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA13C",
+    "name": "XCreateSaveGame",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA39F",
+    "name": "XDeleteSaveGame",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA46F",
+    "name": "XFindFirstSaveGame",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA579",
+    "name": "XFindNextSaveGame",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA5C0",
+    "name": "XFindClose",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA616",
+    "name": "lstrcpyA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA654",
+    "name": "lstrcpynA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA6B9",
+    "name": "lstrcatA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA713",
+    "name": "lstrlenA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA751",
+    "name": "lstrcmpW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA796",
+    "name": "lstrcpyW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA7CE",
+    "name": "lstrcpynW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA83A",
+    "name": "lstrcatW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA872",
+    "name": "lstrlenW",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BA8AC",
+    "name": "XGetGameRegion",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAA9E",
+    "name": "XGetLanguage",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAACB",
+    "name": "GetLastError",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAAF3",
+    "name": "SetLastError",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAB21",
+    "name": "XapiSetLastNTError",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAB38",
+    "name": "GetOverlappedResult",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAB9D",
+    "name": "XLaunchNewImageA",
+    "tag": "SDK_XAPI_CRT",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "launch_new_image"
+  },
+  {
+    "start": "0x002BACC0",
+    "name": "XGetLaunchInfo",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAD6B",
+    "name": "QueryPerformanceCounter",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAD7C",
+    "name": "QueryPerformanceFrequency",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAD90",
+    "name": "OutputDebugStringA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BAFD0",
+    "name": "MultiByteToWideChar",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB08B",
+    "name": "WideCharToMultiByte",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB153",
+    "name": "XPhysicalAlloc",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB1C3",
+    "name": "XPhysicalSize",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB1C9",
+    "name": "XPhysicalProtect",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB1D9",
+    "name": "XPhysicalFree",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB1DF",
+    "name": "VirtualAlloc",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB20D",
+    "name": "XapiCallThreadNotifyRoutines",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB245",
+    "name": "SetThreadPriority",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB297",
+    "name": "GetThreadPriority",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB2EB",
+    "name": "SetThreadPriorityBoost",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB331",
+    "name": "SuspendThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB357",
+    "name": "ResumeThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB37D",
+    "name": "RaiseException",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB3D3",
+    "name": "SwitchToThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB3E6",
+    "name": "ExitThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB3F8",
+    "name": "GetExitCodeThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB444",
+    "name": "SetUnhandledExceptionFilter",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB456",
+    "name": "XRegisterThreadNotifyRoutine",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB49F",
+    "name": "UnhandledExceptionFilter",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB573",
+    "name": "CreateThread",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB5E1",
+    "name": "GetCurrentThreadId",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB5EE",
+    "name": "CreateEventA",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB64F",
+    "name": "SetEvent",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB66F",
+    "name": "WaitForSingleObjectEx",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB6B3",
+    "name": "SleepEx",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB705",
+    "name": "WaitForSingleObject",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB717",
+    "name": "Sleep",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB76A",
+    "name": "CreateFiber",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB7F6",
+    "name": "DeleteFiber",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB809",
+    "name": "SwitchToFiber",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB848",
+    "name": "ConvertThreadToFiber",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB87E",
+    "name": "XGetVideoFlags",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB8C7",
+    "name": "XGetAudioFlags",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB909",
+    "name": "XGetVideoStandard",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB932",
+    "name": "XGetAVPack",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BB93A",
+    "name": "XComputeContentSignatureKey",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BBB93",
+    "name": "entry",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BBC05",
+    "name": "XQueryValue",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BBC27",
+    "name": "XMemAlloc",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BBCC7",
+    "name": "XMemFree",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BBE40",
+    "name": "XapiMapLetterToDirectory",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BC1C9",
+    "name": "XapiBootToDash",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BC23F",
+    "name": "XapiInitProcess",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BCB52",
+    "name": "XapiFormatObjectAttributes",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD44C",
+    "name": "_cinit",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD4A4",
+    "name": "_rtinit",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD531",
+    "name": "xapi_kernel_init_segment",
+    "tag": "SDK_XAPI_CRT",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "host_kernel_init_segment"
+  },
+  {
+    "start": "0x002BD5F6",
+    "name": "HeapCreate",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD645",
+    "name": "HeapDestroy",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD661",
+    "name": "HeapFree",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD67E",
+    "name": "LocalAlloc",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD69B",
+    "name": "LocalFree",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD720",
+    "name": "XLoadSectionByHandle",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD741",
+    "name": "XFreeSectionByHandle",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD75F",
+    "name": "XGetSectionSize",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BD769",
+    "name": "XGetParentalControlSetting",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002BFDA6",
+    "name": "XAutoPowerDownResetTimer",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002F9E3D",
+    "name": "XNetGetEthernetLinkStatus",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABA0",
+    "name": "XcSHAUpdate",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABA6",
+    "name": "XcSHAInit",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABAC",
+    "name": "XcSHAFinal",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABB2",
+    "name": "DbgBreakPoint",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABB8",
+    "name": "ExQueryNonVolatileSetting",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABBE",
+    "name": "XcHMAC",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABC4",
+    "name": "DbgPrint",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABCA",
+    "name": "XcDESKeyParity",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABD0",
+    "name": "XcBlockCryptCBC",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABD6",
+    "name": "XcKeyTable",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABDC",
+    "name": "XcModExp",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABE2",
+    "name": "XcVerifyPKCS1Signature",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABE8",
+    "name": "XcRC4Crypt",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FABEE",
+    "name": "XcRC4Key",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x002FC300",
+    "name": "D3DDevice_BlockUntilVerticalBlank",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC4A0",
+    "name": "cri_set_server_priorities",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC5A0",
+    "name": "D3DDevice_BlockUntilVerticalBlank",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC690",
+    "name": "cri_create_server_threads",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC780",
+    "name": "cri_init_servers",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC970",
+    "name": "adx_set_mix_bins",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FC990",
+    "name": "adx_set_mix_bin_volumes",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x002FDC20",
+    "name": "adx_select_3d_mono_mode",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00301420",
+    "name": "adx_set_output_mode",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00301480",
+    "name": "adx_create_dsound_buffer",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00301560",
+    "name": "adx_open_port",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00301FA0",
+    "name": "adx_set_pan_mix_bin_volumes",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00302080",
+    "name": "adx_set_3d_pan_mix_bin_volumes",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x003047D0",
+    "name": "return_zero",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x00319600",
+    "name": "noop",
+    "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x003352A4",
+    "name": "_rand",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033562C",
+    "name": "___CxxFrameHandler",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335980",
+    "name": "__global_unwind2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003359C2",
+    "name": "__local_unwind2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335A4D",
+    "name": "__NLG_Notify1",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335A80",
+    "name": "_memmove",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335DBD",
+    "name": "__wtol",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335E1C",
+    "name": "__wtol",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x00335E21",
+    "name": "_wcsncmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335E5B",
+    "name": "__onexit_lk",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335F03",
+    "name": "__onexit",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00335F3B",
+    "name": "_atexit",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033611C",
+    "name": "_wcschr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336140",
+    "name": "__alldiv",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003361EA",
+    "name": "_wcsncpy",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033623D",
+    "name": "_swprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003362AC",
+    "name": "_isdigit",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003362D5",
+    "name": "_isspace",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003362FE",
+    "name": "__ceil_default",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003363D1",
+    "name": "__floor_default",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003364A4",
+    "name": "_wcscat",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003364F0",
+    "name": "_shortsort",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336560",
+    "name": "_qsort",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003367E3",
+    "name": "_wcscmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336815",
+    "name": "_atol",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033686D",
+    "name": "_atol",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x00336872",
+    "name": "__atoi64",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003368EB",
+    "name": "_bsearch",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336977",
+    "name": "_sprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003369D0",
+    "name": "_strncpy",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336C4C",
+    "name": "__abstract_cw",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336CDE",
+    "name": "__hw_cw",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336D6C",
+    "name": "__control87",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336D9E",
+    "name": "__controlfp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336DC0",
+    "name": "__allmul",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336DFE",
+    "name": "crt_fmod_intrinsic",
+    "tag": "SDK_XAPI_CRT",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "crt_fmod_intrinsic"
+  },
+  {
+    "start": "0x00336FAF",
+    "name": "__stricmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00336FF2",
+    "name": "__fclose_lk",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033703E",
+    "name": "_fclose",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033708F",
+    "name": "__vsnprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337164",
+    "name": "__nh_malloc",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337190",
+    "name": "_malloc",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033720C",
+    "name": "__SEH_prolog",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337247",
+    "name": "__SEH_epilog",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033734D",
+    "name": "__snprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003373A4",
+    "name": "_vswprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337412",
+    "name": "_vsprintf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337470",
+    "name": "__aullshr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337490",
+    "name": "__aullrem",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337505",
+    "name": "_wcsstr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003375D3",
+    "name": "__strnicmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337630",
+    "name": "__aulldiv",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003376A0",
+    "name": "__allshr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003376D6",
+    "name": "__fpclass",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337A57",
+    "name": "__lock_file",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337A86",
+    "name": "__lock_file2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337AA9",
+    "name": "__unlock_file",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337AD8",
+    "name": "__unlock_file2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337C4E",
+    "name": "__wcsnicmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337CF0",
+    "name": "__allrem",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337DF0",
+    "name": "_strchr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337F60",
+    "name": "__allshl",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00337FD0",
+    "name": "_strncat",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338110",
+    "name": "_strncmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338150",
+    "name": "__alldvrm",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338430",
+    "name": "_strstr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003384B6",
+    "name": "__callnewh",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003385B0",
+    "name": "__fassign",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033889E",
+    "name": "__cfltcvt",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338D0C",
+    "name": "__trandisp1",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338D73",
+    "name": "__trandisp2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338EEF",
+    "name": "__startOneArgErrorHandling",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338F71",
+    "name": "__fload_withFB",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00338FD7",
+    "name": "__math_exit",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003392FF",
+    "name": "___FrameUnwindToState",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003393CD",
+    "name": "___DestructExceptionObject",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00339A58",
+    "name": "___InternalCxxFrameHandler",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00339BBC",
+    "name": "__wchartodigit",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00339E1F",
+    "name": "__mtinitlocks",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00339EA3",
+    "name": "__mtinitlocknum",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00339F8D",
+    "name": "__flsbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033A0A6",
+    "name": "_write_char",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033A0CB",
+    "name": "_write_multi_char",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033A0F0",
+    "name": "_write_string",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033ADCB",
+    "name": "__errcode",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033ADF8",
+    "name": "__umatherr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033AE96",
+    "name": "__handle_qnan1",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033AF89",
+    "name": "__frnd",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033AF9A",
+    "name": "__set_exp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033AFC4",
+    "name": "__sptype",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B0EA",
+    "name": "__ctrlfp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B194",
+    "name": "_write_char",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B1C7",
+    "name": "_write_multi_char",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B1EB",
+    "name": "_write_string",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B9AC",
+    "name": "__cintrindisp2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033B9EA",
+    "name": "__cintrindisp1",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BA27",
+    "name": "__ctrandisp2",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BBBD",
+    "name": "__ctrandisp1",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BBF0",
+    "name": "__fload",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BC60",
+    "name": "___ascii_stricmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BD2F",
+    "name": "__close",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BDCA",
+    "name": "__freebuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BDF5",
+    "name": "__flush",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BE52",
+    "name": "__fflush_lk",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BE80",
+    "name": "_flsall",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BF55",
+    "name": "__flushall",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033BF5E",
+    "name": "__filbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C216",
+    "name": "__read",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C2D3",
+    "name": "__dosmaperr",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C4D1",
+    "name": "__write",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C580",
+    "name": "__aulldvrm",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C620",
+    "name": "___ascii_strnicmp",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033C832",
+    "name": "__lseek",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033CA13",
+    "name": "__stbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033CA9B",
+    "name": "__ftbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033CAC5",
+    "name": "__hextodec",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033CAF7",
+    "name": "__inc",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D68A",
+    "name": "__ZeroTail",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D6BC",
+    "name": "__IncMan",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D709",
+    "name": "__RoundMan",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D77B",
+    "name": "__CopyMan",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D796",
+    "name": "__IsZeroMan",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D7AF",
+    "name": "__ShrMan",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033D82A",
+    "name": "__ld12cvt",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033DA87",
+    "name": "___dtold",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E045",
+    "name": "__getbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E089",
+    "name": "__isatty",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E226",
+    "name": "__get_osfhandle",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E267",
+    "name": "__lock_fhandle",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E4D0",
+    "name": "___addl",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E4F1",
+    "name": "___add_12",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E54F",
+    "name": "___shl_12",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033E57D",
+    "name": "___shr_12",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033ED66",
+    "name": "__flswbuf",
+    "tag": "SDK_XAPI_CRT",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0033F250",
+    "name": "XOpenSoundtrackSong",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x0033F2E0",
+    "name": "IsBadReadPtr",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x0033F345",
+    "name": "IsBadWritePtr",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x0033F3AE",
+    "name": "IsBadCodePtr",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x0033F3BC",
+    "name": "RtlUnwind",
+    "tag": "SDK_XAPI_CRT"
+  },
+  {
+    "start": "0x00340F70",
+    "name": "init_global_mt19937",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00344180",
+    "name": "D3DDevice_SetGammaRamp"
+  },
+  {
+    "start": "0x00344210",
+    "name": "D3DDevice_SetTransform"
+  },
+  {
+    "start": "0x00344330",
+    "name": "D3DDevice_GetTransform"
+  },
+  {
+    "start": "0x00344360",
+    "name": "D3DDevice_GetViewport"
+  },
+  {
+    "start": "0x003443A0",
+    "name": "D3DDevice_SetMaterial"
+  },
+  {
+    "start": "0x003443D0",
+    "name": "D3DDevice_GetMaterial"
+  },
+  {
+    "start": "0x003443F0",
+    "name": "D3DDevice_SwitchTexture"
+  },
+  {
+    "start": "0x00344420",
+    "name": "D3D_KickOffAndWaitForIdle"
+  },
+  {
+    "start": "0x00344430",
+    "name": "D3DDevice_BlockOnFence"
+  },
+  {
+    "start": "0x00344440",
+    "name": "D3DDevice_KickPushBuffer"
+  },
+  {
+    "start": "0x00344450",
+    "name": "D3DDevice_GetVisibilityTestResult"
+  },
+  {
+    "start": "0x003444C0",
+    "name": "D3DDevice_BlockUntilVerticalBlank"
+  },
+  {
+    "start": "0x003444F0",
+    "name": "D3DDevice_GetTile"
+  },
+  {
+    "start": "0x00344530",
+    "name": "AvGetSavedDataAddress"
+  },
+  {
+    "start": "0x00344540",
+    "name": "D3DDevice_SetFlickerFilter"
+  },
+  {
+    "start": "0x00344590",
+    "name": "D3DDevice_SetSoftDisplayFilter"
+  },
+  {
+    "start": "0x003445F0",
+    "name": "D3DDevice_InsertFence"
+  },
+  {
+    "start": "0x00344720",
+    "name": "D3DDevice_Reset"
+  },
+  {
+    "start": "0x003447D0",
+    "name": "D3DDevice_SetRenderTarget"
+  },
+  {
+    "start": "0x00344A50",
+    "name": "D3DDevice_GetBackBuffer2"
+  },
+  {
+    "start": "0x00344AA0",
+    "name": "D3DDevice_CopyRects"
+  },
+  {
+    "start": "0x00344DD0",
+    "name": "D3DDevice_GetRenderTarget2"
+  },
+  {
+    "start": "0x00344DF0",
+    "name": "D3DDevice_GetDepthStencilSurface2"
+  },
+  {
+    "start": "0x00344E10",
+    "name": "D3DDevice_SetViewport"
+  },
+  {
+    "start": "0x00345040",
+    "name": "D3DDevice_SetLight"
+  },
+  {
+    "start": "0x00345300",
+    "name": "D3DDevice_LightEnable"
+  },
+  {
+    "start": "0x00345460",
+    "name": "D3DDevice_GetTexture2"
+  },
+  {
+    "start": "0x00345490",
+    "name": "D3DDevice_SetTexture"
+  },
+  {
+    "start": "0x00345670",
+    "name": "D3DDevice_SetPalette"
+  },
+  {
+    "start": "0x00345700",
+    "name": "D3DDevice_SetIndices"
+  },
+  {
+    "start": "0x00345790",
+    "name": "D3DDevice_IsBusy"
+  },
+  {
+    "start": "0x003457C0",
+    "name": "D3DDevice_BeginVisibilityTest"
+  },
+  {
+    "start": "0x00345860",
+    "name": "D3DDevice_EndVisibilityTest"
+  },
+  {
+    "start": "0x003458C0",
+    "name": "D3DDevice_GetDisplayFieldStatus"
+  },
+  {
+    "start": "0x00345900",
+    "name": "D3D_SetTileNoWait"
+  },
+  {
+    "start": "0x003459E0",
+    "name": "D3DDevice_SetTile"
+  },
+  {
+    "start": "0x003459F0",
+    "name": "D3DDevice_SetScissors"
+  },
+  {
+    "start": "0x00345D70",
+    "name": "D3DDevice_PersistDisplay"
+  },
+  {
+    "start": "0x00345EA0",
+    "name": "D3DDevice_SetScreenSpaceOffset"
+  },
+  {
+    "start": "0x00346140",
+    "name": "D3DDevice_CreateVertexBuffer2"
+  },
+  {
+    "start": "0x00346190",
+    "name": "D3DVertexBuffer_Lock2"
+  },
+  {
+    "start": "0x003461E0",
+    "name": "D3DPalette_Lock2"
+  },
+  {
+    "start": "0x00346200",
+    "name": "D3DPalette_GetSize"
+  },
+  {
+    "start": "0x00346210",
+    "name": "D3DDevice_SetRenderState_PSTextureModes"
+  },
+  {
+    "start": "0x00346240",
+    "name": "D3DDevice_SetRenderState_Simple"
+  },
+  {
+    "start": "0x00346270",
+    "name": "D3DDevice_SetRenderStateNotInline"
+  },
+  {
+    "start": "0x003462D0",
+    "name": "D3DDevice_GetViewportOffsetAndScale"
+  },
+  {
+    "start": "0x00346400",
+    "name": "D3D_UpdateProjectionViewportTransform"
+  },
+  {
+    "start": "0x00346540",
+    "name": "D3DDevice_SetRenderState_EdgeAntiAlias"
+  },
+  {
+    "start": "0x00346580",
+    "name": "D3DDevice_SetRenderState_ShadowFunc"
+  },
+  {
+    "start": "0x003465C0",
+    "name": "D3DDevice_SetRenderState_FogColor"
+  },
+  {
+    "start": "0x00346610",
+    "name": "D3DDevice_SetRenderState_CullMode"
+  },
+  {
+    "start": "0x00346680",
+    "name": "D3DDevice_SetRenderState_FrontFace"
+  },
+  {
+    "start": "0x003466C0",
+    "name": "D3DDevice_SetRenderState_NormalizeNormals"
+  },
+  {
+    "start": "0x00346700",
+    "name": "D3DDevice_SetRenderState_TextureFactor"
+  },
+  {
+    "start": "0x00346760",
+    "name": "D3DDevice_SetRenderState_LineWidth"
+  },
+  {
+    "start": "0x003467D0",
+    "name": "D3DDevice_SetRenderState_Dxt1NoiseEnable"
+  },
+  {
+    "start": "0x00346850",
+    "name": "D3DDevice_SetRenderState_ZBias"
+  },
+  {
+    "start": "0x003468D0",
+    "name": "D3DDevice_SetRenderState_LogicOp"
+  },
+  {
+    "start": "0x00346930",
+    "name": "D3DDevice_SetRenderState_FillMode"
+  },
+  {
+    "start": "0x00346980",
+    "name": "D3DDevice_SetRenderState_BackFillMode"
+  },
+  {
+    "start": "0x003469E0",
+    "name": "D3DDevice_SetRenderState_TwoSidedLighting"
+  },
+  {
+    "start": "0x00346A60",
+    "name": "D3DDevice_SetRenderState_VertexBlend"
+  },
+  {
+    "start": "0x00346AB0",
+    "name": "D3DDevice_SetTextureState_TexCoordIndex"
+  },
+  {
+    "start": "0x00346BC0",
+    "name": "D3DDevice_SetTextureState_BumpEnv"
+  },
+  {
+    "start": "0x00346C30",
+    "name": "D3DDevice_SetTextureState_BorderColor"
+  },
+  {
+    "start": "0x00346C70",
+    "name": "D3DDevice_SetTextureState_ColorKeyColor"
+  },
+  {
+    "start": "0x00346CB0",
+    "name": "D3DDevice_SetTextureStageStateNotInline"
+  },
+  {
+    "start": "0x00347060",
+    "name": "D3D_CommonSetDebugRegisters"
+  },
+  {
+    "start": "0x00347130",
+    "name": "D3D_CommonSetMultiSampleModeAndScale"
+  },
+  {
+    "start": "0x00347490",
+    "name": "D3DDevice_SetRenderState_ZEnable"
+  },
+  {
+    "start": "0x00347520",
+    "name": "D3DDevice_SetRenderState_StencilEnable"
+  },
+  {
+    "start": "0x003475C0",
+    "name": "D3DDevice_SetRenderState_StencilFail"
+  },
+  {
+    "start": "0x00347630",
+    "name": "D3DDevice_SetRenderState_YuvEnable"
+  },
+  {
+    "start": "0x00347660",
+    "name": "D3DDevice_SetRenderState_OcclusionCullEnable"
+  },
+  {
+    "start": "0x003476D0",
+    "name": "D3DDevice_SetRenderState_StencilCullEnable"
+  },
+  {
+    "start": "0x00347740",
+    "name": "D3DDevice_SetRenderState_RopZCmpAlwaysRead"
+  },
+  {
+    "start": "0x00347760",
+    "name": "D3DDevice_SetRenderState_RopZRead"
+  },
+  {
+    "start": "0x00347780",
+    "name": "D3DDevice_SetRenderState_DoNotCullUncompressed"
+  },
+  {
+    "start": "0x003477A0",
+    "name": "D3DDevice_SetRenderState_MultiSampleMode"
+  },
+  {
+    "start": "0x003477D0",
+    "name": "D3DDevice_SetRenderState_MultiSampleRenderTargetMode"
+  },
+  {
+    "start": "0x00347800",
+    "name": "D3DDevice_SetRenderState_MultiSampleAntiAlias"
+  },
+  {
+    "start": "0x00347880",
+    "name": "D3DDevice_SetRenderState_MultiSampleMask"
+  },
+  {
+    "start": "0x003478D0",
+    "name": "D3DDevice_SetRenderState_SampleAlpha"
+  },
+  {
+    "start": "0x00347920",
+    "name": "D3DDevice_Clear"
+  },
+  {
+    "start": "0x00347D60",
+    "name": "D3D_DestroyResource"
+  },
+  {
+    "start": "0x00347E80",
+    "name": "D3DResource_AddRef"
+  },
+  {
+    "start": "0x00347EC0",
+    "name": "D3DResource_Release"
+  },
+  {
+    "start": "0x00347F10",
+    "name": "D3DResource_GetType"
+  },
+  {
+    "start": "0x00347FA0",
+    "name": "D3DResource_Register"
+  },
+  {
+    "start": "0x00348040",
+    "name": "D3DBaseTexture_GetLevelCount"
+  },
+  {
+    "start": "0x00348050",
+    "name": "D3DTexture_GetLevelDesc"
+  },
+  {
+    "start": "0x00348060",
+    "name": "D3DTexture_GetSurfaceLevel2"
+  },
+  {
+    "start": "0x003480B0",
+    "name": "D3DTexture_LockRect"
+  },
+  {
+    "start": "0x00348170",
+    "name": "D3DSurface_GetDesc"
+  },
+  {
+    "start": "0x00348190",
+    "name": "D3DSurface_LockRect"
+  },
+  {
+    "start": "0x00348240",
+    "name": "D3DDevice_DrawVerticesUP"
+  },
+  {
+    "start": "0x003483B0",
+    "name": "D3DDevice_DrawVertices"
+  },
+  {
+    "start": "0x00348450",
+    "name": "D3DDevice_DrawIndexedVertices"
+  },
+  {
+    "start": "0x003486B0",
+    "name": "D3DDevice_SetVertexData2f"
+  },
+  {
+    "start": "0x003486F0",
+    "name": "D3DDevice_Begin"
+  },
+  {
+    "start": "0x00348730",
+    "name": "D3DDevice_End"
+  },
+  {
+    "start": "0x00348C80",
+    "name": "D3DDevice_CreateVertexShader"
+  },
+  {
+    "start": "0x00348DC0",
+    "name": "D3DDevice_GetVertexShader"
+  },
+  {
+    "start": "0x00348DE0",
+    "name": "D3DDevice_SetVertexShaderConstant1"
+  },
+  {
+    "start": "0x00348E40",
+    "name": "D3DDevice_SetVertexShaderConstant4"
+  },
+  {
+    "start": "0x00348EF0",
+    "name": "D3DDevice_GetVertexShaderConstant"
+  },
+  {
+    "start": "0x00348F20",
+    "name": "D3DDevice_SetStreamSource"
+  },
+  {
+    "start": "0x00348FB0",
+    "name": "D3DDevice_LoadVertexShader"
+  },
+  {
+    "start": "0x00349010",
+    "name": "D3DDevice_SelectVertexShader"
+  },
+  {
+    "start": "0x003490B0",
+    "name": "D3DDevice_SetShaderConstantMode"
+  },
+  {
+    "start": "0x00349210",
+    "name": "D3DDevice_DeleteVertexShader"
+  },
+  {
+    "start": "0x00349320",
+    "name": "D3DDevice_SetVertexShader"
+  },
+  {
+    "start": "0x00349490",
+    "name": "D3DDevice_CreatePixelShader"
+  },
+  {
+    "start": "0x003494E0",
+    "name": "D3DDevice_DeletePixelShader"
+  },
+  {
+    "start": "0x00349500",
+    "name": "D3DDevice_GetPixelShader"
+  },
+  {
+    "start": "0x00349520",
+    "name": "D3DDevice_SetPixelShader"
+  },
+  {
+    "start": "0x00349720",
+    "name": "D3DDevice_SetPixelShaderConstant"
+  },
+  {
+    "start": "0x003499F0",
+    "name": "D3D_AllocContiguousMemory"
+  },
+  {
+    "start": "0x00349A30",
+    "name": "D3D_FreeContiguousMemory"
+  },
+  {
+    "start": "0x00349E10",
+    "name": "D3DDevice_InsertCallback"
+  },
+  {
+    "start": "0x00349E80",
+    "name": "CDevice_KickOff"
+  },
+  {
+    "start": "0x00349FA0",
+    "name": "D3D_SetFence"
+  },
+  {
+    "start": "0x0034A060",
+    "name": "D3D_BlockOnTime"
+  },
+  {
+    "start": "0x0034A1D0",
+    "name": "D3D_MakeRequestedSpace_8"
+  },
+  {
+    "start": "0x0034A310",
+    "name": "D3DDevice_MakeSpace"
+  },
+  {
+    "start": "0x0034A320",
+    "name": "D3DDevice_BeginStateBig"
+  },
+  {
+    "start": "0x0034A370",
+    "name": "D3D_KickOffAndWaitForIdle"
+  },
+  {
+    "start": "0x0034A390",
+    "name": "D3D_BlockOnResource"
+  },
+  {
+    "start": "0x0034A450",
+    "name": "D3D_SetPushBufferSize"
+  },
+  {
+    "start": "0x0034A470",
+    "name": "Direct3D_CreateDevice"
+  },
+  {
+    "start": "0x0034AF80",
+    "name": "D3DDevice_Swap"
+  },
+  {
+    "start": "0x0034BD50",
+    "name": "CDevice_FreeFrameBuffers"
+  },
+  {
+    "start": "0x0034BE80",
+    "name": "CDevice_InitializeFrameBuffers"
+  },
+  {
+    "start": "0x0034CF70",
+    "name": "Get2DSurfaceDesc"
+  },
+  {
+    "start": "0x0034D260",
+    "name": "Lock2DSurface"
+  },
+  {
+    "start": "0x0034D4F5",
+    "name": "CMiniport_GetDisplayCapabilities"
+  },
+  {
+    "start": "0x0034D800",
+    "name": "CMiniport_IsFlipPending"
+  },
+  {
+    "start": "0x0034E582",
+    "name": "CMiniport_CreateCtxDmaObject"
+  },
+  {
+    "start": "0x0034E894",
+    "name": "CMiniport_InitHardware"
+  },
+  {
+    "start": "0x0034EF10",
+    "name": "D3D_LazySetPointParams"
+  },
+  {
+    "start": "0x00350550",
+    "name": "CDevice_SetStateVB"
+  },
+  {
+    "start": "0x003506F0",
+    "name": "CDevice_SetStateUP"
+  },
+  {
+    "start": "0x00357D2D",
+    "name": "D3DXVec4Hermite"
+  },
+  {
+    "start": "0x00357DFE",
+    "name": "D3DXMatrixTranspose"
+  },
+  {
+    "start": "0x00357E6B",
+    "name": "D3DXMatrixInverse"
+  },
+  {
+    "start": "0x003581F8",
+    "name": "D3DXMatrixScaling"
+  },
+  {
+    "start": "0x00358254",
+    "name": "D3DXMatrixRotationZ"
+  },
+  {
+    "start": "0x003582F3",
+    "name": "D3DXVec3Normalize"
+  },
+  {
+    "start": "0x0035836F",
+    "name": "D3DXMatrixMultiply"
+  },
+  {
+    "start": "0x0035848F",
+    "name": "D3DXLoadSurfaceFromMemory"
+  },
+  {
+    "start": "0x00358699",
+    "name": "D3DXLoadSurfaceFromSurface"
+  },
+  {
+    "start": "0x003587C2",
+    "name": "D3DXFilterTexture"
+  },
+  {
+    "start": "0x00361424",
+    "name": "XGSetSurfaceHeader"
+  },
+  {
+    "start": "0x00361465",
+    "name": "XGSetTextureHeader"
+  },
+  {
+    "start": "0x0036148F",
+    "name": "XGSetVertexBufferHeader"
+  },
+  {
+    "start": "0x003614A7",
+    "name": "XGSetIndexBufferHeader"
+  },
+  {
+    "start": "0x00361BE7",
+    "name": "XGIsSwizzledFormat"
+  },
+  {
+    "start": "0x00361C2B",
+    "name": "XGBytesPerPixelFromFormat"
+  },
+  {
+    "start": "0x0036249D",
+    "name": "XGSwizzleRect"
+  },
+  {
+    "start": "0x00362BEE",
+    "name": "XGUnswizzleRect"
+  },
+  {
+    "start": "0x0036342A",
+    "name": "DSound_CRefCount_Release"
+  },
+  {
+    "start": "0x00363518",
+    "name": "dsound3d_call_pan_gains"
+  },
+  {
+    "start": "0x0036354C",
+    "name": "dsound3d_call_center_volume"
+  },
+  {
+    "start": "0x00363595",
+    "name": "DirectSoundEnterCriticalSection"
+  },
+  {
+    "start": "0x00363621",
+    "name": "IDirectSound_SetCooperativeLevel"
+  },
+  {
+    "start": "0x00363626",
+    "name": "IDirectSound_Release"
+  },
+  {
+    "start": "0x0036363C",
+    "name": "IDirectSoundBuffer_Unlock"
+  },
+  {
+    "start": "0x00363641",
+    "name": "IDirectSoundBuffer_Release"
+  },
+  {
+    "start": "0x00363657",
+    "name": "DirectSoundUseFullHRTF"
+  },
+  {
+    "start": "0x00363676",
+    "name": "XAudioCalculatePitch"
+  },
+  {
+    "start": "0x00363780",
+    "name": "CDirectSound_GetSpeakerConfig"
+  },
+  {
+    "start": "0x003637CD",
+    "name": "CDirectSound_DownloadEffectsImage"
+  },
+  {
+    "start": "0x00363831",
+    "name": "CDirectSound_SetEffectData"
+  },
+  {
+    "start": "0x00363893",
+    "name": "CDirectSound_SetMixBinHeadroom"
+  },
+  {
+    "start": "0x003638F2",
+    "name": "CDirectSound_DoWork"
+  },
+  {
+    "start": "0x00363923",
+    "name": "CDirectSoundVoiceSettings_SetMixBinVolumes"
+  },
+  {
+    "start": "0x00363A03",
+    "name": "CDirectSoundVoice_SetPitch"
+  },
+  {
+    "start": "0x00363A1C",
+    "name": "CDirectSoundVoice_SetVolume"
+  },
+  {
+    "start": "0x00363A38",
+    "name": "CDirectSoundVoice_SetHeadroom"
+  },
+  {
+    "start": "0x00363A5B",
+    "name": "CDirectSoundVoice_SetMixBinVolumes"
+  },
+  {
+    "start": "0x00363A78",
+    "name": "CDirectSoundVoice_CommitDeferredSettings"
+  },
+  {
+    "start": "0x00363BDB",
+    "name": "CDirectSoundBuffer_Play"
+  },
+  {
+    "start": "0x00363C2C",
+    "name": "CDirectSoundBuffer_Stop"
+  },
+  {
+    "start": "0x00363C7B",
+    "name": "CDirectSoundBuffer_StopEx"
+  },
+  {
+    "start": "0x00363CD4",
+    "name": "CDirectSoundBuffer_GetStatus"
+  },
+  {
+    "start": "0x00363D25",
+    "name": "CDirectSoundBuffer_SetLoopRegion"
+  },
+  {
+    "start": "0x00363DAA",
+    "name": "CDirectSoundBuffer_GetCurrentPosition"
+  },
+  {
+    "start": "0x00363DFF",
+    "name": "CDirectSoundBuffer_Lock"
+  },
+  {
+    "start": "0x00363EE1",
+    "name": "CDirectSoundBuffer_SetCurrentPosition"
+  },
+  {
+    "start": "0x00364155",
+    "name": "CDirectSoundStream_Process"
+  },
+  {
+    "start": "0x003641CC",
+    "name": "CDirectSoundStream_FlushEx"
+  },
+  {
+    "start": "0x00364236",
+    "name": "CDirectSound3DCalculator_GetVoiceData"
+  },
+  {
+    "start": "0x00364593",
+    "name": "CDirectSoundBuffer_SetVolume"
+  },
+  {
+    "start": "0x003645E1",
+    "name": "CDirectSoundBuffer_SetHeadroom"
+  },
+  {
+    "start": "0x0036462F",
+    "name": "CDirectSoundBuffer_SetMixBinVolumes"
+  },
+  {
+    "start": "0x0036467D",
+    "name": "CDirectSoundStream_SetHeadroom"
+  },
+  {
+    "start": "0x003646CF",
+    "name": "CDirectSoundStream_SetMixBinVolumes_8"
+  },
+  {
+    "start": "0x00364721",
+    "name": "IDirectSound_GetSpeakerConfig"
+  },
+  {
+    "start": "0x0036473D",
+    "name": "IDirectSound_DownloadEffectsImage"
+  },
+  {
+    "start": "0x00364764",
+    "name": "IDirectSound_SetEffectData"
+  },
+  {
+    "start": "0x0036478E",
+    "name": "IDirectSound_SetMixBinHeadroom"
+  },
+  {
+    "start": "0x003647AE",
+    "name": "IDirectSoundBuffer_SetVolume"
+  },
+  {
+    "start": "0x003647CA",
+    "name": "IDirectSoundBuffer_SetHeadroom"
+  },
+  {
+    "start": "0x003647E6",
+    "name": "IDirectSoundBuffer_SetMixBinVolumes_8"
+  },
+  {
+    "start": "0x00364802",
+    "name": "IDirectSoundBuffer_Play"
+  },
+  {
+    "start": "0x00364826",
+    "name": "IDirectSoundBuffer_Stop"
+  },
+  {
+    "start": "0x0036483E",
+    "name": "IDirectSoundBuffer_StopEx"
+  },
+  {
+    "start": "0x00364862",
+    "name": "IDirectSoundBuffer_SetLoopRegion"
+  },
+  {
+    "start": "0x00364882",
+    "name": "IDirectSoundBuffer_GetStatus"
+  },
+  {
+    "start": "0x003648BE",
+    "name": "IDirectSoundBuffer_SetCurrentPosition"
+  },
+  {
+    "start": "0x003648DA",
+    "name": "IDirectSoundBuffer_Lock"
+  },
+  {
+    "start": "0x0036490A",
+    "name": "IDirectSoundStream_SetHeadroom"
+  },
+  {
+    "start": "0x0036490F",
+    "name": "IDirectSoundStream_SetMixBinVolumes_8"
+  },
+  {
+    "start": "0x00364914",
+    "name": "IDirectSoundStream_FlushEx"
+  },
+  {
+    "start": "0x0036492C",
+    "name": "DirectSoundDoWork"
+  },
+  {
+    "start": "0x00364970",
+    "name": "dsound_voice_set_default_or_given_mix_bins"
+  },
+  {
+    "start": "0x00364B53",
+    "name": "dsound_voice_register_and_set_hrtf_mode"
+  },
+  {
+    "start": "0x00364BEA",
+    "name": "CDirectSoundVoice_SetFrequency"
+  },
+  {
+    "start": "0x00364C0E",
+    "name": "CDirectSoundVoice_SetMixBins"
+  },
+  {
+    "start": "0x00364C2B",
+    "name": "CDirectSoundVoice_SetMaxDistance"
+  },
+  {
+    "start": "0x00364C5E",
+    "name": "CDirectSoundVoice_SetMinDistance"
+  },
+  {
+    "start": "0x00364C91",
+    "name": "CDirectSoundVoice_SetPosition"
+  },
+  {
+    "start": "0x00364CE3",
+    "name": "CDirectSoundVoice_SetVelocity"
+  },
+  {
+    "start": "0x00364D35",
+    "name": "CDirectSoundVoice_SetDistanceFactor"
+  },
+  {
+    "start": "0x00364D68",
+    "name": "CDirectSoundVoice_SetRolloffFactor"
+  },
+  {
+    "start": "0x00364E0D",
+    "name": "CDirectSoundBuffer_SetFrequency"
+  },
+  {
+    "start": "0x00364E5B",
+    "name": "CDirectSoundBuffer_SetMixBins"
+  },
+  {
+    "start": "0x00364EA9",
+    "name": "CDirectSoundBuffer_SetMaxDistance"
+  },
+  {
+    "start": "0x00364EFF",
+    "name": "CDirectSoundBuffer_SetMinDistance"
+  },
+  {
+    "start": "0x00364F55",
+    "name": "CDirectSoundBuffer_SetPosition"
+  },
+  {
+    "start": "0x00364FBC",
+    "name": "CDirectSoundBuffer_SetVelocity"
+  },
+  {
+    "start": "0x00365023",
+    "name": "CDirectSoundBuffer_SetDistanceFactor"
+  },
+  {
+    "start": "0x00365079",
+    "name": "CDirectSoundBuffer_SetRolloffFactor"
+  },
+  {
+    "start": "0x003650CF",
+    "name": "CDirectSoundStream_SetMixBins"
+  },
+  {
+    "start": "0x00365121",
+    "name": "IDirectSoundBuffer_SetFrequency"
+  },
+  {
+    "start": "0x0036513D",
+    "name": "IDirectSoundBuffer_SetMixBins"
+  },
+  {
+    "start": "0x00365159",
+    "name": "IDirectSoundBuffer_SetMaxDistance"
+  },
+  {
+    "start": "0x0036517D",
+    "name": "IDirectSoundBuffer_SetMinDistance"
+  },
+  {
+    "start": "0x003651A1",
+    "name": "IDirectSoundBuffer_SetPosition"
+  },
+  {
+    "start": "0x003651D6",
+    "name": "IDirectSoundBuffer_SetVelocity"
+  },
+  {
+    "start": "0x0036520B",
+    "name": "IDirectSoundBuffer_SetDistanceFactor"
+  },
+  {
+    "start": "0x0036522F",
+    "name": "IDirectSoundBuffer_SetRolloffFactor"
+  },
+  {
+    "start": "0x00365253",
+    "name": "IDirectSoundStream_SetMixBins"
+  },
+  {
+    "start": "0x003653F4",
+    "name": "CDirectSoundBufferSettings_SetBufferData"
+  },
+  {
+    "start": "0x00365480",
+    "name": "CDirectSoundBuffer_SetBufferData"
+  },
+  {
+    "start": "0x0036552E",
+    "name": "CDirectSoundStream_Constructor"
+  },
+  {
+    "start": "0x00365553",
+    "name": "CDirectSound3DCalculator_Calculate3D"
+  },
+  {
+    "start": "0x00365793",
+    "name": "IDirectSoundBuffer_SetBufferData"
+  },
+  {
+    "start": "0x003657B3",
+    "name": "dsound_settings_ctor"
+  },
+  {
+    "start": "0x00365842",
+    "name": "CDirectSound_CommitDeferredSettings"
+  },
+  {
+    "start": "0x003658F7",
+    "name": "dsound_voice_settings_init"
+  },
+  {
+    "start": "0x00365A1E",
+    "name": "dsound_buffer_settings_init_from_desc",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00365C6E",
+    "name": "IDirectSound_CommitDeferredSettings"
+  },
+  {
+    "start": "0x00365C86",
+    "name": "CDirectSound_CreateSoundBuffer"
+  },
+  {
+    "start": "0x00365D22",
+    "name": "CDirectSound_CreateSoundStream"
+  },
+  {
+    "start": "0x00365DB3",
+    "name": "CDirectSound_SetPosition"
+  },
+  {
+    "start": "0x00365E26",
+    "name": "CDirectSound_SetVelocity"
+  },
+  {
+    "start": "0x00365E99",
+    "name": "CDirectSound_SetI3DL2Listener"
+  },
+  {
+    "start": "0x00365FBC",
+    "name": "IDirectSound_CreateSoundBuffer"
+  },
+  {
+    "start": "0x00365FE0",
+    "name": "IDirectSound_SetPosition"
+  },
+  {
+    "start": "0x00366015",
+    "name": "IDirectSound_SetVelocity"
+  },
+  {
+    "start": "0x0036604A",
+    "name": "IDirectSound_SetI3DL2Listener"
+  },
+  {
+    "start": "0x00366210",
+    "name": "DirectSoundCreate"
+  },
+  {
+    "start": "0x00366257",
+    "name": "DirectSoundCreateStream"
+  },
+  {
+    "start": "0x003662AE",
+    "name": "DSound_CMemoryManager_PoolAlloc"
+  },
+  {
+    "start": "0x00366374",
+    "name": "dsound_mem_alloc",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00366560",
+    "name": "dsound3d_amplitude_to_mb"
+  },
+  {
+    "start": "0x00366873",
+    "name": "dsound3d_distance_attenuation_mb"
+  },
+  {
+    "start": "0x00366984",
+    "name": "dsound3d_cone_attenuation_mb"
+  },
+  {
+    "start": "0x00366A14",
+    "name": "dsound3d_pan_gains_mb"
+  },
+  {
+    "start": "0x00366AE3",
+    "name": "CFullHRTFSource_GetCenterVolume"
+  },
+  {
+    "start": "0x00366B85",
+    "name": "dsound3d_pitch_factor"
+  },
+  {
+    "start": "0x00366BFE",
+    "name": "hrtf_full_lookup_filter"
+  },
+  {
+    "start": "0x00366D1A",
+    "name": "CHRTFSource_SetFullHRTF5Channel"
+  },
+  {
+    "start": "0x00366DA8",
+    "name": "dsound_gp_load_image",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036701E",
+    "name": "dsound_gp_map_ep_shared_pages",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00367032",
+    "name": "dsound_gp_map_region_pages",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036732B",
+    "name": "dsound_alloc_voice_handles",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00367429",
+    "name": "dsound_fe_mem_fence",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003676F8",
+    "name": "CMcpxAPU_ServiceDeferredCommandsLow"
+  },
+  {
+    "start": "0x003677C1",
+    "name": "CMcpxAPU_SetMixBinHeadroom"
+  },
+  {
+    "start": "0x00367DBF",
+    "name": "dsound_notifier_is_done",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00367ED7",
+    "name": "CMcpxStream_Stop"
+  },
+  {
+    "start": "0x00367F49",
+    "name": "CMcpxStream_GetStatus"
+  },
+  {
+    "start": "0x003682DD",
+    "name": "CMcpxStream_construct",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00368388",
+    "name": "CMcpxStream_Stop_Ex"
+  },
+  {
+    "start": "0x003684C6",
+    "name": "CMcpxStream_Discontinuity"
+  },
+  {
+    "start": "0x003685B6",
+    "name": "CMcpxStream_Flush"
+  },
+  {
+    "start": "0x00368A2C",
+    "name": "CMcpxStream_Pause"
+  },
+  {
+    "start": "0x00368F71",
+    "name": "dsound_heap_alloc",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00369290",
+    "name": "hrtf_select_filter"
+  },
+  {
+    "start": "0x003692B2",
+    "name": "dsound_notifier_reset",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x003694B4",
+    "name": "pack_voice_mix_bins"
+  },
+  {
+    "start": "0x00369565",
+    "name": "voice_build_apu_volume_words"
+  },
+  {
+    "start": "0x00369CAE",
+    "name": "hrtf_upload_voice_entry"
+  },
+  {
+    "start": "0x00369E1D",
+    "name": "CMcpxVoiceClient_SetFilter"
+  },
+  {
+    "start": "0x00369FF2",
+    "name": "dsound_notifier_init",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036A010",
+    "name": "dsound_voice_notifier_init",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036A027",
+    "name": "CMcpxVoiceClient_AllocateVoices",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036A1A1",
+    "name": "CMcpxVoiceClient_SetMixBins"
+  },
+  {
+    "start": "0x0036A262",
+    "name": "CMcpxVoiceClient_SetVolume"
+  },
+  {
+    "start": "0x0036A2FA",
+    "name": "CMcpxVoiceClient_SetPitch"
+  },
+  {
+    "start": "0x0036A411",
+    "name": "CMcpxVoiceClient_construct",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036A5B0",
+    "name": "CMcpxVoiceClient_Commit3dSettings"
+  },
+  {
+    "start": "0x0036ACD0",
+    "name": "CMcpxBuffer_Pause"
+  },
+  {
+    "start": "0x0036AD43",
+    "name": "CMcpxBuffer_GetStatus"
+  },
+  {
+    "start": "0x0036AD85",
+    "name": "CMcpxBuffer_GetCurrentPosition"
+  },
+  {
+    "start": "0x0036AF8F",
+    "name": "CMcpxBuffer_construct",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036B050",
+    "name": "dsound_buffer_set_fxin_data",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036B141",
+    "name": "CMcpxBuffer_AllocateVoices",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036B18F",
+    "name": "CMcpxBuffer_Play"
+  },
+  {
+    "start": "0x0036B25D",
+    "name": "CMcpxBuffer_Stop"
+  },
+  {
+    "start": "0x0036B2ED",
+    "name": "CMcpxBuffer_SetCurrentPosition"
+  },
+  {
+    "start": "0x0036B407",
+    "name": "CMcpxBuffer_SetBufferData"
+  },
+  {
+    "start": "0x0036B4C6",
+    "name": "CMcpxBuffer_Stop_Ex"
+  },
+  {
+    "start": "0x0036BB1F",
+    "name": "dsound3d_i3dl2_volumes"
+  },
+  {
+    "start": "0x0036C0C0",
+    "name": "dsp_scratch_construct",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036C108",
+    "name": "dsp_scratch_build_sge_table",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036C1BB",
+    "name": "gp_scratch_map_pages",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036C20D",
+    "name": "dsp_scratch_write_bytes"
+  },
+  {
+    "start": "0x0036C482",
+    "name": "dsound_vp_global_init"
+  },
+  {
+    "start": "0x0036C555",
+    "name": "dsound_gp_init"
+  },
+  {
+    "start": "0x0036C694",
+    "name": "dsound_apu_init"
+  },
+  {
+    "start": "0x0036C928",
+    "name": "dsound_fe_set_priv_lock",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036CA1C",
+    "name": "dsound_get_physical_run",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036CA93",
+    "name": "dsound_next_page_chunk",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036CD4A",
+    "name": "dsound_alloc_mem_regions",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036CECA",
+    "name": "dsound_vp_halt",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036D8F2",
+    "name": "dolby_ep_scratch_bytes",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036D8F8",
+    "name": "dolby_ep_program_lookup"
+  },
+  {
+    "start": "0x0036D996",
+    "name": "dolby_ep_construct",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036D9A3",
+    "name": "dolby_ep_get_param_block",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036D9A7",
+    "name": "dolby_ep_share_pages_with_gp",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036DA1E",
+    "name": "dolby_ep_set_output_fifo0",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036DA46",
+    "name": "dolby_ep_set_output_fifo1",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0036DAA8",
+    "name": "dsound_load_dolby_ep_image"
+  },
+  {
+    "start": "0x00380F68",
+    "name": "XNetConfig"
+  },
+  {
+    "start": "0x00380F73",
+    "name": "XNetGetConfigStatus"
+  },
+  {
+    "start": "0x00380F7E",
+    "name": "XNetRandom"
+  },
+  {
+    "start": "0x00380F89",
+    "name": "XNetRegisterKey"
+  },
+  {
+    "start": "0x00380F94",
+    "name": "XNetUnregisterKey"
+  },
+  {
+    "start": "0x00380F9F",
+    "name": "XNetXnAddrToInAddr"
+  },
+  {
+    "start": "0x00380FB6",
+    "name": "XNetDnsLookup"
+  },
+  {
+    "start": "0x00380FCD",
+    "name": "XNetDnsRelease"
+  },
+  {
+    "start": "0x00380FD8",
+    "name": "XNetQosListen"
+  },
+  {
+    "start": "0x00380FE7",
+    "name": "XNetQosLookup"
+  },
+  {
+    "start": "0x00381003",
+    "name": "XNetQosRelease"
+  },
+  {
+    "start": "0x0038100E",
+    "name": "XNetGetTitleXnAddr"
+  },
+  {
+    "start": "0x00381019",
+    "name": "socket"
+  },
+  {
+    "start": "0x00381024",
+    "name": "closesocket"
+  },
+  {
+    "start": "0x0038102F",
+    "name": "shutdown"
+  },
+  {
+    "start": "0x0038103A",
+    "name": "ioctlsocket"
+  },
+  {
+    "start": "0x00381045",
+    "name": "setsockopt"
+  },
+  {
+    "start": "0x00381054",
+    "name": "bind"
+  },
+  {
+    "start": "0x0038105F",
+    "name": "connect"
+  },
+  {
+    "start": "0x0038106A",
+    "name": "select"
+  },
+  {
+    "start": "0x00381079",
+    "name": "WSAGetOverlappedResult"
+  },
+  {
+    "start": "0x00381088",
+    "name": "WSACancelOverlappedIO"
+  },
+  {
+    "start": "0x00381093",
+    "name": "WSARecv"
+  },
+  {
+    "start": "0x003810A2",
+    "name": "recvfrom"
+  },
+  {
+    "start": "0x003810B1",
+    "name": "WSASend"
+  },
+  {
+    "start": "0x003810C0",
+    "name": "sendto"
+  },
+  {
+    "start": "0x003810CF",
+    "name": "WSASendTo"
+  },
+  {
+    "start": "0x003810F2",
+    "name": "XNetServerToInAddr"
+  },
+  {
+    "start": "0x00381109",
+    "name": "XNetInAddrToXnAddr"
+  },
+  {
+    "start": "0x00381120",
+    "name": "XNetUnregisterInAddr"
+  },
+  {
+    "start": "0x0038112B",
+    "name": "XnInit"
+  },
+  {
+    "start": "0x00381331",
+    "name": "XNetStartup",
+    "status": "tested",
+    "source": "recomp-runtime/program_manual.c",
+    "symbol": "xnet_startup"
+  },
+  {
+    "start": "0x00381348",
+    "name": "WSAStartup"
+  },
+  {
+    "start": "0x00381363",
+    "name": "XnTerm"
+  },
+  {
+    "start": "0x00381436",
+    "name": "XNetCleanup"
+  },
+  {
+    "start": "0x00381443",
+    "name": "WSACleanup"
+  },
+  {
+    "start": "0x003814D3",
+    "name": "WSAGetLastError"
+  },
+  {
+    "start": "0x003816C0",
+    "name": "ioctlsocket"
+  },
+  {
+    "start": "0x00381C22",
+    "name": "inet_addr"
+  },
+  {
+    "start": "0x00381D7F",
+    "name": "htons"
+  },
+  {
+    "start": "0x00382190",
+    "name": "bind"
+  },
+  {
+    "start": "0x00382214",
+    "name": "connect"
+  },
+  {
+    "start": "0x0038324C",
+    "name": "socket"
+  },
+  {
+    "start": "0x00390278",
+    "name": "XNetOpenConfigVolume"
+  },
+  {
+    "start": "0x003902C6",
+    "name": "XNetCloseConfigVolume"
+  },
+  {
+    "start": "0x0039039A",
+    "name": "XNetLoadConfigSector"
+  },
+  {
+    "start": "0x00390451",
+    "name": "XNetSaveConfigSector"
+  },
+  {
+    "start": "0x003904F4",
+    "name": "XNetSaveConfigParams"
+  },
+  {
+    "start": "0x003905A0",
+    "name": "XNetLoadConfigParams"
+  },
+  {
+    "start": "0x0039063A",
+    "name": "XNetUpdateConfigParams"
+  },
+  {
+    "start": "0x003906A4",
+    "name": "XNetConfigUPnP"
+  },
+  {
+    "start": "0x00393B80",
+    "name": "XOnlineTaskContinue"
+  },
+  {
+    "start": "0x00393B8B",
+    "name": "XOnlineTaskClose"
+  },
+  {
+    "start": "0x00393B96",
+    "name": "XOnlineGetUsers"
+  },
+  {
+    "start": "0x00393BA1",
+    "name": "XOnlineLogon"
+  },
+  {
+    "start": "0x00393BB0",
+    "name": "XOnlineLogonTaskGetResults"
+  },
+  {
+    "start": "0x00393BBB",
+    "name": "XOnlineGetLogonUsers"
+  },
+  {
+    "start": "0x00393BC6",
+    "name": "XOnlineGetServiceInfo"
+  },
+  {
+    "start": "0x00393BD1",
+    "name": "XOnlineTitleUpdate"
+  },
+  {
+    "start": "0x00393BDC",
+    "name": "XOnlineTitleUpdateEx"
+  },
+  {
+    "start": "0x00393BE7",
+    "name": "XOnlineMatchSessionCreate"
+  },
+  {
+    "start": "0x00393BF6",
+    "name": "XOnlineMatchSessionUpdate"
+  },
+  {
+    "start": "0x00393C26",
+    "name": "XOnlineMatchSessionGetInfo"
+  },
+  {
+    "start": "0x00393C31",
+    "name": "XOnlineMatchSessionDelete"
+  },
+  {
+    "start": "0x00393C4F",
+    "name": "XOnlineMatchSessionFindFromID"
+  },
+  {
+    "start": "0x00393C6D",
+    "name": "XOnlineMatchSearch"
+  },
+  {
+    "start": "0x00393C7C",
+    "name": "XOnlineMatchSearchGetResults"
+  },
+  {
+    "start": "0x00393C87",
+    "name": "XOnlineMatchSearchParse"
+  },
+  {
+    "start": "0x00393C92",
+    "name": "XOnlineMatchSearchResultsLen"
+  },
+  {
+    "start": "0x00393C9D",
+    "name": "XOnlineTitleIdIsSameTitle"
+  },
+  {
+    "start": "0x00393CA8",
+    "name": "XOnlineNotificationSetState"
+  },
+  {
+    "start": "0x00393CD7",
+    "name": "XOnlineFriendsStartup"
+  },
+  {
+    "start": "0x00393CE2",
+    "name": "XOnlineFriendsEnumerate"
+  },
+  {
+    "start": "0x00393CED",
+    "name": "XOnlineFriendsEnumerateFinish"
+  },
+  {
+    "start": "0x00393CF8",
+    "name": "XOnlineFriendsGetLatest"
+  },
+  {
+    "start": "0x00393D03",
+    "name": "XOnlineFriendsGetTitleName"
+  },
+  {
+    "start": "0x00393D0E",
+    "name": "XOnlineFriendsRemove"
+  },
+  {
+    "start": "0x00393D19",
+    "name": "XOnlineFriendsRequest"
+  },
+  {
+    "start": "0x00393D3B",
+    "name": "XOnlineFriendsGameInvite"
+  },
+  {
+    "start": "0x00393D5C",
+    "name": "XOnlineFriendsRevokeGameInvite"
+  },
+  {
+    "start": "0x00393D7D",
+    "name": "XOnlineFriendsAnswerRequest"
+  },
+  {
+    "start": "0x00393D88",
+    "name": "XOnlineFriendsAnswerGameInvite"
+  },
+  {
+    "start": "0x00393D93",
+    "name": "XOnlineFriendsJoinGame"
+  },
+  {
+    "start": "0x00393D9E",
+    "name": "XOnlineFriendsGetAcceptedGameInvite"
+  },
+  {
+    "start": "0x00393DA9",
+    "name": "XOnlineMutelistGet"
+  },
+  {
+    "start": "0x00393DB8",
+    "name": "XOnlineMutelistStartup"
+  },
+  {
+    "start": "0x00393E07",
+    "name": "XOnlineFeedbackSend"
+  },
+  {
+    "start": "0x00393E37",
+    "name": "XOnlineStatWrite"
+  },
+  {
+    "start": "0x00393E42",
+    "name": "XOnlineStatRead"
+  },
+  {
+    "start": "0x00393E4D",
+    "name": "XOnlineStatReadGetResult"
+  },
+  {
+    "start": "0x00393E5C",
+    "name": "XOnlineStatLeaderEnumerate"
+  },
+  {
+    "start": "0x00393E6B",
+    "name": "XOnlineStatLeaderEnumerateGetResults"
+  },
+  {
+    "start": "0x003941CE",
+    "name": "XOnlineStartup"
+  },
+  {
+    "start": "0x003942CB",
+    "name": "XOnlineCleanup"
+  },
+  {
+    "start": "0x0039BD4D",
+    "name": "CXo_XOnlineLogon"
+  },
+  {
+    "start": "0x0039C34B",
+    "name": "XoUpdateLaunchNewImageInternal"
+  },
+  {
+    "start": "0x0039CF35",
+    "name": "CXo_XOnlineMatchSearchGetResults"
+  },
+  {
+    "start": "0x0039D0B0",
+    "name": "CXo_XOnlineMatchSearchResultsLen"
+  },
+  {
+    "start": "0x0039D84B",
+    "name": "CXo_XOnlineMatchSessionCreate"
+  },
+  {
+    "start": "0x0039D8C6",
+    "name": "CXo_XOnlineMatchSessionUpdate"
+  },
+  {
+    "start": "0x0039D91B",
+    "name": "CXo_XOnlineMatchSearch"
+  },
+  {
+    "start": "0x003B8604",
+    "name": "MU_Init"
+  },
+  {
+    "start": "0x003B87B3",
+    "name": "XInitDevices"
+  },
+  {
+    "start": "0x003B88A9",
+    "name": "IUsbInit_GetMaxDeviceTypeCount"
+  },
+  {
+    "start": "0x003B94C4",
+    "name": "XMountMUA"
+  },
+  {
+    "start": "0x003B95F6",
+    "name": "XUnmountMU"
+  },
+  {
+    "start": "0x003B9704",
+    "name": "XReadMUMetaData"
+  },
+  {
+    "start": "0x003B986F",
+    "name": "XMUPortFromDriveLetterA"
+  },
+  {
+    "start": "0x003B988E",
+    "name": "XMUSlotFromDriveLetterA"
+  },
+  {
+    "start": "0x003B98D2",
+    "name": "XPeekDevices"
+  },
+  {
+    "start": "0x003B990E",
+    "name": "XInitDevices"
+  },
+  {
+    "start": "0x003B9913",
+    "name": "XGetDevices"
+  },
+  {
+    "start": "0x003B9935",
+    "name": "XGetDeviceChanges"
+  },
+  {
+    "start": "0x003B9E12",
+    "name": "XInputOpen"
+  },
+  {
+    "start": "0x003B9E68",
+    "name": "XInputClose"
+  },
+  {
+    "start": "0x003B9E74",
+    "name": "XInputGetCapabilities"
+  },
+  {
+    "start": "0x003BA04C",
+    "name": "XInputGetState"
+  },
+  {
+    "start": "0x003BA0BF",
+    "name": "XInputSetState"
+  },
+  {
+    "start": "0x003BA0F2",
+    "name": "GetTypeInformation_8"
+  },
+  {
+    "start": "0x003BA129",
+    "name": "GetTypeInformation_4"
+  },
+  {
+    "start": "0x003BA402",
+    "name": "XGetDeviceEnumerationStatus"
+  },
+  {
+    "start": "0x003BD0FF",
+    "name": "XID_fCloseDevice"
+  },
+  {
+    "start": "0x003C1007",
+    "name": "XVoiceCreateMediaObject"
+  },
+  {
+    "start": "0x003C123E",
+    "name": "XVoiceCreateMediaObjectEx"
+  }
+]

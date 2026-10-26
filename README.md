@@ -168,6 +168,21 @@ The lift reads the committed function list in `tools/doa2u/functions`;
 `--disassemble` rebuilds that list from the executable (about 25 minutes)
 after a change to `tools/doa2u/seed_functions.json` or the lifter pin.
 
+`tools/doa2u/function_status.json` is the decompilation registry. It records
+the Ghidra name for each tracked function and, once it is more than a name,
+its `status` (`named`, `decompiled`, `bound` or `tested`). A bound or tested
+entry also names the host `source` and `symbol`; the runtime replacement stays
+in `recomp-runtime/program_manual.c` or the adapter's own manual lookup. Raw
+decompiler output, generated C and retail bytes stay under `private/`.
+The initial `decompiled` entries are the named functions that already carry a
+Ghidra comment; the rest stay `named` until their bodies are worked through.
+`python -m unittest discover -s tools -p "test_*.py"` checks every registry
+address against the committed function list and checks bound symbols exist.
+Refresh names and tags with `tools/doa2u/ghidra/ExportFunctionStatus.py` from
+Ghidra's Script Manager against `DOA2.xbe`; add that folder to Ghidra's script
+directories or load it through GhidrAssistMCP. It keeps existing statuses and
+accepts the registry path as its first argument.
+
 `run_game.py` takes the launcher's settings as switches, and
 `--seconds <n>` runs a bounded probe instead of `--play`:
 
