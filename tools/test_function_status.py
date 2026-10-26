@@ -42,7 +42,8 @@ class FunctionStatusTests(unittest.TestCase):
             self.assertTrue(source.is_file(), entry)
             self.assertRegex(
                 source.read_text(encoding="utf-8"),
-                rf"\b{re.escape(entry['symbol'])}\s*\(",
+                rf"(?m)^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*[ \t*]+)+"
+                rf"{re.escape(entry['symbol'])}\s*\([^;]*\)\s*\{{",
                 entry,
             )
 

@@ -48,6 +48,7 @@
     "tools/doa2u/seed_functions.json",
     "tools/doa2u/function_status.json",
     "tools/test_function_status.py",
+    "tools/test_export_function_status.py",
     "tools/doa2u/ghidra/ExportFunctionStatus.py",
     "tools/doa2u/functions/**"
   ],

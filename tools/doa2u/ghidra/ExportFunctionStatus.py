@@ -68,6 +68,24 @@ def load(path):
     return dict((int(entry["start"], 16), entry) for entry in entries)
 
 
+def load_starts(path):
+    folder = os.path.join(os.path.dirname(path), "functions")
+    if not os.path.isdir(folder):
+        raise RuntimeError("cannot find %s" % folder)
+    starts = set()
+    for name in os.listdir(folder):
+        if not name.endswith(".json"):
+            continue
+        stream = open(os.path.join(folder, name), "rb")
+        try:
+            entries = json.loads(stream.read().decode("utf-8"))
+        finally:
+            stream.close()
+        for entry in entries:
+            starts.add(int(entry["start"], 16))
+    return starts
+
+
 def write(path, entries):
     ordered = []
     for address in sorted(entries):
@@ -100,16 +118,23 @@ def run():
         raise RuntimeError("pass tools/doa2u/function_status.json as argument 0")
 
     entries = load(path)
-    found = set()
+    starts = load_starts(path)
+    defined = set()
+    exported = set()
+    outside = set()
     for function in current_program().getFunctionManager().getFunctions(True):
+        address = int(function.getEntryPoint().getOffset())
+        defined.add(address)
         name = function.getName()
         if name.startswith(("FUN_", "thunk_FUN_", "LAB_", "SUB_")):
             continue
         if not NAME.match(name):
             continue
+        if address not in starts:
+            outside.add(address)
+            continue
 
-        address = int(function.getEntryPoint().getOffset())
-        found.add(address)
+        exported.add(address)
         old = entries.get(address, {})
         entry = {"name": name}
         tags = sorted(tag.getName() for tag in function.getTags())
@@ -124,6 +149,13 @@ def run():
                 entry[key] = old[key]
         entries[address] = entry
 
+    # A default name clears a stale custom name, but a manual binding keeps
+    # its descriptive name because its source/symbol is still live.
+    for address in defined - exported:
+        entry = entries.get(address)
+        if entry is not None and not entry.get("source"):
+            entries.pop(address)
+
     ordered = write(path, entries)
     counts = {}
     for entry in ordered:
@@ -131,9 +163,11 @@ def run():
         counts[status] = counts.get(status, 0) + 1
     print("wrote %d functions to %s" % (len(ordered), path))
     print("status: " + ", ".join("%s=%d" % item for item in sorted(counts.items())))
-    stale = len(set(entries) - found)
+    stale = len(set(entries) - defined)
     if stale:
         print("kept %d entries not defined in Ghidra" % stale)
+    if outside:
+        print("skipped %d names outside tools/doa2u/functions" % len(outside))
 
 
 run()

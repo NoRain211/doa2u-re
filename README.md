@@ -181,7 +181,9 @@ address against the committed function list and checks bound symbols exist.
 Refresh names and tags with `tools/doa2u/ghidra/ExportFunctionStatus.py` from
 Ghidra's Script Manager against `DOA2.xbe`; add that folder to Ghidra's script
 directories or load it through GhidrAssistMCP. It keeps existing statuses and
-accepts the registry path as its first argument.
+accepts the registry path as its first argument. Names outside
+`tools/doa2u/functions` are skipped and reported; add those addresses to
+`seed_functions.json` and regenerate the list first.
 
 `run_game.py` takes the launcher's settings as switches, and
 `--seconds <n>` runs a bounded probe instead of `--play`:
