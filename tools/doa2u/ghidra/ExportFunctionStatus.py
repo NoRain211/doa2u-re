@@ -20,6 +20,12 @@ AREA_LABELS = {
     "UNTAGGED": "Untagged",
 }
 AREA_ORDER = ("GAME", "CRI_MIDDLEWARE", "SDK_XAPI_CRT")
+FILLED = u"\U0001f7e9"
+EMPTY = u"\u2b1c"
+BAR_WIDTH = 10
+BAR_COLUMNS = 5
+SEPARATOR = u" \u00b7 "
+DASH = u" \u2014 "
 
 
 def ghidra_global(name):
@@ -114,7 +120,7 @@ def write(path, entries):
 
 
 def thousands(value):
-    return "{:,}".format(value)
+    return u"{:,}".format(value)
 
 
 def percentage(value, total):
@@ -123,7 +129,31 @@ def percentage(value, total):
     return (value * 100 + total // 2) // total
 
 
-def status_table(entries):
+def summary(row):
+    total = sum(row.values())
+    if not total:
+        return u"0 tracked"
+    parts = [
+        u"%s tracked" % thousands(total),
+        u"%s named" % thousands(row.get("named", 0)),
+    ]
+    for status in ("decompiled", "bound", "tested"):
+        if row.get(status):
+            parts.append(u"%s %s" % (thousands(row[status]), status))
+    ported = row.get("decompiled", 0) + row.get("bound", 0) + row.get("tested", 0)
+    parts.append(u"%d%%" % percentage(ported, total))
+    return SEPARATOR.join(parts)
+
+
+def progress_rows(percent):
+    filled = (percent + 5) // 10
+    if filled > BAR_WIDTH:
+        filled = BAR_WIDTH
+    squares = FILLED * filled + EMPTY * (BAR_WIDTH - filled)
+    return squares[:BAR_COLUMNS], squares[BAR_COLUMNS:]
+
+
+def status_grid(entries):
     counts = {}
     for entry in entries:
         tag = entry.get("tag", "UNTAGGED")
@@ -140,43 +170,30 @@ def status_table(entries):
     tags.append("UNTAGGED")
 
     lines = [
-        "| Area | Named | Decompiled | Bound / tested | Total | Progress |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        u"Each square is 10%% of that area's tracked functions. "
+        u"%s decompiled or ported%s%s named." % (FILLED, SEPARATOR, EMPTY),
+        u"",
     ]
-    total_named = total_decompiled = total_ported = total_all = 0
+    total = {"named": 0, "decompiled": 0, "bound": 0, "tested": 0}
     for tag in tags:
         row = counts.get(tag, {})
-        named = row.get("named", 0)
-        decompiled = row.get("decompiled", 0)
-        ported = row.get("bound", 0) + row.get("tested", 0)
-        total = named + decompiled + ported
-        total_named += named
-        total_decompiled += decompiled
-        total_ported += ported
-        total_all += total
+        for status in total:
+            total[status] += row.get(status, 0)
         label = AREA_LABELS.get(tag, tag.replace("_", " ").title())
-        lines.append(
-            "| %s | %d | %d | %d | %s | %d%% |"
-            % (
-                label,
-                named,
-                decompiled,
-                ported,
-                thousands(total),
-                percentage(decompiled + ported, total),
-            )
-        )
-    lines.append(
-        "| **Total** | **%d** | **%d** | **%d** | **%s** | **%d%%** |"
-        % (
-            total_named,
-            total_decompiled,
-            total_ported,
-            thousands(total_all),
-            percentage(total_decompiled + total_ported, total_all),
-        )
-    )
-    return "\n".join(lines)
+        ported = row.get("decompiled", 0) + row.get("bound", 0) + row.get("tested", 0)
+        percent = percentage(ported, sum(row.values()))
+        top, bottom = progress_rows(percent)
+        lines.append(u"**%s**%s%s<br>" % (label, DASH, summary(row)))
+        lines.append(top + u"<br>")
+        lines.append(bottom)
+        lines.append(u"")
+    ported = total["decompiled"] + total["bound"] + total["tested"]
+    percent = percentage(ported, sum(total.values()))
+    top, bottom = progress_rows(percent)
+    lines.append(u"**Total**%s%s<br>" % (DASH, summary(total)))
+    lines.append(top + u"<br>")
+    lines.append(bottom)
+    return u"\n".join(lines).rstrip()
 
 
 def write_readme(repo, entries):
@@ -194,7 +211,7 @@ def write_readme(repo, entries):
         return
     start = text.index(GRID_START) + len(GRID_START)
     end = text.index(GRID_END, start)
-    updated = text[:start] + "\n" + status_table(entries) + "\n" + text[end:]
+    updated = text[:start] + "\n" + status_grid(entries) + "\n" + text[end:]
     if updated == text:
         return
     stream = open(path, "wb")

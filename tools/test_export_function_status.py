@@ -205,8 +205,17 @@ class ExportFunctionStatusTests(unittest.TestCase):
                 ],
             )
             readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("| Game | 1 | 0 | 1 | 2 | 50% |", readme)
-        self.assertIn("| **Total** | **1** | **0** | **1** | **2** | **50%** |", readme)
+        self.assertIn("Each square is 10% of that area's tracked functions.", readme)
+        self.assertIn(
+            "**Game** \u2014 2 tracked \u00b7 1 named \u00b7 1 tested \u00b7 50%<br>",
+            readme,
+        )
+        self.assertIn("\U0001f7e9" * 5 + "<br>", readme)
+        self.assertIn("\u2b1c" * 5, readme)
+        self.assertIn(
+            "**Total** \u2014 2 tracked \u00b7 1 named \u00b7 1 tested \u00b7 50%<br>",
+            readme,
+        )
         self.assertIn("Before\n", readme)
         self.assertIn("\nAfter\n", readme)
 

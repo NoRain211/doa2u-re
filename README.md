@@ -176,17 +176,31 @@ in `recomp-runtime/program_manual.c` or the adapter's own manual lookup. Raw
 decompiler output, generated C and retail bytes stay under `private/`.
 
 <!-- function-status-grid:start -->
-| Area | Named | Decompiled | Bound / tested | Total | Progress |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Game | 157 | 46 | 3 | 206 | 24% |
-| CRI middleware | 15 | 0 | 0 | 15 | 0% |
-| SDK / CRT | 138 | 131 | 4 | 273 | 49% |
-| Untagged | 521 | 131 | 1 | 653 | 20% |
-| **Total** | **831** | **308** | **8** | **1,147** | **28%** |
+Each square is 10% of that area's tracked functions. 🟩 decompiled or ported · ⬜ named.
+
+**Game** — 206 tracked · 157 named · 46 decompiled · 3 tested · 24%<br>
+🟩🟩⬜⬜⬜<br>
+⬜⬜⬜⬜⬜
+
+**CRI middleware** — 15 tracked · 15 named · 0%<br>
+⬜⬜⬜⬜⬜<br>
+⬜⬜⬜⬜⬜
+
+**SDK / CRT** — 273 tracked · 138 named · 131 decompiled · 4 tested · 49%<br>
+🟩🟩🟩🟩🟩<br>
+⬜⬜⬜⬜⬜
+
+**Untagged** — 653 tracked · 521 named · 131 decompiled · 1 tested · 20%<br>
+🟩🟩⬜⬜⬜<br>
+⬜⬜⬜⬜⬜
+
+**Total** — 1,147 tracked · 831 named · 308 decompiled · 8 tested · 28%<br>
+🟩🟩🟩⬜⬜<br>
+⬜⬜⬜⬜⬜
 <!-- function-status-grid:end -->
 
 Statuses are exclusive; progress counts decompiled, bound and tested. The
-exporter rewrites this table from `function_status.json` after each refresh.
+exporter rewrites this grid from `function_status.json` after each refresh.
 
 The initial `decompiled` entries are the named functions that already carry a
 Ghidra comment; the rest stay `named` until their bodies are worked through.
