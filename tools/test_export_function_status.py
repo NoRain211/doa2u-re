@@ -69,6 +69,11 @@ def run_export(root, registry, starts, functions, registry_path=None):
     registry_path = registry_path or folder / "function_status.json"
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    (root / "README.md").write_text(
+        "Before\n\n<!-- function-status-grid:start -->\nold\n"
+        "<!-- function-status-grid:end -->\n\nAfter\n",
+        encoding="utf-8",
+    )
     (folder / "functions/00.json").write_text(
         json.dumps([{"start": "0x%08X" % address} for address in starts]),
         encoding="utf-8",
@@ -180,6 +185,30 @@ class ExportFunctionStatusTests(unittest.TestCase):
             )
             self.assertTrue(output.is_file())
         self.assertEqual(entries, [{"start": "0x00001000", "name": "new_name"}])
+
+    def test_refresh_updates_readme_grid(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run_export(
+                root,
+                [{
+                    "start": "0x00001004",
+                    "name": "tested_name",
+                    "status": "tested",
+                    "source": "recomp-runtime/program_manual.c",
+                    "symbol": "tested_name",
+                }],
+                {0x1000, 0x1004},
+                [
+                    FakeFunction(0x1000, "game_named", tag="GAME"),
+                    FakeFunction(0x1004, "game_tested", tag="GAME"),
+                ],
+            )
+            readme = (root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("| Game | 1 | 0 | 1 | 2 | 50% |", readme)
+        self.assertIn("| **Total** | **1** | **0** | **1** | **2** | **50%** |", readme)
+        self.assertIn("Before\n", readme)
+        self.assertIn("\nAfter\n", readme)
 
 
 if __name__ == "__main__":

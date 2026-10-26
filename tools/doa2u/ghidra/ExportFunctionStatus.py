@@ -11,6 +11,15 @@ from collections import OrderedDict
 
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DEFAULT = os.path.join("tools", "doa2u", "function_status.json")
+GRID_START = "<!-- function-status-grid:start -->"
+GRID_END = "<!-- function-status-grid:end -->"
+AREA_LABELS = {
+    "GAME": "Game",
+    "CRI_MIDDLEWARE": "CRI middleware",
+    "SDK_XAPI_CRT": "SDK / CRT",
+    "UNTAGGED": "Untagged",
+}
+AREA_ORDER = ("GAME", "CRI_MIDDLEWARE", "SDK_XAPI_CRT")
 
 
 def ghidra_global(name):
@@ -104,6 +113,98 @@ def write(path, entries):
     return ordered
 
 
+def thousands(value):
+    return "{:,}".format(value)
+
+
+def percentage(value, total):
+    if not total:
+        return 0
+    return (value * 100 + total // 2) // total
+
+
+def status_table(entries):
+    counts = {}
+    for entry in entries:
+        tag = entry.get("tag", "UNTAGGED")
+        status = entry.get("status", "named")
+        if status not in ("named", "decompiled", "bound", "tested"):
+            status = "named"
+        row = counts.setdefault(tag, {})
+        row[status] = row.get(status, 0) + 1
+
+    tags = list(AREA_ORDER)
+    for tag in sorted(counts):
+        if tag not in tags and tag != "UNTAGGED":
+            tags.append(tag)
+    tags.append("UNTAGGED")
+
+    lines = [
+        "| Area | Named | Decompiled | Bound / tested | Total | Progress |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    total_named = total_decompiled = total_ported = total_all = 0
+    for tag in tags:
+        row = counts.get(tag, {})
+        named = row.get("named", 0)
+        decompiled = row.get("decompiled", 0)
+        ported = row.get("bound", 0) + row.get("tested", 0)
+        total = named + decompiled + ported
+        total_named += named
+        total_decompiled += decompiled
+        total_ported += ported
+        total_all += total
+        label = AREA_LABELS.get(tag, tag.replace("_", " ").title())
+        lines.append(
+            "| %s | %d | %d | %d | %s | %d%% |"
+            % (
+                label,
+                named,
+                decompiled,
+                ported,
+                thousands(total),
+                percentage(decompiled + ported, total),
+            )
+        )
+    lines.append(
+        "| **Total** | **%d** | **%d** | **%d** | **%s** | **%d%%** |"
+        % (
+            total_named,
+            total_decompiled,
+            total_ported,
+            thousands(total_all),
+            percentage(total_decompiled + total_ported, total_all),
+        )
+    )
+    return "\n".join(lines)
+
+
+def write_readme(repo, entries):
+    path = os.path.join(repo, "README.md")
+    if not os.path.isfile(path):
+        print("README grid skipped: README.md not found")
+        return
+    stream = open(path, "rb")
+    try:
+        text = stream.read().decode("utf-8")
+    finally:
+        stream.close()
+    if GRID_START not in text or GRID_END not in text:
+        print("README grid skipped: markers not found")
+        return
+    start = text.index(GRID_START) + len(GRID_START)
+    end = text.index(GRID_END, start)
+    updated = text[:start] + "\n" + status_table(entries) + "\n" + text[end:]
+    if updated == text:
+        return
+    stream = open(path, "wb")
+    try:
+        stream.write(updated.encode("utf-8"))
+    finally:
+        stream.close()
+    print("updated README grid")
+
+
 def run():
     executable = executable_path()
     if os.path.basename(executable).lower() != "doa2.xbe":
@@ -158,6 +259,7 @@ def run():
             entries.pop(address)
 
     ordered = write(path, entries)
+    write_readme(repo, ordered)
     counts = {}
     for entry in ordered:
         status = entry.get("status", "named")
