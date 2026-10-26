@@ -175,6 +175,7 @@ entry also names the host `source` and `symbol`; the runtime replacement stays
 in `recomp-runtime/program_manual.c` or the adapter's own manual lookup. Raw
 decompiler output, generated C and retail bytes stay under `private/`.
 
+<!-- function-status-grid:start -->
 | Area | Named | Decompiled | Bound / tested | Total | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Game | 157 | 46 | 3 | 206 | 24% |
@@ -182,10 +183,10 @@ decompiler output, generated C and retail bytes stay under `private/`.
 | SDK / CRT | 138 | 131 | 4 | 273 | 49% |
 | Untagged | 521 | 131 | 1 | 653 | 20% |
 | **Total** | **831** | **308** | **8** | **1,147** | **28%** |
+<!-- function-status-grid:end -->
 
 Statuses are exclusive; progress counts decompiled, bound and tested. The
-table follows `function_status.json`; refresh the registry and these counts
-together.
+exporter rewrites this table from `function_status.json` after each refresh.
 
 The initial `decompiled` entries are the named functions that already carry a
 Ghidra comment; the rest stay `named` until their bodies are worked through.
