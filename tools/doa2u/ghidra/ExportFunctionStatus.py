@@ -42,15 +42,14 @@ def executable_path():
     return path
 
 
-def find_registry(start):
+def find_repo(start):
     if not start:
         return None
     current = os.path.abspath(start)
     while True:
-        candidate = os.path.join(current, DEFAULT)
         shards = os.path.join(current, "tools", "doa2u", "functions")
-        if os.path.isfile(candidate) or os.path.isdir(shards):
-            return candidate
+        if os.path.isdir(shards):
+            return current
         parent = os.path.dirname(current)
         if parent == current:
             return None
@@ -68,8 +67,8 @@ def load(path):
     return dict((int(entry["start"], 16), entry) for entry in entries)
 
 
-def load_starts(path):
-    folder = os.path.join(os.path.dirname(path), "functions")
+def load_starts(repo):
+    folder = os.path.join(repo, "tools", "doa2u", "functions")
     if not os.path.isdir(folder):
         raise RuntimeError("cannot find %s" % folder)
     starts = set()
@@ -110,15 +109,17 @@ def run():
     if os.path.basename(executable).lower() != "doa2.xbe":
         raise RuntimeError("open the DOA2.xbe game program, not %s" % executable)
 
+    repo = find_repo(os.path.dirname(executable))
+    if not repo:
+        repo = find_repo(os.path.dirname(os.path.abspath(__file__)))
+    if not repo:
+        raise RuntimeError("cannot find tools/doa2u/functions")
+
     args = script_args()
-    path = args[0] if args else find_registry(os.path.dirname(executable))
-    if not path:
-        path = find_registry(os.path.dirname(os.path.abspath(__file__)))
-    if not path:
-        raise RuntimeError("pass tools/doa2u/function_status.json as argument 0")
+    path = args[0] if args else os.path.join(repo, DEFAULT)
 
     entries = load(path)
-    starts = load_starts(path)
+    starts = load_starts(repo)
     defined = set()
     exported = set()
     outside = set()

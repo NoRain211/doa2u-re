@@ -63,10 +63,11 @@ class FakeProgram:
         return list(self.functions)
 
 
-def run_export(root, registry, starts, functions):
+def run_export(root, registry, starts, functions, registry_path=None):
     folder = root / "tools/doa2u"
     (folder / "functions").mkdir(parents=True)
-    registry_path = folder / "function_status.json"
+    registry_path = registry_path or folder / "function_status.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
     (folder / "functions/00.json").write_text(
         json.dumps([{"start": "0x%08X" % address} for address in starts]),
@@ -137,18 +138,22 @@ class ExportFunctionStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             entries, _ = run_export(
                 Path(folder),
-                [{
-                    "start": "0x00001000",
-                    "name": "bound_name",
-                    "status": "bound",
-                    "source": "recomp-runtime/program_manual.c",
-                    "symbol": "bound_name",
-                }],
-                {0x1000, 0x1004, 0x1008},
+                [
+                    {
+                        "start": "0x00001000",
+                        "name": "bound_name",
+                        "status": "bound",
+                        "source": "recomp-runtime/program_manual.c",
+                        "symbol": "bound_name",
+                    },
+                    {"start": "0x0000100C", "name": "old_name"},
+                ],
+                {0x1000, 0x1004, 0x1008, 0x100C},
                 [
                     FakeFunction(0x1000, "bound_name", tag="GAME", comment="known"),
                     FakeFunction(0x1004, "new_name", tag="CRI_MIDDLEWARE", comment="new"),
                     FakeFunction(0x1008, "plain_name"),
+                    FakeFunction(0x100C, "renamed"),
                 ],
             )
         by_start = {entry["start"]: entry for entry in entries}
@@ -156,9 +161,25 @@ class ExportFunctionStatusTests(unittest.TestCase):
         self.assertEqual(by_start["0x00001000"]["source"], "recomp-runtime/program_manual.c")
         self.assertEqual(by_start["0x00001000"]["symbol"], "bound_name")
         self.assertEqual(by_start["0x00001000"]["tag"], "GAME")
+        self.assertEqual(by_start["0x00001004"]["name"], "new_name")
         self.assertEqual(by_start["0x00001004"]["status"], "decompiled")
         self.assertEqual(by_start["0x00001004"]["tag"], "CRI_MIDDLEWARE")
         self.assertNotIn("status", by_start["0x00001008"])
+        self.assertEqual(by_start["0x0000100C"]["name"], "renamed")
+
+    def test_registry_copy_uses_repository_shards(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            output = root / "output/function_status.json"
+            entries, _ = run_export(
+                root,
+                [{"start": "0x00001000", "name": "old_name"}],
+                {0x1000},
+                [FakeFunction(0x1000, "new_name")],
+                registry_path=output,
+            )
+            self.assertTrue(output.is_file())
+        self.assertEqual(entries, [{"start": "0x00001000", "name": "new_name"}])
 
 
 if __name__ == "__main__":
