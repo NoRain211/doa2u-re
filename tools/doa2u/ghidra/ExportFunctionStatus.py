@@ -13,15 +13,29 @@ NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DEFAULT = os.path.join("tools", "doa2u", "function_status.json")
 
 
+def ghidra_global(name):
+    scope = globals()
+    value = getattr(scope, name, None)
+    if value is not None:
+        return value
+    getter = getattr(scope, "get", None)
+    return getter(name) if getter else None
+
+
 def script_args():
-    try:
-        return getScriptArgs() or []
-    except NameError:
-        return []
+    get_args = ghidra_global("getScriptArgs")
+    return get_args() if get_args else []
+
+
+def current_program():
+    program = ghidra_global("currentProgram")
+    if program is None:
+        raise RuntimeError("run this script inside Ghidra")
+    return program
 
 
 def executable_path():
-    path = currentProgram.getExecutablePath()
+    path = current_program().getExecutablePath()
     # Ghidra reports Windows paths as /C:/...; strip the leading slash.
     if path.startswith("/") and len(path) > 2 and path[2] == ":":
         path = path[1:]
@@ -87,7 +101,7 @@ def run():
 
     entries = load(path)
     found = set()
-    for function in currentProgram.getFunctionManager().getFunctions(True):
+    for function in current_program().getFunctionManager().getFunctions(True):
         name = function.getName()
         if name.startswith(("FUN_", "thunk_FUN_", "LAB_", "SUB_")):
             continue
