@@ -174,6 +174,19 @@ its `status` (`named`, `decompiled`, `bound` or `tested`). A bound or tested
 entry also names the host `source` and `symbol`; the runtime replacement stays
 in `recomp-runtime/program_manual.c` or the adapter's own manual lookup. Raw
 decompiler output, generated C and retail bytes stay under `private/`.
+
+| Area | Named | Decompiled | Bound / tested | Total | Progress |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Game | 157 | 46 | 3 | 206 | 24% |
+| CRI middleware | 15 | 0 | 0 | 15 | 0% |
+| SDK / CRT | 138 | 131 | 4 | 273 | 49% |
+| Untagged | 521 | 131 | 1 | 653 | 20% |
+| **Total** | **831** | **308** | **8** | **1,147** | **28%** |
+
+Statuses are exclusive; progress counts decompiled, bound and tested. The
+table follows `function_status.json`; refresh the registry and these counts
+together.
+
 The initial `decompiled` entries are the named functions that already carry a
 Ghidra comment; the rest stay `named` until their bodies are worked through.
 `python -m unittest discover -s tools -p "test_*.py"` checks every registry
