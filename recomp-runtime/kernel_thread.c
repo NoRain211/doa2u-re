@@ -6,6 +6,7 @@
 #include "fiber_adapter.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -70,6 +71,8 @@ static GuestThread threads[MAX_THREADS] = {
 };
 static unsigned current_thread;
 static bool scheduler_started;
+/* Next guest-time scheduler slice offered to a clock read. */
+static uint64_t poll_slice;
 
 /* RECOMP_PERF_COUNTER frame breakdown: host QPC ticks each guest thread ran,
    and ticks the scheduler slept with nothing runnable, since the last report. */
@@ -171,6 +174,11 @@ static uint64_t interrupt_time(void)
 
 static uint64_t system_time(void)
 {
+    /* Frame-locked guest time: the host wall clock differs on every replay,
+       so UTC rides the same counter as interrupt time. */
+    if (recomp_xapi_frame_clock_enabled()) {
+        return 116444736000000000ull + recomp_xapi_performance_counter() / 100u;
+    }
     struct timespec now;
     if (timespec_get(&now, TIME_UTC) != TIME_UTC) {
         recomp_stop(2, "thread:system-time");
@@ -408,7 +416,9 @@ static void schedule(void)
         }
         /* Advance idle guest time in unpaced mode. Indefinite waits still sleep. */
         if (earliest < UINT64_MAX / 100u &&
-            recomp_xapi_skip_wait(earliest * 100u)) continue;
+            recomp_xapi_skip_wait(earliest * 100u)) {
+            continue;
+        }
         /* With no runnable thread, sleep until the first deadline. */
         uint64_t now = interrupt_time();
         charge_slice(false);
@@ -460,11 +470,12 @@ static void schedule(void)
 
 void recomp_kernel_poll(void)
 {
-    static uint64_t next_slice;
     if (!scheduler_started) return;
+    /* Guest time, never host time: a replayed frame has to preempt at the same
+       points, and the frame clock only moves when the guest reads it. */
     const uint64_t now = recomp_xapi_performance_counter();
-    if (now < next_slice) return;
-    next_slice = now + UINT64_C(1000000);
+    if (now < poll_slice) return;
+    poll_slice = now + UINT64_C(1000000);
     unsigned selected = current_thread;
     for (unsigned step = 1u; step < MAX_THREADS; ++step) {
         unsigned index = (current_thread + step) % MAX_THREADS;
@@ -944,6 +955,125 @@ static void bridge_ob_reference_object_by_handle(void)
 static void bridge_obf_dereference_object(void)
 {
     kernel_return_caller_cleanup(0u);
+}
+
+typedef struct KernelThreadState {
+    GuestThread threads[MAX_THREADS];
+    unsigned current_thread;
+    bool scheduler_started;
+    uint64_t poll_slice;
+    SyntheticEvent events[MAX_EVENTS];
+    uint32_t next_event_handle;
+    uint32_t armed_timers[MAX_EVENTS];
+} KernelThreadState;
+
+/* Between switches each guest thread parks on its own native stack. That
+   continuation is host state the guest cannot rebuild, so a rewind puts it
+   back beside the guest registers. The running thread's stack is live. */
+typedef struct KernelThreadFiber {
+    void *fiber;
+    RecompNativeFiberState native;
+} KernelThreadFiber;
+
+typedef struct KernelThreadFiberState {
+    KernelThreadFiber threads[MAX_THREADS];
+} KernelThreadFiberState;
+
+size_t recomp_kernel_thread_fiber_state_size(void)
+{
+    return sizeof(KernelThreadFiberState);
+}
+
+void recomp_kernel_thread_fiber_state_save(void *state)
+{
+    KernelThreadFiberState *out = state;
+    memset(out, 0, sizeof *out);
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        if (threads[i].native_fiber == NULL || i == current_thread) continue;
+        /* A converted thread keeps the runner's own stack; its guest state
+           already covers the continuation. */
+        if (!recomp_native_fiber_owns_stack(threads[i].native_fiber)) continue;
+        out->threads[i].fiber = threads[i].native_fiber;
+        recomp_native_fiber_state_save(threads[i].native_fiber, &out->threads[i].native);
+    }
+}
+
+bool recomp_kernel_thread_fiber_state_restorable(const void *state)
+{
+    const KernelThreadFiberState *in = state;
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        if (in->threads[i].fiber == NULL) continue;
+        /* A reused thread slot owns a different fiber now. */
+        if (threads[i].native_fiber != in->threads[i].fiber) {
+            fprintf(stderr, "recomp thread: fiber %u slot reused\n", i);
+            return false;
+        }
+        if ((in->threads[i].native.flags & RECOMP_NATIVE_STATE_UNAVAILABLE) != 0u) {
+            fprintf(stderr, "recomp thread: fiber %u stack %u too deep\n", i,
+                in->threads[i].native.stack_bytes);
+            return false;
+        }
+    }
+    return true;
+}
+
+void recomp_kernel_thread_fiber_state_restore(const void *state)
+{
+    const KernelThreadFiberState *in = state;
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        if (in->threads[i].fiber == NULL) continue;
+        if (!recomp_native_fiber_state_restore(in->threads[i].fiber, &in->threads[i].native))
+            recomp_stop(2, "thread:restore-fiber:%u", i);
+    }
+}
+
+size_t recomp_kernel_thread_state_size(void)
+{
+    return sizeof(KernelThreadState);
+}
+
+void recomp_kernel_thread_state_save(void *state)
+{
+    KernelThreadState *out = state;
+    memcpy(out->threads, threads, sizeof out->threads);
+    out->current_thread = current_thread;
+    out->scheduler_started = scheduler_started;
+    out->poll_slice = poll_slice;
+    memcpy(out->events, events, sizeof out->events);
+    out->next_event_handle = next_event_handle;
+    memcpy(out->armed_timers, armed_timers, sizeof out->armed_timers);
+}
+
+void recomp_kernel_thread_state_restore(const void *state)
+{
+    const KernelThreadState *in = state;
+    memcpy(threads, in->threads, sizeof threads);
+    current_thread = in->current_thread;
+    scheduler_started = in->scheduler_started;
+    poll_slice = in->poll_slice;
+    memcpy(events, in->events, sizeof events);
+    next_event_handle = in->next_event_handle;
+    memcpy(armed_timers, in->armed_timers, sizeof armed_timers);
+}
+
+size_t recomp_kernel_thread_stack_ranges(RecompGuestStackRange *ranges, size_t capacity)
+{
+    size_t count = 0u;
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        const GuestThread *thread = &threads[i];
+        /* An exited thread keeps its stack allocation until the slot is
+           reused; those bytes are still scratch. */
+        if (thread->handle == 0u) continue;
+        const uint32_t base = thread->fs[2];
+        const uint32_t tls_slot = *recomp_memory_u32(thread->object + 0x28u);
+        if (base == 0u || tls_slot <= base) continue;
+        if (count < capacity) {
+            ranges[count].base = base;
+            ranges[count].size = tls_slot - base;
+        }
+        ++count;
+    }
+    return count;
 }
 
 RecompFunction recomp_kernel_thread(uint32_t ordinal)

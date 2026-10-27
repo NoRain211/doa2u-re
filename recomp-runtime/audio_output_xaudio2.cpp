@@ -523,7 +523,10 @@ extern "C" void recomp_audio_output_submit(
     XAUDIO2_VOICE_STATE state{};
     voice.source->GetState(&state, 0);
     const bool starved = state.BuffersQueued == 0;
-    if (starved && voice.queued > 0) ++underruns;
+    if (starved && voice.queued > 0 &&
+        (++underruns <= 4 || (underruns & (underruns - 1)) == 0)) {
+        std::fprintf(stderr, "[audio-output] underrun=%llu slot=%u\n", underruns, slot);
+    }
     /* BuffersQueued includes the active buffer; only retire the FIFO prefix. */
     while (voice.queued > state.BuffersQueued) {
         voice.front = (voice.front + 1) % kQueueSize;

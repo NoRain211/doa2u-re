@@ -95,6 +95,12 @@ RecompFunction recomp_input_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_save_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 static int test_fmod(void)
 {
     RecompFunction function = recomp_lookup_manual(0x00336dfeu);
@@ -191,7 +197,8 @@ static int test_boot_opening_skip(void)
     return 1;
 }
 
-/* Only the game's own relaunch asks the launcher for a fresh runner. */
+/* The game's own relaunch and its dashboard requests ask the launcher for a
+   fresh runner; XapiBootToDash still stops. */
 static int test_launch_new_image(void)
 {
     RecompFunction function = recomp_lookup_manual(0x002bab9du);
@@ -205,6 +212,7 @@ static int test_launch_new_image(void)
         memset(guest_path, 0, sizeof guest_path);
         if (cases[i].path != NULL) strcpy(guest_path, cases[i].path);
         recomp_runtime.registers.esp = 0x1000u;
+        *recomp_memory_u32(0x1000u) = 0x002bc220u;
         *recomp_memory_u32(0x1004u) = cases[i].path != NULL ? 0x3000u : 0u;
         if (setjmp(stopped) == 0) {
             function();
@@ -215,7 +223,12 @@ static int test_launch_new_image(void)
             return 0;
         }
     }
-    return 1;
+    *recomp_memory_u32(0x1000u) = 0x002acab3u;
+    if (setjmp(stopped) == 0) {
+        function();
+        return 0;
+    }
+    return stop_code == 4 && strcmp(stop_id, "xapi:dashboard-relaunch-title caller=0x002acab3") == 0;
 }
 
 int main(void)

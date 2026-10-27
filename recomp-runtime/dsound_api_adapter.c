@@ -15,6 +15,27 @@ enum { DS_SINGLETON = 0x00380cc8u, DS_ROOT_SIZE = 0x2cu, DS_SETTINGS_SIZE = 0xb4
 static RecompDsoundDeviceModel device;
 static uint32_t root, settings;
 
+typedef struct DsoundApiState {
+    RecompDsoundDeviceModel device;
+    uint32_t root, settings;
+} DsoundApiState;
+
+size_t recomp_dsound_api_state_size(void) { return sizeof(DsoundApiState); }
+void recomp_dsound_api_state_save(void *state)
+{
+    DsoundApiState *out = state;
+    out->device = device;
+    out->root = root;
+    out->settings = settings;
+}
+void recomp_dsound_api_state_restore(const void *state)
+{
+    const DsoundApiState *in = state;
+    device = in->device;
+    root = in->root;
+    settings = in->settings;
+}
+
 uint32_t recomp_dsound_current_device(void) { return device.handle; }
 
 void recomp_dsound_require_device(uint32_t handle)

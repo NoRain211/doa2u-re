@@ -17,6 +17,29 @@
     "status": "decompiled"
   },
   {
+    "start": "0x000219C0",
+    "name": "save_game_write",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/save_adapter.c",
+    "symbol": "save_game_write"
+  },
+  {
+    "start": "0x00021C10",
+    "name": "replay_save_write",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00021C50",
+    "name": "save_game_read",
+    "tag": "GAME"
+  },
+  {
+    "start": "0x00021EB0",
+    "name": "profile_save_replace",
+    "tag": "GAME"
+  },
+  {
     "start": "0x000238D0",
     "name": "vector_constructor_iterator",
     "tag": "GAME",

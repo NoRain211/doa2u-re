@@ -44,6 +44,12 @@ Clock::time_point guest_now()
     return Clock::time_point(std::chrono::nanoseconds(recomp_xapi_performance_counter()));
 }
 
+// The first refresh on the last_vblank grid at or after now.
+Clock::time_point nextRefresh(Clock::time_point now)
+{
+    return last_vblank + interval * ((now - last_vblank + interval - Clock::duration(1)) / interval);
+}
+
 // Sleeps until deadline on the clock that now() reads. Guest time runs ahead
 // of steady_clock after a skip, so every wait is measured against now().
 template <typename Now>
@@ -100,15 +106,29 @@ void recomp_d3d_vblank_reset(void)
     presented_vblank = last_vblank;
 }
 
+void recomp_d3d_vblank_state_save(uint64_t *state)
+{
+    state[0] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        last_vblank.time_since_epoch()).count());
+    state[1] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        presented_vblank.time_since_epoch()).count());
+}
+
+void recomp_d3d_vblank_state_restore(const uint64_t *state)
+{
+    last_vblank = Clock::time_point(std::chrono::nanoseconds(state[0]));
+    presented_vblank = Clock::time_point(std::chrono::nanoseconds(state[1]));
+}
+
 void recomp_d3d_wait_vblank(void)
 {
     const auto wait_start = Clock::now();
     // Every waiter in this refresh interval observes the same vblank.
     // Keep the deadline local across guest switches and nested waits.
     const auto now = guest_now();
-    if (last_vblank <= now) {
-        last_vblank += interval * ((now - last_vblank) / interval + 1);
-    }
+    // A refresh exactly at now counts as reached. The frame clock reads every
+    // frame's end, which sits on the grid, so rounding past it doubled each frame.
+    if (last_vblank < now) last_vblank = nextRefresh(now);
     const auto deadline = last_vblank;
     const auto deadline_ns = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -134,7 +154,7 @@ void recomp_d3d_wait_present(void)
         ++present_waits;
     }
     const auto now = guest_now();
-    if (last_vblank <= now) last_vblank += interval * ((now - last_vblank) / interval + 1);
+    if (last_vblank < now) last_vblank = nextRefresh(now);
     const auto flip = last_vblank;
     static const bool enabled = std::getenv("RECOMP_PERF_COUNTER") != nullptr;
     char breakdown[512] = "";

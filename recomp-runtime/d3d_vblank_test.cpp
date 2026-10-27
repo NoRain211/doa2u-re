@@ -20,6 +20,24 @@ int main()
 {
     using Clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
+    // Under the frame clock, Swap is the vblank: a wait each frame must not
+    // round up to the refresh after the frame's end and run time double.
+    recomp_xapi_frame_clock_set_enabled(true);
+    recomp_d3d_vblank_reset();
+    const uint64_t frame_start = recomp_xapi_performance_counter();
+    for (unsigned i = 0; i < 10; ++i) {
+        recomp_d3d_wait_vblank();
+        recomp_d3d_wait_present();
+        recomp_xapi_frame_clock_advance();
+    }
+    const uint64_t frame_span = recomp_xapi_performance_counter() - frame_start;
+    if (frame_span < 166666660u || frame_span > 166700000u) {
+        std::fprintf(stderr, "vblank: 10 frame-clock frames took %llu ns\n",
+            static_cast<unsigned long long>(frame_span));
+        return 1;
+    }
+    recomp_xapi_frame_clock_set_enabled(false);
+    waits = 0;
     recomp_d3d_vblank_reset();
     const char *unpaced = std::getenv("RECOMP_UNPACED");
     if (unpaced != nullptr && std::strcmp(unpaced, "1") == 0) {

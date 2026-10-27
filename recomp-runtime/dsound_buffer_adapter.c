@@ -37,6 +37,17 @@ typedef struct Buffer {
 static Buffer buffers[BUFFER_COUNT];
 static void update_3d(Buffer *buffer);
 
+size_t recomp_dsound_buffer_state_size(void) { return sizeof buffers; }
+void recomp_dsound_buffer_state_save(void *state) { memcpy(state, buffers, sizeof buffers); }
+void recomp_dsound_buffer_state_restore(const void *state) { memcpy(buffers, state, sizeof buffers); }
+
+static bool output_suppressed;
+
+void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
+{
+    output_suppressed = suppressed;
+}
+
 static uint32_t canonical(uint32_t address)
 {
     uint32_t window = address & ~(RECOMP_XBOX_RAM_SIZE - 1u);
@@ -218,7 +229,9 @@ static void write_mix(Buffer *buffer)
 
 static void reset_output(Buffer *buffer)
 {
-    recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
+    /* Host voices belong to the frames the game keeps; a speculative run-ahead
+       frame resetting one would discard audio those frames queued. */
+    if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
 }
@@ -258,7 +271,7 @@ static void pump(Buffer *buffer, uint64_t now)
     if (!recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
     apply_routing(buffer);
     const uint32_t slot = (uint32_t)(buffer - buffers);
-    if (!buffer->is3d) {
+    if (!buffer->is3d && !output_suppressed) {
         recomp_audio_output_submit(slot, pcm, bytes, buffer->model.sample_rate, buffer->channels,
             buffer->format == 0x69u ? 16u : buffer->bits, buffer->volume);
     }
@@ -270,7 +283,7 @@ static void pump(Buffer *buffer, uint64_t now)
         uint32_t piece = frames - done < limit ? frames - done : limit;
         uint32_t rendered = recomp_hrtf_render(&buffer->hrtf, samples + done, piece,
             buffer->model.sample_rate, ears, 20000u);
-        if (rendered) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
+        if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
             RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
         done += piece;
     }
@@ -341,7 +354,7 @@ void recomp_dsound_buffers_pump(void)
 
 static void dispose(Buffer *buffer)
 {
-    recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
+    if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     if (buffer->owned) recomp_kernel_free_pool(buffer->owned);
     if (buffer->settings) recomp_kernel_free_pool(buffer->settings);
     if (buffer->root) recomp_kernel_free_pool(buffer->root);

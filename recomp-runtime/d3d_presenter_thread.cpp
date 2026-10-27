@@ -41,6 +41,7 @@ struct PresenterThread {
     // Guest visibility indices: ENDs submitted but unresolved, and the latest count.
     struct Visibility { unsigned pending = 0; uint32_t pixels = 0; };
     std::unordered_map<uint32_t, Visibility> visibility;
+    unsigned visibility_outstanding = 0u;
     // RECOMP_PERF_COUNTER pacing on the game side, reported once per second.
     bool pacing = false;
     double last_frame_ms = 0.0;
@@ -174,12 +175,16 @@ bool resolveVisibility(PresenterThread &thread, RecompD3dPresenter *backend)
             return false;
         }
         if (state != D3D_BACKEND_VISIBILITY_READY) return state == D3D_BACKEND_VISIBILITY_PENDING;
-        std::lock_guard<std::mutex> lock(thread.mutex);
-        const auto found = thread.visibility.find(index);
-        if (found != thread.visibility.end() && found->second.pending != 0u) {
-            found->second.pixels = pixels;
-            --found->second.pending;
+        {
+            std::lock_guard<std::mutex> lock(thread.mutex);
+            const auto found = thread.visibility.find(index);
+            if (found != thread.visibility.end() && found->second.pending != 0u) {
+                found->second.pixels = pixels;
+                --found->second.pending;
+                if (thread.visibility_outstanding != 0u) --thread.visibility_outstanding;
+            }
         }
+        thread.changed.notify_all();
     }
 }
 
@@ -345,6 +350,7 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
         try {
             std::lock_guard<std::mutex> lock(thread.mutex);
             ++thread.visibility[command->data.visibility_index].pending;
+            ++thread.visibility_outstanding;
         } catch (const std::bad_alloc &) {
             return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
         }
@@ -352,6 +358,7 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
         if (error != RECOMP_D3D_PRESENTER_OK) {
             std::lock_guard<std::mutex> lock(thread.mutex);
             --thread.visibility[command->data.visibility_index].pending;
+            --thread.visibility_outstanding;
         }
         return error;
     }
@@ -399,7 +406,8 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     }
     if (!wait) return RECOMP_D3D_PRESENTER_OK;
     std::unique_lock<std::mutex> lock(thread.mutex);
-    thread.changed.wait(lock, [&] { return thread.pending == 0u ||
+    thread.changed.wait(lock, [&] { return (thread.pending == 0u &&
+        thread.visibility_outstanding == 0u) ||
         thread.status != RECOMP_D3D_PRESENTER_OK; });
     return thread.status;
 }

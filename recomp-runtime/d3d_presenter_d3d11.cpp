@@ -259,6 +259,8 @@ struct RecompD3dPresenter {
     ID3D11Device *device = nullptr;
     ID3D11DeviceContext *context = nullptr;
     IDXGISwapChain *swap_chain = nullptr;
+    // Signaled while the flip queue has room for one frame; null for immediate presents.
+    HANDLE frame_latency_wait = nullptr;
     ID3D11RenderTargetView *render_target_view = nullptr;
     ID3D11RenderTargetView *present_target_view = nullptr;
     // VRR only: main-sized output, downscaled into the window-sized swap chain.
@@ -541,6 +543,10 @@ void releaseGraphics(RecompD3dPresenter *presenter)
     releaseCom(presenter->back_buffer_copy);
     releaseCom(presenter->previous_frame_sample);
     releaseCom(presenter->previous_frame);
+    if (presenter->frame_latency_wait != nullptr) {
+        CloseHandle(presenter->frame_latency_wait);
+        presenter->frame_latency_wait = nullptr;
+    }
     releaseCom(presenter->swap_chain);
     releaseCom(presenter->context);
     releaseCom(presenter->device);
@@ -674,6 +680,7 @@ HRESULT createDeviceWithDriver(
         IDXGISwapChain2 *chain = nullptr;
         result = presenter->swap_chain->QueryInterface(IID_PPV_ARGS(&chain));
         if (SUCCEEDED(result)) result = chain->SetMaximumFrameLatency(1u);
+        if (SUCCEEDED(result)) presenter->frame_latency_wait = chain->GetFrameLatencyWaitableObject();
         releaseCom(chain);
     }
     return result;
@@ -3372,6 +3379,12 @@ RecompD3dPresenterError submitPresent(
         // Submit the frame's last commands now, so the GPU finishes them before the flip.
         presenter->context->Flush();
         recomp_d3d_sleep_until(presenter->vrr_slot_ns);
+    }
+    /* A waitable chain never blocks in Present, so frames queued after a hitch
+       stayed queued behind the screen. Hold each frame until the queue has room
+       for it; the timeout covers a hidden window. */
+    if (presenter->frame_latency_wait != nullptr) {
+        WaitForSingleObjectEx(presenter->frame_latency_wait, 1000u, TRUE);
     }
     LARGE_INTEGER qpc_before{}, qpc_after{};
     QueryPerformanceCounter(&qpc_before);

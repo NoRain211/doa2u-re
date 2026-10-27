@@ -906,3 +906,62 @@ void recomp_fpu_context_restore(const RecompFpuContext *context)
     recomp_runtime.fpu_control_word = context->fpu_control_word;
     recomp_runtime.fpu_compare = context->fpu_compare;
 }
+
+typedef struct RuntimeState {
+    RecompRegisters registers;
+    RecompXmm xmm[8];
+    RecompMmx mmx[8];
+    double fpu_stack[8];
+    uint32_t fpu_top;
+    uint16_t fpu_control_word;
+    int fpu_compare;
+    uint16_t fpu_status_cc;
+    int direction_flag;
+    uint32_t arithmetic_flags;
+    uint32_t last_dispatch_address;
+} RuntimeState;
+
+size_t recomp_runtime_state_size(void)
+{
+    return sizeof(RuntimeState);
+}
+
+void recomp_runtime_state_save(void *state)
+{
+    RuntimeState *out = state;
+    out->registers = recomp_runtime.registers;
+    memcpy(out->xmm, recomp_runtime.xmm, sizeof out->xmm);
+    memcpy(out->mmx, recomp_runtime.mmx, sizeof out->mmx);
+    memcpy(out->fpu_stack, recomp_runtime.fpu_stack, sizeof out->fpu_stack);
+    out->fpu_top = recomp_runtime.fpu_top;
+    out->fpu_control_word = recomp_runtime.fpu_control_word;
+    out->fpu_compare = recomp_runtime.fpu_compare;
+    out->fpu_status_cc = recomp_runtime.fpu_status_cc;
+    out->direction_flag = recomp_runtime.direction_flag;
+    out->arithmetic_flags = recomp_runtime.arithmetic_flags;
+    out->last_dispatch_address = recomp_last_dispatch_address;
+}
+
+void recomp_runtime_state_restore(const void *state)
+{
+    const RuntimeState *in = state;
+    recomp_runtime.registers = in->registers;
+    memcpy(recomp_runtime.xmm, in->xmm, sizeof recomp_runtime.xmm);
+    memcpy(recomp_runtime.mmx, in->mmx, sizeof recomp_runtime.mmx);
+    memcpy(recomp_runtime.fpu_stack, in->fpu_stack, sizeof recomp_runtime.fpu_stack);
+    recomp_runtime.fpu_top = in->fpu_top;
+    recomp_runtime.fpu_control_word = in->fpu_control_word;
+    recomp_runtime.fpu_compare = in->fpu_compare;
+    recomp_runtime.fpu_status_cc = in->fpu_status_cc;
+    recomp_runtime.direction_flag = in->direction_flag;
+    recomp_runtime.arithmetic_flags = in->arithmetic_flags;
+    recomp_last_dispatch_address = in->last_dispatch_address;
+}
+
+bool recomp_runtime_state_equal(const void *left, const void *right, size_t size)
+{
+    if (size != sizeof(RuntimeState)) return false;
+    const RuntimeState *a = left, *b = right;
+    return a->registers.eax == b->registers.eax &&
+        a->registers.esp == b->registers.esp;
+}

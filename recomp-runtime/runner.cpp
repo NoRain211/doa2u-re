@@ -2,11 +2,14 @@
 #include "host_diagnostics.h"
 #include "d3d8_adapter.h"
 #include "dsound_api_adapter.h"
+#include "dsound_buffer_adapter.h"
+#include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
@@ -33,15 +36,25 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #ifndef _WIN32
 #include <strings.h>
 #define _stricmp strcasecmp
+#else
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 static RecompInputPulseSource inputPulses;
 static bool scriptedInputOnly;
+static std::uint32_t lastSwapFrame;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
+    if (std::getenv("RECOMP_INPUT_TRACE") != nullptr)
+        std::fprintf(stderr, "recomp input: poll %llu frame=%u thread=0x%08x\n",
+            static_cast<unsigned long long>(inputPulses.sample_count),
+            lastSwapFrame,
+            static_cast<unsigned>(recomp_kernel_current_thread_id()));
     static bool startHeld;
     const bool start = sampled && (gamepad->buttons & RECOMP_INPUT_BUTTON_START) != 0u;
     if (start != startHeld) {
@@ -191,11 +204,180 @@ static void showCard()
 
 static void onSwap(std::uint32_t frame)
 {
+    lastSwapFrame = frame;
     if (unlockAll) unlockProfile(frame);
     if (storyFinale) applyStoryFinale();
     if (!cardPending) return;
     cardPending = false;
     showCard();
+}
+
+static void saveInputPulses(void *state)
+{
+    std::memcpy(state, &inputPulses, sizeof inputPulses);
+}
+
+static void restoreInputPulses(const void *state)
+{
+    std::memcpy(&inputPulses, state, sizeof inputPulses);
+}
+
+static void onFrameBoundary(std::uint32_t frame)
+{
+    /* A snapshot from before the main fiber exists cannot be restored. */
+    if (recomp_fiber_adapter_model()->current_handle == 0u) return;
+    if (std::getenv("RECOMP_INPUT_TRACE") != nullptr)
+        std::fprintf(stderr, "recomp input: frame %u samples %llu pending %u/%u\n", frame,
+            (unsigned long long)inputPulses.sample_count,
+            (unsigned)inputPulses.pending_analog_index, (unsigned)inputPulses.pending_samples);
+    const RecompSyncTestResult result = recomp_synctest_frame(frame);
+    if (result == RECOMP_SYNCTEST_MISMATCH) recomp_stop(2, "synctest:mismatch");
+    if (result == RECOMP_SYNCTEST_SKIP) recomp_stop(3, "synctest:skip");
+    if (result == RECOMP_SYNCTEST_MATCH && !recomp_synctest_loop())
+        recomp_stop(0, "synctest:match");
+}
+
+/* Run-ahead: each frame is simulated hidden, then displayed, then the state
+   is rewound and the frame runs again to keep the real timeline. */
+static RecompSyncTestState *runAheadState;
+static unsigned runAheadFrames, runAheadRemaining;
+static int runAheadPhase;
+static std::uint32_t runAheadSettleUntil;
+static double runAheadSaveMs, runAheadLoadMs, runAheadShownMs, runAheadKeptMs, runAheadPaceMs;
+static std::chrono::steady_clock::time_point runAheadMark;
+/* Cycles (save, display, rewind) since run-ahead last resumed, and the start
+   of the 8-cycle window that measures whether it keeps up. */
+static unsigned runAheadCycles;
+static std::chrono::steady_clock::time_point runAheadWindowStart;
+/* Frames to run plain after falling behind. Each suspension in a row doubles
+   it: resuming into the same heavy scene only repeats 8 slow cycles, which
+   starve audio and are heard as a hitch. */
+static unsigned runAheadBackoff = 60u;
+/* Every hidden frame after the first rewind repeats a frame that already ran. */
+static bool runAheadRewound;
+/* Whether the frame now running is on the kept timeline, and the host time at
+   which the frame clock read zero. */
+static bool runAheadAudible = true, runAheadPaced;
+static std::chrono::steady_clock::time_point runAheadPaceAnchor;
+
+/* The frame clock skips guest waits instead of sleeping, so nothing else holds
+   the kept timeline to real time, and audio, which follows guest time, runs
+   ahead or behind. Sleep each kept frame until host time catches up. */
+static void paceKeptFrame()
+{
+    using namespace std::chrono;
+    RecompFrameClockState clock;
+    recomp_xapi_frame_clock_save(&clock);
+    const auto now = steady_clock::now();
+    const auto target = runAheadPaceAnchor + nanoseconds(clock.base_ns);
+    /* After a stall, start over instead of rushing frames to catch up. */
+    if (!runAheadPaced || now - target > milliseconds(100) || target - now > seconds(1)) {
+        runAheadPaceAnchor = now - nanoseconds(clock.base_ns);
+        runAheadPaced = true;
+        return;
+    }
+    if (target > now) recomp_d3d_sleep_until(duration_cast<nanoseconds>(target.time_since_epoch()).count());
+}
+
+/* Audio follows the timeline the game keeps: plain frames and the rerun after
+   a rewind. Speculative frames read newer input and can start other sounds. */
+static void setRunAheadHidden(bool hidden, bool audible)
+{
+    recomp_d3d8_set_present_suppressed(hidden);
+    recomp_d3d8_set_gpu_work_suppressed(hidden && runAheadRewound);
+    recomp_dsound_buffer_set_output_suppressed(!audible);
+    runAheadAudible = audible;
+}
+
+static void onRunAheadBoundary(std::uint32_t frame)
+{
+    const bool trace = std::getenv("RECOMP_RUNAHEAD_VERBOSE") != nullptr;
+    const auto arrive = std::chrono::steady_clock::now();
+    (runAheadAudible ? runAheadKeptMs : runAheadShownMs) +=
+        std::chrono::duration<double, std::milli>(arrive - runAheadMark).count();
+    if (runAheadAudible) paceKeptFrame();
+    const auto now = std::chrono::steady_clock::now();
+    runAheadPaceMs += std::chrono::duration<double, std::milli>(now - arrive).count();
+    runAheadMark = now;
+    if (frame < runAheadSettleUntil) {
+        return;
+    }
+    switch (runAheadPhase) {
+    case 0: {
+        /* The main fiber does not exist yet during boot. */
+        if (recomp_fiber_adapter_model()->current_handle == 0u) return;
+        /* One cycle shows one frame. Averaging past 20 ms (60 Hz plus margin),
+           the doubled simulation misses vblanks and starves audio, so run plain
+           for a while. The first cycle after a resume spans an extra vblank. */
+        if (++runAheadCycles == 10u) {
+            const double cycleMs = std::chrono::duration<double, std::milli>(
+                now - runAheadWindowStart).count() / 8.0;
+            /* The breakdown says which part ran long: the shown frame includes
+               waiting on the presenter, the kept frame is CPU only. */
+            if (trace || cycleMs > 20.0) {
+                std::fprintf(stderr, "recomp runahead: per cycle %.1f ms: shown %.1f kept %.1f"
+                    " paced %.1f save %.1f load %.1f\n", cycleMs, runAheadShownMs / 8.0,
+                    runAheadKeptMs / 8.0, runAheadPaceMs / 8.0, runAheadSaveMs / 8.0,
+                    runAheadLoadMs / 8.0);
+            }
+            if (cycleMs > 20.0) {
+                std::fprintf(stderr, "recomp runahead: frame %u behind (%.1f ms); suspended"
+                    " for %u frames\n", frame, cycleMs, runAheadBackoff);
+                runAheadSettleUntil = frame + runAheadBackoff;
+                runAheadBackoff = std::min(runAheadBackoff * 2u, 1920u);
+                runAheadCycles = 0u;
+                runAheadRewound = false;
+                setRunAheadHidden(false, true);
+                break;
+            }
+            runAheadBackoff = 60u;
+            runAheadCycles = 2u;
+        }
+        if (runAheadCycles == 2u) {
+            runAheadWindowStart = now;
+            runAheadShownMs = runAheadKeptMs = runAheadPaceMs = runAheadSaveMs = runAheadLoadMs = 0.0;
+        }
+        const auto saveStart = std::chrono::steady_clock::now();
+        recomp_synctest_state_save(runAheadState);
+        runAheadSaveMs += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - saveStart).count();
+        runAheadRemaining = runAheadFrames - 1u;
+        runAheadPhase = runAheadRemaining == 0u ? 2 : 1;
+        setRunAheadHidden(runAheadPhase == 1, false);
+        if (trace) std::fprintf(stderr, "recomp runahead: saved %u, next %s\n", frame,
+            runAheadPhase == 2 ? "display" : "hidden");
+        break;
+    }
+    case 1:
+        if (--runAheadRemaining == 0u) {
+            runAheadPhase = 2;
+            setRunAheadHidden(false, false);
+            if (trace) std::fprintf(stderr, "recomp runahead: next is display\n");
+        }
+        break;
+    default: {
+        if (!recomp_synctest_state_restorable(runAheadState)) {
+            /* shortcut: the kept frame ran speculative, so its audio is lost (one
+               frame at a display mode change); replay it audibly if that is heard. */
+            std::fprintf(stderr, "recomp runahead: frame %u cannot be rewound; suspended\n", frame);
+            runAheadSettleUntil = frame + 60u;
+            runAheadCycles = 0u;
+            runAheadRewound = false;
+            runAheadPhase = 0;
+            setRunAheadHidden(false, true);
+            break;
+        }
+        const auto loadStart = std::chrono::steady_clock::now();
+        recomp_synctest_state_load(runAheadState);
+        runAheadLoadMs += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - loadStart).count();
+        runAheadRewound = true;
+        setRunAheadHidden(true, true);
+        runAheadPhase = 0;
+        if (trace) std::fprintf(stderr, "recomp runahead: rewound after %u\n", frame);
+        break;
+    }
+    }
 }
 
 int main(int argc, char **argv)
@@ -329,9 +511,9 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: XBE SHA-256 differs from the authenticated program target\n";
         return 1;
     }
-    std::vector<std::uint8_t> memory(RECOMP_XBOX_RAM_SIZE, 0u);
+    std::vector<std::uint8_t> loaded(RECOMP_XBOX_RAM_SIZE, 0u);
     std::string error;
-    if (!recomp_load_xbe(parsed, memory, error)) {
+    if (!recomp_load_xbe(parsed, loaded, error)) {
         std::cerr << "recomp runner: " << error << '\n';
         return 1;
     }
@@ -353,9 +535,44 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         return 2;
     }
-    const RecompMemoryRegion region = {0u, memory.size(), memory.data()};
+    /* Write-watched: a frame snapshot copies only the pages a frame wrote. */
+    std::uint8_t *memory = loaded.data();
+#ifdef _WIN32
+    memory = static_cast<std::uint8_t *>(VirtualAlloc(nullptr, RECOMP_XBOX_RAM_SIZE,
+        MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE));
+    if (memory == nullptr) {
+        std::cerr << "recomp runner: cannot allocate write-watched guest RAM\n";
+        return 1;
+    }
+    std::memcpy(memory, loaded.data(), loaded.size());
+    loaded = std::vector<std::uint8_t>();
+#endif
+    const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
+    const char *runAhead = std::getenv("RECOMP_RUNAHEAD");
+    int runAheadRequested = runAhead != nullptr ? std::atoi(runAhead) : 0;
+    if (runAheadRequested > 8) runAheadRequested = 8;
+    if (recomp_synctest_enabled() || runAheadRequested > 0) {
+        const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
+        if (clock == nullptr || std::strcmp(clock, "0") != 0)
+            recomp_xapi_frame_clock_set_enabled(true);
+        recomp_synctest_install_default_modules();
+        recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
+        if (recomp_synctest_enabled()) {
+            recomp_d3d_frame_boundary_hook = onFrameBoundary;
+        } else {
+            runAheadFrames = static_cast<unsigned>(runAheadRequested);
+            runAheadState = recomp_synctest_state_create();
+            if (runAheadState == nullptr) {
+                std::fprintf(stderr, "recomp runahead: state allocation failed\n");
+                return 2;
+            }
+            recomp_d3d_frame_boundary_hook = onRunAheadBoundary;
+            runAheadMark = std::chrono::steady_clock::now();
+            std::fprintf(stderr, "recomp runahead: %u frame(s)\n", runAheadFrames);
+        }
+    }
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;

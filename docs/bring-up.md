@@ -74,6 +74,10 @@ first tick; attract replays and story movies still play. The game's soft reset
 relaunches its own XBE through XLaunchNewImage (`0x2bab9d`); the runner exits
 with code 4 and `run_game.py` starts a fresh runner, so the relaunch boots
 like a cold start without its launch data.
+The game's own dashboard requests, such as **Yes** on the Xbox Live "No
+accounts found" dialog, take the same path: the game tears down its tasks
+before the call, and the PC port has no dashboard, so the title restarts.
+Answering **No** returns to Mode Select. XapiBootToDash still stops the run.
 
 The optional dedication card (`RECOMP_DEDICATION_CARD`, set by `run_game.py`
 from `private/dedication.bmp`) starts on the first guest read of the staff
@@ -639,6 +643,29 @@ InsertCallback (`0x349e10`, stdcall type/callback/context) calls its cdecl
 callback immediately: captured commands own their bytes and the host GPU
 never writes guest memory, so READ and WRITE conditions already hold.
 
+## Code layout
+
+Library code in `.text` sits in contiguous linker ranges after the game's
+objects. The split follows call direction (library code never calls game code
+directly), 16-byte game function alignment, and each range's imports.
+
+| Range | Contents |
+|---|---|
+| `0x11000`-`0x2b7d2b` | Game |
+| `0x2b7d2c`-`0x2c00c7` | XAPI, CRT startup, XCrypt |
+| `0x2c00c8`-`0x2f9e3c` | XVOICE/VOICMAIL |
+| `0x2f9e3d`-`0x2fabff` | XNet/PHY helpers, kernel import stubs |
+| `0x2fac00`-`0x3350ff` | CRI middleware |
+| `0x335100`-`0x33f3ef` | LIBCMT/LIBCPMT, XAPI |
+| `0x33f3f0`-`0x340f6f` | CRI middleware |
+| `0x340f70`-`0x344163` | Game global initializers and EH stubs |
+
+The game range also holds linker-folded inline library bodies that library
+code calls: empty and constant returns (`0x4ba60`, `0x4bfd0`, `0x136dc0`),
+the vector constructor iterator (`0x238d0`), a D3DX vector divide
+(`0x293570`) and C++ standard string and exception code (`0x26230`,
+`0x262b0`, `0x262f0`).
+
 ## Game tasks
 
 Game logic runs as up to 24 XAPI fibers, resumed each frame by a task
@@ -663,6 +690,24 @@ them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
 come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.
+
+## Saves
+
+The game writes every save through `save_game_write` (`0x219c0`, cdecl,
+11 arguments, 0 on success). XCreateSaveGame writes SaveMeta.xbx and
+SaveImage.xbx, then the payload follows: `ups.dat` for the profile, `br.dat`
+for a Battle Record replay. `save_adapter.c` brackets that call with the save
+journal, so one save's files commit together, and a failed write or an
+interrupted process leaves the previous save. The profile rewrite
+(`0x21eb0`) deletes the old save first and writes a fallback when its first
+write fails; both stay outside the journal, so they behave as on the console.
+XCreateSaveGame opens SaveImage.xbx for write to learn whether it exists, so a
+missing file on that open does not fail the save.
+
+Save storage is host disk, outside every snapshot. SyncTest and run-ahead do
+not rewind across a frame that opened a save file for writing, creating or
+deleting, or that ends inside a journal transaction: the replay would find
+the files the first pass wrote and take the overwrite branch.
 
 ## Input API contract
 
@@ -805,6 +850,169 @@ The 5849 GetTickCount boundary reads shared monotonic time and offers bounded
 cooperative scheduler polling. D3D BlockUntilVerticalBlank and its two CRI
 tail aliases use the native shared-vblank service. These platform seams let
 the existing worker modules run; they do not force middleware load status.
+
+## Determinism checks
+
+`RECOMP_FRAME_CLOCK=1` replaces the host clock with a frame-locked guest
+clock: the counter is constant inside a frame apart from a read tick,
+and each Swap advances exactly one 1/60 s. SyncTest and run-ahead imply it
+unless it is set to `0`.
+
+The read tick is 1 us by default (`RECOMP_FRAME_CLOCK_TICK_NS`): guest loops
+that poll the counter, such as a vblank wait, reach their deadline in a few
+thousand reads instead of burning a frame's worth of host time. The value
+only affects how fast such a loop converges; it is deterministic for a given
+read sequence. A skipped wait (a vblank wait, or the scheduler idling until
+the next timer) sets the counter straight to its deadline: reaching it by
+ticks cost thousands of idle scheduler passes per frame, about 4 ms of each
+run-ahead fight frame.
+
+Under the frame clock every read inside a frame returns the frame's end,
+which lies exactly on the vblank grid. The vblank wait used to treat a
+refresh at that instant as passed and wait for the next one, so a frame that
+waited for vblank covered two frames of guest time. A refresh at the current
+time now counts as reached (`d3d_vblank_test` checks ten frames span
+exactly ten intervals).
+
+When every guest thread waits, the scheduler moves the frame clock to the
+earliest deadline. Reads return the frame's end, so a thread that sleeps one
+frame per loop is due at the next frame's end; that jump used to stretch the
+frame to two. The movie player's audio streamer is such a thread: under the
+frame clock each movie Swap covered 33 ms, the streamer wrote 5,120 bytes per
+6,400 played, never kept a lead, and replayed stale ring data about 6 ms in
+every 33 (heard as heavy clipping in movies with run-ahead). A wait ending by
+the next frame's end now moves time inside the current frame only; longer
+waits still stretch it. The movie stream under run-ahead now matches a plain
+run sample for sample, and the rerun frame in a fight fell from about 6 ms to
+3 ms.
+
+`RECOMP_SYNCTEST=1` saves state at `RECOMP_SYNCTEST_START`, replays
+`RECOMP_SYNCTEST_FRAMES` frames (default 1) and compares; `loop` keeps
+checking. It exits 0 on a match, 2 on a mismatch and 3 when the saved state
+cannot be rewound; `loop` waits 60 frames after such a skip before checking
+again.
+
+Fibers are snapshotted as plain data. XAPI fibers keep their guest model
+(registers, FPU, exception list) plus the host continuation of every parked
+fiber: the captured CONTEXT and the live part of its native stack. Guest
+threads park the same way, so their native continuations are saved beside
+their guest records. Three kinds of fiber are deliberately not rewound: the
+fiber running at the boundary (its stack is the caller's own live stack, and
+a snapshot only restores while that same fiber runs), a converted thread's
+fiber (its stack holds the runner's frames), and a fiber whose stack image
+would not fit the 64 KiB capture. Native fiber objects are restarted in place
+rather than freed, so an image that still names one stays valid, and each
+host slot's guest stack bookkeeping is rewound so a create after a rewind
+allocates what the original frame allocated.
+
+Guest RAM is write-watched (GetWriteWatch) and every image records the
+generation at which it was copied, so a save, a rewind and a comparison touch
+only the pages written since the image they work from. On the development
+machine a 64 MB frame snapshot drops from 8.3 ms to about 0.7 ms and the
+comparison from 9.4 ms to about 5 ms.
+
+Host state the guest can observe is snapshotted with it: file positions and
+directory cursors, the file handle table (handles opened after the image are
+closed and the handle counter is rewound, or every later open gets a
+different number), and the presenter's vblank marks. Missing vblank marks
+were what made run-ahead wait on a refresh from the abandoned timeline: it
+fell from 15 fps to 6 fps until they were restored.
+
+`RECOMP_RUNAHEAD=N` runs each frame hidden with present and audio suppressed,
+displays the last of N, then rewinds and runs the same N frames again. A
+state that cannot be rewound suspends it for 60 frames. On the development
+machine it now costs 8.2 ms per simulated frame, the same as with the frame
+clock off, so N=1 holds the display rate.
+
+Audio comes only from the frames the game keeps: plain frames and the rerun
+after each rewind, one frame behind the picture. Input is read live, so a
+speculative frame can see a newer button than its rerun and start other
+sounds; when it fed the host voices, sounds started only by the rerun never
+reset their voice and stacked on stale audio, which clipped. Speculative
+frames also skip the voice reset that DirectSound Play, Stop, seek, loop and
+data changes perform; resetting there discarded queued audio and opened every
+new sound with a 50 ms gap (867 underruns in the first 6,000 frames of a
+scripted fight, against 1 without run-ahead). Hidden repeats skip draws,
+clears, copies and visibility tests as well: the visible run already left
+those results in the presenter, and at 4K with 32x MSAA drawing every frame
+twice could not hold 60 fps. Run-ahead also
+suspends when the Present that ended the visible frame came from the other
+routine, as SyncTest re-syncs below; rewinding across a display mode change
+stopped on a null D3D resource. Heavy frames such as character select and
+match transitions cost about 11 ms per simulated frame, too much to run twice.
+When 8 consecutive cycles (save, display, rewind) average over 20 ms,
+run-ahead suspends for 60 frames, so those stretches play without it at full
+rate. The scripted fight fell from 89 underruns in 14,000 frames to 11; the
+rest come where a long heavy stretch resumes run-ahead and suspends it again.
+Each suspension in a row doubles the pause, up to 1,920 frames, and a window
+that keeps up resets it: resuming into the same heavy fight every 69 frames
+repeated 8 slow cycles each time, heard as a hitch about once a second. Each
+suspension logs the window's average shown, kept, paced, save and load times.
+
+The frame clock never sleeps, so the runner holds each kept frame to host
+time itself: it sleeps until the frame clock's time has passed on the host
+clock, and starts over after a 100 ms stall instead of rushing to catch up.
+Without this, kept frames ran at whatever rate the presenter allowed and a
+long guest wait advanced guest time instantly, so audio, which follows guest
+time, ran ahead (93 `too-far-ahead` drops in one session's boot) or behind.
+Snapshots also no longer wait for the GPU when a hidden repeat dropped its
+visibility test: the pending result is the visible frame's query, which the
+guest's own poll resolves. That wait serialised CPU and GPU every cycle. With
+all three, the scripted fight at 4K, 8x MSAA and SMAA costs about 11 ms for
+the visible frame and 6 ms for the rerun, and run-ahead suspends only while
+the fight loads.
+
+A frame boundary is a Present, and the game presents from two routines: the
+frame loop (0x282947) and the display mode change (0x28284f). A rewind
+restores guest state but leaves the host running the caller's own native
+frames, so it cannot resume a frame that presented from the other routine;
+the replay then plays the following frame instead. SyncTest records the
+Present return address in each image and re-syncs when it moves, instead of
+reporting the mismatch. That was frame 1035.
+
+The scheduler slice offered on a tick read (recomp_kernel_poll) is gated on
+guest time rather than host time, so a replayed frame preempts at the same
+points; with the frame clock on that is about one slice per frame. Host time
+made the interleaving depend on how fast the host ran, which also moved the
+frame at which the next divergence appears.
+
+The D3D8 image now includes the host render-state model that feeds draw
+commands. Leaving it live let later state leak into an earlier replayed draw.
+
+Frame 1422 was a stale occlusion result. The guest reads the previous
+visibility test's count before ending the next test. That count lived only
+in the presenter's host query map, so a rewind left the abandoned timeline's
+144 in place instead of the saved 140. The completed count is now part of
+`D3d8State`, snapshot save waits for outstanding host queries, and the
+adapter returns the saved count until the guest ends a new test. The loop
+check now runs from frame 1419 to 38,036 without a further mismatch. The two
+display mode changes in that span, at frames 3036 and 6155, re-sync as
+designed; loops started at 3038 and 6157 verify the frames each re-sync would
+otherwise skip. The streaming read that used to diverge at frames 636 and 807
+is fixed; that one was the file position and directory cursor surviving a
+rewind.
+
+Menu, save and story flows are checked the same way, each from its own input
+schedule: a walk through the mode select, the settings list and the audio
+submenu; the ranking and battle record screens; a settings change that
+commits a 74 KB profile write at a fixed frame; the in-fight pause menu; and
+story mode from character select through its cutscene into the fight. Both
+ways a story battle ends are covered: a loss reaches GAME OVER and returns to
+the title, and a win plays the round back under a REPLAY banner, runs the next
+chapter's cutscene and starts the following fight. The battle record path,
+RECORD and then SINGLE BATTLE, runs through character and stage select, a
+recorded round and its playback; SAVE REPLAY in the playback's pause menu
+writes the replay (`br.dat`, 578 KB) and a second save overwrites it. The
+round's end calls XAPI WideCharToMultiByte, which needs kernel ordinal 308,
+RtlUnicodeStringToAnsiString; the runner stopped there before
+`kernel_rtl.c` bridged it. They run clean under the loop. A frame that
+saves is now skipped, as the Saves section describes, and a loop started on
+the frame after a save checks what follows it. Before that rule, profile
+writes replayed with identical bytes because `ups.dat` already existed, but
+the first replay save diverged: its replay found the new SaveImage.xbx and
+took the overwrite branch. The profile header carries a 28-byte value that is
+fixed for the life of the process and differs between sessions; nothing the
+guest reads back depends on it.
 
 ## Remaining work
 

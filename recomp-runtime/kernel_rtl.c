@@ -255,6 +255,43 @@ static void bridge_rtl_equal_string(void)
     kernel_return(3u, (uint32_t)equal);
 }
 
+/* RtlUnicodeStringToAnsiString(PSTRING Destination, PCUNICODE_STRING Source,
+   BOOLEAN Allocate). DOA2U reaches it only through XAPI WideCharToMultiByte,
+   which passes Allocate FALSE into a buffer it has already sized. As on NT, a
+   short buffer receives what fits and the call returns STATUS_BUFFER_OVERFLOW.
+   Characters outside Latin-1 become '?'. */
+static void bridge_rtl_unicode_string_to_ansi_string(void)
+{
+    uint32_t destination = kernel_arg(1u);
+    uint32_t source = kernel_arg(2u);
+    uint32_t status = 0u;
+
+    if ((kernel_arg(3u) & 0xffu) != 0u) {
+        /* shortcut: no pool allocation, add one when a caller passes TRUE. */
+        kernel_return(3u, 0xc0000017u); /* STATUS_NO_MEMORY */
+        return;
+    }
+    uint32_t length = *recomp_memory_u16(source) / 2u;
+    uint32_t maximum = *recomp_memory_u16(destination + 2u);
+    if (length >= maximum) {
+        status = 0x80000005u;
+        if (maximum == 0u) {
+            kernel_return(3u, status);
+            return;
+        }
+        length = maximum - 1u;
+    }
+    uint32_t from = *recomp_memory_u32(source + 4u);
+    uint32_t to = *recomp_memory_u32(destination + 4u);
+    for (uint32_t i = 0u; i < length; ++i) {
+        uint16_t c = *recomp_memory_u16(from + 2u * i);
+        *recomp_memory_i8(to + i) = (int8_t)(c < 0x100u ? c : '?');
+    }
+    *recomp_memory_i8(to + length) = 0;
+    *recomp_memory_u16(destination) = (uint16_t)length;
+    kernel_return(3u, status);
+}
+
 RecompFunction recomp_kernel_rtl(uint32_t ordinal)
 {
     switch (ordinal) {
@@ -263,6 +300,7 @@ RecompFunction recomp_kernel_rtl(uint32_t ordinal)
     case 301u: return bridge_rtl_ntstatus_to_dos_error;
     case 304u: return bridge_rtl_time_fields_to_time;
     case 305u: return bridge_rtl_time_to_time_fields;
+    case 308u: return bridge_rtl_unicode_string_to_ansi_string;
     default: return NULL;
     }
 }

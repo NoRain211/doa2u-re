@@ -84,6 +84,21 @@ const RecompInputModel *recomp_input_adapter_model(void)
     return &input_model;
 }
 
+size_t recomp_input_adapter_state_size(void)
+{
+    return sizeof input_model;
+}
+
+void recomp_input_adapter_state_save(void *state)
+{
+    memcpy(state, &input_model, sizeof input_model);
+}
+
+void recomp_input_adapter_state_restore(const void *state)
+{
+    memcpy(&input_model, state, sizeof input_model);
+}
+
 static void xinit_devices_adapter(void)
 {
     uint32_t entry_esp = recomp_runtime.registers.esp;

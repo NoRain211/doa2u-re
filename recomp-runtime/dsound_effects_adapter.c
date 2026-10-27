@@ -19,6 +19,41 @@ static RecompAudioReverb pending_listener;
 static bool listener_dirty;
 static uint8_t *dirty;
 
+typedef struct DsoundEffectsState {
+    RecompDsoundEffectsImage effects;
+    uint32_t payload, descriptor, scratch;
+    uint32_t locations[2];
+    RecompAudioReverb pending_listener;
+    bool listener_dirty;
+    uint8_t *dirty;
+} DsoundEffectsState;
+
+size_t recomp_dsound_effects_state_size(void) { return sizeof(DsoundEffectsState); }
+void recomp_dsound_effects_state_save(void *state)
+{
+    DsoundEffectsState *out = state;
+    out->effects = effects;
+    out->payload = payload;
+    out->descriptor = descriptor;
+    out->scratch = scratch;
+    memcpy(out->locations, locations, sizeof out->locations);
+    out->pending_listener = pending_listener;
+    out->listener_dirty = listener_dirty;
+    out->dirty = dirty;
+}
+void recomp_dsound_effects_state_restore(const void *state)
+{
+    const DsoundEffectsState *in = state;
+    effects = in->effects;
+    payload = in->payload;
+    descriptor = in->descriptor;
+    scratch = in->scratch;
+    memcpy(locations, in->locations, sizeof locations);
+    pending_listener = in->pending_listener;
+    listener_dirty = in->listener_dirty;
+    dirty = in->dirty;
+}
+
 static uint8_t *span(uint32_t address, uint32_t bytes)
 {
     uint32_t window = address & ~(RECOMP_XBOX_RAM_SIZE - 1u);

@@ -1916,6 +1916,17 @@ static bool testVisibility()
     passed &= expect("unknown index", recomp_d3d_presenter_visibility_result(presenter, 9u, &complete, &pixels[0]),
         RECOMP_D3D_PRESENTER_INVALID_ARGUMENT);
     passed &= expect("publish visibility", recomp_d3d_presenter_flush(presenter, false));
+#ifdef _WIN32
+    passed &= expect("wait for visibility", recomp_d3d_presenter_flush(presenter, true));
+    complete = false;
+    passed &= expect("index 7 resolves before the wait returns",
+        recomp_d3d_presenter_visibility_result(presenter, 7u, &complete, &pixels[0]));
+    passed &= complete;
+    complete = false;
+    passed &= expect("index 8 resolves before the wait returns",
+        recomp_d3d_presenter_visibility_result(presenter, 8u, &complete, &pixels[1]));
+    passed &= complete;
+#endif
     const ULONGLONG deadline = GetTickCount64() + 5000u;
     for (uint32_t i = 0; i < 2u && passed; ++i) {
         complete = false;

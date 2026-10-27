@@ -271,6 +271,25 @@ static void block(uint32_t address, uint16_t predictor)
     memset(recomp_memory(address, 36), 0x11, 36);
     write16(address, predictor); write16(address + 2, 0);
 }
+
+/* A speculative run-ahead frame advances the buffer but neither submits nor
+   resets the host voice. */
+static void test_hidden_frames(void)
+{
+    fixture(1, 1, 0);
+    uint32_t handle = create();
+    CHECK(CALL(0x365793, handle, DATA, 80) == 0);
+    recomp_dsound_buffer_set_output_suppressed(true);
+    uint32_t calls = output_calls, before = resets;
+    CHECK(CALL(0x364802, handle, 0, 0, 0) == 0);
+    now = 10; recomp_dsound_buffers_pump();
+    CHECK(CALL(0x36489e, handle, OUTPUT, 0) == 0 && read32(OUTPUT) == 20);
+    CHECK(CALL(0x364826, handle) == 0);
+    CHECK(output_calls == calls && resets == before);
+    recomp_dsound_buffer_set_output_suppressed(false);
+    CHECK(CALL(0x364802, handle, 0, 0, 0) == 0 && resets == before + 1);
+    CHECK(CALL(0x363641, handle) == 0);
+}
 static void test_adpcm(void)
 {
     fixture(0x69, 1, 0);
@@ -424,6 +443,7 @@ int main(void)
 {
     test_pcm_and_headroom(); test_ownership_and_lock(); test_clock_and_loop();
     test_adpcm(); test_validation_and_guards(); test_capacity_and_owner(); test_3d();
+    test_hidden_frames();
     recomp_dsound_buffers_reset(); CHECK(allocated == freed);
     puts("PASS 5849 buffer RAM layout, PCM/ADPCM output, headroom, clocks, locks, aliases, ownership, 3D voices and guards");
     return 0;

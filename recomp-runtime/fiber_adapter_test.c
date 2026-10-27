@@ -3,6 +3,7 @@
 #include "xbox_memory_layout.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -100,6 +101,20 @@ int main(void)
         check("main TLS fiber", *recomp_memory_u32(TLS_BLOCK + 0xcu), main_fiber);
     }
     check("thread context", recomp_fiber_thread_context(), main_fiber);
+
+    /* A snapshot rewinds a delete; the parked context resumes in place. */
+    void *saved = malloc(recomp_fiber_adapter_state_size());
+    if (saved == NULL) return 1;
+    recomp_fiber_adapter_state_save(saved);
+    arguments[0] = second;
+    call(RECOMP_XAPI_DELETE_FIBER, 1u, arguments);
+    recomp_fiber_adapter_state_restore(saved);
+    free(saved);
+    arguments[0] = second;
+    call(RECOMP_XAPI_SWITCH_TO_FIBER, 1u, arguments);
+    check("task resumed after rewind", entry_count, 3u);
+    check("main after rewind", *recomp_memory_u32(TLS_BLOCK + 0xcu), main_fiber);
+
     arguments[0] = second;
     call(RECOMP_XAPI_DELETE_FIBER, 1u, arguments);
     recomp_fiber_adapter_reset();

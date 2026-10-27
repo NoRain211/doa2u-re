@@ -38,6 +38,16 @@ const RecompD3dRenderStateModel *recomp_d3d8_state_model(void)
     return &render_state;
 }
 
+void recomp_d3d8_render_state_save(RecompD3dRenderStateModel *state)
+{
+    *state = render_state;
+}
+
+void recomp_d3d8_render_state_restore(const RecompD3dRenderStateModel *state)
+{
+    render_state = *state;
+}
+
 void recomp_d3d8_state_reset(void)
 {
     recomp_d3d_render_state_reset(&render_state);

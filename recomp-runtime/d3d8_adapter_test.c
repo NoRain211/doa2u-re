@@ -53,6 +53,8 @@ static uint32_t create_count, submit_count, destroy_count;
 static uint32_t vblank_reset_count, wait_present_count, wait_vblank_count;
 void recomp_d3d8_state_reset(void) {}
 void recomp_d3d8_state_write_defaults(bool auto_depth) { (void)auto_depth; }
+void recomp_d3d8_render_state_save(RecompD3dRenderStateModel *state) { (void)state; }
+void recomp_d3d8_render_state_restore(const RecompD3dRenderStateModel *state) { (void)state; }
 void recomp_d3d8_resource_reset(void) {}
 bool recomp_d3d8_resource_describe(uint32_t resource, RecompD3dTextureDesc *out)
 {
@@ -87,6 +89,9 @@ void recomp_d3d8_resource_set_render_targets(uint32_t color, uint32_t depth)
 void recomp_d3d_presenter_report_draw_textures(void) {}
 static unsigned flush_count;
 static bool flush_wait;
+static bool flush_resolves_visibility;
+static bool visibility_complete;
+static uint32_t visibility_pixels, visibility_queried;
 static bool coverage = true;
 static RecompD3dPresenterError coverage_error = RECOMP_D3D_PRESENTER_OK;
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
@@ -101,6 +106,7 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     (void)presenter;
     ++flush_count;
     flush_wait = wait;
+    if (wait && flush_resolves_visibility) visibility_complete = true;
     return RECOMP_D3D_PRESENTER_OK;
 }
 RecompD3dPresenterError recomp_d3d_presenter_release_memory(
@@ -117,8 +123,6 @@ RecompD3dPresenterError recomp_d3d_presenter_invalidate_textures(
 }
 void recomp_d3d_wait_vblank(void) { ++wait_vblank_count; }
 void recomp_d3d_note_block(uint32_t return_address) { (void)return_address; }
-static bool visibility_complete;
-static uint32_t visibility_pixels, visibility_queried;
 RecompD3dPresenterError recomp_d3d_presenter_visibility_result(
     RecompD3dPresenter *presenter, uint32_t index, bool *complete, uint32_t *pixels)
 {
@@ -779,6 +783,13 @@ int main(void)
         submitted.type == RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_END &&
         submitted.data.visibility_index == 0x11u &&
         recomp_runtime.registers.esp == ENTRY_ESP + 8u && recomp_runtime.registers.eax == 0u);
+    recomp_d3d8_set_gpu_work_suppressed(true);
+    prior_submits = submit_count;
+    passed &= call(0x3457c0u, arguments, 0u, NULL);
+    passed &= call(0x345860u, arguments, 1u, NULL);
+    recomp_d3d8_set_gpu_work_suppressed(false);
+    passed &= expect("a repeated run-ahead frame keeps its visibility test off the GPU",
+        submit_count == prior_submits && recomp_runtime.registers.eax == 0u);
     arguments[0] = 1u; arguments[1] = 0x276b50u; arguments[2] = 0x11u;
     passed &= call(0x349e10u, arguments, 3u, NULL);
     passed &= expect("callback runs as cdecl with its context",
@@ -800,6 +811,57 @@ int main(void)
     passed &= expect("complete result counts supersampled back-buffer samples",
         recomp_runtime.registers.eax == 0u && recomp_runtime.registers.esp == ENTRY_ESP + 16u &&
         *recomp_memory_u32(OUTPUT) == 600u);
+    visibility_queried = 0u;
+    *recomp_memory_u32(OUTPUT) = EAX_SENTINEL;
+    passed &= call(0x344450u, arguments, 3u, NULL);
+    passed &= expect("completed result stays available before the next end",
+        recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 600u &&
+        visibility_queried == 0u);
+    {
+        const unsigned saved_flush_count = flush_count;
+        const bool saved_flush_wait = flush_wait;
+        unsigned char *visibility_state = malloc(recomp_d3d8_state_size());
+        passed &= expect("visibility snapshot allocated", visibility_state != NULL);
+        if (visibility_state != NULL) {
+            passed &= call(0x3457c0u, arguments, 0u, NULL);
+            passed &= call(0x345860u, arguments, 1u, NULL);
+            visibility_complete = false;
+            *recomp_memory_u32(OUTPUT) = EAX_SENTINEL;
+            passed &= call(0x344450u, arguments, 3u, NULL);
+            passed &= expect("new visibility result is pending",
+                recomp_runtime.registers.eax == 0x88760828u &&
+                *recomp_memory_u32(OUTPUT) == EAX_SENTINEL);
+            visibility_complete = false;
+            visibility_pixels = 303u;
+            flush_resolves_visibility = true;
+            recomp_d3d8_state_save(visibility_state);
+            passed &= expect("snapshot captures the pending visibility result",
+                flush_wait && visibility_complete);
+            flush_resolves_visibility = false;
+            visibility_queried = 0u;
+            *recomp_memory_u32(OUTPUT) = EAX_SENTINEL;
+            passed &= call(0x344450u, arguments, 3u, NULL);
+            passed &= expect("captured visibility result is returned",
+                recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 606u &&
+                visibility_queried == 0u);
+            passed &= call(0x3457c0u, arguments, 0u, NULL);
+            passed &= call(0x345860u, arguments, 1u, NULL);
+            visibility_pixels = 304u;
+            passed &= call(0x344450u, arguments, 3u, NULL);
+            passed &= expect("live visibility value advances",
+                recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 608u);
+            recomp_d3d8_state_restore(visibility_state);
+            visibility_queried = 0u;
+            *recomp_memory_u32(OUTPUT) = EAX_SENTINEL;
+            passed &= call(0x344450u, arguments, 3u, NULL);
+            passed &= expect("restored visibility result is cached",
+                recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 606u &&
+                visibility_queried == 0u);
+            free(visibility_state);
+        }
+        flush_count = saved_flush_count;
+        flush_wait = saved_flush_wait;
+    }
     arguments[2] = OUTPUT + 4u;
     passed &= call(0x344450u, arguments, 3u, "d3d8:visibility-timestamp-unbound");
     arguments[0] = 0x12u; arguments[2] = 0u;

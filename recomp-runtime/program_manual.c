@@ -8,6 +8,7 @@
 #include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "kernel_abi.h"
+#include "save_adapter.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
 #include "stop_report.h"
@@ -106,6 +107,13 @@ static void launch_new_image(void)
        launcher to start a fresh runner. shortcut: launch data is dropped, so
        the relaunch boots like a cold start; carry it if a caller needs it. */
     const uint32_t path = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
+    const uint32_t caller = *recomp_memory_u32(recomp_runtime.registers.esp);
+    /* The PC port has no dashboard. Game menus (Xbox Live network settings
+       0x2acaae, account sign-up 0x2ad8ce) tear down their tasks first, so a
+       failed launch leaves a black screen; restart the title as a console
+       does on return from the dashboard. XapiBootToDash stays fatal. */
+    if (path == 0u && caller != 0x002bc220u)
+        recomp_stop(4, "xapi:dashboard-relaunch-title caller=0x%08x", caller);
     char name[16] = "";
     for (uint32_t i = 0u; path != 0u && i + 1u < sizeof name; ++i) {
         name[i] = (char)tolower(*recomp_memory(path + i, 1u));
@@ -133,5 +141,6 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     /* XAPI fibers: native Windows fibers replace the SDK stack switch. */
     if (function == NULL) function = recomp_fiber_lookup_manual(guest_address);
     if (function == NULL) function = recomp_input_lookup_manual(guest_address);
+    if (function == NULL) function = recomp_save_lookup_manual(guest_address);
     return function;
 }

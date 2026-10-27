@@ -10,6 +10,7 @@
 #include "d3d_vblank.h"
 #include "kernel_abi.h"
 #include "stop_report.h"
+#include "xapi_time_adapter.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -35,6 +36,19 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
+static bool present_suppressed;
+static bool gpu_work_suppressed;
+
+void recomp_d3d8_set_present_suppressed(bool suppressed)
+{
+    present_suppressed = suppressed;
+}
+
+void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
+{
+    gpu_work_suppressed = suppressed;
+}
+void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
 static uint32_t submitted_draws;
 /* The host keeps one main color target across Swap and Reset (which clears
    only depth). It still holds the frame Present last showed, and the pixels
@@ -46,12 +60,110 @@ static bool display_mode_pending;
 /* Device teardown (0x34ca1f) frees 64 report pages of 256 visibility slots. */
 enum { VISIBILITY_TESTS = 64u * 256u, D3DERR_TESTINCOMPLETE = 0x88760828u };
 static bool visibility_open;
+/* Guest return address of the last Present. The frame loop and the display
+   mode change both present, and a rewind cannot move the native return path. */
+static uint32_t swap_caller;
 /* Guest samples per counted host pixel for each ended index; zero until ended. */
 static uint32_t visibility_scale[VISIBILITY_TESTS];
+/* The last completed count in guest units. The guest polls an index before it
+   ends the next test, so this is part of the rewindable state rather than a
+   live host query. */
+static uint32_t visibility_value[VISIBILITY_TESTS];
+static uint8_t visibility_pending_result[VISIBILITY_TESTS];
+static uint8_t visibility_valid[VISIBILITY_TESTS];
 
 static uint32_t argument(uint32_t entry, uint32_t index)
 {
     return *recomp_memory_u32(entry + 4u + index * 4u);
+}
+
+typedef struct D3d8State {
+    RecompD3dDeviceState device;
+    RecompD3dFrameState frame;
+    RecompD3dRenderStateModel render;
+    uint32_t submitted_draws;
+    bool back_buffer_displayed;
+    bool back_buffer_saved;
+    bool display_mode_pending;
+    bool visibility_open;
+    uint32_t visibility_scale[VISIBILITY_TESTS];
+    uint32_t visibility_value[VISIBILITY_TESTS];
+    uint8_t visibility_pending_result[VISIBILITY_TESTS];
+    uint8_t visibility_valid[VISIBILITY_TESTS];
+} D3d8State;
+
+size_t recomp_d3d8_state_size(void)
+{
+    return sizeof(D3d8State);
+}
+
+uint32_t recomp_d3d8_swap_caller(void)
+{
+    return swap_caller;
+}
+
+static bool visibility_capture_pending(void)
+{
+    bool pending = false;
+    if (presenter == NULL) return false;
+    for (uint32_t index = 0u; index < VISIBILITY_TESTS; ++index) {
+        if (visibility_pending_result[index] == 0u) continue;
+        bool complete = false;
+        uint32_t pixels = 0u;
+        const RecompD3dPresenterError error =
+            recomp_d3d_presenter_visibility_result(presenter, index, &complete, &pixels);
+        if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
+        if (error != RECOMP_D3D_PRESENTER_OK || !complete) {
+            pending = true;
+            continue;
+        }
+        visibility_value[index] = pixels * visibility_scale[index];
+        visibility_valid[index] = 1u;
+        visibility_pending_result[index] = 0u;
+    }
+    return pending;
+}
+
+void recomp_d3d8_state_save(void *state)
+{
+    /* A repeated run-ahead frame drops its query, so a pending result belongs to
+       the shown frame; polling resolves it later, without stalling on the GPU. */
+    if (!gpu_work_suppressed && visibility_capture_pending()) {
+        (void)recomp_d3d_presenter_flush(presenter, true);
+        (void)visibility_capture_pending();
+    }
+    D3d8State *out = state;
+    out->device = device_state;
+    out->frame = frame_state;
+    recomp_d3d8_render_state_save(&out->render);
+    out->submitted_draws = submitted_draws;
+    out->back_buffer_displayed = back_buffer_displayed;
+    out->back_buffer_saved = back_buffer_saved;
+    out->display_mode_pending = display_mode_pending;
+    out->visibility_open = visibility_open;
+    memcpy(out->visibility_scale, visibility_scale, sizeof out->visibility_scale);
+    memcpy(out->visibility_value, visibility_value, sizeof out->visibility_value);
+    memcpy(out->visibility_pending_result, visibility_pending_result,
+        sizeof out->visibility_pending_result);
+    memcpy(out->visibility_valid, visibility_valid, sizeof out->visibility_valid);
+}
+
+void recomp_d3d8_state_restore(const void *state)
+{
+    const D3d8State *in = state;
+    device_state = in->device;
+    frame_state = in->frame;
+    recomp_d3d8_render_state_restore(&in->render);
+    submitted_draws = in->submitted_draws;
+    back_buffer_displayed = in->back_buffer_displayed;
+    back_buffer_saved = in->back_buffer_saved;
+    display_mode_pending = in->display_mode_pending;
+    visibility_open = in->visibility_open;
+    memcpy(visibility_scale, in->visibility_scale, sizeof visibility_scale);
+    memcpy(visibility_value, in->visibility_value, sizeof visibility_value);
+    memcpy(visibility_pending_result, in->visibility_pending_result,
+        sizeof visibility_pending_result);
+    memcpy(visibility_valid, in->visibility_valid, sizeof visibility_valid);
 }
 
 static void load(void *destination, uint32_t address, size_t size)
@@ -78,6 +190,15 @@ void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
          !command->data.clear.target.offscreen) ||
         (command->type == RECOMP_D3D_PRESENTER_COMMAND_DRAW && !command->data.draw.target.offscreen)) {
         back_buffer_displayed = back_buffer_saved = false;
+    }
+    /* A repeated run-ahead frame redoes GPU work whose results, visibility
+       counts included, its visible run already left in the presenter. */
+    if (gpu_work_suppressed && (command->type == RECOMP_D3D_PRESENTER_COMMAND_CLEAR ||
+            command->type == RECOMP_D3D_PRESENTER_COMMAND_DRAW ||
+            command->type == RECOMP_D3D_PRESENTER_COMMAND_COPY_MAIN_COLOR ||
+            command->type == RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_BEGIN ||
+            command->type == RECOMP_D3D_PRESENTER_COMMAND_VISIBILITY_END)) {
+        return;
     }
     const RecompD3dPresenterError error = recomp_d3d_presenter_submit(presenter, command);
     if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
@@ -130,6 +251,9 @@ void recomp_d3d8_shutdown(void)
     display_mode_pending = false;
     visibility_open = false;
     memset(visibility_scale, 0, sizeof visibility_scale);
+    memset(visibility_value, 0, sizeof visibility_value);
+    memset(visibility_pending_result, 0, sizeof visibility_pending_result);
+    memset(visibility_valid, 0, sizeof visibility_valid);
 }
 
 static uint32_t color_header(uint32_t index)
@@ -502,14 +626,17 @@ static void clear(void)
 static void swap(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
+    swap_caller = *recomp_memory_u32(entry);
     recomp_d3d8_require_device();
     const uint32_t completed_bank = frame_state.swap_counter & 1u;
     const RecompD3dFrameResult result = recomp_d3d_frame_swap(&frame_state, argument(entry, 0u));
     if (result.error != RECOMP_D3D_FRAME_OK) recomp_stop(2, "d3d8:swap:%u", (unsigned)result.error);
     for (uint32_t i = 0; i < 2u; ++i) load(&device_state.color[i], color_header(i), sizeof device_state.color[i]);
     if (recomp_d3d_device_swap_buffers(&device_state) != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:swap-headers");
-    recomp_d3d_wait_present();
-    recomp_d3d8_submit(&result.command);
+    if (!present_suppressed) {
+        recomp_d3d_wait_present();
+        recomp_d3d8_submit(&result.command);
+    }
     back_buffer_displayed = true;
     back_buffer_saved = false;
     if (display_mode_pending) {
@@ -523,6 +650,9 @@ static void swap(void)
     if (recomp_d3d_present_hook != NULL) recomp_d3d_present_hook(result.command.data.present.swap_counter);
     recomp_runtime.registers.eax = result.command.data.present.swap_counter;
     recomp_runtime.registers.esp = entry + 8u;
+    recomp_xapi_frame_clock_advance();
+    if (recomp_d3d_frame_boundary_hook != NULL)
+        recomp_d3d_frame_boundary_hook(result.command.data.present.swap_counter);
     fprintf(stderr, "recomp d3d8: Swap frame=%u\n", result.command.data.present.swap_counter);
 }
 
@@ -631,6 +761,7 @@ static void end_visibility_test(void)
     visibility_open = false;
     /* The host counts logical pixels; a supersampled back buffer has more samples. */
     visibility_scale[index] = target.offscreen ? 1u : device_state.scale[0] * device_state.scale[1];
+    visibility_pending_result[index] = 1u;
     recomp_runtime.registers.eax = RECOMP_D3D_OK;
     recomp_runtime.registers.esp = entry + 8u;
 }
@@ -648,6 +779,15 @@ static void get_visibility_test_result(void)
     if (result == 0u) recomp_stop(2, "d3d8:visibility-result-null");
     /* shortcut: no host clock maps the GPU report timestamp; bind one when a caller asks for it. */
     if (timestamp != 0u) recomp_stop(2, "d3d8:visibility-timestamp-unbound");
+    /* The guest reads the previous test's count before ending the next test.
+       That count comes from the snapshot, not from whatever host query most
+       recently resolved on the abandoned timeline. */
+    if (visibility_pending_result[index] == 0u && visibility_valid[index] != 0u) {
+        *recomp_memory_u32(result) = visibility_value[index];
+        recomp_runtime.registers.eax = RECOMP_D3D_OK;
+        recomp_runtime.registers.esp = entry + 16u;
+        return;
+    }
     bool complete = false;
     uint32_t pixels = 0u;
     const RecompD3dPresenterError error =
@@ -655,7 +795,10 @@ static void get_visibility_test_result(void)
     if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
     if (error != RECOMP_D3D_PRESENTER_OK) recomp_stop(2, "d3d8:visibility-result:%u", (unsigned)error);
     if (complete) {
-        *recomp_memory_u32(result) = pixels * visibility_scale[index];
+        visibility_value[index] = pixels * visibility_scale[index];
+        visibility_valid[index] = 1u;
+        visibility_pending_result[index] = 0u;
+        *recomp_memory_u32(result) = visibility_value[index];
         recomp_runtime.registers.eax = RECOMP_D3D_OK;
     } else {
         flush(false);

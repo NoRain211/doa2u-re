@@ -9,6 +9,10 @@ enum {
     TEST_ENTRY_ESP = TEST_MEMORY_BASE + 0x100u,
     TEST_TIME = TEST_MEMORY_BASE + 0x200u,
     TEST_FIELDS = TEST_MEMORY_BASE + 0x300u,
+    TEST_WIDE = TEST_MEMORY_BASE + 0x400u,
+    TEST_NARROW = TEST_MEMORY_BASE + 0x500u,
+    TEST_UNICODE_STRING = TEST_MEMORY_BASE + 0x600u,
+    TEST_ANSI_STRING = TEST_MEMORY_BASE + 0x610u,
 };
 
 /* Expectations were produced outside this translation unit, from a calendar
@@ -131,6 +135,40 @@ static int test_conversion_model(void)
     return passed;
 }
 
+/* Ordinal 308 as XAPI WideCharToMultiByte calls it: a caller-sized buffer. */
+static int test_unicode_to_ansi(uint32_t *stack, uint16_t maximum,
+                                const char *expected, uint32_t expected_status)
+{
+    static const uint16_t wide[] = {'A', 'b', 0x00e9u, 0x4e00u};
+    RecompFunction convert = recomp_kernel_rtl(308u);
+    uint32_t length = (uint32_t)strlen(expected);
+    int passed = expect_u32("ordinal 308 lookup", convert != NULL, 1u);
+
+    if (convert == NULL) {
+        return 0;
+    }
+    memcpy(recomp_memory(TEST_WIDE, sizeof wide), wide, sizeof wide);
+    memset(recomp_memory(TEST_NARROW, 16u), 0xa5, 16u);
+    *recomp_memory_u16(TEST_UNICODE_STRING) = (uint16_t)sizeof wide;
+    *recomp_memory_u16(TEST_UNICODE_STRING + 2u) = (uint16_t)sizeof wide;
+    *recomp_memory_u32(TEST_UNICODE_STRING + 4u) = TEST_WIDE;
+    *recomp_memory_u16(TEST_ANSI_STRING) = 0u;
+    *recomp_memory_u16(TEST_ANSI_STRING + 2u) = maximum;
+    *recomp_memory_u32(TEST_ANSI_STRING + 4u) = TEST_NARROW;
+    stack[0] = 0x0010abcdu;
+    stack[1] = TEST_ANSI_STRING;
+    stack[2] = TEST_UNICODE_STRING;
+    stack[3] = 0xffffff00u; /* BOOLEAN FALSE with junk in the upper bytes */
+    recomp_runtime.registers.esp = TEST_ENTRY_ESP;
+    convert();
+    passed &= expect_u32("to-ansi status", recomp_runtime.registers.eax, expected_status);
+    passed &= expect_u32("to-ansi ESP", recomp_runtime.registers.esp, TEST_ENTRY_ESP + 16u);
+    passed &= expect_u32("to-ansi length", *recomp_memory_u16(TEST_ANSI_STRING), length);
+    passed &= expect_u32("to-ansi bytes",
+        (uint32_t)memcmp(recomp_memory(TEST_NARROW, length + 1u), expected, length + 1u), 0u);
+    return passed;
+}
+
 int recomp_kernel_rtl_test(void)
 {
     static uint8_t memory[TEST_MEMORY_SIZE];
@@ -212,6 +250,9 @@ int recomp_kernel_rtl_test(void)
         "null destination ESP",
         recomp_runtime.registers.esp,
         TEST_ENTRY_ESP + 12u);
+
+    passed &= test_unicode_to_ansi(stack, 8u, "Ab\xe9?", 0u);
+    passed &= test_unicode_to_ansi(stack, 3u, "Ab", 0x80000005u);
 
     return passed;
 }
