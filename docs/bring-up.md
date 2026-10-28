@@ -295,7 +295,8 @@ pixels check world-view position and S/T translation independently of mesh UVs.
 Normal inverses are captured only for generated reflections with a normal
 stream. Camera-position texgen, mesh UVs and the no-normal eye-vector path
 accept finite singular world-view matrices; a required invalid inverse stops
-with the layout, generating matrix, influence and caller.
+with the layout, generating matrix, influence and caller, and the line before
+it logs the world matrix and primitive type.
 The fixed-function draw snapshot
 binds up to eight directional/point light slots, front material and ambient,
 normalization, blended world/normal transforms and infinite-view specular.

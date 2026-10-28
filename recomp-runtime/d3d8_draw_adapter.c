@@ -811,6 +811,12 @@ static bool reflection_inputs(uint32_t device, uint32_t texture_matrix, uint32_t
             if (draw->primitive_type >= 5u && draw->primitive_type <= 7u &&
                 ((draw->blend_weight_count == 0u && world_collapses_to_line(world)) ||
                  !recomp_d3d8_draw_has_coverage(draw))) return false;
+            /* The stop id is capped at 160 characters, too short for the matrix that
+               shows which object triggered it, so the matrix goes on the line before. */
+            fprintf(stderr, "recomp d3d8: reflection-normal world influence=%u prim=%u"
+                " rows=[%.9g %.9g %.9g|%.9g %.9g %.9g|%.9g %.9g %.9g] translation=[%.9g %.9g %.9g]\n",
+                i, draw->primitive_type, world[0], world[1], world[2], world[4], world[5], world[6],
+                world[8], world[9], world[10], world[12], world[13], world[14]);
             recomp_stop(2, "d3d8:reflection-normal:fvf=%x:matrix=%x:influence=%u/%u:normalize=%u:ret=%08x",
                 draw->fvf, texture_matrix, i, draw->blend_weight_count, draw->reflection_normalize,
                 *recomp_memory_u32(recomp_runtime.registers.esp));
