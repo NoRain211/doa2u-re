@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIFTER = ROOT / "tools/xboxrecomp"
 XBE_SHA256 = "30d5bd3ff363afb72ea4d5058537013e284df0930f1921d345aeaf44af288a0c"
 CAPSTONE = "5.0.7"
-PILLOW = "12.2.0"  # run_game.py builds the dedication card with it
+PILLOW = "12.2.0"  # minimum; run_game.py builds the optional dedication card with it
 # The generated program the runtime was validated against. Changing the lifter
 # pin or the function list in tools/doa2u/functions changes it; regenerate and update both.
 PROGRAM_SHA256 = "5f43bf496a7b2e22c66598ed75eda161220eb420b55e833e5f3e70ce84ad1760"
@@ -208,14 +208,19 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                 missing.append(f"capstone=={CAPSTONE}")
         except ImportError:
             missing.append(f"capstone=={CAPSTONE}")
+        if missing:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+            if "capstone" in sys.modules:
+                raise ValueError(f"Updated Capstone to {CAPSTONE}; run the build again")
         try:
             import PIL  # noqa: F401
         except ImportError:
-            missing.append(f"pillow=={PILLOW}")
-        if missing:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
-            if missing[0].startswith("capstone") and "capstone" in sys.modules:
-                raise ValueError(f"Updated Capstone to {CAPSTONE}; run the build again")
+            # Pillow only draws the dedication card, which run_game.py skips without it, so a
+            # Python with no prebuilt Pillow (pip would otherwise try a source build) must not stop the build.
+            if subprocess.call([sys.executable, "-m", "pip", "install", "--only-binary", "pillow",
+                                f"pillow>={PILLOW}"]):
+                print(f"No prebuilt Pillow for Python {sys.version_info.major}.{sys.version_info.minor}; "
+                      "the dedication card will be skipped. Install a Python version Pillow supports to include it.")
     # Fetch the compiler before the long lift, so a failed download stops early.
     compiler = llvm_mingw(ROOT) if windows and not lift_only else None
     import capstone

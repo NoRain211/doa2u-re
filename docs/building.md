@@ -42,7 +42,7 @@ The lifter needs Capstone 5.0.7. Homebrew's Python refuses a global
 git clone --recurse-submodules https://github.com/NoRain211/doa2u-re.git
 cd doa2u-re
 python3.13 -m venv private/venv
-private/venv/bin/pip install capstone==5.0.7 pillow==12.2.0
+private/venv/bin/pip install capstone==5.0.7 "pillow>=12.2.0"
 ```
 
 Then build from your Disc 2 ISO:
@@ -76,7 +76,7 @@ has none:
 
 ```bash
 python3 -m venv private/venv
-private/venv/bin/pip install capstone==5.0.7 pillow==12.2.0
+private/venv/bin/pip install capstone==5.0.7 "pillow>=12.2.0"
 ./build_game.sh /path/to/disc2.iso
 ```
 
