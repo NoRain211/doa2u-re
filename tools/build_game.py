@@ -219,8 +219,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
             # Python with no prebuilt Pillow (pip would otherwise try a source build) must not stop the build.
             if subprocess.call([sys.executable, "-m", "pip", "install", "--only-binary", "pillow",
                                 f"pillow>={PILLOW}"]):
-                print(f"No prebuilt Pillow for Python {sys.version_info.major}.{sys.version_info.minor}; "
-                      "the dedication card will be skipped. Install a Python version Pillow supports to include it.")
+                print("Could not install Pillow, so the dedication card will be skipped. Check the pip error above;"
+                      " a new Python version may have no prebuilt Pillow yet.")
     # Fetch the compiler before the long lift, so a failed download stops early.
     compiler = llvm_mingw(ROOT) if windows and not lift_only else None
     import capstone

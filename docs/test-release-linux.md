@@ -37,7 +37,7 @@ Build (once, about 15 to 25 minutes):
 2. Give the build its own Python packages:
 
       python3 -m venv private/venv
-      private/venv/bin/pip install capstone==5.0.7 "pillow>=12.2.0"
+      private/venv/bin/pip install capstone==5.0.7
 
 3. Build from your ISO. The ISO is only read:
 
