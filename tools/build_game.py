@@ -13,7 +13,7 @@ import time
 import uuid
 
 from extract_iso import extract, run_logged, sha256
-from build_prerequisites import llvm_mingw
+from build_prerequisites import extract_xiso, llvm_mingw
 
 ROOT = Path(__file__).resolve().parents[1]
 LIFTER = ROOT / "tools/xboxrecomp"
@@ -44,6 +44,17 @@ def build_fraction(plan, finished, lines, elapsed):
         share = min(elapsed / seconds, 0.95)
         done += seconds * min(max(lines / expected, share) if expected else share, 0.99)
     return done / total
+
+
+def failure_excerpt(lines, size=20):
+    """The log's end, led by the first error when it lies earlier: CMake prints its cause before a long help."""
+    end = max(len(lines) - size, 0)
+    first = next((i for i, line in enumerate(lines[:end]) if "error" in line.lower()), None)
+    if first is None:
+        return lines[end:]
+    if first + size >= end:
+        return lines[first:]
+    return [*lines[first:first + size], "...", *lines[end:]]
 
 
 class Progress:
@@ -85,8 +96,8 @@ class Progress:
         except subprocess.CalledProcessError:
             stop.set()
             ticker.join()
-            tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
-            print(f"\n{LABELS[self.plan[self.finished]]} failed. The end of {log_path}:", *tail, sep="\n")
+            excerpt = failure_excerpt(log_path.read_text(encoding="utf-8", errors="replace").splitlines())
+            print(f"\n{LABELS[self.plan[self.finished]]} failed. Excerpt of {log_path}:", *excerpt, sep="\n")
             raise
         finally:
             stop.set()
@@ -182,7 +193,7 @@ def import_disc(iso, extractor=None):
             print(f"Removing the unfinished extraction in {imported}", flush=True)
             shutil.rmtree(imported)
         bundled = ROOT / "tools/artifacts/extract-xiso.exe"
-        extract(iso, imported, extractor or (bundled if bundled.is_file() else "extract-xiso"))
+        extract(iso, imported, extractor or (bundled if bundled.is_file() else extract_xiso(ROOT)))
     for xbe in sorted((imported / "disc").glob("*.xbe")):
         if sha256(xbe) == XBE_SHA256:
             path = ROOT / "private/target.json"

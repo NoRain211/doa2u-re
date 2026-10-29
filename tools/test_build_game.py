@@ -6,12 +6,28 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_game import (STEPS, build_fraction, import_disc, lifter_revision, merge_functions,
-                        program_manifest, selected_xbe, use_windows_newlines, write_functions)
+from build_game import (STEPS, build_fraction, failure_excerpt, import_disc, lifter_revision,
+                        merge_functions, program_manifest, selected_xbe, use_windows_newlines,
+                        write_functions)
 from extract_iso import sha256
 
 
 class BuildTests(unittest.TestCase):
+    def test_failure_excerpt_keeps_an_early_cause_ahead_of_a_long_tail(self):
+        # CMake prints "Could not create named generator" first, then its whole help.
+        help_text = [f"  Generator {i}" for i in range(70)]
+        excerpt = failure_excerpt(["CMake Error: Could not create named generator X", "", *help_text])
+        self.assertEqual(excerpt[0], "CMake Error: Could not create named generator X")
+        self.assertEqual(excerpt[20:22], ["...", help_text[-20]])
+        self.assertEqual(excerpt[-1], help_text[-1])
+        # An error inside the tail, or none, leaves the plain tail; short logs print whole.
+        tail = [f"line {i}" for i in range(30)]
+        self.assertEqual(failure_excerpt([*tail, "error: last"]), [*tail[11:], "error: last"])
+        self.assertEqual(failure_excerpt(tail), tail[-20:])
+        # An early error close to the tail joins it without a gap.
+        self.assertEqual(failure_excerpt(["error: near", *tail[:20]]), ["error: near", *tail[:20]])
+        self.assertEqual(failure_excerpt(["error: only"]), ["error: only"])
+
     def test_function_shards_round_trip_without_call_edges(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
