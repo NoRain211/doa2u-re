@@ -24,6 +24,8 @@ class BuildTests(unittest.TestCase):
         tail = [f"line {i}" for i in range(30)]
         self.assertEqual(failure_excerpt([*tail, "error: last"]), [*tail[11:], "error: last"])
         self.assertEqual(failure_excerpt(tail), tail[-20:])
+        # An early error close to the tail joins it without a gap.
+        self.assertEqual(failure_excerpt(["error: near", *tail[:20]]), ["error: near", *tail[:20]])
         self.assertEqual(failure_excerpt(["error: only"]), ["error: only"])
 
     def test_function_shards_round_trip_without_call_edges(self):
