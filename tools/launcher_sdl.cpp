@@ -333,6 +333,8 @@ int main(int argc, char **argv)
     int result = -1;
     int held_dx = 0, held_dy = 0;
     Uint64 next_repeat = 0;
+    // A held Down key that entered a page waits for release before it changes a value.
+    bool down_entered = false;
     while (result < 0) {
         SDL_Event event;
         while (result < 0 && SDL_PollEvent(&event)) {
@@ -353,7 +355,10 @@ int main(int argc, char **argv)
             case SDL_EVENT_KEY_DOWN:
                 switch (event.key.key) {
                 case SDLK_UP: launcher.move(0, -1); break;
-                case SDLK_DOWN: launcher.move(0, 1); break;
+                case SDLK_DOWN:
+                    if (!event.key.repeat) down_entered = !launcher.in_page;
+                    if (!(event.key.repeat && down_entered)) launcher.move(0, 1);
+                    break;
                 case SDLK_LEFT: launcher.move(-1, 0); break;
                 case SDLK_RIGHT: launcher.move(1, 0); break;
                 case SDLK_RETURN:
