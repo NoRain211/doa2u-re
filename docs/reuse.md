@@ -13,8 +13,10 @@ The Windows launcher follows committed DOA3 `tools/launcher.cs` at
 `6c782d5`: one C# file, built by the in-box .NET Framework 4 compiler into
 `Launcher.exe` (build, settings, play) and `DOA2U.exe` (play only). It keeps
 DOA3's Horizon Bar menu, controller, keyboard and mouse input, and its
-AI-generated beach backdrop (`tools/launcher-background.jpg`, pinned by hash
-with the export checker's binary-file support from the same commit).
+AI-generated beach backdrop (`tools/launcher-background.jpg`). The export
+checker's hash-pinned `binary_files` come from DOA3's
+`tools/public_export.py` at the same commit; path, extension and size rules
+still apply to pinned files.
 Choices stay in `private/launcher.json`. DOA3's volume, free camera and
 swimsuit pages are omitted; DOA2U adds surround and intro-movie pages, extends
 MSAA through 32x, and runs its authenticated Python tools for the build and
