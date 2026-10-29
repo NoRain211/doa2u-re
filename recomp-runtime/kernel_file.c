@@ -2177,6 +2177,15 @@ static void bridge_nt_read_file(void)
         }
 
         tracked_handle_seen = 1;
+        /* Reads at the handle cursor queue behind the one in flight, as on a
+           synchronous file object, so two never take the same offset. */
+        while (byte_offset == 0u && file_handles[i].reads_pending != 0u) {
+            (void)recomp_kernel_wait_host(reads_finished, &file_handles[i]);
+        }
+        if (!file_handles[i].active ||
+            file_handles[i].guest_handle != guest_handle) {
+            break;
+        }
         read_offset = file_handles[i].cursor;
         if (byte_offset != 0u) {
             read_offset = *recomp_memory_u32(byte_offset);
@@ -2521,6 +2530,9 @@ uint32_t recomp_kernel_close_file(uint32_t guest_handle, uint32_t owner)
         }
         if (entry->reads_pending != 0u) {
             (void)recomp_kernel_wait_host(reads_finished, entry);
+            if (!entry->active || entry->guest_handle != guest_handle) {
+                return RECOMP_STATUS_INVALID_HANDLE;
+            }
         }
         status = RECOMP_STATUS_SUCCESS;
         bool delete_on_close = entry->delete_on_close != 0;
