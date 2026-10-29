@@ -58,13 +58,16 @@ $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
 $flags = [Reflection.BindingFlags]'NonPublic, Instance'
 $type.GetField('menu', $flags).SetValue($form, 0)
-$press = $type.GetMethod('Press', $flags)
+$keyDown = $type.GetMethod('OnKeyDown', $flags)
+$keyUp = $type.GetMethod('OnKeyUp', $flags)
+$down = [Windows.Forms.KeyEventArgs]::new([Windows.Forms.Keys]::Down)
 $row = $type.GetField('resolution', $flags).GetValue($form)
 $row.Index = 2
-$press.Invoke($form, @([Windows.Forms.Keys]::Down, $false))
-$press.Invoke($form, @([Windows.Forms.Keys]::Down, $true))
+$keyDown.Invoke($form, @($down))
+$keyDown.Invoke($form, @($down))
 $held = $row.Index
-$press.Invoke($form, @([Windows.Forms.Keys]::Down, $false))
+$keyUp.Invoke($form, @($down))
+$keyDown.Invoke($form, @($down))
 "$($type.GetField('inPage', $flags).GetValue($form)) $held $($row.Index)"
 '''
         with tempfile.TemporaryDirectory() as folder:

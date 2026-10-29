@@ -140,6 +140,7 @@ final class LauncherView: NSView {
         case 124: if inPage { row = min(row + 1, rows.count - 1) } else { tab = min(tab + 1, pages.count - 1) }
         case 126: if inPage { change(1) }
         case 125:
+            if !event.isARepeat { downEntered = false }
             if !inPage { if !rows.isEmpty { accept(); downEntered = true } }
             else if !(event.isARepeat && downEntered) { change(-1) }
         case 36, 76, 49: accept()
@@ -147,11 +148,6 @@ final class LauncherView: NSView {
         default: super.keyDown(with: event); return
         }
         needsDisplay = true
-    }
-
-    override func keyUp(with event: NSEvent) {
-        if event.keyCode == 125 { downEntered = false }
-        super.keyUp(with: event)
     }
 
     func hitTab(_ p: NSPoint) -> Int { tabs.firstIndex { $0.contains(p) } ?? -1 }

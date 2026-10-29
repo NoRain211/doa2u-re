@@ -274,7 +274,6 @@ void heldDirection(int &dx, int &dy)
         if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || x > 20000) dx = 1;
     }
     SDL_free(ids);
-    if (dx != 0) dy = 0;  // a diagonal moves a column without also changing a value
 }
 
 } // namespace
@@ -335,6 +334,7 @@ int main(int argc, char **argv)
     Uint64 next_repeat = 0;
     // A held Down key that entered a page waits for release before it changes a value.
     bool down_entered = false;
+    bool pad_down_entered = false;
     while (result < 0) {
         SDL_Event event;
         while (result < 0 && SDL_PollEvent(&event)) {
@@ -404,6 +404,9 @@ int main(int argc, char **argv)
         // D-pad and stick: one step on press, then repeat while held.
         int dx, dy;
         heldDirection(dx, dy);
+        // A pad Down that entered a page stays blocked until Down itself is released.
+        if (dy != 1) pad_down_entered = false;
+        if (dx != 0 || pad_down_entered) dy = 0;  // a diagonal moves a column without also changing a value
         const Uint64 now = SDL_GetTicks();
         if (dx != held_dx || dy != held_dy) {
             held_dx = dx;
@@ -411,8 +414,7 @@ int main(int argc, char **argv)
             next_repeat = now + 350;
             const bool was_in_page = launcher.in_page;
             if (dx || dy) launcher.move(dx, dy);
-            // A held Down that entered a page waits for release before it changes a value.
-            if (!was_in_page && launcher.in_page) next_repeat = SDL_MAX_UINT64;
+            if (!was_in_page && launcher.in_page) pad_down_entered = true;
         } else if ((dx || dy) && now >= next_repeat) {
             next_repeat = now + 120;
             launcher.move(dx, dy);

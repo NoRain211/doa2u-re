@@ -212,7 +212,7 @@ class LauncherForm : Form
     DateTime padRepeat = DateTime.MaxValue;
     // A held Down that entered a page waits for a fresh press before it changes a value.
     bool downEntered;
-    Keys heldKey;
+    bool downHeld;
     Point? drag;
     RectangleF[] tabs;
 
@@ -546,9 +546,10 @@ class LauncherForm : Form
 
     // A form without controls would otherwise spend the arrow keys on focus moves.
     protected override bool ProcessDialogKey(Keys keyData) { return false; }
-    // Windows repeats WM_KEYDOWN while a key is held; the key stays in heldKey until its WM_KEYUP.
-    protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); Press(e.KeyCode, e.KeyCode == heldKey); heldKey = e.KeyCode; }
-    protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); if (e.KeyCode == heldKey) heldKey = Keys.None; }
+    // Windows repeats WM_KEYDOWN while a key is held; Down stays held until its WM_KEYUP or focus leaves.
+    protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); Press(e.KeyCode, e.KeyCode == Keys.Down && downHeld); if (e.KeyCode == Keys.Down) downHeld = true; }
+    protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); if (e.KeyCode == Keys.Down) downHeld = false; }
+    protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); downHeld = false; }
 
     // A dropped ISO becomes the game disc and selects Build.
     void UseDisc(string path)
