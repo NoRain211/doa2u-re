@@ -147,6 +147,7 @@ def main():
                     package.write(Path(launchers) / exe, f"{name}/{exe}")
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")
         package.write(ROOT / readme, f"{name}/README.txt")
+        package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release
     partial.rename(out)
     print(out)
 

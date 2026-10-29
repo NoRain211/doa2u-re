@@ -36,6 +36,8 @@
     "tools/build_prerequisites.py",
     "tools/test_build_prerequisites.py",
     "tools/package_test.py",
+    "tools/update.py",
+    "tools/test_update.py",
     "tools/test_public_export.py",
     "tools/run_game.py",
     "tools/dedication_card.py",

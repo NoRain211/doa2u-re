@@ -171,6 +171,29 @@ static class Pad
     }
 }
 
+// Updates the install from the newest GitHub release ZIP through tools\update.py, which the other launchers share.
+// The ZIP's VERSION file says what is installed; a source checkout has none and is never updated.
+static class Updater
+{
+    public static readonly bool Available = File.Exists(Path.Combine(Game.Root, "VERSION"));
+
+    // Runs update.py check or install; returns the version it printed (null when current) or throws with its message.
+    public static string Run(string command)
+    {
+        if (Game.Python == null) throw new IOException(Game.PythonMessage);
+        var lines = new List<string>();
+        using (Process update = Game.StartPython(@"tools\update.py", command, line => { lock (lines) lines.Add(line); }))
+        {
+            update.WaitForExit();
+            lock (lines)
+            {
+                if (update.ExitCode != 0) throw new IOException(lines.LastOrDefault() ?? "update.py failed");
+                return lines.FirstOrDefault();
+            }
+        }
+    }
+}
+
 class Row
 {
     public string Label, Info, Action;
@@ -188,12 +211,12 @@ class LauncherForm : Form
 {
     static readonly int[] Heights = { 480, 720, 1080, 1440, 2160 };
     static readonly int[] Samples = { 1, 2, 4, 8, 16, 32 };
-    const int BuildPage = 3, PlayPage = 4;
+    const int BuildPage = 3, PlayPage = 4, UpdatePage = 5;
     // Horizon Bar layout on a 960x540 window: letterbox bars, the settings and page tabs in the bottom one.
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, surround, intro, chooseGame;
+    readonly Row resolution, msaa, smaa, screen, surround, intro, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -203,6 +226,9 @@ class LauncherForm : Form
     string gameSource;
     bool built = File.Exists(Game.Runner);
     Process build;
+    // The newer version a check found, and whether a check or install is running on its thread.
+    string pending;
+    bool updating;
     DateTime buildStart;
     readonly List<string> buildLines = new List<string>();
     readonly string buildLog = Game.Private("build.log");
@@ -251,6 +277,8 @@ class LauncherForm : Form
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         gameSource = Game.Str(settings, "game_source", null);
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
+        updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
+        checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
         var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 15 minutes", Action = "build" };
         pages = new[] {
             new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing and screen shape", Rows = PageRows(resolution, msaa, smaa, screen) },
@@ -258,6 +286,7 @@ class LauncherForm : Form
             new Page { Name = "MOVIES", Info = "Plays or skips the logo and opening movies at boot", Rows = PageRows(intro) },
             new Page { Name = "BUILD GAME", Info = BuildStatus(), Rows = new[] { chooseGame, buildRow, new Row { Label = "Exit", Info = "Returns to the menu", Action = "back" } } },
             new Page { Name = "START GAME", Info = "Saves these settings and starts the game", Rows = new Row[0], Action = "play" },
+            new Page { Name = "UPDATE", Info = UpdateStatus(), Rows = PageRows(updateRow, checkAtStart) },
             new Page { Name = "EXIT", Info = "Closes the launcher", Rows = new Row[0], Action = "exit" },
         };
         menu = built ? PlayPage : BuildPage;
@@ -296,17 +325,69 @@ class LauncherForm : Form
         return built ? "Built. Build again after an update" : "Not built yet: choose your Disc 2 ISO, then Build";
     }
 
+    string UpdateStatus()
+    {
+        return !Updater.Available ? "Updates are for the release ZIP; this is a source checkout"
+            : pending != null ? "Version " + pending + " is available. Choose Install"
+            : "Choose Check to look for a newer release";
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (Updater.Available && checkAtStart.Index == 1) Update(true);
+    }
+
+    // Checks for a newer release, or installs the one found, on a worker thread. A quiet check shows nothing unless it finds one.
+    void Update(bool quiet)
+    {
+        if (updating) return;
+        if (build != null) { notice = "Wait for the build to finish"; return; }
+        if (!Updater.Available) { notice = UpdateStatus(); return; }
+        bool install = pending != null;
+        if (!quiet) notice = install ? "Downloading " + pending : "Checking for updates";
+        updating = true;
+        new System.Threading.Thread(delegate ()
+        {
+            string version = null, error = null;
+            try { version = Updater.Run(install ? "install" : "check"); }
+            catch (Exception e) { error = e.Message; }
+            if (IsHandleCreated) BeginInvoke(new Action(() => FinishUpdate(install, version, quiet ? null : error, quiet)));
+        }) { IsBackground = true }.Start();
+    }
+
+    void FinishUpdate(bool installed, string version, string error, bool quiet)
+    {
+        updating = false;
+        if (error == null && !installed) pending = version;
+        updateRow.Info = pages[UpdatePage].Info = UpdateStatus();
+        if (error == null && installed)
+        {
+            MessageBox.Show("Updated to " + version + ". The launcher restarts; choose Build again to apply it to the game.", Game.Title);
+            Process.Start(Path.Combine(Game.Root, "Launcher.exe"));
+            Close();
+            return;
+        }
+        if (error != null) notice = error;
+        else if (!quiet) notice = version != null ? UpdateStatus() : "You have the latest version";
+        Invalidate();
+    }
+
     public Dictionary<string, object> Settings()
     {
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 },
-            { "game_source", gameSource } };
+            { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }
     int ColW { get { return (W - 2 * Side) / Math.Max(Rows.Length, 1); } }
-    static string Verb(string action) { return action == "build" ? "BUILD" : action == "default" ? "RESET" : action == "back" ? "BACK" : "CHOOSE"; }
+    string Verb(string action)
+    {
+        return action == "build" ? "BUILD" : action == "default" ? "RESET" : action == "back" ? "BACK"
+            : action == "update" ? (pending != null ? "INSTALL" : "CHECK") : "CHOOSE";
+    }
 
     // The generated backdrop (tools/launcher-background.jpg, embedded by package_test.py) between letterbox bars.
     // A private\launcher-background.png or .jpg replaces it; it is read at run time so private art never enters the exe.
@@ -366,7 +447,7 @@ class LauncherForm : Form
         Color sand = Rgb(241, 197, 143), dark = Rgb(42, 29, 21), muted = Rgb(191, 178, 165);
 
         // Top letterbox bar: title and build state on the left, button prompts on the right.
-        g.DrawString("DEAD OR ALIVE 2 ULTIMATE  \u00B7  " + (built ? "READY TO PLAY" : "NOT BUILT YET"),
+        g.DrawString("DEAD OR ALIVE 2 ULTIMATE  \u00B7  " + (built ? "READY TO PLAY" : "NOT BUILT YET") + (pending != null ? "  \u00B7  UPDATE AVAILABLE" : ""),
             smallFont, new SolidBrush(muted), new RectangleF(Side, 0, 500, TopH), near);
         float x = W - Side;
         foreach (var hint in new[] { new[] { "", "CHANGE" }, new[] { "B", "BACK" }, new[] { "A", "SELECT" } })
@@ -515,6 +596,7 @@ class LauncherForm : Form
                     if (dialog.ShowDialog() == DialogResult.OK) { gameSource = dialog.FileName; r.Info = SourceName(); }
             }
             else if (r.Action == "build") StartBuild();
+            else if (r.Action == "update") Update(false);
         }
         Invalidate();
     }

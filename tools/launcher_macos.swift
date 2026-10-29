@@ -39,9 +39,11 @@ func font(_ name: String, _ size: CGFloat) -> NSFont { NSFont(name: name, size: 
 // A setting with its choices.
 final class Row {
     let label: String
-    let info: String
-    let names: [String]
+    var info: String
+    var names: [String]
     var index: Int
+    // Set on a row that does something when chosen, instead of changing a value.
+    var action: (() -> Void)?
     init(_ label: String, _ info: String, _ names: [String], _ index: Int) {
         self.label = label; self.info = info; self.names = names; self.index = max(0, index)
     }
@@ -49,12 +51,27 @@ final class Row {
 
 struct Page { let name: String; let info: String; let rows: [Row] }
 
+// Runs tools/update.py (check or install) off the main thread; done gets whether it succeeded and its last output line.
+func runUpdate(_ command: String, done: @escaping (Bool, String) -> Void) {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["python3", root.appendingPathComponent("tools/update.py").path, command]
+    process.standardOutput = output
+    process.terminationHandler = { finished in
+        let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let last = text.split(separator: "\n").last.map(String.init) ?? ""
+        DispatchQueue.main.async { done(finished.terminationStatus == 0, last) }
+    }
+    do { try process.run() } catch { DispatchQueue.main.async { done(false, "Cannot run python3: \(error.localizedDescription)") } }
+}
+
 final class LauncherView: NSView {
     // Horizon Bar layout, as in tools/launcher.cs: letterbox bars, the settings and page tabs in the bottom one.
     static let topH: CGFloat = 44, side: CGFloat = 30, fadeY: CGFloat = 334
     static let infoY: CGFloat = 380, labelY: CGFloat = 414, valueY: CGFloat = 434, valueH: CGFloat = 30
     static let tabY: CGFloat = 494, tabH: CGFloat = 26
-    static let playPage = 3, exitPage = 4
+    static let playPage = 3, exitPage = 5
 
     // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
@@ -68,17 +85,24 @@ final class LauncherView: NSView {
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
     let intro = Row("Intro Movies", "Skip goes straight to the title screen at boot", ["Play", "Skip"],
                     boolSetting("skipIntro", false) ? 1 : 0)
+    let updateRow = Row("Update", "Choose Check to look for a newer release", ["Check"], 0)
+    let checkAtStart = Row("Check At Start", "Looks for a newer release when the launcher opens", ["Off", "On"],
+                           boolSetting("checkUpdates", true) ? 1 : 0)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
+        Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
     ]
     // The tab cursor picks a page; inside a page the row cursor picks a setting column.
     var tab = LauncherView.playPage, row = 0, inPage = false
     // A held Down that entered a page waits for release before it changes a value.
     var downEntered = false
+    // The newer version a check found, and whether a check or install is running.
+    var pending: String?
+    var updating = false
     var tabs: [NSRect] = []
     let built = FileManager.default.fileExists(atPath: root.appendingPathComponent("build/recomp-program/recomp_program_runner").path)
     var onPlay: () -> Void = {}
@@ -96,6 +120,7 @@ final class LauncherView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        updateRow.action = { [unowned self] in self.update(quiet: false) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -111,7 +136,31 @@ final class LauncherView: NSView {
             "widescreen": screen.index == 1,
             "skipIntro": intro.index == 1,
             "surround": surround.index == 1,
+            "checkUpdates": checkAtStart.index == 1,
         ]
+    }
+
+    // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
+    func update(quiet: Bool) {
+        if updating { return }
+        let installing = pending != nil
+        updating = true
+        updateRow.names = ["Working"]
+        if !quiet { updateRow.info = installing ? "Downloading \(pending ?? "")" : "Checking for updates" }
+        runUpdate(installing ? "install" : "check") { [self] ok, output in
+            updating = false
+            if ok && installing {
+                pending = nil
+                updateRow.info = "Updated to \(output). Run ./build_game.sh, then reopen the launcher"
+            } else if ok {
+                pending = output.isEmpty ? nil : output
+                updateRow.info = pending.map { "Version \($0) is available. Choose Install" } ?? "You have the latest version"
+            } else if !quiet {
+                updateRow.info = output
+            }
+            updateRow.names = [pending == nil ? "Check" : "Install"]
+            needsDisplay = true
+        }
     }
 
     func change(_ delta: Int) {
@@ -125,6 +174,8 @@ final class LauncherView: NSView {
             if tab == LauncherView.exitPage { NSApp.terminate(nil); return }
             inPage = true
             row = 0
+        } else if let action = rows[row].action {
+            action()
         } else {
             change(1)
         }
@@ -175,7 +226,7 @@ final class LauncherView: NSView {
         inPage = true
         row = i
         if entering { return }
-        change(p.x < LauncherView.side + (CGFloat(i) + 0.5) * columnWidth ? -1 : 1)
+        if rows[i].action != nil { accept() } else { change(p.x < LauncherView.side + (CGFloat(i) + 0.5) * columnWidth ? -1 : 1) }
     }
 
     override func rightMouseDown(with event: NSEvent) { back(); needsDisplay = true }
@@ -227,7 +278,8 @@ final class LauncherView: NSView {
             .draw(in: NSRect(x: 0, y: LauncherView.fadeY, width: w, height: h - LauncherView.fadeY), angle: 90)
 
         // Top bar: title and build state on the left, key prompts on the right.
-        text("DEAD OR ALIVE 2 ULTIMATE  \u{00B7}  " + (built ? "READY TO PLAY" : "NOT BUILT YET"), smallFont, muted,
+        text("DEAD OR ALIVE 2 ULTIMATE  \u{00B7}  " + (built ? "READY TO PLAY" : "NOT BUILT YET")
+             + (pending != nil ? "  \u{00B7}  UPDATE AVAILABLE" : ""), smallFont, muted,
              NSRect(x: side, y: 0, width: 500, height: topH))
         var x = w - side
         for (key, label) in [("", "CHANGE"), ("Esc", "BACK"), ("Return", "SELECT")] {
@@ -301,6 +353,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         view.onPlay = { [unowned self] in self.play() }
+        if view.checkAtStart.index == 1 { view.update(quiet: true) }
         window.title = "Dead or Alive 2 Ultimate"
         window.delegate = self
         window.contentView = view
