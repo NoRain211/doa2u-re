@@ -658,7 +658,7 @@ otherwise stalls frames and audio for its whole length; from a Steam Deck
 microSD card that was up to 1.4 s (issue #34). Handles with write access
 still read in place. A read issued by the main game thread still pauses
 frames until it finishes, as it would on hardware. Reads at the handle
-cursor wait for the one in flight, and close waits for all of them.
+cursor and close both wait until no read on that handle is in flight.
 
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) holds one costume byte per character at +0x2ed8, in the

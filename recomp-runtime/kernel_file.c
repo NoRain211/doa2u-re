@@ -2177,7 +2177,7 @@ static void bridge_nt_read_file(void)
         }
 
         tracked_handle_seen = 1;
-        /* Reads at the handle cursor queue behind the one in flight, as on a
+        /* Reads at the handle cursor wait for every read in flight, as on a
            synchronous file object, so two never take the same offset. */
         while (byte_offset == 0u && file_handles[i].reads_pending != 0u) {
             (void)recomp_kernel_wait_host(reads_finished, &file_handles[i]);
