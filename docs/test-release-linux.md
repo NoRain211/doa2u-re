@@ -22,11 +22,13 @@ What you need (x86-64 Linux; on the Steam Deck, see below):
           libegl-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
           libudev-dev libdbus-1-dev
 
-- extract-xiso. Build it once:
+- extract-xiso. Download upstream's Linux build into this folder's private/:
 
-      git clone https://github.com/XboxDev/extract-xiso.git
-      cmake -S extract-xiso -B extract-xiso/build
-      cmake --build extract-xiso/build
+      curl -L -o private/extract-xiso.zip https://github.com/XboxDev/extract-xiso/releases/latest/download/extract-xiso_Linux.zip
+      unzip private/extract-xiso.zip extract-xiso -d private
+      chmod +x private/extract-xiso
+
+  Or build it with the tools above from github.com/XboxDev/extract-xiso.
 
 - An internet connection for the first build, your Disc 2 as an Xbox ISO,
   and about 6 GB of free space.
@@ -41,7 +43,7 @@ Build (once, about 15 to 25 minutes):
 
 3. Build from your ISO. The ISO is only read:
 
-      ./build_game.sh /path/to/disc2.iso --extractor /path/to/extract-xiso/build/extract-xiso
+      ./build_game.sh /path/to/disc2.iso --extractor private/extract-xiso
 
 4. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.

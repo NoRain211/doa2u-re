@@ -69,20 +69,44 @@ Linux renders with Vulkan and compiles shaders at run time with shaderc, so
 the host needs `libshaderc_shared.so.1` (SteamOS includes it) or, on Debian
 and Ubuntu, `libshaderc.so.1` from the `libshaderc1` package.
 
-Build in an x86-64 distribution with CMake, Ninja, a C++17 compiler, Python
-3.12 or newer with the `venv` module, `extract-xiso` built as above, and
-SDL3's build dependencies. `build_game.sh` builds SDL3 when the distribution
-has none:
+Build in an x86-64 distribution with CMake, Ninja, a C++17 compiler, Git,
+Python 3.12 or newer with the `venv` module, `extract-xiso` and SDL3's build
+dependencies. A fresh container has none of these. On Ubuntu 24.04 or Debian:
+
+```bash
+sudo apt install build-essential cmake ninja-build git curl unzip python3-venv \
+    libshaderc1 libvulkan1 mesa-vulkan-drivers \
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
+    libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev libpulse-dev \
+    libpipewire-0.3-dev libudev-dev libdbus-1-dev
+```
+
+Upstream publishes a Linux `extract-xiso`, so there is nothing to compile:
+
+```bash
+curl -L -o private/extract-xiso.zip https://github.com/XboxDev/extract-xiso/releases/latest/download/extract-xiso_Linux.zip
+unzip private/extract-xiso.zip extract-xiso -d private && chmod +x private/extract-xiso
+```
+
+Pass it with `--extractor private/extract-xiso`, or build it as in the macOS section.
+`build_game.sh` builds SDL3 when the distribution has none:
 
 ```bash
 python3 -m venv private/venv
 private/venv/bin/pip install capstone==5.0.7
-./build_game.sh /path/to/disc2.iso
+./build_game.sh /path/to/disc2.iso --extractor private/extract-xiso
 ```
 
 SteamOS has a read-only system and no compiler, so build inside a container
-such as an Ubuntu 24.04 `distrobox` that shares your home folder; the
-finished checkout then runs on SteamOS itself. `./launcher.sh` opens a
+such as an Ubuntu 24.04 `distrobox` that shares your home folder (Bazzite
+includes distrobox); the finished checkout then runs on SteamOS itself:
+
+```bash
+distrobox create --name doa2u --image ubuntu:24.04
+distrobox enter doa2u
+```
+
+Run the `apt install` above inside it. `./launcher.sh` opens a
 gamepad-friendly settings screen, then starts the game; `./run_game.sh`
 starts the game with the saved choices.
 
