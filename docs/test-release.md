@@ -1,4 +1,4 @@
-Dead or Alive 2 Ultimate native PC port - 0.1.7 Alpha (experimental)
+Dead or Alive 2 Ultimate native PC port - 0.1.8 Alpha (experimental)
 ===================================================================
 
 This is an early, experimental build. It contains no game files. You
