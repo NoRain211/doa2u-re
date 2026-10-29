@@ -82,7 +82,7 @@ game built in the previous frame.
 
 DOA2U's fight cameras stand far back with a narrow lens (about 17 units from
 the target at 19 degrees, a fighter being under 2 units tall), so the camera
-flies at a quarter of the DOA3 port's speed.
+flies at half the DOA3 port's speed.
 
 **Turn to the next fighter** faces each fighter's hips in turn. Each fighter
 keeps a bank of 32 bone matrices (64 bytes, row-vector, world space) from
