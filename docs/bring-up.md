@@ -585,9 +585,10 @@ Projected and other counts stop. When a lit world matrix is
 singular, the SDK inverse (0x34b530) fails and uploads an unset matrix. The
 adapter then uses zero normals, so only ambient and emissive light remain.
 A reflection draw cannot use such a matrix. It is skipped only when its single
-world has 3x3 rank at most one, up to one float rounding per entry, so every
-triangle has zero area, or when native raster coverage is empty; otherwise it
-stops.
+world has 3x3 rank at most one, so every triangle has zero area, or when
+native raster coverage is empty; otherwise it stops. Rank one allows each 2x2
+minor twice the error of one float rounding per entry (`2 * FLT_EPSILON` of
+its two terms), as a zero squash scale leaves after the bone multiply.
 A stage projector (0x1df200) divides by the square of its size minus 50, so
 for one frame TEXTURE0 holds infinities and NaNs. With camera-space position
 (w = 1) a non-finite translation makes every S and T non-finite, and CLAMP

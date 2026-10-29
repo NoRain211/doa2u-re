@@ -1795,6 +1795,15 @@ static int reflection_coverage_tests(void)
         recomp_guest_store(DEVICE + 0xde0u, rounded, sizeof rounded);
         invoke(0x348240u, 6u, 3u, VERTICES, 32u);
         CHECK(submits == 0u && coverage_queries == 0u && recomp_runtime.registers.esp == STACK + 20u);
+        /* Rows apart by a few times the allowance keep area and need the query. */
+        float apart[16];
+        memcpy(apart, rounded, sizeof apart);
+        apart[8] *= 1.000002f;
+        recomp_guest_store(DEVICE + 0xde0u, apart, sizeof apart);
+        covered = false;
+        invoke(0x348240u, 6u, 3u, VERTICES, 32u);
+        CHECK(submits == 0u && coverage_queries == 1u && recomp_runtime.registers.esp == STACK + 20u);
+        coverage_queries = 0u;
         recomp_guest_store(DEVICE + 0xde0u, collapsed, sizeof collapsed);
         /* A flattened plane keeps area; only raster coverage proves it unused. */
         *recomp_memory_u32(DEVICE + 0xde0u + 40u) = 0x3f800000u;
