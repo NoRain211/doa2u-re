@@ -95,6 +95,7 @@ static void bridge_rtl_leave_critical_section(void)
     }
     recomp_runtime.registers.esp = entry_esp + 8u;
     recomp_runtime.registers.eax = 0u;
+    if (recursion == 0u) recomp_kernel_poll_host_waits();
 }
 
 RecompFunction recomp_kernel_startup(uint32_t ordinal)

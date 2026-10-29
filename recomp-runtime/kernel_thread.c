@@ -73,6 +73,7 @@ static GuestThread threads[MAX_THREADS] = {
 };
 static unsigned current_thread;
 static bool scheduler_started;
+static unsigned host_waits; /* Threads blocked in recomp_kernel_wait_host. */
 
 /* RECOMP_PERF_COUNTER frame breakdown: host QPC ticks each guest thread ran,
    and ticks the scheduler slept with nothing runnable, since the last report. */
@@ -311,6 +312,7 @@ static bool thread_ready(GuestThread *thread)
     if (thread->host_done != NULL) {
         if (!thread->host_done(thread->host_context)) return false;
         thread->host_done = NULL;
+        --host_waits;
         thread->wait_result = THREAD_STATUS_SUCCESS;
     } else if (thread->alertable && thread->apc_count != 0u) {
         thread->wait_result = THREAD_STATUS_USER_APC;
@@ -513,8 +515,17 @@ bool recomp_kernel_wait_host(bool (*done)(void *context), void *context)
     thread->alertable = false;
     thread->deadline = UINT64_MAX;
     thread->waiting = true;
+    ++host_waits;
     if (!thread_ready(thread)) schedule();
     return true;
+}
+
+/* Host work ends without a guest interrupt, so a thread polling for its result
+   never waits and would starve the thread that awaits it. Lock releases offer
+   the same bounded slice as clock reads while host work is pending. */
+void recomp_kernel_poll_host_waits(void)
+{
+    if (host_waits != 0u) recomp_kernel_poll();
 }
 
 static uint32_t wait_objects(uint32_t count, const uint32_t *objects,

@@ -6,7 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { WORKER = 0x123400u, APC = 0x123410u, HOST_PEER = 0x123420u, STATE = 0x2000u, MAIN_ESP = 0x8000u };
+enum { WORKER = 0x123400u, APC = 0x123410u, HOST_PEER = 0x123420u, HOST_SPINNER = 0x123430u,
+    STATE = 0x2000u, LOCK = 0x2100u, MAIN_ESP = 0x8000u };
 static uint32_t events[2], handles[2], turns[2], apcs[2];
 static int passed = 1;
 
@@ -95,10 +96,34 @@ static bool host_peer_done(void *context)
     return host_peer_ran != 0;
 }
 
+/* A guest thread polling under a lock for a host read's result never waits,
+   so the read's thread must still resume once the read is done. */
+static unsigned host_spins;
+static int host_spinner_released, host_spinner_saw_release;
+
+static void host_spinner(void)
+{
+    const uint64_t limit = recomp_xapi_performance_counter() + UINT64_C(2000000000);
+    while (!host_spinner_released && recomp_xapi_performance_counter() < limit) {
+        KERNEL(277u, LOCK);
+        KERNEL(294u, LOCK);
+        ++host_spins;
+    }
+    host_spinner_saw_release = host_spinner_released;
+    kernel_return(2u, 0u);
+}
+
+static bool host_spin_done(void *context)
+{
+    (void)context;
+    return host_spins >= 100u;
+}
+
 static RecompFunction lookup(uint32_t address)
 {
     if (address == WORKER) return worker;
     if (address == HOST_PEER) return host_peer;
+    if (address == HOST_SPINNER) return host_spinner;
     if (address == APC) return apc;
     return recomp_lookup_kernel(address);
 }
@@ -142,6 +167,13 @@ int main(void)
         HOST_PEER, 0u, 0u, 0u, 0u), 0u);
     check("host wait", recomp_kernel_wait_host(host_peer_done, NULL), 1u);
     check("host wait ran peer", host_peer_ran, 1u);
+    check("init lock", KERNEL(291u, LOCK), 0u);
+    check("create host spinner", KERNEL(255u, STATE, 0u, 0x4000u, 0x40u, 0u,
+        HOST_SPINNER, 0u, 0u, 0u, 0u), 0u);
+    check("host wait under spin", recomp_kernel_wait_host(host_spin_done, NULL), 1u);
+    host_spinner_released = 1;
+    recomp_kernel_run_threads();
+    check("spinner yielded to finished host wait", host_spinner_saw_release, 1u);
     check("main stack", recomp_runtime.registers.esp, MAIN_ESP);
     check("main PCR thread restored", *recomp_memory_u32(XBOX_PCR_BASE + 0x28u), XBOX_STARTUP_THREAD_OBJECT);
     check("main TLS restored", *recomp_memory_u32(XBOX_PCR_BASE + 4u), XBOX_STARTUP_THREAD_STACK_SLOT + 0x44u);
