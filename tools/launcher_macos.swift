@@ -75,8 +75,8 @@ final class LauncherView: NSView {
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
     ]
-    // The menu cursor picks a page tab; inside a page the row cursor picks a setting column.
-    var menu = LauncherView.playPage, row = 0, inPage = false
+    // The tab cursor picks a page; inside a page the row cursor picks a setting column.
+    var tab = LauncherView.playPage, row = 0, inPage = false
     var tabs: [NSRect] = []
     let built = FileManager.default.fileExists(atPath: root.appendingPathComponent("build/recomp-program/recomp_program_runner").path)
     var onPlay: () -> Void = {}
@@ -98,7 +98,7 @@ final class LauncherView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    var rows: [Row] { pages[menu].rows }
+    var rows: [Row] { pages[tab].rows }
     var columnWidth: CGFloat { (bounds.width - 2 * LauncherView.side) / CGFloat(max(rows.count, 1)) }
 
     var chosen: [String: Any] {
@@ -119,8 +119,8 @@ final class LauncherView: NSView {
 
     func accept() {
         if !inPage {
-            if menu == LauncherView.playPage { onPlay(); return }
-            if menu == LauncherView.exitPage { NSApp.terminate(nil); return }
+            if tab == LauncherView.playPage { onPlay(); return }
+            if tab == LauncherView.exitPage { NSApp.terminate(nil); return }
             inPage = true
             row = 0
         } else {
@@ -134,8 +134,8 @@ final class LauncherView: NSView {
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
-        case 123: if inPage { row = max(row - 1, 0) } else { menu = max(menu - 1, 0) }
-        case 124: if inPage { row = min(row + 1, rows.count - 1) } else { menu = min(menu + 1, pages.count - 1) }
+        case 123: if inPage { row = max(row - 1, 0) } else { tab = max(tab - 1, 0) }
+        case 124: if inPage { row = min(row + 1, rows.count - 1) } else { tab = min(tab + 1, pages.count - 1) }
         case 126: if inPage { change(1) }
         case 125: if inPage { change(-1) } else if !rows.isEmpty { accept() }
         case 36, 76, 49: accept()
@@ -155,7 +155,7 @@ final class LauncherView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let m = hitTab(p), i = hitColumn(p)
-        if !inPage && m >= 0 && m != menu { menu = m; needsDisplay = true }
+        if !inPage && m >= 0 && m != tab { tab = m; needsDisplay = true }
         if inPage && i >= 0 && i != row { row = i; needsDisplay = true }
     }
 
@@ -163,7 +163,7 @@ final class LauncherView: NSView {
         let p = convert(event.locationInWindow, from: nil)
         let m = hitTab(p), i = hitColumn(p)
         defer { needsDisplay = true }
-        if m >= 0 { menu = m; inPage = false; accept(); return }
+        if m >= 0 { tab = m; inPage = false; accept(); return }
         guard i >= 0 else { return }
         // From the tabs, the first click only enters the page and selects the setting.
         let entering = !inPage
@@ -245,10 +245,10 @@ final class LauncherView: NSView {
         text("ULTIMATE", ultimateFont, chrome, NSRect(x: 0, y: 124, width: right - 4, height: 30), .right, shadow: true)
 
         // The chosen page in the bottom bar: its information line, then its settings side by side.
-        let page = pages[menu]
+        let page = pages[tab]
         text(inPage ? page.rows[row].info : page.info, infoFont, rgb(216, 202, 188),
              NSRect(x: side, y: LauncherView.infoY, width: w - 2 * side, height: 22))
-        if menu == LauncherView.playPage {
+        if tab == LauncherView.playPage {
             text("PRESS START BUTTON", titleFont, chrome, NSRect(x: side, y: valueY - 8, width: w - 2 * side, height: 40), shadow: true)
         }
         let colW = columnWidth
@@ -278,8 +278,8 @@ final class LauncherView: NSView {
         tabs = pages.enumerated().map { m, p in
             let tw = width(p.name, tabFont)
             let rect = NSRect(x: tx, y: tabY, width: tw, height: tabH)
-            text(p.name, tabFont, m == menu ? rgb(255, 243, 228) : rgb(169, 156, 144), NSRect(x: tx, y: tabY, width: tw + 4, height: tabH))
-            if m == menu {
+            text(p.name, tabFont, m == tab ? rgb(255, 243, 228) : rgb(169, 156, 144), NSRect(x: tx, y: tabY, width: tw + 4, height: tabH))
+            if m == tab {
                 NSGradient(starting: rgb(247, 220, 181), ending: rgb(201, 138, 85))?.draw(in: NSRect(x: tx, y: tabY + tabH, width: tw, height: 3), angle: 0)
             }
             tx += tw + 18
