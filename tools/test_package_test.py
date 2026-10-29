@@ -18,6 +18,8 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertTrue(shipped("docs/building.md", "macos"))
         self.assertFalse(shipped("tools/launcher_sdl.cpp", "macos"))
         self.assertTrue(shipped("recomp-runtime/kernel_file.c", "linux"))
+        # build_game.py --disassemble reads it.
+        self.assertTrue(shipped("tools/doa2u/seed_functions.json", "windows"))
 
     def test_developer_notes_stay_out(self):
         for path in ("AGENTS.md", "CONTEXT.md", "README.md", "docs/bring-up.md", "tools/test_run_game.py"):

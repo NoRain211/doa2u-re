@@ -16,7 +16,7 @@ SUBMODULE = "tools/xboxrecomp"
 # A release holds what building and playing need; developer and agent material stays in the repository.
 DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitignore", ".gitmodules",
              "private/README.md", "tools/package_test.py", "tools/public_export.py", "tools/xbe_info.py",
-             "tools/doa2u/function_status.json", "tools/doa2u/seed_functions.json", SUBMODULE}
+             "tools/doa2u/function_status.json", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
 # Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
 WINDOWS_ONLY = {"tools/launcher.cs", *(f"recomp-runtime/{name}" for name in (
@@ -129,8 +129,15 @@ def main():
     with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as package:
         for path, data in archive(ROOT, f"{name}/", lambda path: shipped(path, args.platform)):
             package.writestr(path, data)
-        for path, data in archive(ROOT / SUBMODULE, f"{name}/{SUBMODULE}/", lifter_shipped):
+        lifter_prefix = f"{name}/{SUBMODULE}/"
+        lifter = set()
+        for path, data in archive(ROOT / SUBMODULE, lifter_prefix, lifter_shipped):
             package.writestr(path, data)
+            lifter.add(path.filename[len(lifter_prefix):])
+        # A pin that moves part of the lift must not ship a ZIP that cannot build.
+        missing = sorted(LIFTER_FILES - lifter) + [d for d in LIFTER_DIRS if not any(p.startswith(d) for p in lifter)]
+        if missing:
+            raise SystemExit(f"{SUBMODULE} at its pin lacks {', '.join(missing)}; update the lifter lists")
         if windows:
             for artifact in artifacts[:2]:
                 package.write(ARTIFACTS / artifact, f"{name}/tools/artifacts/{artifact}")
