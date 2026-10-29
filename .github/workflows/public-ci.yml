@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: brew install sdl3 ninja shaderc spirv-cross
+      - run: swiftc -typecheck tools/launcher_macos.swift
       - run: cmake -S recomp-runtime -B build/recomp-runtime -G Ninja
       - run: cmake --build build/recomp-runtime
       - run: ctest --test-dir build/recomp-runtime --output-on-failure

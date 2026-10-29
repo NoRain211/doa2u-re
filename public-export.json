@@ -42,6 +42,7 @@
     "tools/test_dedication_card.py",
     "tools/launcher.cs",
     "tools/launcher-background.jpg",
+    "tools/launcher-background.png",
     "tools/test_run_game.py",
     "tools/launcher_sdl.cpp",
     "tools/launcher_macos.swift",
@@ -127,6 +128,11 @@
       "path": "tools/launcher-background.jpg",
       "sha256": "5947e43268c7a0a0cf3b85f90cf3839cb03c4e5fdb119b577e035a9ed408d0c2",
       "reason": "Launcher backdrop from committed DOA3 at 6c782d5: an AI-generated beach (Gemini), no game asset bytes. Update the hash with the file."
+    },
+    {
+      "path": "tools/launcher-background.png",
+      "sha256": "2df2429f1b9d3c7607dcf8d9ec1aefadf379f1baad06abd64d3eee8d8447b38b",
+      "reason": "The same backdrop at 640x400 from committed DOA3 at ce393e4, for the SDL launcher, which loads PNG but not JPEG. Update the hash with the file."
     }
   ]
 }

@@ -21,6 +21,11 @@ Choices stay in `private/launcher.json`. DOA3's volume, free camera and
 swimsuit pages are omitted; DOA2U adds surround and intro-movie pages, extends
 MSAA through 32x, and runs its authenticated Python tools for the build and
 play. Resolution presets keep the same height/480 scaling contract.
+The macOS (`tools/launcher_macos.swift`) and Linux (`tools/launcher_sdl.cpp`)
+launchers take the same Horizon Bar layout from committed DOA3 at `ce393e4`,
+with the same DOA2U pages and MSAA up to SDL_GPU's 8x; the SDL one draws the
+640x400 `tools/launcher-background.png` from that commit. Neither has a build
+page, since `./build_game.sh` builds there.
 
 The macOS and Linux ports take the host layer of committed DOA3 at `48d05e9`
 (its PR #7), which came from DOAXBV's macOS and Linux ports: `win32_compat`,

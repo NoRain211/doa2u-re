@@ -50,9 +50,11 @@ distrobox that shares your home folder, then play on SteamOS itself. To
 play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
-Play: ./launcher.sh opens a window to pick resolution, MSAA, SMAA,
-widescreen, whether to skip the intro movies and 5.1 surround, saves the choices and
-starts the game. ./run_game.sh plays again with the saved choices. The
+Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
+on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS and the intro skip on
+MOVIES, then choose START GAME (a controller, the arrow keys with Enter and
+Esc, the mouse or touch). It saves the choices and starts the game.
+./run_game.sh plays again with the saved choices. The
 first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache live in
 private/play-disc. Start + Back + both triggers resets the game.
