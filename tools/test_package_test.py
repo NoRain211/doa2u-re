@@ -24,6 +24,7 @@ class ReleaseSelectionTest(unittest.TestCase):
             self.assertFalse(shipped(path, "windows"), path)
         self.assertTrue(lifter_shipped("tools/recomp/__main__.py"))
         self.assertTrue(lifter_shipped("LICENSES/LGPL-2.1.txt"))
+        self.assertTrue(lifter_shipped("templates/runtime/recomp_types.h"))
         self.assertFalse(lifter_shipped("tools/recomp/test_lifter_fpu.py"))
         self.assertFalse(lifter_shipped("README.md"))
         self.assertFalse(lifter_shipped("src/kernel/kernel.c"))

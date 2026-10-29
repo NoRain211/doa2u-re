@@ -31,9 +31,10 @@ POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md",
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
                   "linux": POSIX_ONLY | {"tools/launcher_sdl.cpp", "tools/launcher-background.png"}}
-# The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser).
+# The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
+# and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")
-LIFTER_FILES = {"LICENSE", "NOTICE", "tools/__init__.py"}
+LIFTER_FILES = {"LICENSE", "NOTICE", "tools/__init__.py", "templates/runtime/recomp_types.h"}
 # extract-xiso.exe and its LICENSE.TXT, copied from the DOA3 test package, and
 # dedication-photo.jpg, which run_game.py turns into the staff-roll card.
 ARTIFACTS = ROOT / "private" / "release-assets"

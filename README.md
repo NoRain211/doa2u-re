@@ -231,8 +231,11 @@ python tools/package_test.py 0.1.10-Alpha --platform macos
 python tools/package_test.py 0.1.10-Alpha --platform linux
 ```
 
-It zips committed HEAD, the pinned lifter and the photo from
-`private/release-assets/`. The Windows ZIP adds extract-xiso and its license
+It zips the files of committed HEAD that building and playing on that platform
+need, the pinned lifter's lift and licenses, and the photo from
+`private/release-assets/`. Developer notes, tests outside the build and other
+platforms' launchers and backends stay out; `tools/package_test.py` lists them.
+The Windows ZIP adds extract-xiso and its license
 with [test-release.md](docs/test-release.md) as `README.txt`; the macOS and
 Linux ZIPs use [test-release-macos.md](docs/test-release-macos.md) and
 [test-release-linux.md](docs/test-release-linux.md).
