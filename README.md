@@ -60,7 +60,7 @@ keeps running.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, an
-  optional intro-movie skip and 5.1 surround, and remembers them. `DOA2U.exe` plays
+  optional intro-movie skip, 5.1 surround and the unlock setting, and remembers them. `DOA2U.exe` plays
   with the same choices.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
   character and costume starts unlocked. The game's soft reset
@@ -120,7 +120,8 @@ Visual Studio or administrator approval.
    (about 15 minutes). The build stops unless it reproduces the exact program
    the developers tested.
 3. Pick resolution, MSAA, SMAA and widescreen on **VIDEO SETTINGS**, stereo or
-   5.1 on **AUDIO SETTINGS** and the intro skip on **MOVIES**, then choose
+   5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
+   **GAMEPLAY** to leave unlocks to play, then choose
    **START GAME**. A controller, the keyboard or the mouse all work. Your
    choices are remembered, and `DOA2U.exe` plays with them later.
 
@@ -220,8 +221,9 @@ window. The build fetches pinned, hash-verified copies of SDL3 and
 
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.
-`--no-unlock-all` turns off the automatic character and costume unlock, so
-unlocks come from play; profiles already saved with the unlock keep it.
+`--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
+off the automatic character and costume unlock, so unlocks come from play;
+profiles already saved with the unlock keep it.
 
 To package a release ZIP from a clean checkout:
 

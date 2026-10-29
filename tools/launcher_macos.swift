@@ -54,7 +54,7 @@ final class LauncherView: NSView {
     static let topH: CGFloat = 44, side: CGFloat = 30, fadeY: CGFloat = 334
     static let infoY: CGFloat = 380, labelY: CGFloat = 414, valueY: CGFloat = 434, valueH: CGFloat = 30
     static let tabY: CGFloat = 494, tabH: CGFloat = 26
-    static let playPage = 3, exitPage = 4
+    static let playPage = 4, exitPage = 5
 
     // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
@@ -68,10 +68,13 @@ final class LauncherView: NSView {
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
     let intro = Row("Intro Movies", "Skip goes straight to the title screen at boot", ["Play", "Skip"],
                     boolSetting("skipIntro", false) ? 1 : 0)
+    let unlock = Row("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them",
+                     ["Everything", "Earn"], boolSetting("unlockAll", true) ? 0 : 1)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
+        Page(name: "GAMEPLAY", info: "Offers every character and costume, or leaves them to earn through play", rows: [unlock]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
     ]
@@ -111,6 +114,7 @@ final class LauncherView: NSView {
             "widescreen": screen.index == 1,
             "skipIntro": intro.index == 1,
             "surround": surround.index == 1,
+            "unlockAll": unlock.index == 0,
         ]
     }
 

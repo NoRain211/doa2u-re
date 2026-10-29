@@ -671,7 +671,8 @@ and +0x2ed4 (`0x11e5f0`). After each Swap, the runner repeats the game's award
 loops (`0xdc640`, `0xdc100`): each costume byte becomes its count and the three
 flags become 1. Loaded profiles get the same values, and the next save stores
 them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
-`--no-unlock-all` (runner and `run_game.py`) skips this step, so unlocks
+`--no-unlock-all` (runner and `run_game.py`) and the launchers' **Unlocks: Earn**
+(`unlockAll` in `launcher.json`) skip this step, so unlocks
 come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.

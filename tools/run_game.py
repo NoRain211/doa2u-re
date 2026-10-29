@@ -81,7 +81,7 @@ def saved_settings():
     if saved.get("msaa") in (1, 2, 4, 8, 16, 32):
         options["msaa"] = saved["msaa"]
     for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("skipIntro", "skip_intro"),
-                        ("surround", "surround")):
+                        ("surround", "surround"), ("unlockAll", "unlock_all")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     return options
@@ -244,7 +244,8 @@ if __name__ == "__main__":
                              args.input_analog_pulse_at, pick("widescreen", args.widescreen),
                              pick("msaa", args.msaa), pick("smaa", args.smaa),
                              pick("resolution", args.resolution), args.story_finale,
-                             args.skip_intro or saved.get("skip_intro", False), args.unlock_all,
+                             args.skip_intro or saved.get("skip_intro", False),
+                             args.unlock_all and saved.get("unlock_all", True),
                              pick("surround", args.surround)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
