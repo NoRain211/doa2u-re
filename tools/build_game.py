@@ -46,6 +46,17 @@ def build_fraction(plan, finished, lines, elapsed):
     return done / total
 
 
+def failure_excerpt(lines, size=20):
+    """The log's end, led by the first error when it lies earlier: CMake prints its cause before a long help."""
+    end = max(len(lines) - size, 0)
+    first = next((i for i, line in enumerate(lines[:end]) if "error" in line.lower()), None)
+    if first is None:
+        return lines[end:]
+    if first + size >= end:
+        return lines[first:]
+    return [*lines[first:first + size], "...", *lines[end:]]
+
+
 class Progress:
     """One console bar across the build steps; each step's output still goes to its log."""
 
@@ -85,8 +96,8 @@ class Progress:
         except subprocess.CalledProcessError:
             stop.set()
             ticker.join()
-            tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
-            print(f"\n{LABELS[self.plan[self.finished]]} failed. The end of {log_path}:", *tail, sep="\n")
+            excerpt = failure_excerpt(log_path.read_text(encoding="utf-8", errors="replace").splitlines())
+            print(f"\n{LABELS[self.plan[self.finished]]} failed. Excerpt of {log_path}:", *excerpt, sep="\n")
             raise
         finally:
             stop.set()
