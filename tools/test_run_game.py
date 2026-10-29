@@ -49,6 +49,34 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                 with patch("run_game.ROOT", root):
                     self.assertEqual(saved_settings(), expected)
 
+    @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
+    def test_launcher_held_down_enters_a_page_without_changing_a_value(self):
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
+$form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
+$flags = [Reflection.BindingFlags]'NonPublic, Instance'
+$type.GetField('menu', $flags).SetValue($form, 0)
+$press = $type.GetMethod('Press', $flags)
+$row = $type.GetField('resolution', $flags).GetValue($form)
+$row.Index = 2
+$press.Invoke($form, @([Windows.Forms.Keys]::Down, $false))
+$press.Invoke($form, @([Windows.Forms.Keys]::Down, $true))
+$held = $row.Index
+$press.Invoke($form, @([Windows.Forms.Keys]::Down, $false))
+"$($type.GetField('inPage', $flags).GetValue($form)) $held $($row.Index)"
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            build_launchers(Path(folder))
+            env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(Path(folder) / "Launcher.exe"))
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-STA",
+                                     "-ExecutionPolicy", "Bypass", "-Command", script],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Entered the page; the repeat left 1080p alone; a fresh press stepped down to 720p.
+            self.assertEqual(result.stdout.split(), ["True", "2", "1"])
+
     def test_play_keeps_player_saves_and_has_no_deadline_or_script(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
