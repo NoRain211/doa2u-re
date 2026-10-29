@@ -15,9 +15,9 @@ from extract_iso import sha256
 class BuildTests(unittest.TestCase):
     def test_linux_build_stops_before_import_in_a_folder_the_shell_misreads(self):
         with patch("build_game.sys.platform", "linux"), patch("build_game.import_disc") as imported:
-            with patch("build_game.ROOT", "Downloads/DOA2U-0.1 (1).8-Alpha"), \
-                    self.assertRaisesRegex(ValueError, "Rename or move"):
-                build(iso=Path("disc.iso"))
+            for root in ("Downloads/DOA2U-0.1 (1).8-Alpha", "Downloads/DOA2U\nAlpha"):
+                with patch("build_game.ROOT", root), self.assertRaisesRegex(ValueError, "Rename or move"):
+                    build(iso=Path("disc.iso"))
             imported.assert_not_called()
             with patch("build_game.ROOT", "Downloads/DOA2U 0.1.8-Alpha"), \
                     patch("build_game.shutil.which", return_value=None), \

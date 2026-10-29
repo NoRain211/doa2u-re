@@ -207,7 +207,8 @@ def import_disc(iso, extractor=None):
 def build(build_only=False, lift_only=False, iso=None, disassemble=False, extractor=None):
     windows = sys.platform == "win32"
     # SDL3's Wayland header step hands the build path to /bin/sh unquoted; spaces survive, these do not.
-    if sys.platform.startswith("linux") and set(str(ROOT)) & set("()&;|<>`$'\"\\*?[]!#~{}"):
+    if (sys.platform.startswith("linux") and not lift_only
+            and set(str(ROOT)) & set("()&;|<>`$'\"\\*?[]!#~{}\n")):
         raise ValueError(f"Rename or move {ROOT} to a folder without ( ) or other shell symbols"
                          " in its path, such as DOA2U-0.1.8-Alpha, and run the build again")
     if iso is not None:
