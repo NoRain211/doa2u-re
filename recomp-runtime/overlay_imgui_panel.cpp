@@ -34,20 +34,21 @@ void recomp_overlay_imgui_style(float target_height)
    entry (one per player for the suit switch). */
 void recomp_overlay_imgui_build(const RecompOverlayText &text, float width, float height)
 {
-    if (text.title[0] == '\0' && text.count == 0u) return;
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-    ImGui::SetNextWindowPos(ImVec2(width * 0.5f, height * 0.17f), 0, ImVec2(0.5f, 0.0f));
-    /* Fixed width, wide enough for the longest suit line, so the box does
-       not change size while scrolling. */
-    const float fixed = ImGui::CalcTextSize("P1  307 / 307  Carnation (skirt)  ").x +
-        ImGui::GetStyle().WindowPadding.x * 2.0f;
-    ImGui::SetNextWindowSizeConstraints(ImVec2(fixed, 0.0f), ImVec2(fixed, height));
-    ImGui::Begin("recomp-overlay-panel", nullptr, flags);
-    if (text.title[0] != '\0') ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.35f, 1.0f), "%s", text.title);
-    for (unsigned i = 0u; i < text.count; ++i) ImGui::TextUnformatted(text.line[i]);
-    ImGui::End();
+    if (text.title[0] != '\0' || text.count != 0u) {
+        ImGui::SetNextWindowPos(ImVec2(width * 0.5f, height * 0.17f), 0, ImVec2(0.5f, 0.0f));
+        /* Fixed width, wide enough for the longest suit line, so the box does
+           not change size while scrolling. */
+        const float fixed = ImGui::CalcTextSize("P1  307 / 307  Carnation (skirt)  ").x +
+            ImGui::GetStyle().WindowPadding.x * 2.0f;
+        ImGui::SetNextWindowSizeConstraints(ImVec2(fixed, 0.0f), ImVec2(fixed, height));
+        ImGui::Begin("recomp-overlay-panel", nullptr, flags);
+        if (text.title[0] != '\0') ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.35f, 1.0f), "%s", text.title);
+        for (unsigned i = 0u; i < text.count; ++i) ImGui::TextUnformatted(text.line[i]);
+        ImGui::End();
+    }
     /* The hint: the controls, along the bottom. */
     if (text.hint[0] == '\0') return;
     ImGui::SetNextWindowPos(ImVec2(width * 0.5f, height * 0.97f), 0, ImVec2(0.5f, 1.0f));

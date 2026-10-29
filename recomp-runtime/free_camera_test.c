@@ -28,7 +28,10 @@ int main(void)
 
     const float eye[3] = {1.0f, 2.0f, 3.0f};
     const float ahead[3] = {1.0f, 2.0f, 13.0f};
-    check(recomp_free_camera_begin(&camera, eye, ahead, 0.8f), "begin from a level view");
+    if (!recomp_free_camera_begin(&camera, eye, ahead, 0.8f)) {
+        fprintf(stderr, "free camera test failed: begin from a level view\n");
+        return 1;
+    }
     check(near(camera.heading, 0.0f) && near(camera.pitch, 0.0f), "level view down +Z");
     check(near(camera.focus, 10.0f) && near(camera.speed, 5.0f), "focus and speed from the gap");
     recomp_free_camera_target(&camera, target);

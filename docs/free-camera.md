@@ -30,7 +30,7 @@ running until you freeze it.
 | Turn to the next fighter | **\\** (backslash) | D-pad left |
 | Screenshot of the game's frame, without the panel | **F12** (works with the camera off too) | D-pad right (while flying) |
 
-While the camera flies, a panel at the top left names the camera and whether
+While the camera flies, a panel near the top centre names the camera and whether
 the game is frozen; a line along the bottom lists the controls: the
 keyboard's after a key was last used, the controller's after a controller was
 (and from the start on a Steam Deck). The camera starts where the game's

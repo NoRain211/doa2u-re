@@ -13,11 +13,22 @@
 #include <knownfolders.h>
 #include <shlobj.h>
 #else
+#include <fcntl.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #define make_folder(path) mkdir(path, 0755)
 #define open_file(path, mode) fopen(path, mode)
 #define remove_file(path) remove(path)
+
+static FILE *create_file(const char *path)
+{
+    const int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) return NULL;
+    FILE *file = fdopen(fd, "wb");
+    if (file == NULL) close(fd);
+    return file;
+}
 #endif
 
 #ifdef _WIN32
@@ -52,6 +63,11 @@ static void remove_file(const char *path)
 {
     wchar_t wide[1200];
     if (widen(path, wide, 1200)) _wremove(wide);
+}
+
+static FILE *create_file(const char *path)
+{
+    return open_file(path, "wbx");
 }
 #endif
 
@@ -167,7 +183,8 @@ bool recomp_screenshot_write_png(const char *path, const uint8_t *bgra,
     put32(zlib + at, (b << 16) | a);
     at += 4u;
 
-    FILE *file = open_file(path, "wb");
+    /* Never replaces a file, so a failed write removes only its own. */
+    FILE *file = create_file(path);
     if (file == NULL) goto done;
     static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
     uint8_t header[13];
@@ -230,8 +247,10 @@ bool recomp_screenshot_path(char *path, size_t size)
     char stamp[32];
     strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &local);
     for (unsigned n = 0u; n < 100u; ++n) {
-        if (n == 0u) snprintf(path, size, "%s/DOA2U-%s.png", folder, stamp);
-        else snprintf(path, size, "%s/DOA2U-%s-%u.png", folder, stamp, n);
+        const int needed = n == 0u
+            ? snprintf(path, size, "%s/DOA2U-%s.png", folder, stamp)
+            : snprintf(path, size, "%s/DOA2U-%s-%u.png", folder, stamp, n);
+        if (needed < 0 || (size_t)needed >= size) return false;
         FILE *existing = open_file(path, "rb");
         if (existing == NULL) return true;
         fclose(existing);
