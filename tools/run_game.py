@@ -129,8 +129,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
         raise ValueError("Analog polls require positive uint64 polls and indices 0..7, at most 1024")
     receipt_path = ROOT / "private/program/receipt.json"
     if not receipt_path.is_file():
-        raise ValueError('The game is not built yet. Drag your Disc 2 ISO onto BuildGame.cmd '
-                         'and wait for "Build complete"; if it says "Build failed", report that line')
+        raise ValueError('The game is not built yet. Build it from your Disc 2 ISO and wait for '
+                         '"Build complete"; if it says "Build failed", report that line')
     selected = selected_xbe()
     generated = ROOT / "private/program/generated"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))

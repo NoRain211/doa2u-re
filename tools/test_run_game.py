@@ -5,52 +5,18 @@ import tempfile
 import unittest
 import json
 import os
-import subprocess
 from unittest.mock import Mock, patch
 
+from package_test import build_launchers
 from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
 
 
 class DiscTests(unittest.TestCase):
-    @unittest.skipUnless(os.name == "nt", "WinForms launcher requires Windows")
-    def test_settings_dialog_saves_resolution_and_hands_choices_to_runner(self):
-        script = r'''
-$ErrorActionPreference = 'Stop'
-$source = Get-Content (Join-Path $env:RECOMP_LAUNCHER_TEST_SOURCE 'tools/launcher.ps1') -Raw
-$source = $source -replace '(?m)^trap [^\r\n]*', ''
-$source = $source.Replace('$root = Split-Path $PSScriptRoot -Parent', '$root = $env:RECOMP_LAUNCHER_TEST_SOURCE')
-$head = $source.Substring(0, $source.IndexOf('if ($form.ShowDialog()'))
-$tail = $source.Substring($source.IndexOf('$height = $heights'))
-$tail = $tail.Substring(0, $tail.LastIndexOf('exit $LASTEXITCODE'))
-function python { $script:launched = @($args); $global:LASTEXITCODE = 0 }
-foreach ($enabled in @($true, $false)) {
-    Invoke-Expression $head
-    if ($resolution.Items.Count -ne 5 -or $msaa.Items.Count -ne 6) { throw 'Missing graphics choices' }
-    $settingsPath = Join-Path $env:RECOMP_LAUNCHER_TEST_ROOT 'launcher.json'
-    $resolution.SelectedIndex = if ($enabled) { 4 } else { 0 }
-    $msaa.SelectedIndex = if ($enabled) { 5 } else { 4 }
-    $smaa.Checked = $widescreen.Checked = $skipIntro.Checked = $surround.Checked = $enabled
-    Invoke-Expression $tail
-    $saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
-    $height = if ($enabled) { 2160 } else { 480 }
-    $count = if ($enabled) { 32 } else { 16 }
-    if ($saved.height -ne $height -or $saved.msaa -ne $count -or
-        $saved.smaa -ne $enabled -or $saved.widescreen -ne $enabled -or
-        $saved.skipIntro -ne $enabled -or $saved.surround -ne $enabled) { throw 'Wrong saved graphics settings' }
-    $wide = if ($enabled) { '--widescreen' } else { '--no-widescreen' }
-    $smaaOption = if ($enabled) { '--smaa' } else { '--no-smaa' }
-    $surroundOption = if ($enabled) { '--surround' } else { '--no-surround' }
-    $expected = "--play --resolution $height --msaa $count $wide $smaaOption $surroundOption" + $(if ($enabled) { ' --skip-intro' } else { '' })
-    if (($launched[1..($launched.Count - 1)] -join ' ') -ne $expected) { throw 'Wrong runner options' }
-}
-'''
+    @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
+    def test_launchers_compile_as_windows_executables(self):
         with tempfile.TemporaryDirectory() as folder:
-            env = dict(os.environ, RECOMP_LAUNCHER_TEST_ROOT=folder,
-                       RECOMP_LAUNCHER_TEST_SOURCE=str(Path(__file__).resolve().parents[1]))
-            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-STA",
-                                     "-ExecutionPolicy", "Bypass", "-Command", script],
-                                    env=env, capture_output=True, text=True, timeout=30)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            build_launchers(Path(folder))
+            self.assertEqual(sorted(path.name for path in Path(folder).iterdir()), ["DOA2U.exe", "Launcher.exe"])
 
     def test_play_keeps_player_saves_and_has_no_deadline_or_script(self):
         with tempfile.TemporaryDirectory() as folder:

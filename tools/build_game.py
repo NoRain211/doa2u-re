@@ -180,7 +180,7 @@ def write_functions(disasm):
 def import_disc(iso, extractor=None):
     """Extract a user's ISO once into private/imported-disc and select its game executable."""
     if not iso.is_file():
-        raise ValueError("Drag your Dead or Alive Ultimate Disc 2 ISO onto BuildGame.cmd")
+        raise ValueError("Choose your Dead or Alive Ultimate Disc 2 ISO and build again")
     imported = ROOT / "private/imported-disc"
     receipt = imported / "receipt.json"
     if receipt.is_file():
@@ -319,7 +319,7 @@ def main():
         print(f"Build failed: {error}", file=sys.stderr)
         return 1
     if args.iso is not None:
-        print("Build complete. " + ("Double-click play.cmd to play." if sys.platform == "win32"
+        print("Build complete. " + ("Run DOA2U.exe to play." if sys.platform == "win32"
                                     else "Run ./launcher.sh to play."))
     return 0
 

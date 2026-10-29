@@ -3,9 +3,11 @@
 # Adapted from committed DOA3 tools/package_test.py at 5747204.
 import argparse
 import io
+import os
 from pathlib import Path
 import subprocess
 import tarfile
+import tempfile
 import time
 import zipfile
 
@@ -20,6 +22,24 @@ ARTIFACTS = ROOT / "private" / "release-assets"
 PLATFORMS = {"windows": ("", "docs/test-release.md"),
              "macos": ("-macOS", "docs/test-release-macos.md"),
              "linux": ("-Linux", "docs/test-release-linux.md")}
+
+
+# The C# compiler every Windows ships builds both launchers from tools/launcher.cs.
+CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+LAUNCHERS = {"Launcher.exe": [], "DOA2U.exe": ["/define:PLAY_ONLY"]}
+# Optional private icon (fan art from issue #39 holds Tecmo's character and logo art, so it stays untracked).
+ICON = ROOT / "private" / "launcher-icon.ico"
+
+
+def build_launchers(out_dir):
+    """Launcher.exe (build, settings, play) and DOA2U.exe (play) into out_dir."""
+    if not CSC.is_file():
+        raise SystemExit(f"The launchers need Windows: {CSC} is missing")
+    icon = [f"/win32icon:{ICON}"] if ICON.is_file() else []
+    for exe, flags in LAUNCHERS.items():
+        subprocess.run([str(CSC), "/nologo", "/warnaserror", "/target:winexe", "/r:System.Web.Extensions.dll",
+                        f"/resource:{ROOT / 'tools' / 'launcher-background.jpg'},launcher-background.jpg",
+                        *icon, *flags, f"/out:{out_dir / exe}", str(ROOT / "tools" / "launcher.cs")], check=True)
 
 
 def git(*args, cwd=ROOT):
@@ -40,9 +60,16 @@ def archive(cwd, prefix):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("version")
+    parser.add_argument("version", nargs="?")
     parser.add_argument("--platform", choices=PLATFORMS, default="windows")
+    parser.add_argument("--launchers", type=Path, metavar="DIR",
+                        help="only build Launcher.exe and DOA2U.exe into DIR (the repository root for a checkout)")
     args = parser.parse_args()
+    if args.launchers:
+        build_launchers(args.launchers)
+        return
+    if not args.version:
+        parser.error("give a version, or --launchers DIR")
     suffix, readme = PLATFORMS[args.platform]
     if git("status", "--porcelain", "--untracked-files=no").strip():
         raise SystemExit("Commit first: the package is built from HEAD")
@@ -70,6 +97,10 @@ def main():
         if windows:
             for artifact in artifacts[:2]:
                 package.write(ARTIFACTS / artifact, f"{name}/tools/artifacts/{artifact}")
+            with tempfile.TemporaryDirectory() as launchers:
+                build_launchers(Path(launchers))
+                for exe in LAUNCHERS:
+                    package.write(Path(launchers) / exe, f"{name}/{exe}")
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")
         package.write(ROOT / readme, f"{name}/README.txt")
     partial.rename(out)

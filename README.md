@@ -59,12 +59,13 @@ keeps running.
   own 5.1 surround mix. The intro and story movies play.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
-- **Launcher.** `play.cmd` picks resolution, anti-aliasing, widescreen, an
-  optional intro-movie skip and 5.1 surround, and remembers them.
+- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, an
+  optional intro-movie skip and 5.1 surround, and remembers them. `DOA2U.exe` plays
+  with the same choices.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
   character and costume starts unlocked. The game's soft reset
   (Start + Back + both triggers) restarts it.
-- **Built from your disc.** `BuildGame.cmd` lifts the game from your ISO and
+- **Built from your disc.** `Launcher.exe` lifts the game from your ISO and
   refuses any executable other than the one the developers tested.
 
 ## Status
@@ -114,12 +115,14 @@ Visual Studio or administrator approval.
 1. Download the ZIP from the
    [latest release](https://github.com/NoRain211/doa2u-re/releases/latest) and
    extract it into a new folder with a short path, such as `C:\DOA2U`.
-2. Drag your Disc 2 ISO onto `BuildGame.cmd` and wait for **Build complete**
+2. Open `Launcher.exe`, drag your Disc 2 ISO onto it (or choose it on the
+   **BUILD GAME** page) and choose **Build**. Wait for **Build complete**
    (about 15 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Run `play.cmd`, pick resolution, MSAA, SMAA, widescreen, whether to
-   skip the intro movies and whether to use 5.1 surround, then press
-   **Play**. Your choices are remembered.
+3. Pick resolution, MSAA, SMAA and widescreen on **VIDEO SETTINGS**, stereo or
+   5.1 on **AUDIO SETTINGS** and the intro skip on **MOVIES**, then choose
+   **START GAME**. A controller, the keyboard or the mouse all work. Your
+   choices are remembered, and `DOA2U.exe` plays with them later.
 
 The first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache
@@ -153,6 +156,7 @@ To build the game from a clone, initialize the lifter and pass your ISO:
 
 ```powershell
 git submodule update --init tools/xboxrecomp
+python tools/package_test.py --launchers .
 python tools/build_game.py <your-disc-2.iso>
 python tools/run_game.py --play
 ```
@@ -210,7 +214,7 @@ python tools/run_game.py --play --no-widescreen --msaa 1 --no-smaa
 The game picks its own 16:9 camera and menu layouts from the dashboard video
 setting, and the presenter shows that image at 16:9. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
-highest count the GPU supports. Arguments to `play.cmd` bypass the settings
+highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3 and
 [upstream SMAA](https://github.com/iryoku/smaa).
 

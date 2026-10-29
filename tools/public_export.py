@@ -71,6 +71,7 @@ class Manifest:
     allowed_private_paths: frozenset[str]
     forbidden_extensions: frozenset[str]
     byte_literal_exceptions: frozenset[str]
+    binary_files: dict[str, str]
     max_file_bytes: int
     gitlinks: tuple[Gitlink, ...]
 
@@ -102,6 +103,10 @@ def load_manifest(path: Path = MANIFEST_PATH) -> Manifest:
             extension.lower() for extension in data["forbidden_extensions"]
         ),
         byte_literal_exceptions=frozenset(exception_hashes),
+        binary_files={
+            entry["path"]: entry["sha256"].lower()
+            for entry in data.get("binary_files", [])
+        },
         max_file_bytes=int(data["max_file_bytes"]),
         gitlinks=gitlinks,
     )
@@ -305,6 +310,13 @@ def verify_entries(
             continue
 
         included += 1
+        # A reviewed binary file is pinned to its exact bytes instead of
+        # being scanned as text.
+        if path in manifest.binary_files:
+            digest = hashlib.sha256(entries[path]).hexdigest()
+            if digest != manifest.binary_files[path]:
+                errors.append(f"{path}: binary file does not match its reviewed sha256 {digest}")
+            continue
         if require_public_tree and b"\r" in entries[path]:
             errors.append(f"{path}: public text must use LF line endings")
         errors.extend(scan_file(path, entries[path], manifest))
@@ -390,7 +402,8 @@ def export_tree(destination: Path) -> None:
     for path in included_paths:
         target = destination / Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(normalize_public_bytes(entries[path]))
+        target.write_bytes(entries[path] if path in manifest.binary_files
+                           else normalize_public_bytes(entries[path]))
 
     for gitlink in manifest.gitlinks:
         target = destination / Path(gitlink.path)

@@ -12,8 +12,6 @@
     "LICENSE",
     "NOTICE",
     "README.md",
-    "play.cmd",
-    "BuildGame.cmd",
     "docs/building.md",
     "run_game.sh",
     "launcher.sh",
@@ -41,7 +39,8 @@
     "tools/run_game.py",
     "tools/dedication_card.py",
     "tools/test_dedication_card.py",
-    "tools/launcher.ps1",
+    "tools/launcher.cs",
+    "tools/launcher-background.jpg",
     "tools/test_run_game.py",
     "tools/launcher_sdl.cpp",
     "tools/launcher_macos.swift",
@@ -120,6 +119,13 @@
     {
       "sha256": "fa429cf2d67c0218272b52f0c131753eb23995b77ab2236e8cf469062689ff99",
       "reason": "Combiner-word offsets within the runtime's pixel-shader state block in four_tap() of d3d8_draw_adapter.c; structure offsets, not retail bytes."
+    }
+  ],
+  "binary_files": [
+    {
+      "path": "tools/launcher-background.jpg",
+      "sha256": "5947e43268c7a0a0cf3b85f90cf3839cb03c4e5fdb119b577e035a9ed408d0c2",
+      "reason": "Launcher backdrop from committed DOA3 at 6c782d5: an AI-generated beach (Gemini), no game asset bytes. Update the hash with the file."
     }
   ]
 }

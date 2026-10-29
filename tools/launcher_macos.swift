@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // macOS launcher: pick resolution, anti-aliasing, widescreen, the intro skip
 // and 5.1 surround, remember them in private/launcher.json, then exit 0 so launcher.sh
-// starts the game. Mirrors tools/launcher.ps1, with MSAA up to SDL_GPU's 8x.
+// starts the game. Mirrors tools/launcher.cs, with MSAA up to SDL_GPU's 8x.
 // Exits 1 if the window is closed.
 // Adapted from the DOA3 launcher (NoRain211/doa3-re tools/launcher_macos.swift).
 import AppKit
@@ -53,7 +53,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         window.title = "Dead or Alive 2 Ultimate"
         window.delegate = self
-        // launcher.ps1's defaults: the screen height, the most MSAA, widescreen on.
+        // launcher.cs's defaults: the screen height, the most MSAA, widescreen on.
         let savedHeight = intSetting("height", screenHeight)
         let nearest = heights.lastIndex(where: { $0 <= savedHeight }) ?? 0
         addRow("Resolution", resolution,

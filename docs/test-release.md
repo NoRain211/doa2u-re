@@ -21,15 +21,19 @@ Build (once, about 15 minutes):
 1. Extract this ZIP to a folder with a short path, for example C:\DOA2U.
    On FAT32 or exFAT drives, common on USB sticks, the play folder holds a
    copy of the disc instead of hardlinks, so allow about 4 GB more space.
-2. Drag your Disc 2 ISO onto BuildGame.cmd. The ISO is only read.
+2. Open Launcher.exe and drag your Disc 2 ISO onto it, or choose it on the
+   BUILD GAME page, then choose Build. The ISO is only read.
 3. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
-   A progress bar and clock show it is still working; keep the window
-   open even when the bar moves slowly.
+   The launcher shows the elapsed time and the build's latest message; keep
+   it open until it finishes.
 
-Play: double-click play.cmd, pick resolution, MSAA, SMAA, widescreen,
-whether to skip the intro movies and whether to use 5.1 surround, and press Play; it remembers your
-choices. Widescreen uses the game's own 16:9 camera and menus. The first
+Play: open Launcher.exe, pick resolution, MSAA, SMAA and widescreen on VIDEO
+SETTINGS, stereo or 5.1 on AUDIO SETTINGS and the intro skip on MOVIES, then
+choose START GAME. A controller, the keyboard (arrows, Enter, Esc) or the
+mouse all work. It remembers your choices, and DOA2U.exe plays with the same
+choices. Widescreen
+uses the game's own 16:9 camera and menus. The first
 launch copies about 700 MB of the game's disc archives into its hard-disk
 cache, which takes a few seconds. Saves and the cache live in
 private\play-disc. Start + Back + both triggers resets the game.
@@ -54,7 +58,7 @@ the safari stage's heat haze does not ripple yet.
 Reporting problems: open an issue at
 https://github.com/NoRain211/doa2u-re/issues and say what you did and what
 happened. Copy the "recomp stop" or crash lines from the end of the newest
-log in private\play-logs, the error play.cmd shows if there is no log, or
+log in private\play-logs, the error Launcher.exe shows if there is no log, or
 the error from the newest private\build-logs folder if the build failed.
 Remove your user name and other private paths,
 and do not upload whole logs or any game files.

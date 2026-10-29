@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Linux launcher: pick resolution, anti-aliasing, widescreen, the intro skip
 // and 5.1 surround, remember them in private/launcher.json, then exit 0 so run_game.py
-// starts the game. Mirrors tools/launcher.ps1, with MSAA up to SDL_GPU's 8x. Adapted from the DOA3 launcher
+// starts the game. Mirrors tools/launcher.cs, with MSAA up to SDL_GPU's 8x. Adapted from the DOA3 launcher
 // (NoRain211/doa3-re tools/launcher_sdl.cpp). Gamepad,
 // keyboard, mouse and touch all work, so it runs from Steam Game Mode.
 // Exits 1 when closed without Play.
@@ -27,7 +27,7 @@ const int kSamples[] = {1, 2, 4, 8};
 
 enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SKIP_INTRO, SURROUND, PLAY, QUIT, ITEM_COUNT };
 
-// launcher.ps1's defaults: the screen height, the most MSAA, widescreen on.
+// launcher.cs's defaults: the screen height, the most MSAA, widescreen on.
 struct Settings {
     int height = 0;
     int msaa = 8;
@@ -41,7 +41,7 @@ struct Color { Uint8 r, g, b; };
 constexpr Color kBackground{11, 22, 34}, kPanel{19, 38, 58}, kSelected{31, 77, 110};
 constexpr Color kAccent{255, 179, 71}, kText{232, 241, 248}, kMuted{127, 155, 179};
 
-// Reads the flat object launcher.ps1, launcher_macos.swift and this file write.
+// Reads the flat object launcher.cs, launcher_macos.swift and this file write.
 bool jsonValue(const std::string &text, const char *key, std::string &value)
 {
     const auto at = text.find(std::string("\"") + key + "\"");

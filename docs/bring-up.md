@@ -61,7 +61,7 @@ Use `tools/run_game.py` for a bounded probe. It hardlinks the disc files
 runner identity. Private notes hold the observed
 frontier; a timeout by itself does not establish gameplay progress.
 
-For normal play, open `play.cmd` or run `python tools/run_game.py --play`.
+For normal play, open `DOA2U.exe` or run `python tools/run_game.py --play`.
 It uses the player's existing saves and physical controls with no time limit.
 Close the game window to exit. Session logs, including the runner identity and any
 runtime stop, are kept under `private/play-logs/`.
