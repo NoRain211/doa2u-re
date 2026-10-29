@@ -404,7 +404,10 @@ int main(int argc, char **argv)
             held_dx = dx;
             held_dy = dy;
             next_repeat = now + 350;
+            const bool was_in_page = launcher.in_page;
             if (dx || dy) launcher.move(dx, dy);
+            // A held Down that entered a page waits for release before it changes a value.
+            if (!was_in_page && launcher.in_page) next_repeat = SDL_MAX_UINT64;
         } else if ((dx || dy) && now >= next_repeat) {
             next_repeat = now + 120;
             launcher.move(dx, dy);

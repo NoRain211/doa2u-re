@@ -52,8 +52,9 @@ Mode. If one controller drives two players, turn Steam Input off for it.
 
 Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
 on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS and the intro skip on
-MOVIES, then choose START GAME (a controller, the arrow keys with Enter and
-Esc, the mouse or touch). It saves the choices and starts the game.
+MOVIES, then choose START GAME. A controller, the mouse or touch work; on the
+keyboard, arrows move, Enter selects and Esc goes back. It saves the choices
+and starts the game.
 ./run_game.sh plays again with the saved choices. The
 first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache live in
