@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import json
 import os
+import subprocess
 from unittest.mock import Mock, patch
 
 from package_test import build_launchers
@@ -13,10 +14,29 @@ from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_ca
 
 class DiscTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
-    def test_launchers_compile_as_windows_executables(self):
+    def test_launcher_saves_every_choice_run_game_reads(self):
+        # Reflection builds the real settings form, so a renamed key or a changed type in launcher.cs fails here.
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
+$form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
+$type.GetMethod('Settings').Invoke($form, $null) | ConvertTo-Json | Set-Content -Encoding ASCII $env:RECOMP_LAUNCHER_TEST_OUT
+'''
         with tempfile.TemporaryDirectory() as folder:
-            build_launchers(Path(folder))
-            self.assertEqual(sorted(path.name for path in Path(folder).iterdir()), ["DOA2U.exe", "Launcher.exe"])
+            root = Path(folder)
+            build_launchers(root)
+            self.assertTrue((root / "DOA2U.exe").is_file())
+            (root / "private").mkdir()
+            env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
+                       RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"))
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-STA",
+                                     "-ExecutionPolicy", "Bypass", "-Command", script],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with patch("run_game.ROOT", root):
+                self.assertEqual(sorted(saved_settings()), ["msaa", "resolution", "skip_intro", "smaa",
+                                                            "surround", "widescreen"])
 
     def test_play_keeps_player_saves_and_has_no_deadline_or_script(self):
         with tempfile.TemporaryDirectory() as folder:
