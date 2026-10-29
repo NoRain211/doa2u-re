@@ -13,7 +13,7 @@ import time
 import uuid
 
 from extract_iso import extract, run_logged, sha256
-from build_prerequisites import llvm_mingw
+from build_prerequisites import extract_xiso, llvm_mingw
 
 ROOT = Path(__file__).resolve().parents[1]
 LIFTER = ROOT / "tools/xboxrecomp"
@@ -182,7 +182,7 @@ def import_disc(iso, extractor=None):
             print(f"Removing the unfinished extraction in {imported}", flush=True)
             shutil.rmtree(imported)
         bundled = ROOT / "tools/artifacts/extract-xiso.exe"
-        extract(iso, imported, extractor or (bundled if bundled.is_file() else "extract-xiso"))
+        extract(iso, imported, extractor or (bundled if bundled.is_file() else extract_xiso(ROOT)))
     for xbe in sorted((imported / "disc").glob("*.xbe")):
         if sha256(xbe) == XBE_SHA256:
             path = ROOT / "private/target.json"
