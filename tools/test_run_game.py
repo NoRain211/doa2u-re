@@ -15,28 +15,39 @@ from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_ca
 class DiscTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
     def test_launcher_saves_every_choice_run_game_reads(self):
-        # Reflection builds the real settings form, so a renamed key or a changed type in launcher.cs fails here.
+        # Reflection builds the real settings form and sets every choice to its first or last
+        # option, so a renamed key, a changed type or a wrong value mapping in launcher.cs fails here.
         script = r'''
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-$type.GetMethod('Settings').Invoke($form, $null) | ConvertTo-Json | Set-Content -Encoding ASCII $env:RECOMP_LAUNCHER_TEST_OUT
+foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'surround', 'intro') {
+    $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
+    $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
+}
+# The serializer Game.SaveSettings writes launcher.json with.
+$json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($type.GetMethod('Settings').Invoke($form, $null))
+[IO.File]::WriteAllText($env:RECOMP_LAUNCHER_TEST_OUT, $json)
 '''
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             build_launchers(root)
             self.assertTrue((root / "DOA2U.exe").is_file())
             (root / "private").mkdir()
-            env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
-                       RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"))
-            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-STA",
-                                     "-ExecutionPolicy", "Bypass", "-Command", script],
-                                    env=env, capture_output=True, text=True, timeout=60)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            with patch("run_game.ROOT", root):
-                self.assertEqual(sorted(saved_settings()), ["msaa", "resolution", "skip_intro", "smaa",
-                                                            "surround", "widescreen"])
+            for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, widescreen=True,
+                                                skip_intro=True, surround=True)),
+                                   (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False,
+                                                skip_intro=False, surround=False))):
+                env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
+                           RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"),
+                           RECOMP_LAUNCHER_TEST_LAST="1" if last else "0")
+                result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-STA",
+                                         "-ExecutionPolicy", "Bypass", "-Command", script],
+                                        env=env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with patch("run_game.ROOT", root):
+                    self.assertEqual(saved_settings(), expected)
 
     def test_play_keeps_player_saves_and_has_no_deadline_or_script(self):
         with tempfile.TemporaryDirectory() as folder:
