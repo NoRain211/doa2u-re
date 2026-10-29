@@ -80,6 +80,10 @@ uint32_t recomp_kernel_current_thread_id(void);
 uint32_t recomp_kernel_close_thread_handle(uint32_t handle);
 void recomp_kernel_run_threads(void);
 void recomp_kernel_wait_for_vblank(uint64_t deadline_ns);
+/* Blocks the current guest thread until done(context) is true, running the
+   other guest threads meanwhile. done runs on the guest thread. Returns false
+   without waiting before the scheduler starts. */
+bool recomp_kernel_wait_host(bool (*done)(void *context), void *context);
 void recomp_kernel_thread_times(char *out, size_t size);
 RecompFunction recomp_kernel_video(uint32_t ordinal);
 RecompFunction recomp_kernel_file(uint32_t ordinal);

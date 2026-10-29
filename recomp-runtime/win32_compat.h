@@ -225,6 +225,15 @@ BOOL ReadFile(
     DWORD *lpNumberOfBytesRead,
     void *lpOverlapped);
 
+/* Reads at offset without the file pointer or lock checks, so another host
+   thread can read while the handle stays open. */
+BOOL recomp_win32_read_at(
+    HANDLE hFile,
+    uint64_t offset,
+    LPVOID lpBuffer,
+    DWORD nNumberOfBytesToRead,
+    DWORD *lpNumberOfBytesRead);
+
 BOOL WriteFile(
     HANDLE hFile,
     LPCVOID lpBuffer,

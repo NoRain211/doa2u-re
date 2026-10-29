@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { WORKER = 0x123400u, APC = 0x123410u, STATE = 0x2000u, MAIN_ESP = 0x8000u };
+enum { WORKER = 0x123400u, APC = 0x123410u, HOST_PEER = 0x123420u, STATE = 0x2000u, MAIN_ESP = 0x8000u };
 static uint32_t events[2], handles[2], turns[2], apcs[2];
 static int passed = 1;
 
@@ -80,9 +80,25 @@ static void worker(void)
     kernel_return(2u, 0u);
 }
 
+/* Host work ends a wait only once it reports done; meanwhile peers run. */
+static int host_peer_ran;
+
+static void host_peer(void)
+{
+    host_peer_ran = 1;
+    kernel_return(2u, 0u);
+}
+
+static bool host_peer_done(void *context)
+{
+    (void)context;
+    return host_peer_ran != 0;
+}
+
 static RecompFunction lookup(uint32_t address)
 {
     if (address == WORKER) return worker;
+    if (address == HOST_PEER) return host_peer;
     if (address == APC) return apc;
     return recomp_lookup_kernel(address);
 }
@@ -122,6 +138,10 @@ int main(void)
     recomp_kernel_run_threads();
     check("worker zero", turns[0], 3u);
     check("worker one", turns[1], 3u);
+    check("create host peer", KERNEL(255u, STATE, 0u, 0x4000u, 0x40u, 0u,
+        HOST_PEER, 0u, 0u, 0u, 0u), 0u);
+    check("host wait", recomp_kernel_wait_host(host_peer_done, NULL), 1u);
+    check("host wait ran peer", host_peer_ran, 1u);
     check("main stack", recomp_runtime.registers.esp, MAIN_ESP);
     check("main PCR thread restored", *recomp_memory_u32(XBOX_PCR_BASE + 0x28u), XBOX_STARTUP_THREAD_OBJECT);
     check("main TLS restored", *recomp_memory_u32(XBOX_PCR_BASE + 4u), XBOX_STARTUP_THREAD_STACK_SLOT + 0x44u);

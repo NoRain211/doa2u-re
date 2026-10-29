@@ -651,6 +651,13 @@ Guest FS refers to the PCR block. The guest-thread scheduler saves and
 restores each thread's current fiber. Without this binding, the tasks never
 run and the game only clears frames.
 
+Guest threads share one host thread, so `NtReadFile` on a handle without
+write access reads on a host worker while the reading thread waits and the
+scheduler runs the others (`recomp_kernel_wait_host`). A blocking read
+otherwise stalls frames and audio for its whole length; from a Steam Deck
+microSD card that was up to 1.4 s (issue #34). Handles with write access
+still read in place.
+
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start

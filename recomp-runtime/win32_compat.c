@@ -478,6 +478,40 @@ BOOL ReadFile(
     return TRUE;
 }
 
+BOOL recomp_win32_read_at(
+    HANDLE hFile,
+    uint64_t offset,
+    LPVOID lpBuffer,
+    DWORD nNumberOfBytesToRead,
+    DWORD *lpNumberOfBytesRead)
+{
+    if (hFile == INVALID_HANDLE_VALUE || hFile == NULL) {
+        last_error = ERROR_INVALID_HANDLE;
+        return FALSE;
+    }
+    RecompWin32FileHandle *h = (RecompWin32FileHandle *)hFile;
+    if ((h->access & (GENERIC_READ | 0x1u /* FILE_READ_DATA */)) == 0) {
+        last_error = ERROR_ACCESS_DENIED;
+        return FALSE;
+    }
+    DWORD total = 0;
+    while (total < nNumberOfBytesToRead) {
+        ssize_t ret = pread(h->fd, (char *)lpBuffer + total,
+            nNumberOfBytesToRead - total, (off_t)(offset + total));
+        if (ret < 0 && errno == EINTR) continue;
+        if (ret < 0) {
+            set_last_error_from_errno();
+            return FALSE;
+        }
+        if (ret == 0) break;
+        total += (DWORD)ret;
+    }
+    if (lpNumberOfBytesRead) {
+        *lpNumberOfBytesRead = total;
+    }
+    return TRUE;
+}
+
 BOOL WriteFile(
     HANDLE hFile,
     LPCVOID lpBuffer,

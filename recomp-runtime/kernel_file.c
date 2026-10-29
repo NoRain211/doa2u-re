@@ -16,6 +16,7 @@
 #include <windows.h>
 #else
 #include "win32_compat.h"
+#include <pthread.h>
 #endif
 
 static const uint32_t RECOMP_STATUS_SUCCESS = 0x00000000u;
@@ -57,10 +58,133 @@ typedef struct FileHandleEntry {
     RecompReadFilter read_filter;
     uint32_t save_owner;
     uint32_t delete_owner;
+    unsigned reads_pending; /* Close waits for these to finish. */
     char host_path[MAX_PATH_LEN];
 } FileHandleEntry;
 
 static FileHandleEntry file_handles[MAX_FILE_HANDLES];
+
+/* All guest threads share one host thread, so a blocking host read stalls
+   every one of them, frames and audio included; a slow card makes that a
+   visible freeze. Handles without write access therefore read on a host
+   worker while the scheduler runs the other guest threads, as the Xbox did
+   during DVD and disk DMA. The reading thread resumes when its bytes are in. */
+typedef struct HostRead {
+    HANDLE handle;
+    uint64_t offset;
+    void *buffer;
+    DWORD length;
+    DWORD bytes_read;
+    BOOL ok;
+    int done;
+    struct HostRead *next;
+} HostRead;
+
+static HostRead *reads_queued;
+static int read_worker_state; /* 0 not started, 1 running, -1 failed */
+#ifdef _WIN32
+static SRWLOCK read_lock = SRWLOCK_INIT;
+static CONDITION_VARIABLE read_queued = CONDITION_VARIABLE_INIT;
+static CONDITION_VARIABLE read_finished = CONDITION_VARIABLE_INIT;
+#define lock_reads() AcquireSRWLockExclusive(&read_lock)
+#define unlock_reads() ReleaseSRWLockExclusive(&read_lock)
+#define wait_reads(cv) SleepConditionVariableSRW(&(cv), &read_lock, INFINITE, 0)
+#define wake_reads(cv) WakeAllConditionVariable(&(cv))
+#else
+static pthread_mutex_t read_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t read_queued = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t read_finished = PTHREAD_COND_INITIALIZER;
+#define lock_reads() pthread_mutex_lock(&read_lock)
+#define unlock_reads() pthread_mutex_unlock(&read_lock)
+#define wait_reads(cv) pthread_cond_wait(&(cv), &read_lock)
+#define wake_reads(cv) pthread_cond_broadcast(&(cv))
+#endif
+
+static BOOL read_at(HANDLE handle, uint64_t offset, void *buffer, DWORD length,
+    DWORD *bytes_read)
+{
+#ifdef _WIN32
+    OVERLAPPED at = {0};
+    at.Offset = (DWORD)offset;
+    at.OffsetHigh = (DWORD)(offset >> 32u);
+    if (ReadFile(handle, buffer, length, bytes_read, &at)) return TRUE;
+    if (GetLastError() != ERROR_HANDLE_EOF) return FALSE;
+    *bytes_read = 0u;
+    return TRUE;
+#else
+    return recomp_win32_read_at(handle, offset, buffer, length, bytes_read);
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI read_worker(LPVOID unused)
+#else
+static void *read_worker(void *unused)
+#endif
+{
+    (void)unused;
+    lock_reads();
+    for (;;) {
+        while (reads_queued == NULL) wait_reads(read_queued);
+        HostRead *read = reads_queued;
+        reads_queued = read->next;
+        unlock_reads();
+        DWORD bytes_read = 0u;
+        BOOL ok = read_at(read->handle, read->offset, read->buffer, read->length, &bytes_read);
+        lock_reads();
+        read->bytes_read = bytes_read;
+        read->ok = ok;
+        read->done = 1;
+        wake_reads(read_finished);
+    }
+}
+
+static bool host_read_done(void *context)
+{
+    HostRead *read = context;
+    lock_reads();
+    int done = read->done;
+    unlock_reads();
+    return done != 0;
+}
+
+static void run_host_read(HostRead *read)
+{
+    lock_reads();
+    if (read_worker_state == 0) {
+#ifdef _WIN32
+        HANDLE thread = CreateThread(NULL, 0, read_worker, NULL, 0, NULL);
+        read_worker_state = thread != NULL ? 1 : -1;
+        if (thread != NULL) CloseHandle(thread);
+#else
+        pthread_t thread;
+        read_worker_state = pthread_create(&thread, NULL, read_worker, NULL) == 0 ? 1 : -1;
+        if (read_worker_state == 1) pthread_detach(thread);
+#endif
+    }
+    if (read_worker_state != 1) {
+        unlock_reads();
+        read->ok = read_at(read->handle, read->offset, read->buffer, read->length,
+            &read->bytes_read);
+        return;
+    }
+    HostRead **tail = &reads_queued;
+    while (*tail != NULL) tail = &(*tail)->next;
+    read->next = NULL;
+    *tail = read;
+    wake_reads(read_queued);
+    unlock_reads();
+    if (recomp_kernel_wait_host(host_read_done, read)) return;
+    lock_reads();
+    while (!read->done) wait_reads(read_finished);
+    unlock_reads();
+}
+
+static bool reads_finished(void *context)
+{
+    return ((FileHandleEntry *)context)->reads_pending == 0u;
+}
+
 static uint32_t next_guest_handle = 1u;
 static RecompSymbolicLinkModel symbolic_links;
 static int symbolic_links_initialized;
@@ -2071,31 +2195,31 @@ static void bridge_nt_read_file(void)
             break;
         }
 
-        LARGE_INTEGER distance;
-        distance.QuadPart = (LONGLONG)read_offset;
-        if (!SetFilePointerEx(
-                file_handles[i].host_handle, distance, NULL, FILE_BEGIN)) {
-            status = RECOMP_STATUS_UNSUCCESSFUL;
-            policy = "host-file-seek-failed";
-            break;
-        }
-
         void *host_buffer = length == 0u
             ? NULL
             : (void *)recomp_memory(buffer, length);
-        DWORD host_bytes_read = 0u;
-        if (!ReadFile(
-                file_handles[i].host_handle,
-                host_buffer,
-                length,
-                &host_bytes_read,
-                NULL)) {
+        HostRead read = {
+            .handle = file_handles[i].host_handle,
+            .offset = read_offset,
+            .buffer = host_buffer,
+            .length = length,
+        };
+        if ((file_handles[i].sharing_access & FILE_SHARE_WRITE) != 0u ||
+            length == 0u) {
+            read.ok = read_at(read.handle, read.offset, read.buffer, read.length,
+                &read.bytes_read);
+        } else {
+            ++file_handles[i].reads_pending;
+            run_host_read(&read);
+            --file_handles[i].reads_pending;
+        }
+        if (!read.ok) {
             status = RECOMP_STATUS_UNSUCCESSFUL;
             policy = "host-file-read-failed";
             break;
         }
 
-        bytes_read = host_bytes_read;
+        bytes_read = read.bytes_read;
         if (file_handles[i].read_filter != NULL && bytes_read != 0u) {
             file_handles[i].read_filter(read_offset, host_buffer, bytes_read);
         }
@@ -2394,6 +2518,9 @@ uint32_t recomp_kernel_close_file(uint32_t guest_handle, uint32_t owner)
         FileHandleEntry *entry = &file_handles[i];
         if (!entry->active || entry->guest_handle != guest_handle) {
             continue;
+        }
+        if (entry->reads_pending != 0u) {
+            (void)recomp_kernel_wait_host(reads_finished, entry);
         }
         status = RECOMP_STATUS_SUCCESS;
         bool delete_on_close = entry->delete_on_close != 0;
