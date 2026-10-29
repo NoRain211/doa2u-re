@@ -39,7 +39,9 @@ int main(int argc, char **argv)
     check(!recomp_screenshot_take_request(), "a request is taken once");
 
     check(!recomp_screenshot_write_png(path, bgra, W, H, W * 3), "a pitch shorter than a row is refused");
+    remove(path);
     check(recomp_screenshot_write_png(path, bgra, W, H, PITCH), "a PNG is written");
+    check(!recomp_screenshot_write_png(path, bgra, 1, 1, 4), "an existing file is kept");
 
     FILE *file = fopen(path, "rb");
     unsigned char head[33] = {0};

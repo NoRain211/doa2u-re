@@ -58,7 +58,8 @@ static uint32_t turn_draws;
 static uint32_t step_until;
 static RecompSceneFreezeFrameHook frame_hook;
 static uint32_t kept_function;
-static uint32_t hooked_frame;
+/* No frame yet: the swap counter starts at 0. */
+static uint32_t hooked_frame = UINT32_MAX;
 
 void recomp_scene_freeze_set(bool freeze)
 {

@@ -245,8 +245,8 @@ bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad)
     const bool present = sample(port, gamepad);
     if (present && capture_hook != NULL) {
         const uint16_t stick_clicks = gamepad->buttons & (XBOX_LEFT_THUMB | XBOX_RIGHT_THUMB);
-        /* The right stick's click is the free camera's own. */
-        gamepad->buttons &= (uint16_t)~XBOX_RIGHT_THUMB;
+        /* Port 0's right stick click is the free camera's own. */
+        if (port == 0u) gamepad->buttons &= (uint16_t)~XBOX_RIGHT_THUMB;
         capture_hook(port, gamepad, stick_clicks);
     }
     return present;

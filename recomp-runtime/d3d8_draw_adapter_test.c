@@ -72,7 +72,8 @@ uint32_t recomp_kernel_allocate_pool(uint32_t size)
 }
 void recomp_kernel_free_pool(uint32_t address) { freed = address; }
 uint32_t recomp_d3d8_require_device(void) { return DEVICE; }
-bool recomp_scene_freeze_overlay_hidden(void) { return false; }
+static bool overlay_hidden;
+bool recomp_scene_freeze_overlay_hidden(void) { return overlay_hidden; }
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void) { return &state; }
 bool recomp_d3d8_state_set_simple(uint32_t method, uint32_t value)
 {
@@ -353,6 +354,12 @@ static int draw_tests(void)
     *recomp_memory_u32(DEVICE + 0xf88u) = 0u;
     invoke(0x348240u, 2u, 2u, VERTICES, 20u);
     CHECK(submits == quads + 4u && submitted.data.draw.fvf == 0x44u && !submitted.data.draw.has_texture);
+    /* The clean view leaves out a pretransformed fixed-function draw but still counts it. */
+    const uint32_t counted = recomp_d3d8_draw_submitted();
+    overlay_hidden = true;
+    invoke(0x348240u, 2u, 2u, VERTICES, 20u);
+    overlay_hidden = false;
+    CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 1u);
     /* Width 2 widens an x-major line by one pixel above and below. */
     const float line[10] = {10.0f, 20.0f, 0.0f, 1.0f, 0.0f, 50.0f, 24.0f, 0.0f, 1.0f, 0.0f};
     const float wide = 2.0f;
