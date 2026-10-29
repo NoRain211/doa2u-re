@@ -23,7 +23,17 @@ LLVM_MINGW = Path("tools/llvm-mingw")
 EXTRACT_XISO_URL = ("https://github.com/XboxDev/extract-xiso/releases/download/build-202609111233/"
                     "extract-xiso_Linux.zip")
 EXTRACT_XISO_SHA256 = "c4b9fbf86b57c74d07fb643522740ae82034d8280ccde24528752cd1cb0b798d"
-LINUX_X86_64 = sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64")
+
+
+def runs_upstream_linux_binary():
+    """True on x86-64 Linux with glibc 2.34 or newer, which upstream's Linux binary needs."""
+    if not sys.platform.startswith("linux") or platform.machine() not in ("x86_64", "AMD64"):
+        return False
+    libc, version = platform.libc_ver()
+    try:
+        return libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 34)
+    except ValueError:
+        return False
 
 
 def fetch_verified(url, expected_sha256, archive, name):
@@ -76,10 +86,11 @@ def llvm_mingw(root):
 
 
 def extract_xiso(root):
-    """Return the extract-xiso to run: the one on PATH, else on x86-64 Linux the pinned upstream build."""
-    if shutil.which("extract-xiso") or not LINUX_X86_64:
+    """Return the extract-xiso to run: the one on PATH, else on x86-64 glibc Linux the pinned upstream build."""
+    if shutil.which("extract-xiso") or not runs_upstream_linux_binary():
         return "extract-xiso"
-    tool = root / "private/extract-xiso"
+    # Keyed by the pin, so a new pin downloads a new binary.
+    tool = root / f"private/extract-xiso-{EXTRACT_XISO_SHA256[:12]}"
     if not tool.is_file():
         (root / "private").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="extract-xiso-", dir=root / "private") as folder:
