@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround and
+// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
 // the intro skip, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
@@ -100,11 +100,13 @@ final class LauncherView: NSView {
                            boolSetting("checkUpdates", true) ? 1 : 0)
     let unlock = Row("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them",
                      ["Everything", "Earn"], boolSetting("unlockAll", true) ? 0 : 1)
+    let freeCamera = Row("Free Camera", "In game, F1 or a right-stick click flies the camera", ["Off", "On"],
+                         boolSetting("freeCamera", false) ? 1 : 0)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
-        Page(name: "GAMEPLAY", info: "Offers every character and costume, or leaves them to earn through play", rows: [unlock]),
+        Page(name: "GAMEPLAY", info: "Chooses the unlocks and whether the free camera is allowed", rows: [unlock, freeCamera]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
@@ -152,6 +154,7 @@ final class LauncherView: NSView {
             "surround": surround.index == 1,
             "checkUpdates": checkAtStart.index == 1,
             "unlockAll": unlock.index == 0,
+            "freeCamera": freeCamera.index == 1,
         ]
     }
 

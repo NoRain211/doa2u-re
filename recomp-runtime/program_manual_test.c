@@ -106,6 +106,12 @@ RecompFunction recomp_mwply_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_free_camera_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 static int test_fmod(void)
 {
     RecompFunction function = recomp_lookup_manual(0x00336dfeu);

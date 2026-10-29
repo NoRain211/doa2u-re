@@ -72,6 +72,7 @@ uint32_t recomp_kernel_allocate_pool(uint32_t size)
 }
 void recomp_kernel_free_pool(uint32_t address) { freed = address; }
 uint32_t recomp_d3d8_require_device(void) { return DEVICE; }
+bool recomp_scene_freeze_overlay_hidden(void) { return false; }
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void) { return &state; }
 bool recomp_d3d8_state_set_simple(uint32_t method, uint32_t value)
 {
