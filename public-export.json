@@ -44,6 +44,7 @@
     "tools/launcher-background.jpg",
     "tools/launcher-background.png",
     "tools/test_run_game.py",
+    "tools/test_package_test.py",
     "tools/launcher_sdl.cpp",
     "tools/launcher_macos.swift",
     "tools/doa2u/seed_functions.json",
