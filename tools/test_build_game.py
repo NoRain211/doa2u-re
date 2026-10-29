@@ -6,13 +6,25 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_game import (STEPS, build_fraction, failure_excerpt, import_disc, lifter_revision,
+from build_game import (STEPS, build, build_fraction, failure_excerpt, import_disc, lifter_revision,
                         merge_functions, program_manifest, selected_xbe, use_windows_newlines,
                         write_functions)
 from extract_iso import sha256
 
 
 class BuildTests(unittest.TestCase):
+    def test_linux_build_stops_before_import_in_a_folder_the_shell_misreads(self):
+        with patch("build_game.sys.platform", "linux"), patch("build_game.import_disc") as imported:
+            with patch("build_game.ROOT", "Downloads/DOA2U-0.1 (1).8-Alpha"), \
+                    self.assertRaisesRegex(ValueError, "Rename or move"):
+                build(iso=Path("disc.iso"))
+            imported.assert_not_called()
+            with patch("build_game.ROOT", "Downloads/DOA2U 0.1.8-Alpha"), \
+                    patch("build_game.shutil.which", return_value=None), \
+                    self.assertRaisesRegex(ValueError, "CMake"):
+                build(iso=Path("disc.iso"))
+            imported.assert_called_once()
+
     def test_failure_excerpt_keeps_an_early_cause_ahead_of_a_long_tail(self):
         # CMake prints "Could not create named generator" first, then its whole help.
         help_text = [f"  Generator {i}" for i in range(70)]
