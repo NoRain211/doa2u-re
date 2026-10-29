@@ -63,7 +63,8 @@ keeps running.
   optional intro-movie skip, 5.1 surround and the unlock setting, and remembers them. `DOA2U.exe` plays
   with the same choices.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
-  character and costume starts unlocked. The game's soft reset
+  character and costume starts unlocked unless you choose **Earn** on the
+  launcher's **GAMEPLAY** page. The game's soft reset
   (Start + Back + both triggers) restarts it.
 - **Built from your disc.** `Launcher.exe` lifts the game from your ISO and
   refuses any executable other than the one the developers tested.
@@ -84,7 +85,7 @@ keeps running.
 | Story, Ayane and Gen Fu | Stages 1-6 cleared without a stop in scripted runs; the Tengu fight was lost each time |
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
-| Every character and costume | Unlocked; the game saves the unlocks to your profile |
+| Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
 | Native 16:9 widescreen, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
