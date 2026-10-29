@@ -3,6 +3,8 @@
 #include "d3d_draw_shader.h"
 #include "d3d_vblank.h"
 #include "input_keyboard_win32.h"
+#include "overlay_d3d11.h"
+#include "screenshot.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -462,6 +464,7 @@ void releaseGraphics(RecompD3dPresenter *presenter)
         presenter->context->ClearState();
         presenter->context->Flush();
     }
+    recomp_overlay_d3d11_shutdown();
     releaseCom(presenter->present_target_view);
     releaseCom(presenter->vrr_target_view);
     releaseCom(presenter->vrr_source);
@@ -3258,6 +3261,40 @@ void recordFrameStatistics(RecompD3dPresenter *presenter,
     presenter->last_stat_refresh = stats.PresentRefreshCount;
 }
 
+// Saves the window's back buffer, the game's frame before the overlay, through
+// a CPU-readable copy. Only a requested screenshot pays for the wait.
+void saveScreenshot(RecompD3dPresenter *presenter)
+{
+    ID3D11Texture2D *back_buffer = nullptr;
+    presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer));
+    bool saved = false;
+    if (back_buffer == nullptr) {
+        std::fprintf(stderr, "recomp screenshot: could not read the back buffer\n");
+        return;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    back_buffer->GetDesc(&desc);
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0u;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0u;
+    ID3D11Texture2D *staging = nullptr;
+    if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM && desc.SampleDesc.Count == 1u &&
+        SUCCEEDED(presenter->device->CreateTexture2D(&desc, nullptr, &staging))) {
+        presenter->context->CopyResource(staging, back_buffer);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (SUCCEEDED(presenter->context->Map(staging, 0u, D3D11_MAP_READ, 0u, &mapped))) {
+            recomp_screenshot_save(static_cast<const uint8_t *>(mapped.pData),
+                desc.Width, desc.Height, mapped.RowPitch);
+            saved = true;
+            presenter->context->Unmap(staging, 0u);
+        }
+    }
+    if (!saved) std::fprintf(stderr, "recomp screenshot: could not read the back buffer\n");
+    releaseCom(staging);
+    releaseCom(back_buffer);
+}
+
 RecompD3dPresenterError submitPresent(
     RecompD3dPresenter *presenter,
     const RecompD3dPresenterPresentCommand &present)
@@ -3351,6 +3388,18 @@ RecompD3dPresenterError submitPresent(
         presenter->context->PSSetShaderResources(0u, 1u, &none);
         copyGuestBuffer(presenter, presenter->previous_frame);
         if (presenter->scale != 1.0f) presenter->context->GenerateMips(presenter->previous_frame_sample);
+    }
+
+    // The runtime's overlay text goes on the window, not the game's back
+    // buffer, which the game reads back as its front buffer.
+    {
+        if (recomp_screenshot_take_request()) saveScreenshot(presenter);
+        DXGI_SWAP_CHAIN_DESC window{};
+        presenter->swap_chain->GetDesc(&window);
+        RecompOverlayText overlay;
+        recomp_overlay_take(&overlay);
+        recomp_overlay_d3d11_draw(presenter->device, presenter->context, presenter->present_target_view,
+            window.BufferDesc.Width, window.BufferDesc.Height, &overlay);
     }
 
     const auto clock_ms = [] {

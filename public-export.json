@@ -18,6 +18,7 @@
     "build_game.sh",
     "public-export.json",
     "docs/reuse.md",
+    "docs/free-camera.md",
     "docs/adr/0001-three-platform-targets.md",
     "docs/bring-up.md",
     "docs/test-release.md",
@@ -121,6 +122,10 @@
     {
       "sha256": "fa429cf2d67c0218272b52f0c131753eb23995b77ab2236e8cf469062689ff99",
       "reason": "Combiner-word offsets within the runtime's pixel-shader state block in four_tap() of d3d8_draw_adapter.c; structure offsets, not retail bytes."
+    },
+    {
+      "sha256": "af5bd80569c76220c8521cc23779c31ae23373b35fb9d78b612743508c44f859",
+      "reason": "The last four bytes of the PNG file signature (0x0D, 0x0A, 0x1A, 0x0A) from the PNG specification, written and checked by screenshot.c and screenshot_test.c, copied from committed DOA3 public source."
     }
   ],
   "binary_files": [

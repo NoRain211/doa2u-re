@@ -22,7 +22,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'surround', 'intro') {
+foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'surround', 'intro', 'freeCamera') {
     $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
     $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
 }
@@ -36,9 +36,9 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             self.assertTrue((root / "DOA2U.exe").is_file())
             (root / "private").mkdir()
             for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, widescreen=True,
-                                                skip_intro=True, surround=True)),
+                                                skip_intro=True, surround=True, free_camera=True)),
                                    (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False,
-                                                skip_intro=False, surround=False))):
+                                                skip_intro=False, surround=False, free_camera=False))):
                 env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
                            RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"),
                            RECOMP_LAUNCHER_TEST_LAST="1" if last else "0")
@@ -114,8 +114,9 @@ $keyDown.Invoke($form, @($down))
                 self.assertEqual(execute.call_args.args[0][-1], "--skip-intro")
                 self.assertEqual(run(None, unlock_all=False), 0)
                 self.assertEqual(execute.call_args.args[0][-1], "--no-unlock-all")
-                self.assertEqual(run(None, surround=True), 0)
+                self.assertEqual(run(None, surround=True, free_camera=True), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_FREE_CAMERA"], "1")
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
                 execute.side_effect = [Mock(returncode=4), Mock(returncode=0)]
@@ -170,9 +171,9 @@ $keyDown.Invoke($form, @($down))
             with patch("run_game.ROOT", root):
                 self.assertEqual(saved_settings(), {})
                 settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False,
-                    "widescreen": True, "skipIntro": True, "surround": True}), encoding="utf-8")
+                    "widescreen": True, "skipIntro": True, "surround": True, "freeCamera": True}), encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
-                    "widescreen": True, "skip_intro": True, "surround": True})
+                    "widescreen": True, "skip_intro": True, "surround": True, "free_camera": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

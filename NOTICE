@@ -22,6 +22,10 @@ SDL3 audio output, the launchers and the SDL_GPU presenter's resource
 handling) adapts committed source from NoRain211/doa3-re (commit 48d05e9) and
 NoRain211/doaxbv-re, under GPL-3.0-or-later.
 
+The free camera's overlay draws with Dear ImGui by Omar Cornut, release
+1.91.9 (ocornut/imgui), fetched at configuration under its MIT license, whose
+notices remain in the fetched source.
+
 recomp-runtime/audio_reverb.cpp is altered from FAudio's
 src/FAudioFX_reverb.c (FNA-XNA/FAudio 26.10), Copyright (c) 2011-2024 Ethan
 Lee, Luigi Auriemma, and the MonoGame Team, under the zlib license, whose

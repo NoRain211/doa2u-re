@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Linux launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround and
+// Linux launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
 // the intro skip, remember them in private/launcher.json, then exit 0 so
 // run_game.py starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
@@ -29,18 +29,19 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, ITEM_COUNT };
-const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES"};
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, FREE_CAMERA, ITEM_COUNT };
+const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "FREE CAMERA"};
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
     {"VIDEO SETTINGS", "Sets resolution, anti-aliasing and screen shape", {RESOLUTION, MSAA, SMAA, WIDESCREEN}},
     {"AUDIO SETTINGS", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"MOVIES", "Plays or skips the logo and opening movies at boot", {SKIP_INTRO}},
+    {"FREE CAMERA", "In game, F1 or a right-stick click flies the camera", {FREE_CAMERA}},
     {"START GAME", "Saves these settings and starts the game", {}},
     {"EXIT", "Closes the launcher", {}},
 };
-constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 3, kExitPage = 4;
+constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 4, kExitPage = 5;
 
 // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
 struct Settings {
@@ -50,6 +51,7 @@ struct Settings {
     bool widescreen = true;
     bool surround = false;
     bool skip_intro = false;
+    bool free_camera = false;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -82,6 +84,7 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "widescreen", value)) settings.widescreen = value == "true";
     if (jsonValue(text, "surround", value)) settings.surround = value == "true";
     if (jsonValue(text, "skipIntro", value)) settings.skip_intro = value == "true";
+    if (jsonValue(text, "freeCamera", value)) settings.free_camera = value == "true";
     return settings;
 }
 
@@ -92,7 +95,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
          << ",\n  \"widescreen\": " << (settings.widescreen ? "true" : "false")
          << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
-         << ",\n  \"surround\": " << (settings.surround ? "true" : "false") << "\n}\n";
+         << ",\n  \"surround\": " << (settings.surround ? "true" : "false")
+         << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
 
@@ -145,7 +149,7 @@ struct Launcher {
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2};
+        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2};
         choice[item] = (choice[item] + counts[item] + step) % counts[item];
     }
 
@@ -328,6 +332,7 @@ int main(int argc, char **argv)
     launcher.choice[WIDESCREEN] = settings.widescreen ? 1 : 0;
     launcher.choice[SURROUND] = settings.surround ? 1 : 0;
     launcher.choice[SKIP_INTRO] = settings.skip_intro ? 1 : 0;
+    launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -429,6 +434,7 @@ int main(int argc, char **argv)
         settings.widescreen = launcher.choice[WIDESCREEN] != 0;
         settings.surround = launcher.choice[SURROUND] != 0;
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
+        settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             result = 1;

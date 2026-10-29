@@ -40,6 +40,18 @@ bias, coverage probes and visibility counts), and the SDL audio output adds
 DOA2U's voice routing and I3DL2 reverb. The reverb network is altered from
 FAudio 26.10 under its zlib license (see NOTICE).
 
+The free camera follows committed DOA3 at `c3e9163` (its PR #29):
+`free_camera.c`, `scene_freeze.c`, `screenshot.c`, `overlay_text.c`, the
+Dear ImGui overlay (`overlay_imgui_panel.cpp`, `overlay_sdl_gpu.cpp`,
+`overlay_d3d11.cpp`) and their tests come over as they are; the presenters'
+overlay and screenshot hooks, the input host's key and mouse reads and the
+launcher pages follow it. `free_camera_adapter.c` and
+`scene_freeze_adapter.c` are DOA2U's own, on DOA2U's camera objects, camera
+build, task table and bone banks (docs/free-camera.md); the camera build is
+wrapped through `recomp_lookup_manual` rather than a re-lift. DOA3's swimsuit
+controls are left out. Dear ImGui 1.91.9 is fetched hash-verified at
+configuration, as in DOA3.
+
 The frame-buffer correction follows committed DOA3 fixes `bb479cf` and
 `c10423f`: constant-alpha blend decoding and the shared host-frame flag with
 a separate previous-frame selector. DOA2U keeps its verified 5849 surface

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround and
+// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
 // the intro skip, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
@@ -54,7 +54,7 @@ final class LauncherView: NSView {
     static let topH: CGFloat = 44, side: CGFloat = 30, fadeY: CGFloat = 334
     static let infoY: CGFloat = 380, labelY: CGFloat = 414, valueY: CGFloat = 434, valueH: CGFloat = 30
     static let tabY: CGFloat = 494, tabH: CGFloat = 26
-    static let playPage = 3, exitPage = 4
+    static let playPage = 4, exitPage = 5
 
     // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
@@ -68,10 +68,13 @@ final class LauncherView: NSView {
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
     let intro = Row("Intro Movies", "Skip goes straight to the title screen at boot", ["Play", "Skip"],
                     boolSetting("skipIntro", false) ? 1 : 0)
+    let freeCamera = Row("Free Camera", "In game, F1 or a right-stick click flies the camera", ["Off", "On"],
+                         boolSetting("freeCamera", false) ? 1 : 0)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
+        Page(name: "FREE CAMERA", info: "Fly the camera through fights and cutscenes, freeze them and save screenshots", rows: [freeCamera]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
     ]
@@ -111,6 +114,7 @@ final class LauncherView: NSView {
             "widescreen": screen.index == 1,
             "skipIntro": intro.index == 1,
             "surround": surround.index == 1,
+            "freeCamera": freeCamera.index == 1,
         ]
     }
 

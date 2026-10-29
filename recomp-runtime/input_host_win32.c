@@ -48,7 +48,11 @@ static unsigned long long tick_ms(void)
 #else
 /* Virtual-key codes the keyboard model is indexed by; the SDL_GPU presenter
    forwards SDL key events under these codes. */
-enum { VK_BACK = 0x08, VK_RETURN = 0x0d, VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28 };
+enum {
+    VK_BACK = 0x08, VK_RETURN = 0x0d, VK_SHIFT = 0x10, VK_CONTROL = 0x11,
+    VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_F1 = 0x70, VK_F12 = 0x7b,
+    VK_OEM_PERIOD = 0xbe, VK_OEM_3 = 0xc0, VK_OEM_5 = 0xdc,
+};
 
 static bool pressed(int key)
 {
@@ -227,7 +231,28 @@ static void read_pad(SDL_Gamepad *host, RecompInputGamepad *gamepad)
     gamepad->thumb_ry = up_axis(host, SDL_GAMEPAD_AXIS_RIGHTY);
 }
 
+static RecompInputCaptureHook capture_hook;
+
+void recomp_input_host_set_capture_hook(RecompInputCaptureHook hook)
+{
+    capture_hook = hook;
+}
+
+static bool sample(uint32_t port, RecompInputGamepad *gamepad);
+
 bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad)
+{
+    const bool present = sample(port, gamepad);
+    if (present && capture_hook != NULL) {
+        const uint16_t stick_clicks = gamepad->buttons & (XBOX_LEFT_THUMB | XBOX_RIGHT_THUMB);
+        /* The right stick's click is the free camera's own. */
+        gamepad->buttons &= (uint16_t)~XBOX_RIGHT_THUMB;
+        capture_hook(port, gamepad, stick_clicks);
+    }
+    return present;
+}
+
+static bool sample(uint32_t port, RecompInputGamepad *gamepad)
 {
     if (gamepad == NULL || port >= RECOMP_INPUT_PORT_COUNT) {
         return false;
@@ -266,4 +291,77 @@ bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad)
     if (pressed('R')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] = 0xffu;
     trace_sample(gamepad, host, true);
     return true;
+}
+
+bool recomp_input_host_key(RecompInputHostKey key)
+{
+    if (!focused()) return false;
+    switch (key) {
+    case RECOMP_INPUT_HOST_KEY_F1: return pressed(VK_F1);
+    case RECOMP_INPUT_HOST_KEY_GRAVE: return pressed(VK_OEM_3);
+    case RECOMP_INPUT_HOST_KEY_F12: return pressed(VK_F12);
+    case RECOMP_INPUT_HOST_KEY_W: return pressed('W');
+    case RECOMP_INPUT_HOST_KEY_A: return pressed('A');
+    case RECOMP_INPUT_HOST_KEY_S: return pressed('S');
+    case RECOMP_INPUT_HOST_KEY_D: return pressed('D');
+    case RECOMP_INPUT_HOST_KEY_Q: return pressed('Q');
+    case RECOMP_INPUT_HOST_KEY_E: return pressed('E');
+    case RECOMP_INPUT_HOST_KEY_R: return pressed('R');
+    case RECOMP_INPUT_HOST_KEY_Z: return pressed('Z');
+    case RECOMP_INPUT_HOST_KEY_X: return pressed('X');
+    case RECOMP_INPUT_HOST_KEY_C: return pressed('C');
+    case RECOMP_INPUT_HOST_KEY_P: return pressed('P');
+    case RECOMP_INPUT_HOST_KEY_H: return pressed('H');
+    case RECOMP_INPUT_HOST_KEY_PERIOD: return pressed(VK_OEM_PERIOD);
+    case RECOMP_INPUT_HOST_KEY_BACKSLASH: return pressed(VK_OEM_5);
+    case RECOMP_INPUT_HOST_KEY_UP: return pressed(VK_UP);
+    case RECOMP_INPUT_HOST_KEY_DOWN: return pressed(VK_DOWN);
+    case RECOMP_INPUT_HOST_KEY_LEFT: return pressed(VK_LEFT);
+    case RECOMP_INPUT_HOST_KEY_RIGHT: return pressed(VK_RIGHT);
+    case RECOMP_INPUT_HOST_KEY_RETURN: return pressed(VK_RETURN);
+    case RECOMP_INPUT_HOST_KEY_BACKSPACE: return pressed(VK_BACK);
+    case RECOMP_INPUT_HOST_KEY_SHIFT: return pressed(VK_SHIFT);
+    case RECOMP_INPUT_HOST_KEY_CONTROL: return pressed(VK_CONTROL);
+    case RECOMP_INPUT_HOST_KEY_COUNT: break;
+    }
+    return false;
+}
+
+bool recomp_input_host_mouse_drag(float *dx, float *dy)
+{
+    static bool dragging;
+    static float last_x, last_y;
+    float x = 0.0f, y = 0.0f;
+    bool held = false;
+
+    *dx = *dy = 0.0f;
+    if (focused()) {
+#ifdef _WIN32
+        /* GetAsyncKeyState reads physical buttons; swapped buttons put the
+           logical right one on the left. */
+        const int right = GetSystemMetrics(SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON;
+        POINT point = {0, 0};
+        held = (GetAsyncKeyState(right) & 0x8000) != 0 && GetCursorPos(&point);
+        if (held && !dragging) {
+            /* A drag starts only over the game's client area. */
+            HWND window = GetForegroundWindow();
+            POINT client = point;
+            RECT area;
+            held = ScreenToClient(window, &client) && GetClientRect(window, &area) &&
+                PtInRect(&area, client);
+        }
+        x = (float)point.x;
+        y = (float)point.y;
+#else
+        held = (SDL_GetMouseState(&x, &y) & SDL_BUTTON_RMASK) != 0u;
+#endif
+    }
+    if (held && dragging) {
+        *dx = x - last_x;
+        *dy = y - last_y;
+    }
+    dragging = held;
+    last_x = x;
+    last_y = y;
+    return held;
 }

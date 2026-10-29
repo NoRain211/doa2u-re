@@ -25,6 +25,8 @@ void recomp_d3d8_shutdown(void);
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
     float display_aspect, uint8_t level);
+/* Swaps presented so far (the guest's frame counter). */
+uint32_t recomp_d3d8_swap_counter(void);
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 
