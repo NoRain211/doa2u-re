@@ -165,7 +165,10 @@ struct Launcher {
         installing = !pending.empty();
         quiet = quietly;
         const std::string script = root + "/tools/update.py";
-        const char *args[] = {"python3", script.c_str(), installing ? "install" : "check", nullptr};
+        // The interpreter run_game.sh and build_game.sh prefer, else python3 on PATH.
+        std::string python = root + "/private/venv/bin/python3";
+        if (!SDL_GetPathInfo(python.c_str(), nullptr)) python = "python3";
+        const char *args[] = {python.c_str(), script.c_str(), installing ? "install" : "check", nullptr};
         update = SDL_CreateProcess(args, true);
         if (!quiet) status = update == nullptr ? std::string("Cannot run python3: ") + SDL_GetError()
             : installing ? "Downloading " + pending : "Checking for updates";
@@ -184,14 +187,26 @@ struct Launcher {
         output.erase(output.find_last_not_of(" \r\n") + 1);
         output.erase(0, output.rfind('\n') + 1);
         if (code == 0 && installing) {
+            // An install prints nothing when the release it found is no longer newer.
             pending.clear();
-            status = "Updated to " + output + ". Run ./build_game.sh, then reopen the launcher";
+            status = output.empty() ? "You have the latest version"
+                : "Updated to " + output + ". Run ./build_game.sh, then reopen the launcher";
         } else if (code == 0) {
             pending = output;
             status = pending.empty() ? "You have the latest version" : "Version " + pending + " is available. Choose Install";
         } else if (!quiet) {
-            status = output.substr(0, 75);
+            status = output.empty() ? "Update failed (exit " + std::to_string(code) + ")" : output.substr(0, 75);
         }
+    }
+
+    // Play and exit wait for an install, which replaces the tools; this shows why on the update page.
+    bool waitForInstall()
+    {
+        if (update == nullptr || !installing) return false;
+        menu = kUpdatePage;
+        in_page = false;
+        status = "Wait for the update to finish";
+        return true;
     }
 
     // Returns the exit code once the player picks Start Game (0) or Exit (1), else -1.
@@ -202,6 +217,7 @@ struct Launcher {
             else change(rows()[row], 1);
             return -1;
         }
+        if ((menu == kPlayPage || menu == kExitPage) && waitForInstall()) return -1;
         if (menu == kPlayPage) return 0;
         if (menu == kExitPage) return 1;
         in_page = true;
@@ -211,7 +227,7 @@ struct Launcher {
 
     int back()
     {
-        if (!in_page) return 1;
+        if (!in_page) return waitForInstall() ? -1 : 1;
         in_page = false;
         return -1;
     }
@@ -394,7 +410,7 @@ int main(int argc, char **argv)
             SDL_ConvertEventToRenderCoordinates(launcher.renderer, &event);
             switch (event.type) {
             case SDL_EVENT_QUIT:
-                result = 1;
+                result = launcher.waitForInstall() ? -1 : 1;
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 SDL_OpenGamepad(event.gdevice.which);
@@ -490,9 +506,18 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             result = 1;
         }
+    } else if ((launcher.choice[CHECK_UPDATES] != 0) != settings.check_updates) {
+        // Other settings save on play; Check At Start must also hold after a plain exit.
+        settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
+        saveSettings(settings_path, settings);
     }
     SDL_DestroyTexture(launcher.background);
-    SDL_DestroyProcess(launcher.update);
+    // Only a check can still be running here; stop it rather than leave it behind.
+    if (launcher.update != nullptr) {
+        SDL_KillProcess(launcher.update, true);
+        SDL_WaitProcess(launcher.update, true, nullptr);
+        SDL_DestroyProcess(launcher.update);
+    }
     SDL_DestroyRenderer(launcher.renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

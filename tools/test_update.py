@@ -28,19 +28,31 @@ class UpdateTest(unittest.TestCase):
             with mock.patch.object(update, "SUFFIX", suffix):
                 self.assertEqual(update.pick_asset(assets)["name"], expected)
 
-    def test_unpack_writes_below_the_root_and_keeps_private_files(self):
+    def test_unpack_keeps_private_files_and_writes_version_last(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
             root = update.ROOT
             (root / "private").mkdir()
             (root / "private" / "launcher.json").write_text("mine")
             (root / "Launcher.exe").write_text("old")
-            update.unpack(archive({"DOA2U-2/Launcher.exe": "new", "DOA2U-2/tools/a.py": "a", "DOA2U-2/VERSION": "2"}))
+            update.unpack(archive({"DOA2U-2/VERSION": "2", "DOA2U-2/Launcher.exe": "new", "DOA2U-2/tools/a.py": "a",
+                                   "DOA2U-2/private/launcher.json": "release", "DOA2U-2/private/photo.jpg": "photo"}))
             self.assertEqual((root / "Launcher.exe").read_text(), "new")
             self.assertEqual((root / "Launcher.exe.old").read_text(), "old")
             self.assertEqual((root / "tools" / "a.py").read_text(), "a")
             self.assertEqual((root / "private" / "launcher.json").read_text(), "mine")
+            self.assertEqual((root / "private" / "photo.jpg").read_text(), "photo")
+            # A failed write puts the running exe back and leaves VERSION, which goes last, for a retry.
+            with mock.patch.object(Path, "write_bytes", side_effect=[None, OSError("disk full")]):
+                with self.assertRaises(OSError):
+                    update.unpack(archive({"DOA2U-3/VERSION": "3", "DOA2U-3/tools/a.py": "b", "DOA2U-3/Launcher.exe": "x"}))
+            self.assertEqual((root / "VERSION").read_text(), "2")
+            self.assertEqual((root / "Launcher.exe").read_text(), "new")
+
+    def test_unsafe_entry_stops_before_any_write(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
             with self.assertRaises(ValueError):
-                update.unpack(archive({"DOA2U-2/../../evil": "x"}))
+                update.unpack(archive({"DOA2U-2/tools/a.py": "a", "DOA2U-2/../../evil": "x"}))
+            self.assertFalse((update.ROOT / "tools").exists())
 
 
 if __name__ == "__main__":

@@ -55,13 +55,23 @@ struct Page { let name: String; let info: String; let rows: [Row] }
 func runUpdate(_ command: String, done: @escaping (Bool, String) -> Void) {
     let process = Process()
     let output = Pipe()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["python3", root.appendingPathComponent("tools/update.py").path, command]
+    // The interpreter run_game.sh and build_game.sh prefer, else python3 on PATH.
+    let script = root.appendingPathComponent("tools/update.py").path
+    let venv = root.appendingPathComponent("private/venv/bin/python3").path
+    if FileManager.default.isExecutableFile(atPath: venv) {
+        process.executableURL = URL(fileURLWithPath: venv)
+        process.arguments = [script, command]
+    } else {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", script, command]
+    }
     process.standardOutput = output
+    process.standardError = output
     process.terminationHandler = { finished in
         let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let last = text.split(separator: "\n").last.map(String.init) ?? ""
-        DispatchQueue.main.async { done(finished.terminationStatus == 0, last) }
+        let status = finished.terminationStatus
+        let last = text.split(separator: "\n").last.map(String.init) ?? (status == 0 ? "" : "Update failed (exit \(status))")
+        DispatchQueue.main.async { done(status == 0, last) }
     }
     do { try process.run() } catch { DispatchQueue.main.async { done(false, "Cannot run python3: \(error.localizedDescription)") } }
 }
@@ -71,7 +81,7 @@ final class LauncherView: NSView {
     static let topH: CGFloat = 44, side: CGFloat = 30, fadeY: CGFloat = 334
     static let infoY: CGFloat = 380, labelY: CGFloat = 414, valueY: CGFloat = 434, valueH: CGFloat = 30
     static let tabY: CGFloat = 494, tabH: CGFloat = 26
-    static let playPage = 3, exitPage = 5
+    static let playPage = 3, updatePage = 4, exitPage = 5
 
     // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
@@ -101,8 +111,9 @@ final class LauncherView: NSView {
     // A held Down that entered a page waits for release before it changes a value.
     var downEntered = false
     // The newer version a check found, and whether a check or install is running.
+    // Play and quit wait for an install, which replaces the tools.
     var pending: String?
-    var updating = false
+    var updating = false, installing = false
     var tabs: [NSRect] = []
     let built = FileManager.default.fileExists(atPath: root.appendingPathComponent("build/recomp-program/recomp_program_runner").path)
     var onPlay: () -> Void = {}
@@ -143,15 +154,19 @@ final class LauncherView: NSView {
     // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
     func update(quiet: Bool) {
         if updating { return }
-        let installing = pending != nil
+        installing = pending != nil
         updating = true
         updateRow.names = ["Working"]
         if !quiet { updateRow.info = installing ? "Downloading \(pending ?? "")" : "Checking for updates" }
         runUpdate(installing ? "install" : "check") { [self] ok, output in
+            let installed = installing
             updating = false
-            if ok && installing {
+            installing = false
+            if ok && installed {
                 pending = nil
-                updateRow.info = "Updated to \(output). Run ./build_game.sh, then reopen the launcher"
+                // An install prints nothing when the release it found is no longer newer.
+                updateRow.info = output.isEmpty ? "You have the latest version"
+                    : "Updated to \(output). Run ./build_game.sh, then reopen the launcher"
             } else if ok {
                 pending = output.isEmpty ? nil : output
                 updateRow.info = pending.map { "Version \($0) is available. Choose Install" } ?? "You have the latest version"
@@ -168,8 +183,20 @@ final class LauncherView: NSView {
         r.index = min(max(r.index + delta, 0), r.names.count - 1)
     }
 
+    // Shows the update page with why play or quit has to wait; false when nothing is installing.
+    func waitForInstall() -> Bool {
+        guard installing else { return false }
+        tab = LauncherView.updatePage
+        inPage = true
+        row = 0
+        updateRow.info = "Wait for the update to finish"
+        needsDisplay = true
+        return true
+    }
+
     func accept() {
         if !inPage {
+            if (tab == LauncherView.playPage || tab == LauncherView.exitPage) && waitForInstall() { return }
             if tab == LauncherView.playPage { onPlay(); return }
             if tab == LauncherView.exitPage { NSApp.terminate(nil); return }
             inPage = true
@@ -182,7 +209,7 @@ final class LauncherView: NSView {
     }
 
     func back() {
-        if inPage { inPage = false } else { NSApp.terminate(nil) }
+        if inPage { inPage = false } else if !waitForInstall() { NSApp.terminate(nil) }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -379,12 +406,29 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.terminate(nil)
     }
 
+    // Other settings save on play; Check At Start must also hold after a plain quit.
+    func keepCheckSetting() {
+        let check = view.checkAtStart.index == 1
+        guard !launched, check != boolSetting("checkUpdates", true) else { return }
+        settings["checkUpdates"] = check
+        try? FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: settingsURL)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool { !view.waitForInstall() }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        view.waitForInstall() ? .terminateCancel : .terminateNow
+    }
+
     func windowWillClose(_ notification: Notification) {
+        keepCheckSetting()
         if !launched { exit(1) }
     }
 
     // AppKit exits 0 after terminate, so a Dock or Cmd-Q quit would start the game.
     func applicationWillTerminate(_ notification: Notification) {
+        keepCheckSetting()
         exit(launched ? 0 : 1)
     }
 }

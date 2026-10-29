@@ -227,8 +227,9 @@ class LauncherForm : Form
     bool built = File.Exists(Game.Runner);
     Process build;
     // The newer version a check found, and whether a check or install is running on its thread.
+    // Build, play and exit wait for an install, which replaces the tools and launchers.
     string pending;
-    bool updating;
+    bool updating, installing;
     DateTime buildStart;
     readonly List<string> buildLines = new List<string>();
     readonly string buildLog = Game.Private("build.log");
@@ -347,6 +348,7 @@ class LauncherForm : Form
         bool install = pending != null;
         if (!quiet) notice = install ? "Downloading " + pending : "Checking for updates";
         updating = true;
+        installing = install;
         new System.Threading.Thread(delegate ()
         {
             string version = null, error = null;
@@ -358,10 +360,11 @@ class LauncherForm : Form
 
     void FinishUpdate(bool installed, string version, string error, bool quiet)
     {
-        updating = false;
-        if (error == null && !installed) pending = version;
+        updating = installing = false;
+        // An install prints nothing when the release it found is no longer newer.
+        if (error == null) pending = installed ? null : version;
         updateRow.Info = pages[UpdatePage].Info = UpdateStatus();
-        if (error == null && installed)
+        if (error == null && installed && version != null)
         {
             MessageBox.Show("Updated to " + version + ". The launcher restarts; choose Build again to apply it to the game.", Game.Title);
             Process.Start(Path.Combine(Game.Root, "Launcher.exe"));
@@ -369,7 +372,7 @@ class LauncherForm : Form
             return;
         }
         if (error != null) notice = error;
-        else if (!quiet) notice = version != null ? UpdateStatus() : "You have the latest version";
+        else if (!quiet) notice = pending != null ? UpdateStatus() : "You have the latest version";
         Invalidate();
     }
 
@@ -512,6 +515,7 @@ class LauncherForm : Form
     void StartBuild()
     {
         if (build != null) return;
+        if (installing) { notice = "Wait for the update to finish"; return; }
         if (!Game.IsIso(gameSource)) { notice = "Choose your Disc 2 ISO first"; return; }
         if (Game.Python == null) { MessageBox.Show(Game.PythonMessage, Game.Title); return; }
         Game.SaveSettings(Settings());
@@ -551,11 +555,19 @@ class LauncherForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);
-        if (build == null || build.HasExited) return;
-        if (MessageBox.Show("Stop the build?", Game.Title, MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
-        timer.Stop();
-        using (var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + build.Id) { UseShellExecute = false, CreateNoWindow = true }))
-            kill.WaitForExit();
+        if (installing) { notice = "Wait for the update to finish"; e.Cancel = true; Invalidate(); return; }
+        if (build != null && !build.HasExited)
+        {
+            if (MessageBox.Show("Stop the build?", Game.Title, MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
+            timer.Stop();
+            using (var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + build.Id) { UseShellExecute = false, CreateNoWindow = true }))
+                kill.WaitForExit();
+        }
+        // Other settings save with a build or play; Check At Start must also hold after a plain exit.
+        var saved = Game.LoadSettings();
+        if (Game.Bool(saved, "checkUpdates", true) == (checkAtStart.Index == 1)) return;
+        saved["checkUpdates"] = checkAtStart.Index == 1;
+        try { Game.SaveSettings(saved); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     static int Clamp(int value, int max) { return Math.Min(Math.Max(value, 0), max); }
@@ -579,7 +591,8 @@ class LauncherForm : Form
         Page page = pages[menu];
         if (!inPage)
         {
-            if (page.Action == "play" && build != null) notice = "Wait for the build to finish";
+            if (page.Action != null && installing) notice = "Wait for the update to finish";
+            else if (page.Action == "play" && build != null) notice = "Wait for the build to finish";
             else if (page.Action == "play" && !built) { menu = BuildPage; notice = "Build the game first"; }
             else if (page.Action != null) { Tag = page.Action; Close(); return; }
             else { inPage = true; row = 0; }

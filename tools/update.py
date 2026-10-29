@@ -65,19 +65,36 @@ def install(asset):
 
 
 def unpack(archive):
-    """Writes the ZIP over the install. Its entries sit in one top folder, DOA2U-<version>/."""
+    """Writes the ZIP over the install. Its entries sit in one top folder, DOA2U-<version>/.
+
+    Every entry is checked and read before the first write, and VERSION goes last, so an install that
+    fails part way still reports the old version and can be run again."""
+    files = []
     for entry in archive.infolist():
         if entry.is_dir():
             continue
         target = (ROOT / entry.filename.partition("/")[2]).resolve()
         if ROOT not in target.parents:
             raise ValueError(f"Unsafe path in the update: {entry.filename}")
+        # private/ holds the player's files; a release only adds ones they lack.
+        if ROOT / "private" in target.parents and target.exists():
+            continue
+        files.append((target, archive.read(entry), (entry.external_attr >> 16) & 0o777))
+    files.sort(key=lambda file: file[0] == ROOT / "VERSION")
+    for target, data, mode in files:
         target.parent.mkdir(parents=True, exist_ok=True)
         # A running exe can be renamed but not overwritten; main() removes the old one next time.
-        if target.suffix == ".exe" and target.parent == ROOT and target.exists():
-            target.replace(target.with_name(target.name + ".old"))
-        target.write_bytes(archive.read(entry))
-        if mode := (entry.external_attr >> 16) & 0o777:
+        old = target.with_name(target.name + ".old")
+        swap = target.suffix == ".exe" and target.parent == ROOT and target.exists()
+        if swap:
+            target.replace(old)
+        try:
+            target.write_bytes(data)
+        except OSError:
+            if swap:
+                old.replace(target)
+            raise
+        if mode:
             target.chmod(mode)
 
 
@@ -89,11 +106,11 @@ def main(argv):
             old.unlink()
         except OSError:
             pass
-    current = installed()
-    if current is None:
-        print("Updates are for the release ZIP; this is a source checkout")
-        return 1
     try:
+        current = installed()
+        if current is None:
+            print("Updates are for the release ZIP; this is a source checkout")
+            return 1
         release = newer(current)
         if release is not None:
             asset = pick_asset(release["assets"])
