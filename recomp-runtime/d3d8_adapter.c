@@ -64,6 +64,11 @@ static void store(uint32_t address, const void *source, size_t size)
     memcpy(recomp_memory(address, size), source, size);
 }
 
+uint32_t recomp_d3d8_swap_counter(void)
+{
+    return frame_state.swap_counter;
+}
+
 uint32_t recomp_d3d8_require_device(void)
 {
     if (!device_state.created || *recomp_memory_u32(DEVICE_GLOBAL) != DEVICE) {

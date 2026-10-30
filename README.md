@@ -59,8 +59,11 @@ keeps running.
   own 5.1 surround mix. The intro and story movies play.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
+- **Free camera.** Take the game's camera in fights and cutscenes and fly it
+  anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
+  the launcher; see [free camera](docs/free-camera.md).
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, an
-  optional intro-movie skip, 5.1 surround and the unlock setting, and remembers them. `DOA2U.exe` plays
+  optional intro-movie skip, 5.1 surround, the unlock setting and the free camera, and remembers them. `DOA2U.exe` plays
   with the same choices. On release ZIPs after 0.1.10, the settings launcher on
   each platform can check GitHub for a newer release and install it from its
   **UPDATE** page; **Check At Start** turns the start-up check off.
@@ -92,6 +95,7 @@ keeps running.
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
+| Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
 | Xbox Live menus | Stop the game; there is no online service |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
@@ -219,8 +223,9 @@ The game picks its own 16:9 camera and menu layouts from the dashboard video
 setting, and the presenter shows that image at 16:9. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
-window. The build fetches pinned, hash-verified copies of SDL3 and
-[upstream SMAA](https://github.com/iryoku/smaa).
+window. The build fetches pinned, hash-verified copies of SDL3,
+[upstream SMAA](https://github.com/iryoku/smaa) and
+[Dear ImGui](https://github.com/ocornut/imgui), which draws the free camera's panel.
 
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.

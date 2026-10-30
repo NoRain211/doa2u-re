@@ -14,6 +14,8 @@
 #include "d3d_texture_model.h"
 #include "d3d_vblank.h"
 #include "input_keyboard_win32.h"
+#include "overlay_sdl_gpu.h"
+#include "screenshot.h"
 
 #include <SDL3/SDL.h>
 
@@ -2305,6 +2307,14 @@ uint32_t virtualKey(SDL_Scancode code)
     case SDL_SCANCODE_UP: return 0x26u;
     case SDL_SCANCODE_RIGHT: return 0x27u;
     case SDL_SCANCODE_DOWN: return 0x28u;
+    // The free camera's own keys (input_host_win32.c).
+    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return 0x10u;
+    case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return 0x11u;
+    case SDL_SCANCODE_F1: return 0x70u;
+    case SDL_SCANCODE_F12: return 0x7bu;
+    case SDL_SCANCODE_PERIOD: return 0xbeu;
+    case SDL_SCANCODE_GRAVE: return 0xc0u;
+    case SDL_SCANCODE_BACKSLASH: return 0xdcu;
     default: return RECOMP_INPUT_KEY_COUNT;
     }
 }
@@ -2386,6 +2396,40 @@ void dumpTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *texture, uint32_
         }
     }
     SDL_ReleaseGPUTransferBuffer(presenter->device, download);
+}
+
+/* Saves the game's frame as shown (after SMAA and gamma), without the overlay
+   drawn on the window. The download waits for the GPU, so only a requested
+   screenshot pays for it. */
+void saveScreenshot(RecompD3dPresenter *presenter, SDL_GPUTexture *frame)
+{
+    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, width * height * 4u, 0};
+    SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    bool saved = false;
+    if (download != nullptr) {
+        SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
+        if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+            SDL_GPUTextureRegion region{frame, 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+            SDL_GPUTextureTransferInfo destination{download, 0u, 0u, 0u};
+            SDL_DownloadFromGPUTexture(pass, &region, &destination);
+            SDL_EndGPUCopyPass(pass);
+        }
+        SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+        presenter->command_buffer = nullptr;
+        if (fence != nullptr) {
+            SDL_WaitForGPUFences(presenter->device, true, &fence, 1u);
+            SDL_ReleaseGPUFence(presenter->device, fence);
+            if (const auto *pixels = static_cast<const uint8_t *>(
+                    SDL_MapGPUTransferBuffer(presenter->device, download, false))) {
+                recomp_screenshot_save(pixels, width, height, width * 4u);
+                saved = true;
+                SDL_UnmapGPUTransferBuffer(presenter->device, download);
+            }
+        }
+        SDL_ReleaseGPUTransferBuffer(presenter->device, download);
+    }
+    if (!saved) std::fprintf(stderr, "recomp screenshot: %s\n", SDL_GetError());
 }
 
 /* RECOMP_D3D_FRAME_DUMP names the BMP path; AT and COUNT select presents and
@@ -2704,7 +2748,14 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
         blit.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
         blit.filter = SDL_GPU_FILTER_LINEAR;
         SDL_BlitGPUTexture(commands, &blit);
+        // The runtime's overlay text goes on the window, not the game's back
+        // buffer, which the game reads back as its front buffer.
+        RecompOverlayText overlay;
+        recomp_overlay_take(&overlay);
+        recomp_overlay_sdl_gpu_draw(presenter->device, presenter->window, commands,
+            swapchain, swap_width, swap_height, &overlay);
     }
+    if (recomp_screenshot_take_request()) saveScreenshot(presenter, shown);
     // Capture what the window shows, at the main target size, as the D3D11 backend does.
     char burst[1024];
     if (const char *path = frameDumpPath(presenter, presenter->present_count + 1u, burst)) {
@@ -2792,6 +2843,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     flushSegment(presenter);
     submitCommands(presenter);
     SDL_WaitForGPUIdle(presenter->device);
+    recomp_overlay_sdl_gpu_shutdown();
     releaseQuery(presenter, presenter->visibility_active);
     for (VisibilityQuery &query : presenter->visibility_pending) releaseQuery(presenter, query);
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);

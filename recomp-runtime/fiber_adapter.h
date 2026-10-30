@@ -23,6 +23,11 @@ uint32_t recomp_fiber_thread_context(void);
 void recomp_fiber_thread_restore(uint32_t handle);
 void recomp_fiber_adapter_reset(void);
 const RecompFiberModel *recomp_fiber_adapter_model(void);
+/* Consulted on each SwitchToFiber between two known fibers, with the running
+   fiber and the target. Returning true declines the switch: the call returns
+   at once, as if the target had run and switched straight back. */
+typedef bool (*RecompFiberSwitchHook)(uint32_t outgoing_handle, uint32_t target_handle);
+void recomp_fiber_set_switch_hook(RecompFiberSwitchHook hook);
 
 #ifdef __cplusplus
 }

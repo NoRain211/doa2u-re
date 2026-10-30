@@ -123,6 +123,29 @@ set_source_files_properties(d3d_presenter_d3d11.cpp d3d_presenter_sdl_gpu.cpp
     PROPERTIES COMPILE_DEFINITIONS RECOMP_SMAA
     INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR};${smaa_SOURCE_DIR}/Textures")
 
+# Dear ImGui draws the runtime's overlay text (the free camera's panel) over
+# the game through the presenter (Direct3D 11 on Windows, SDL_GPU elsewhere);
+# see overlay_*.cpp. Set FETCHCONTENT_SOURCE_DIR_IMGUI to configure offline.
+if(WIN32 OR SDL3_FOUND)
+    FetchContent_Declare(imgui
+        URL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9.tar.gz
+        URL_HASH SHA256=3872a5f90df78fced023c1945f4466b654fd74573370b77b17742149763a7a7c)
+    FetchContent_MakeAvailable(imgui)
+    add_library(recomp_imgui STATIC
+        "${imgui_SOURCE_DIR}/imgui.cpp"
+        "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+        "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+        "${imgui_SOURCE_DIR}/imgui_widgets.cpp")
+    target_include_directories(recomp_imgui PUBLIC "${imgui_SOURCE_DIR}")
+    if(WIN32)
+        target_sources(recomp_imgui PRIVATE "${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp")
+        target_link_libraries(recomp_imgui PUBLIC d3d11 d3dcompiler)
+    else()
+        target_sources(recomp_imgui PRIVATE "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp")
+        recomp_use_sdl3(recomp_imgui)
+    endif()
+endif()
+
 # POSIX fibers switch stacks in assembly (native_fiber.c).
 if(NOT WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -291,18 +314,25 @@ add_test(NAME recomp-runtime-d3d-capture COMMAND recomp_d3d_capture_test)
 # Direct3D 11 on Windows and SDL_GPU elsewhere.
 set(RECOMP_PRESENTER_SHARED d3d_draw_shader.cpp d3d_vertex_program.cpp d3d_draw_model.c
     d3d_texture_model.c d3d_vblank.cpp)
+# Both presenters draw the runtime's overlay text and save screenshots.
+set(RECOMP_PRESENTER_SHARED ${RECOMP_PRESENTER_SHARED} overlay_imgui_panel.cpp overlay_text.c screenshot.c)
 if(WIN32)
     add_library(recomp_d3d_presenter STATIC
-        d3d_presenter_d3d11.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp
+        d3d_presenter_d3d11.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp overlay_d3d11.cpp
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 recomp_keyboard)
+    # screenshot.c asks the shell for the Pictures folder.
+    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid
+        recomp_keyboard recomp_imgui)
 else()
     add_library(recomp_d3d_presenter STATIC
-        d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp
+        d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(recomp_d3d_presenter PUBLIC recomp_keyboard)
+    if(SDL3_FOUND)
+        target_link_libraries(recomp_d3d_presenter PUBLIC recomp_imgui)
+    endif()
     recomp_use_sdl3(recomp_d3d_presenter)
     recomp_use_shader_compiler(recomp_d3d_presenter)
 endif()
@@ -315,6 +345,17 @@ endif()
 if(WIN32 OR SDL3_FOUND)
     add_test(NAME recomp-runtime-d3d-presenter COMMAND recomp_d3d_presenter_test)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES TIMEOUT 60)
+endif()
+
+add_executable(recomp_free_camera_test free_camera.c free_camera_test.c)
+add_test(NAME recomp-runtime-free-camera COMMAND recomp_free_camera_test)
+add_executable(recomp_scene_freeze_test scene_freeze.c scene_freeze_test.c)
+add_test(NAME recomp-runtime-scene-freeze COMMAND recomp_scene_freeze_test)
+add_executable(recomp_screenshot_test screenshot.c screenshot_test.c)
+add_test(NAME recomp-runtime-screenshot COMMAND recomp_screenshot_test)
+if(WIN32)
+    # screenshot.c asks the shell for the Pictures folder.
+    target_link_libraries(recomp_screenshot_test PRIVATE shell32 ole32 uuid)
 endif()
 
 add_executable(recomp_program_abi_call_test program_abi_call_test.c)
@@ -469,6 +510,7 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
+        free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)

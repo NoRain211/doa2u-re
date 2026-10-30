@@ -193,6 +193,13 @@ static void create_fiber(void)
     finish(entry_esp, 3u, handle);
 }
 
+static RecompFiberSwitchHook switch_hook;
+
+void recomp_fiber_set_switch_hook(RecompFiberSwitchHook hook)
+{
+    switch_hook = hook;
+}
+
 /* SwitchToFiber(fiber): ret 4, void. */
 static void switch_to_fiber(void)
 {
@@ -205,6 +212,10 @@ static void switch_to_fiber(void)
     RecompHostFiber *target_host = host_fiber_find(target_handle);
     if (outgoing == NULL || target == NULL || outgoing_host == NULL || target_host == NULL) {
         fail_fiber("unknown-switch", target_handle);
+    }
+    if (switch_hook != NULL && switch_hook(outgoing->guest_handle, target_handle)) {
+        finish(entry_esp, 1u, result);
+        return;
     }
     if (target_handle == outgoing->guest_handle) {
         finish(entry_esp, 1u, result);
