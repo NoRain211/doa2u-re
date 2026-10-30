@@ -348,6 +348,7 @@ final diffuse. A bound stage-2 texture would need a third sampler and still
 stops with `d3d8:reflection-stage2-texture`.
 Mode 21, used by alternate costumes, blends stage-1 color like mode 4 but takes
 alpha entry 18, SELECTARG1(CURRENT), so the blend keeps the stage-0 alpha.
+Mode 21 before a second stage-2 blend is accepted but unverified in play.
 The binder also reaches modes 3, 4, 4, 5: a base, two successive
 BLENDTEXTUREALPHA stages, then diffuse. The second blend binds a third native
 sampler, with stage 2's own mip filter, bias and WRAP/CLAMP addressing. Stages
