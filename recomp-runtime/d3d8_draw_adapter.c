@@ -11,6 +11,7 @@
 #include "scene_freeze_adapter.h"
 #include "stop_report.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -723,16 +724,20 @@ static void attach_lighting(uint32_t device, const RecompD3dVertexLayout *layout
 
 /* Camera-space reflection inputs: world-view, its normal matrix and the
    texture matrix of the generating stage (TEXTURE0 0xce0, TEXTURE1 0xd20). */
-/* World 3x3 rank of at most one: every row pair has a zero cross product.
-   Float products are exact in double, so the test is exact. */
+/* World 3x3 rank of at most one: every row pair has a zero cross product, up to
+   rounding. 0xea6e0 scales rows 0 and 2 of the stack top by zero (0x283d30), so
+   each child world entry is one rounded product of the surviving row. Rounding
+   each entry once moves a 2x2 minor by at most FLT_EPSILON times its two terms
+   (exact in double); this allows twice that. Issue #32's squash reached 0.26. */
 static bool world_collapses_to_line(const float world[16])
 {
     for (uint32_t a = 0u; a < 2u; ++a)
         for (uint32_t b = a + 1u; b < 3u; ++b)
             for (uint32_t c = 0u; c < 3u; ++c) {
                 const uint32_t x = (c + 1u) % 3u, y = (c + 2u) % 3u;
-                if ((double)world[a * 4u + x] * world[b * 4u + y] !=
-                    (double)world[a * 4u + y] * world[b * 4u + x]) return false;
+                const double p = (double)world[a * 4u + x] * world[b * 4u + y];
+                const double q = (double)world[a * 4u + y] * world[b * 4u + x];
+                if (!(fabs(p - q) <= 2.0 * FLT_EPSILON * (fabs(p) + fabs(q)))) return false;
             }
     return true;
 }

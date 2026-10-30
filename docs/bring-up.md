@@ -586,7 +586,9 @@ singular, the SDK inverse (0x34b530) fails and uploads an unset matrix. The
 adapter then uses zero normals, so only ambient and emissive light remain.
 A reflection draw cannot use such a matrix. It is skipped only when its single
 world has 3x3 rank at most one, so every triangle has zero area, or when
-native raster coverage is empty; otherwise it stops.
+native raster coverage is empty; otherwise it stops. Rank one allows each 2x2
+minor twice the error of one float rounding per entry (`2 * FLT_EPSILON` of
+its two terms), as a zero squash scale leaves after the bone multiply.
 A stage projector (0x1df200) divides by the square of its size minus 50, so
 for one frame TEXTURE0 holds infinities and NaNs. With camera-space position
 (w = 1) a non-finite translation makes every S and T non-finite, and CLAMP
@@ -669,7 +671,8 @@ and +0x2ed4 (`0x11e5f0`). After each Swap, the runner repeats the game's award
 loops (`0xdc640`, `0xdc100`): each costume byte becomes its count and the three
 flags become 1. Loaded profiles get the same values, and the next save stores
 them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
-`--no-unlock-all` (runner and `run_game.py`) skips this step, so unlocks
+`--no-unlock-all` (runner and `run_game.py`) and the launchers' **Unlocks: Earn**
+(`unlockAll` in `launcher.json`) skip this step, so unlocks
 come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.

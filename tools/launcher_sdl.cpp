@@ -29,8 +29,8 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, FREE_CAMERA, ITEM_COUNT };
-const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "FREE CAMERA"};
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, FREE_CAMERA, UNLOCKS, UPDATE, CHECK_UPDATES, ITEM_COUNT };
+const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "FREE CAMERA", "UNLOCKS", "UPDATE", "CHECK AT START"};
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
@@ -38,10 +38,12 @@ const Page kPages[] = {
     {"AUDIO SETTINGS", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"MOVIES", "Plays or skips the logo and opening movies at boot", {SKIP_INTRO}},
     {"FREE CAMERA", "In game, F1 or a right-stick click flies the camera", {FREE_CAMERA}},
+    {"GAMEPLAY", "Offers every character and costume, or leaves them to earn through play", {UNLOCKS}},
     {"START GAME", "Saves these settings and starts the game", {}},
+    {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
     {"EXIT", "Closes the launcher", {}},
 };
-constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 4, kExitPage = 5;
+constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 5, kUpdatePage = 6, kExitPage = 7;
 
 // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
 struct Settings {
@@ -52,6 +54,8 @@ struct Settings {
     bool surround = false;
     bool skip_intro = false;
     bool free_camera = false;
+    bool check_updates = true;
+    bool unlock_all = true;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -85,6 +89,8 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "surround", value)) settings.surround = value == "true";
     if (jsonValue(text, "skipIntro", value)) settings.skip_intro = value == "true";
     if (jsonValue(text, "freeCamera", value)) settings.free_camera = value == "true";
+    if (jsonValue(text, "checkUpdates", value)) settings.check_updates = value == "true";
+    if (jsonValue(text, "unlockAll", value)) settings.unlock_all = value == "true";
     return settings;
 }
 
@@ -95,6 +101,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
          << ",\n  \"widescreen\": " << (settings.widescreen ? "true" : "false")
          << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
+         << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
+         << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
          << ",\n  \"surround\": " << (settings.surround ? "true" : "false")
          << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
@@ -132,6 +140,10 @@ struct Launcher {
     int menu = kPlayPage, row = 0;
     bool in_page = false;
     bool built = false;
+    // tools/update.py runs as a child process. pending is the newer version a check found.
+    std::string root, pending, status;
+    SDL_Process *update = nullptr;
+    bool installing = false, quiet = false;
 
     const std::vector<int> &rows() const { return kPages[menu].rows; }
 
@@ -143,20 +155,78 @@ struct Launcher {
         case WIDESCREEN: return choice[item] ? "16:9" : "4:3";
         case SURROUND: return choice[item] ? "5.1" : "STEREO";
         case SKIP_INTRO: return choice[item] ? "SKIP" : "PLAY";
+        case UPDATE: return update != nullptr ? "WORKING" : pending.empty() ? "CHECK" : "INSTALL";
+        case UNLOCKS: return choice[item] ? "EARN" : "EVERYTHING";
         default: return choice[item] ? "ON" : "OFF";
         }
     }
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2};
+        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2, 2, 2, 2};
         choice[item] = (choice[item] + counts[item] + step) % counts[item];
+    }
+
+    // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
+    void startUpdate(bool quietly)
+    {
+        if (update != nullptr) return;
+        installing = !pending.empty();
+        quiet = quietly;
+        const std::string script = root + "/tools/update.py";
+        // The interpreter run_game.sh and build_game.sh prefer, else python3 on PATH.
+        std::string python = root + "/private/venv/bin/python3";
+        if (!SDL_GetPathInfo(python.c_str(), nullptr)) python = "python3";
+        const char *args[] = {python.c_str(), script.c_str(), installing ? "install" : "check", nullptr};
+        update = SDL_CreateProcess(args, true);
+        if (!quiet) status = update == nullptr ? std::string("Cannot run python3: ") + SDL_GetError()
+            : installing ? "Downloading " + pending : "Checking for updates";
+    }
+
+    // Collects the update process once it has exited; its output is one line.
+    void pollUpdate()
+    {
+        int code = 0;
+        if (update == nullptr || !SDL_WaitProcess(update, false, &code)) return;
+        char *data = static_cast<char *>(SDL_ReadProcess(update, nullptr, nullptr));
+        SDL_DestroyProcess(update);
+        update = nullptr;
+        std::string output(data != nullptr ? data : "");
+        SDL_free(data);
+        output.erase(output.find_last_not_of(" \r\n") + 1);
+        output.erase(0, output.rfind('\n') + 1);
+        if (code == 0 && installing) {
+            // An install prints nothing when the release it found is no longer newer.
+            pending.clear();
+            status = output.empty() ? "You have the latest version"
+                : "Updated to " + output + ". Run ./build_game.sh, then reopen the launcher";
+        } else if (code == 0) {
+            pending = output;
+            status = pending.empty() ? "You have the latest version" : "Version " + pending + " is available. Choose Install";
+        } else if (!quiet) {
+            status = output.empty() ? "Update failed (exit " + std::to_string(code) + ")" : output.substr(0, 75);
+        }
+    }
+
+    // Play and exit wait for an install, which replaces the tools; this shows why on the update page.
+    bool waitForInstall()
+    {
+        if (update == nullptr || !installing) return false;
+        menu = kUpdatePage;
+        in_page = false;
+        status = "Wait for the update to finish";
+        return true;
     }
 
     // Returns the exit code once the player picks Start Game (0) or Exit (1), else -1.
     int accept()
     {
-        if (in_page) { change(rows()[row], 1); return -1; }
+        if (in_page) {
+            if (rows()[row] == UPDATE) startUpdate(false);
+            else change(rows()[row], 1);
+            return -1;
+        }
+        if ((menu == kPlayPage || menu == kExitPage) && waitForInstall()) return -1;
         if (menu == kPlayPage) return 0;
         if (menu == kExitPage) return 1;
         in_page = true;
@@ -166,7 +236,7 @@ struct Launcher {
 
     int back()
     {
-        if (!in_page) return 1;
+        if (!in_page) return waitForInstall() ? -1 : 1;
         in_page = false;
         return -1;
     }
@@ -215,7 +285,8 @@ struct Launcher {
         }
 
         // Top bar: title and build state on the left, button prompts on the right.
-        text(kSide, (kTopH - 8) / 2, std::string("DOA2 ULTIMATE - ") + (built ? "READY TO PLAY" : "NOT BUILT YET"), kMuted);
+        text(kSide, (kTopH - 8) / 2, std::string("DOA2 ULTIMATE - ") + (built ? "READY TO PLAY" : "NOT BUILT YET")
+            + (pending.empty() ? "" : " - UPDATE"), kMuted);
         float x = kWidth - kSide;
         for (const auto &hint : {std::pair<const char *, const char *>{"^v", "CHANGE"}, {"B", "BACK"}, {"A", "SELECT"}}) {
             x -= SDL_strlen(hint.second) * 8;
@@ -234,7 +305,7 @@ struct Launcher {
 
         // The chosen page in the bottom bar: its information, then its settings side by side.
         const Page &page = kPages[menu];
-        text(kSide, kInfoY, page.info, {216, 202, 188});
+        text(kSide, kInfoY, menu == kUpdatePage && !status.empty() ? status : page.info, {216, 202, 188});
         if (menu == kPlayPage) chrome(kSide, kValueY, "PRESS START BUTTON", 2);
         const float column = columnWidth(page.rows.size());
         for (size_t i = 0; i < page.rows.size(); ++i) {
@@ -304,6 +375,7 @@ int main(int argc, char **argv)
     SDL_Window *window = nullptr;
     Launcher launcher;
     launcher.built = SDL_GetPathInfo((root + "/build/recomp-program/recomp_program_runner").c_str(), nullptr);
+    launcher.root = root;
     if (!SDL_CreateWindowAndRenderer("Dead or Alive 2 Ultimate", kWidth * 2, kHeight * 2,
             fullscreen ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_RESIZABLE, &window, &launcher.renderer)) {
         std::fprintf(stderr, "launcher: cannot open a window: %s\n", SDL_GetError());
@@ -313,7 +385,7 @@ int main(int argc, char **argv)
     SDL_SetRenderLogicalPresentation(launcher.renderer, kWidth, kHeight, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
     SDL_SetRenderVSync(launcher.renderer, 1);
     SDL_SetRenderDrawBlendMode(launcher.renderer, SDL_BLENDMODE_BLEND);
-    // A private/launcher-background.png replaces the generated beach; without either the launcher works on a plain fill.
+    // A private/launcher-background.png replaces the generated backdrop; without either the launcher works on a plain fill.
     for (const char *path : {"/private/launcher-background.png", "/tools/launcher-background.png"}) {
         if (SDL_Surface *picture = SDL_LoadPNG((root + path).c_str())) {
             launcher.background = SDL_CreateTextureFromSurface(launcher.renderer, picture);
@@ -333,6 +405,9 @@ int main(int argc, char **argv)
     launcher.choice[SURROUND] = settings.surround ? 1 : 0;
     launcher.choice[SKIP_INTRO] = settings.skip_intro ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
+    launcher.choice[CHECK_UPDATES] = settings.check_updates ? 1 : 0;
+    if (settings.check_updates) launcher.startUpdate(true);
+    launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -346,7 +421,7 @@ int main(int argc, char **argv)
             SDL_ConvertEventToRenderCoordinates(launcher.renderer, &event);
             switch (event.type) {
             case SDL_EVENT_QUIT:
-                result = 1;
+                result = launcher.waitForInstall() ? -1 : 1;
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 SDL_OpenGamepad(event.gdevice.which);
@@ -398,7 +473,9 @@ int main(int argc, char **argv)
                 launcher.in_page = true;
                 launcher.row = i;
                 const float column = columnWidth(launcher.rows().size());
-                if (!entering) launcher.change(launcher.rows()[i], x < kSide + (i + .5f) * column ? -1 : 1);
+                if (entering) break;
+                if (launcher.rows()[i] == UPDATE) result = launcher.accept();
+                else launcher.change(launcher.rows()[i], x < kSide + (i + .5f) * column ? -1 : 1);
                 break;
             }
             default:
@@ -424,6 +501,7 @@ int main(int argc, char **argv)
             next_repeat = now + 120;
             launcher.move(dx, dy);
         }
+        launcher.pollUpdate();
         if (result < 0) launcher.draw();
     }
 
@@ -435,12 +513,24 @@ int main(int argc, char **argv)
         settings.surround = launcher.choice[SURROUND] != 0;
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
+        settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
+        settings.unlock_all = launcher.choice[UNLOCKS] == 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             result = 1;
         }
+    } else if ((launcher.choice[CHECK_UPDATES] != 0) != settings.check_updates) {
+        // Other settings save on play; Check At Start must also hold after a plain exit.
+        settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
+        saveSettings(settings_path, settings);
     }
     SDL_DestroyTexture(launcher.background);
+    // Only a check can still be running here; stop it rather than leave it behind.
+    if (launcher.update != nullptr) {
+        SDL_KillProcess(launcher.update, true);
+        SDL_WaitProcess(launcher.update, true, nullptr);
+        SDL_DestroyProcess(launcher.update);
+    }
     SDL_DestroyRenderer(launcher.renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

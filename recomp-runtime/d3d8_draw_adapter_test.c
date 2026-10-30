@@ -1797,6 +1797,22 @@ static int reflection_coverage_tests(void)
         covered = true;
         invoke(0x348240u, 6u, 3u, VERTICES, 32u);
         CHECK(submits == 0u && coverage_queries == 0u && recomp_runtime.registers.esp == STACK + 20u);
+        /* Issue #32: the same squash after rounding, rows 1 and 2 parallel to float precision. */
+        const float rounded[16] = {0,0,0,0, 0.164432883f,0.923869848f,0.0500328951f,0,
+            -0.0598328076f,-0.336171985f,-0.0182056576f,0, -1.97934079f,1.32895517f,0.295400441f,1};
+        recomp_guest_store(DEVICE + 0xde0u, rounded, sizeof rounded);
+        invoke(0x348240u, 6u, 3u, VERTICES, 32u);
+        CHECK(submits == 0u && coverage_queries == 0u && recomp_runtime.registers.esp == STACK + 20u);
+        /* Rows apart by a few times the allowance keep area and need the query. */
+        float apart[16];
+        memcpy(apart, rounded, sizeof apart);
+        apart[8] *= 1.000002f;
+        recomp_guest_store(DEVICE + 0xde0u, apart, sizeof apart);
+        covered = false;
+        invoke(0x348240u, 6u, 3u, VERTICES, 32u);
+        CHECK(submits == 0u && coverage_queries == 1u && recomp_runtime.registers.esp == STACK + 20u);
+        coverage_queries = 0u;
+        recomp_guest_store(DEVICE + 0xde0u, collapsed, sizeof collapsed);
         /* A flattened plane keeps area; only raster coverage proves it unused. */
         *recomp_memory_u32(DEVICE + 0xde0u + 40u) = 0x3f800000u;
         covered = false;

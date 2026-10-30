@@ -37,6 +37,8 @@
     "tools/build_prerequisites.py",
     "tools/test_build_prerequisites.py",
     "tools/package_test.py",
+    "tools/update.py",
+    "tools/test_update.py",
     "tools/test_public_export.py",
     "tools/run_game.py",
     "tools/dedication_card.py",
@@ -45,6 +47,7 @@
     "tools/launcher-background.jpg",
     "tools/launcher-background.png",
     "tools/test_run_game.py",
+    "tools/test_package_test.py",
     "tools/launcher_sdl.cpp",
     "tools/launcher_macos.swift",
     "tools/doa2u/seed_functions.json",
@@ -131,13 +134,13 @@
   "binary_files": [
     {
       "path": "tools/launcher-background.jpg",
-      "sha256": "5947e43268c7a0a0cf3b85f90cf3839cb03c4e5fdb119b577e035a9ed408d0c2",
-      "reason": "Launcher backdrop from committed DOA3 at 6c782d5: an AI-generated beach (Gemini), no game asset bytes. Update the hash with the file."
+      "sha256": "73560035ae8e6a4f3ad4b0a14e48a910fc35a7169a349b5e4efbb336ea96aaed",
+      "reason": "Launcher backdrop: an AI-generated (Gemini) castle bridge at night, no game asset bytes. Update the hash with the file."
     },
     {
       "path": "tools/launcher-background.png",
-      "sha256": "2df2429f1b9d3c7607dcf8d9ec1aefadf379f1baad06abd64d3eee8d8447b38b",
-      "reason": "The same backdrop at 640x400 from committed DOA3 at ce393e4, for the SDL launcher, which loads PNG but not JPEG. Update the hash with the file."
+      "sha256": "939853b9f76ae735cf5d646a7cb5f75fbcb8f6ad289b421353d263fa9c4af741",
+      "reason": "The same backdrop center-cropped to 640x400, for the SDL launcher, which loads PNG but not JPEG. Update the hash with the file."
     }
   ]
 }

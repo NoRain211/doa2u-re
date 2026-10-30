@@ -12,8 +12,9 @@ the sister presenter's depth-disabled fallback.
 The Windows launcher follows committed DOA3 `tools/launcher.cs` at
 `6c782d5`: one C# file, built by the in-box .NET Framework 4 compiler into
 `Launcher.exe` (build, settings, play) and `DOA2U.exe` (play only). It keeps
-DOA3's Horizon Bar menu, controller, keyboard and mouse input, and its
-AI-generated beach backdrop (`tools/launcher-background.jpg`). The export
+DOA3's Horizon Bar menu, controller, keyboard and mouse input. Its backdrop is
+an AI-generated (Gemini) castle bridge at night (`tools/launcher-background.jpg`),
+not DOA3's beach. The export
 checker's hash-pinned `binary_files` come from DOA3's
 `tools/public_export.py` at the same commit; path, extension and size rules
 still apply to pinned files.
@@ -24,7 +25,7 @@ play. Resolution presets keep the same height/480 scaling contract.
 The macOS (`tools/launcher_macos.swift`) and Linux (`tools/launcher_sdl.cpp`)
 launchers take the same Horizon Bar layout from committed DOA3 at `ce393e4`,
 with the same DOA2U pages and MSAA up to SDL_GPU's 8x; the SDL one draws the
-640x400 `tools/launcher-background.png` from that commit. Neither has a build
+640x400 `tools/launcher-background.png`, a center crop of the same backdrop. Neither has a build
 page, since `./build_game.sh` builds there.
 
 The macOS and Linux ports take the host layer of committed DOA3 at `48d05e9`
