@@ -60,12 +60,13 @@ keeps running.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, an
-  optional intro-movie skip and 5.1 surround, and remembers them. `DOA2U.exe` plays
-  with the same choices. On the release ZIP, the settings launcher on each
-  platform can check GitHub for a newer release and install it from its
+  optional intro-movie skip, 5.1 surround and the unlock setting, and remembers them. `DOA2U.exe` plays
+  with the same choices. On release ZIPs after 0.1.10, the settings launcher on
+  each platform can check GitHub for a newer release and install it from its
   **UPDATE** page; **Check At Start** turns the start-up check off.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
-  character and costume starts unlocked. The game's soft reset
+  character and costume starts unlocked unless you choose **Earn** on the
+  launcher's **GAMEPLAY** page. The game's soft reset
   (Start + Back + both triggers) restarts it.
 - **Built from your disc.** `Launcher.exe` lifts the game from your ISO and
   refuses any executable other than the one the developers tested.
@@ -86,7 +87,7 @@ keeps running.
 | Story, Ayane and Gen Fu | Stages 1-6 cleared without a stop in scripted runs; the Tengu fight was lost each time |
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
-| Every character and costume | Unlocked; the game saves the unlocks to your profile |
+| Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
 | Native 16:9 widescreen, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
@@ -122,7 +123,8 @@ Visual Studio or administrator approval.
    (about 15 minutes). The build stops unless it reproduces the exact program
    the developers tested.
 3. Pick resolution, MSAA, SMAA and widescreen on **VIDEO SETTINGS**, stereo or
-   5.1 on **AUDIO SETTINGS** and the intro skip on **MOVIES**, then choose
+   5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
+   **GAMEPLAY** to leave unlocks to play, then choose
    **START GAME**. A controller, the keyboard or the mouse all work. Your
    choices are remembered, and `DOA2U.exe` plays with them later.
 
@@ -222,8 +224,9 @@ window. The build fetches pinned, hash-verified copies of SDL3 and
 
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.
-`--no-unlock-all` turns off the automatic character and costume unlock, so
-unlocks come from play; profiles already saved with the unlock keep it.
+`--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
+off the automatic character and costume unlock, so unlocks come from play;
+profiles already saved with the unlock keep it.
 
 To package a release ZIP from a clean checkout:
 

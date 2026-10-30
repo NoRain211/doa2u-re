@@ -29,19 +29,20 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UPDATE, CHECK_UPDATES, ITEM_COUNT };
-const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "UPDATE", "CHECK AT START"};
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, UPDATE, CHECK_UPDATES, ITEM_COUNT };
+const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "UNLOCKS", "UPDATE", "CHECK AT START"};
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
     {"VIDEO SETTINGS", "Sets resolution, anti-aliasing and screen shape", {RESOLUTION, MSAA, SMAA, WIDESCREEN}},
     {"AUDIO SETTINGS", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"MOVIES", "Plays or skips the logo and opening movies at boot", {SKIP_INTRO}},
+    {"GAMEPLAY", "Offers every character and costume, or leaves them to earn through play", {UNLOCKS}},
     {"START GAME", "Saves these settings and starts the game", {}},
     {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
     {"EXIT", "Closes the launcher", {}},
 };
-constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 3, kUpdatePage = 4, kExitPage = 5;
+constexpr int kPageCount = static_cast<int>(std::size(kPages)), kPlayPage = 4, kUpdatePage = 5, kExitPage = 6;
 
 // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
 struct Settings {
@@ -52,6 +53,7 @@ struct Settings {
     bool surround = false;
     bool skip_intro = false;
     bool check_updates = true;
+    bool unlock_all = true;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -85,6 +87,7 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "surround", value)) settings.surround = value == "true";
     if (jsonValue(text, "skipIntro", value)) settings.skip_intro = value == "true";
     if (jsonValue(text, "checkUpdates", value)) settings.check_updates = value == "true";
+    if (jsonValue(text, "unlockAll", value)) settings.unlock_all = value == "true";
     return settings;
 }
 
@@ -96,6 +99,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"widescreen\": " << (settings.widescreen ? "true" : "false")
          << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
          << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
+         << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
          << ",\n  \"surround\": " << (settings.surround ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
@@ -148,13 +152,14 @@ struct Launcher {
         case SURROUND: return choice[item] ? "5.1" : "STEREO";
         case SKIP_INTRO: return choice[item] ? "SKIP" : "PLAY";
         case UPDATE: return update != nullptr ? "WORKING" : pending.empty() ? "CHECK" : "INSTALL";
+        case UNLOCKS: return choice[item] ? "EARN" : "EVERYTHING";
         default: return choice[item] ? "ON" : "OFF";
         }
     }
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2, 2};
+        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2, 2, 2};
         choice[item] = (choice[item] + counts[item] + step) % counts[item];
     }
 
@@ -397,6 +402,7 @@ int main(int argc, char **argv)
     launcher.choice[SKIP_INTRO] = settings.skip_intro ? 1 : 0;
     launcher.choice[CHECK_UPDATES] = settings.check_updates ? 1 : 0;
     if (settings.check_updates) launcher.startUpdate(true);
+    launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -502,6 +508,7 @@ int main(int argc, char **argv)
         settings.surround = launcher.choice[SURROUND] != 0;
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
         settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
+        settings.unlock_all = launcher.choice[UNLOCKS] == 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             result = 1;
