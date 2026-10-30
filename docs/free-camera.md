@@ -81,6 +81,7 @@ flies stops being built, and **Next camera** moves it to the next object the
 game built in the previous frame.
 
 DOA2U's fight cameras stand far back with a narrow lens (about 17 units from
+the target at 19 degrees, a fighter being under 2 units tall), so the camera
 flies at half the DOA3 port's speed.
 flies at half the DOA3 port's speed.
 
