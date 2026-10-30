@@ -42,9 +42,17 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual((root / "private" / "launcher.json").read_text(), "mine")
             self.assertEqual((root / "private" / "photo.jpg").read_text(), "photo")
             # A failed write puts the running exe back and leaves VERSION, which goes last, for a retry.
-            with mock.patch.object(Path, "write_bytes", side_effect=[None, OSError("disk full")]):
+            real_write = Path.write_bytes
+
+            def fail_on_exe(path, data):
+                if path.name == "Launcher.exe":
+                    raise OSError("disk full")
+                return real_write(path, data)
+
+            with mock.patch.object(Path, "write_bytes", fail_on_exe):
                 with self.assertRaises(OSError):
                     update.unpack(archive({"DOA2U-3/VERSION": "3", "DOA2U-3/tools/a.py": "b", "DOA2U-3/Launcher.exe": "x"}))
+            self.assertEqual((root / "tools" / "a.py").read_text(), "b")
             self.assertEqual((root / "VERSION").read_text(), "2")
             self.assertEqual((root / "Launcher.exe").read_text(), "new")
 
