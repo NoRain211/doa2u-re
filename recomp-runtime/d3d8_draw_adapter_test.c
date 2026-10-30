@@ -898,6 +898,15 @@ static int lighting_tests(void)
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 32u); return 1; }
     CHECK(strncmp(stop_reason, "d3d8:draw-texture-stages:", 25) == 0);
     *recomp_memory_u32(STAGES + 128u + 48u) = *recomp_memory_u32(STAGES + 128u + 64u) = 14u;
+    /* Costume material mode 21 keeps CURRENT alpha at stage 1 (issue #60). */
+    *recomp_memory_u32(STAGES + 128u + 64u) = 2u;
+    *recomp_memory_u32(STAGES + 128u + 72u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 32u);
+    CHECK(submitted.data.draw.has_reflection && submitted.data.draw.reflection_color_only);
+    *recomp_memory_u32(STAGES + 128u + 64u) = 14u;
+    *recomp_memory_u32(STAGES + 128u + 72u) = 2u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 32u);
+    CHECK(submitted.data.draw.has_reflection && !submitted.data.draw.reflection_color_only);
     *recomp_memory_u32(STAGES + 128u + 6u * 4u) = 0x3f800000u;
     *recomp_memory_u32(STAGES + 128u + 5u * 4u) = 1u;
     invoke(0x348240u, 5u, 3u, VERTICES, 32u);

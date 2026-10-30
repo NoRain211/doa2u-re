@@ -880,6 +880,7 @@ static bool attach_reflection(uint32_t device, const RecompD3dVertexLayout *layo
         if (!isfinite(draw->reflection_diffuse[i])) recomp_stop(2, "d3d8:reflection-material");
     draw->reflection_mesh_uv = stages[1][28] == 0u;
     draw->reflection_premultiplied = stages[1][12] == 16u;
+    draw->reflection_color_only = stages[1][16] == 2u;
     draw->reflection_alpha_kill = stages[1][11] == 4u;
     draw->reflection_stage2 = stages[2][12] == 14u;
     if (draw->reflection_stage2) {

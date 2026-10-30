@@ -247,6 +247,8 @@ typedef struct RecompD3dPresenterDrawCommand {
     bool reflection_normalize;
     bool reflection_mesh_uv;
     bool reflection_premultiplied;
+    /* Stage-1 alpha is SELECTARG1(CURRENT): the blend keeps stage-0 alpha. */
+    bool reflection_color_only;
     /* Discard a zero-alpha stage-1 texel before its reflection blend. */
     bool reflection_alpha_kill;
     /* Stage 2 MODULATE(TEXTURE, CURRENT) without a stage-2 texture: the 5849

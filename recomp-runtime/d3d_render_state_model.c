@@ -522,10 +522,13 @@ bool recomp_d3d_reflection_material(const uint32_t stages[4][32])
     static const uint32_t offsets[] = {12u, 14u, 15u, 16u, 18u, 19u};
     for (uint32_t stage = 0u; stage < (third ? 4u : 3u); ++stage) {
         bool texture_match = !third && stage == 2u;
+        /* Material mode 21 (0x7affc8) blends stage-1 color only; its alpha
+           entry 18 (0x7b0078) is SELECTARG1(CURRENT). */
+        const bool color_only = stage == 1u && stages[1][16] == 2u && stages[1][18] == 1u;
         for (uint32_t i = 0u; i < 6u; ++i) {
             if (stage == 2u && stages[stage][offsets[i]] != texture_final[i]) texture_match = false;
         }
-        for (uint32_t i = 0u; i < 6u && !texture_match; ++i) {
+        for (uint32_t i = 0u; i < (color_only ? 3u : 6u) && !texture_match; ++i) {
             if (stages[stage][offsets[i]] != arguments[third && stage == 2u ? 1u : stage][i]) return false;
         }
         if (stages[stage][20] != 0u) return false;

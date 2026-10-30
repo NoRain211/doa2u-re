@@ -170,14 +170,16 @@ int buildDrawShaderSource(
         "        base.a *= diffuse.a;\n"
         "        float4 env = alpha_mask.Sample(mask_sampler, input.reflection_coord);\n"
         "        if (reflection_stage2_flags.y > 0.5f && env.a == 0.0f) discard;\n"
-        /* w: bit 0 premultiplied blend, bit 1 stage-2 pass-through (no diffuse). */
+        /* w: bit 0 premultiplied blend, bit 1 stage-2 pass-through (no diffuse),
+           bit 2 color-only blend (stage-1 alpha keeps CURRENT). */
         "        shaded = (fmod(reflection_flags.w, 2.0f) > 0.5f\n"
         "            ? saturate(env + base * (1.0f - env.a)) : lerp(base, env, env.a));\n"
+        "        if (reflection_flags.w > 3.5f) shaded.a = base.a;\n"
         "        if (reflection_stage2_flags.x > 0.5f) {\n"
         "            float4 third = bump_map.Sample(bump_sampler, input.reflection_coord2);\n"
         "            shaded = lerp(shaded, third, third.a);\n"
         "        }\n"
-        "        shaded *= reflection_flags.w > 1.5f ? 1.0f : diffuse;\n"
+        "        shaded *= fmod(reflection_flags.w, 4.0f) > 1.5f ? 1.0f : diffuse;\n"
         "    } else\n"
         "%s"
         "    if (blend_flags.y == 1.0f) {\n"
@@ -737,7 +739,7 @@ bool recomp_d3d_draw_constants(
         std::memcpy(constants_out + 132, draw.reflection_diffuse, 16u);
         constants_out[136] = draw.reflection_mesh_uv ? 2.0f : 1.0f;
         constants_out[139] = (draw.reflection_premultiplied ? 1.0f : 0.0f) +
-            (draw.reflection_skip_diffuse ? 2.0f : 0.0f);
+            (draw.reflection_skip_diffuse ? 2.0f : 0.0f) + (draw.reflection_color_only ? 4.0f : 0.0f);
         if (draw.texgen_reflection && !draw.reflection_mesh_uv)
             std::memcpy(constants_out + 140 + 192 * 4 + 364, draw.reflection_stage1_transform, 64u);
     }

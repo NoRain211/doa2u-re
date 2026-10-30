@@ -685,8 +685,9 @@ static bool testReflectionStage2(bool alpha_kill = false, bool mesh_uv = false)
 // while the half-alpha environment keeps mesh UV, as the fight's chrome does.
 // uv_transform: no reflection; UV0 is (u, v, 1, 0) times TEXTURE0.
 // stage1_texgen: with texgen, stage 1 also generates through its own TEXTURE1 matrix.
+// color_only: stage 1 keeps CURRENT alpha, so quarter base alpha survives the opaque environment.
 static bool testReflectionAddress(bool texgen, bool uv_transform = false, bool skip_diffuse = false,
-    bool stage1_texgen = false, float skin_weight = -1.0f)
+    bool stage1_texgen = false, float skin_weight = -1.0f, bool color_only = false)
 {
     char folder[MAX_PATH], path[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "env", 0, path)) return false;
@@ -705,7 +706,7 @@ static bool testReflectionAddress(bool texgen, bool uv_transform = false, bool s
             skinned[i] = {v.x, v.y, v.z, skin_weight, v.nx, v.ny, v.nz, v.u, v.v};
         }
         const uint16_t indices[] = {0, 1, 2, 3};
-        const uint32_t base_pixels[2] = {0xff0000ffu, 0xffffff00u};
+        const uint32_t base_pixels[2] = {color_only ? 0x400000ffu : 0xff0000ffu, 0xffffff00u};
         const uint32_t environment[2] = {texgen ? 0x80ff0000u : 0xffff0000u,
             texgen ? 0x8000ff00u : 0xff00ff00u};
         const float white[] = {1, 1, 1, 1};
@@ -789,6 +790,15 @@ static bool testReflectionAddress(bool texgen, bool uv_transform = false, bool s
             draw.reflection_transform[0] = draw.reflection_transform[12] = 0.5f;
             draw.reflection_transform[13] = 0.25f;
         }
+        if (color_only) {
+            draw.reflection_color_only = true;
+            draw.blend.blend_enable = true;
+            draw.blend.src_factor = RECOMP_D3D_BLEND_SRC_ALPHA;
+            draw.blend.dst_factor = RECOMP_D3D_BLEND_INV_SRC_ALPHA;
+            auto clear = clearCommand();
+            clear.data.clear.color = 0xff000000u;
+            passed &= expect("color-only reflection clear", d3d_backend_submit(presenter, &clear));
+        }
         passed &= expect("clamped reflection draw", d3d_backend_submit(presenter, &command));
         RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
         present.data.present = {5, 1};
@@ -806,6 +816,7 @@ static bool testReflectionAddress(bool texgen, bool uv_transform = false, bool s
                 const bool pixel_ok = skin_weight >= 0.0f
                     ? bgr[0] < 10 && (skin_weight == 0.5f
                         ? bgr[2] > 245 && bgr[1] < 10 : bgr[1] > 245 && bgr[2] < 10)
+                    : color_only ? bgr[0] < 10 && std::abs(int(bgr[2 - i]) - 64) <= 2 && bgr[1 + i] < 10
                     : uv_transform ? bgr[2] > 245 && bgr[1] > 245 && bgr[0] < 10
                     : stage1_texgen
                     ? bgr[0] < 10 && bgr[1] > 250 && std::abs(int(bgr[2]) - 128) <= 3
@@ -822,6 +833,7 @@ static bool testReflectionAddress(bool texgen, bool uv_transform = false, bool s
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     DeleteFileA(path);
     if (passed) std::puts(skin_weight >= 0.0f ? "PASS skinned reflection eye, normal and remainder weights"
+        : color_only ? "PASS color-only reflection blend keeps stage-0 alpha"
         : stage1_texgen ? "PASS both stages generate through their own texture matrices"
         : skip_diffuse ? "PASS reflection stage-2 pass-through skips the final diffuse"
         : uv_transform ? "PASS stage-0 texture matrix translates 2D UV by its third row"
@@ -2863,6 +2875,7 @@ int main()
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
         !testReflectionAddress(false, false, true) || !testReflectionAddress(true, false, false, true) ||
+        !testReflectionAddress(false, false, false, false, -1.0f, true) ||
         !testReflectionAddress(false, false, false, false, 0.0f) ||
         !testReflectionAddress(false, false, false, false, 0.5f) ||
         !testReflectionAddress(false, false, false, false, 1.0f) ||
