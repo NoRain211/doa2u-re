@@ -712,6 +712,43 @@ static int lighting_tests(void)
     CHECK(!lit->enabled && lit->stage_mode && lit->stage[1] == 1.0f && lit->stage[3] == 1.0f);
     *recomp_memory_u32(DEVICE + 0x798u) = 0x112u;
     *recomp_memory_u32(0x3553f8u) = 1u;
+    /* 0x257ee0's projected lights: lit 0x142 without normals, stage 1 ADD(TEXTURE,
+       CURRENT) over the same camera-space projection, sharing stage 0's texture. */
+    uint32_t light_stages[3][32];
+    recomp_guest_load(light_stages, STAGES, sizeof light_stages);
+    const uint32_t saved_stage1_texture = *recomp_memory_u32(DEVICE + 0xf8cu);
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x142u;
+    *recomp_memory_u32(DEVICE + 0xf8cu) = 0x7000u;
+    *recomp_memory_u32(STAGES + 21u * 4u) = *recomp_memory_u32(STAGES + 128u + 21u * 4u) = 0x103u;
+    *recomp_memory_u32(STAGES + 28u * 4u) = *recomp_memory_u32(STAGES + 128u + 28u * 4u) = 0x20000u;
+    *recomp_memory_u32(STAGES + 12u * 4u) = *recomp_memory_u32(STAGES + 14u * 4u) = 2u;
+    *recomp_memory_u32(STAGES + 16u * 4u) = 2u;
+    *recomp_memory_u32(STAGES + 18u * 4u) = 1u;
+    *recomp_memory_u32(STAGES + 128u + 12u * 4u) = 7u;
+    *recomp_memory_u32(STAGES + 128u + 14u * 4u) = 2u;
+    *recomp_memory_u32(STAGES + 128u + 15u * 4u) = 1u;
+    *recomp_memory_u32(STAGES + 128u + 16u * 4u) = 2u;
+    *recomp_memory_u32(STAGES + 128u + 18u * 4u) = 1u;
+    /* Same address, filter, mip filter and LOD bias as stage 0, so one slot serves both. */
+    memcpy(recomp_memory(STAGES + 128u, 7u * 4u), recomp_memory(STAGES, 7u * 4u), 7u * 4u);
+    *recomp_memory_u32(STAGES + 256u + 12u * 4u) = 1u;
+    const float stage1_matrix[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0.5f,0.25f,2,1};
+    recomp_guest_store(DEVICE + 0xd20u, stage1_matrix, sizeof stage1_matrix);
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected projected light stop: %s\n", stop_reason); return 1; }
+    invoke(0x348240u, 5u, 3u, VERTICES, 24u);
+    const RecompD3dPresenterDrawCommand *projected = &submitted.data.draw;
+    CHECK(projected->texgen_projected && !projected->directional.enabled &&
+        projected->projected_stage_count == 1u && projected->projected_slots[0] == 0 &&
+        projected->projected_transforms[0][12] == 0.5f && projected->projected_transforms[0][14] == 2.0f);
+    CHECK(projected->material_alpha_mode == RECOMP_D3D_MATERIAL_ALPHA_SELECT_DIFFUSE &&
+        projected->material_alpha == 0.25f);
+    /* An unbound stage-1 texture passes CURRENT through. */
+    *recomp_memory_u32(DEVICE + 0xf8cu) = 0u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 24u);
+    CHECK(projected->projected_stage_count == 1u && projected->projected_slots[0] == -1);
+    recomp_guest_store(STAGES, light_stages, sizeof light_stages);
+    *recomp_memory_u32(DEVICE + 0xf8cu) = saved_stage1_texture;
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x112u;
     *recomp_memory_u32(STAGES + 44u) = 0u;
     *recomp_memory_u32(STAGES + 48u) = *recomp_memory_u32(STAGES + 64u) = 4u;
     *recomp_memory_u32(STAGES + 72u) = 2u;

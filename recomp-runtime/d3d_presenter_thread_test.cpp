@@ -1329,7 +1329,22 @@ static bool testStageEffect()
         draw.directional.stage[0] = draw.directional.stage[2] = draw.directional.stage[3] = 1;
         draw.texture_factor = 0xffffffffu;
         draw.modulate_texture_factor_alpha = true;
+        // 0x257ee0's ADD stages: slot 1 adds (64, 64), an unbound stage passes, slot 2 adds 16 red.
+        const uint32_t added[2] = {0xff404000u, 0xff100000u};
+        draw.reflection_texture = draw.reflection_stage2_texture = draw.texture;
+        draw.reflection_texture.width = draw.reflection_stage2_texture.width = 1;
+        draw.reflection_texture.data = 0x5000u;
+        draw.reflection_stage2_texture.data = 0x6000u;
+        draw.reflection_bytes = &added[0];
+        draw.reflection_stage2_bytes = &added[1];
+        draw.reflection_byte_count = draw.reflection_stage2_byte_count = sizeof added[0];
+        draw.projected_stage_count = 3;
+        draw.projected_slots[0] = 1;
+        draw.projected_slots[1] = -1;
+        draw.projected_slots[2] = 2;
+        for (auto &m : draw.projected_transforms) m[0] = m[5] = m[10] = m[15] = 1;
         passed &= expect("projected draw", d3d_backend_submit(presenter, &command));
+        draw.projected_stage_count = 0;
         // COUNT2 uses Q=1. Mesh UVs are zero; camera translation and z contribute to S.
         const World unprojected[] = {{0.375f, 0.75f, 0.5f, 0xff0000ffu, 0, 0},
             {0.875f, 0.75f, 0.5f, 0xff0000ffu, 0, 0},
@@ -1369,9 +1384,10 @@ static bool testStageEffect()
         if (FILE *file = std::fopen(path, "rb")) {
             // {x, y, R, G}: masked green at alpha 0.5 and 0.25, then 1.0 and killed, then
             // kill-only at factor alpha 0.5 and killed;
-            // the projected quad reads red at s/q 0.31 (s 0.63 would be green), green at 0.69.
+            // the projected quad reads red at s/q 0.31 (s 0.63 would be green), green at 0.69,
+            // plus its ADD stages, saturating red.
             const int pixels[][4] = {{25, 40, 0, 128}, {55, 40, 0, 64}, {85, 40, 0, 255}, {115, 40, 0, 0},
-                {145, 40, 0, 128}, {175, 40, 0, 0}, {100, 200, 255, 0}, {220, 200, 0, 255},
+                {145, 40, 0, 128}, {175, 40, 0, 0}, {100, 200, 255, 64}, {220, 200, 80, 255},
                 {240, 60, 255, 0}, {280, 60, 0, 255}, {40, 90, 0, 64}};
             for (const auto &pixel : pixels) {
                 unsigned char bgr[3]{};
@@ -1388,7 +1404,7 @@ static bool testStageEffect()
     }
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     DeleteFileA(path);
-    if (passed) std::puts("PASS stage-effect overlays: texture select, factor alpha, UV1 mask/kill, UV0 kill, projected texgen");
+    if (passed) std::puts("PASS stage-effect overlays: texture select, factor alpha, UV1 mask/kill, UV0 kill, projected texgen and ADD stages");
     return passed;
 }
 

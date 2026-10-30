@@ -979,7 +979,7 @@ RecompD3dPresenterError bindTarget(
             desc.width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
             desc.height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
             (desc.format_byte != RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8 &&
-             desc.format_byte != 0x12u)) {
+             desc.format_byte != 0x07u && desc.format_byte != 0x12u)) {
             std::fprintf(stderr,
                 "recomp d3d presenter: unsupported target data=0x%08X "
                 "fmt=0x%02X size=%ux%u no_depth=%d\n",
@@ -1394,8 +1394,9 @@ bool ensureSharedDrawState(RecompD3dPresenter *presenter)
        then post-filter flags, texel size and four constants (24 floats), the
        stage-1 texture matrix (16), bump matrices, bump fog and fog color (16),
        the extra reflection world-view/normal transforms (96), and the stage-2
-       texture matrix and flags (20), then scaled receiver depth bias (4). */
-    constant_desc.ByteWidth = (140u + 192u * 4u + 512u + 4u) * sizeof(float);
+       texture matrix and flags (20), then scaled receiver depth bias (4), then the
+       projected stage 1-3 matrices, count and slots (56). */
+    constant_desc.ByteWidth = kRecompD3dDrawConstantFloats * sizeof(float);
     constant_desc.Usage = D3D11_USAGE_DYNAMIC;
     constant_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     constant_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -2437,7 +2438,8 @@ RecompD3dPresenterError submitDraw(
     /* A second cache lookup can evict the first entry. Keep its view alive
        until the context takes its own reference. */
     const bool has_second_texture = draw.has_alpha_mask || draw.has_reflection ||
-        draw.program_alpha_mask || draw.distortion || draw.stage1_alpha_mask || draw.bump_env;
+        draw.program_alpha_mask || draw.distortion || draw.stage1_alpha_mask || draw.bump_env ||
+        draw.projected_stage_count != 0u;
     if (has_second_texture && texture_view != nullptr) texture_view->AddRef();
     const auto release_view = [](ID3D11ShaderResourceView *view) { if (view) view->Release(); };
     std::unique_ptr<ID3D11ShaderResourceView, decltype(release_view)> retained(
@@ -2502,6 +2504,33 @@ RecompD3dPresenterError submitDraw(
         bump_view = lookupTexture(presenter, third);
         if (bump_view == nullptr || mask_view == nullptr || texture_view == nullptr)
             return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+    }
+    if (draw.projected_stage_count != 0u) {
+        if (!draw.texgen_projected || draw.projected_stage_count > 3u || texture_view == nullptr ||
+            draw.has_alpha_mask || draw.has_reflection || draw.program_count || draw.distortion ||
+            draw.stage1_alpha_mask || draw.bump_env || draw.reflection_stage2)
+            return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        bool slots[3]{};
+        for (uint32_t i = 0u; i < draw.projected_stage_count; ++i)
+            if (draw.projected_slots[i] >= 0 && draw.projected_slots[i] < 3) slots[draw.projected_slots[i]] = true;
+        if (slots[1]) {
+            RecompD3dPresenterDrawCommand second{};
+            second.texture = draw.reflection_texture;
+            second.texture_bytes = draw.reflection_bytes;
+            second.texture_byte_count = draw.reflection_byte_count;
+            mask_view = lookupTexture(presenter, second);
+            if (mask_view == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        }
+        if (slots[2]) {
+            if (mask_view != nullptr) mask_view->AddRef();
+            retained_mask.reset(mask_view);
+            RecompD3dPresenterDrawCommand third{};
+            third.texture = draw.reflection_stage2_texture;
+            third.texture_bytes = draw.reflection_stage2_bytes;
+            third.texture_byte_count = draw.reflection_stage2_byte_count;
+            bump_view = lookupTexture(presenter, third);
+            if (bump_view == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        }
     }
     if (draw.bump_env) {
         if (!draw.program_count || draw.has_alpha_mask || draw.has_reflection || draw.program_alpha_mask ||
@@ -2603,13 +2632,14 @@ RecompD3dPresenterError submitDraw(
     presenter->context->PSSetSamplers(0u, 1u, &sampler);
     sampler = draw.program_alpha_mask ? presenter->program_mask_sampler
             : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env
+                || draw.projected_stage_count != 0u
             ? lookupDrawSampler(presenter, draw.reflection_address_u,
                 draw.reflection_address_v, draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
             : presenter->filter_sampler;
     if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     presenter->context->PSSetSamplers(1u, 1u, &sampler);
-    if (draw.bump_env || draw.reflection_stage2) {
-        sampler = draw.reflection_stage2
+    if (draw.bump_env || draw.reflection_stage2 || draw.projected_stage_count != 0u) {
+        sampler = draw.reflection_stage2 || draw.projected_stage_count != 0u
             ? lookupDrawSampler(presenter, draw.reflection_stage2_address_u, draw.reflection_stage2_address_v,
                 draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
             : lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, 0.0f);

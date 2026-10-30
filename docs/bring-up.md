@@ -474,6 +474,18 @@ snapshot their storage descriptors. Binding counts retain parent textures,
 and viewport extents follow the target. Front-buffer targets, offscreen sharing
 of a supersampled main depth, and partial clears remain guarded. Synthetic draw
 tests establish these contracts, not title acceptance.
+Swizzled X8R8G8B8 (0x07) colors use the same BGRA8 host storage: the adapter
+clears their alpha to 1 and masks it from draws, so samplers read it as 1. Tina's
+Story ending (0x258a30) renders its scene into two alternating 256x256 textures
+after the Tengu fight and blends them by that alpha (0x257a10).
+Its projected lights (0x257ee0) add three more camera-space projected stages to
+stage 0: ADD(TEXTURE, CURRENT), each through its own TEXTUREn with COUNT3 and
+PROJECTED, on lit meshes without normals. Only V0 alpha reaches the image, so
+the adapter skips lighting and takes material diffuse alpha (0x34fc80). An
+unbound stage passes CURRENT through (0x352e46). The presenter samples the
+stages through its three 2D slots, shared by texture and sampler state; the
+ending binds two textures, and a fourth distinct pair stops. Fog on these
+additive draws is not applied, as on other fixed-function draws.
 
 SetRenderTarget (0x3447d0) programs the depth offset and pitch from the depth
 header alone, so an offscreen color can test against the main depth. The fight

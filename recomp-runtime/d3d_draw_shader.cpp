@@ -69,6 +69,9 @@ constexpr char kDrawShaderPrologue[] =
     "    row_major float4x4 reflection_transform2;\n"
     "    float4 reflection_stage2_flags;\n"
     "    float4 raster_bias;\n"
+    "    row_major float4x4 projected_transform[3];\n"
+    "    float4 projected_stages;\n"
+    "    float4 projected_slots;\n"
     "}\n"
     "Texture2D guest_texture : register(t0);\n"
     "Texture3D guest_volume : register(t3);\n"
@@ -145,6 +148,7 @@ int buildDrawShaderSource(
         "    float3 lit_specular : TEXCOORD6;\n"
         "    float projected_q : TEXCOORD7;\n"
         "    float2 reflection_coord2 : TEXCOORD10;\n"
+        "    float3 projected_eye : TEXCOORD12;\n"
         "%s"
         "};\n"
         "VSOut vs_main(VSIn input) {\n"
@@ -206,6 +210,20 @@ int buildDrawShaderSource(
         "        else if (blend_flags.y > 3.5f) shaded.a *= texture_factor.a;\n"
         "        else if (blend_flags.y > 2.5f) shaded.rgb = saturate(2.0f * shaded.rgb * texture_factor.rgb);\n"
         "        else if (blend_flags.y > 1.5f) shaded *= texture_factor;\n"
+        "    }\n"
+        /* Projected ADD stages (0x257ee0) precede the final combiner's specular. */
+        "    if (projected_stages.x > 0.5f) {\n"
+        "        [unroll] for (uint i = 0; i < 3; ++i) {\n"
+        "            float slot = projected_slots[i];\n"
+        "            if (i >= (uint)projected_stages.x || slot < -0.5f) continue;\n"
+        "            float3 g = mul(float4(input.projected_eye, 1), projected_transform[i]).xyz;\n"
+        "            float2 uv = g.xy / g.z;\n"
+        "            float4 t;\n"
+        "            if (slot < 0.5f) t = guest_texture.Sample(guest_sampler, uv);\n"
+        "            else if (slot < 1.5f) t = alpha_mask.Sample(mask_sampler, uv);\n"
+        "            else t = bump_map.Sample(bump_sampler, uv);\n"
+        "            shaded.rgb = saturate(shaded.rgb + t.rgb);\n"
+        "        }\n"
         "    }\n"
         /* Fixed function adds specular after the texture stages, textured or not. */
         "    if (directional_flags.w > 0.5f) shaded.rgb += input.lit_specular;\n"
@@ -275,6 +293,7 @@ int buildDrawShaderSource(
                   "        output.texcoord = g.xy;\n"
                   "        output.volume_coord = g.z;\n"
                   "        output.projected_q = reflection_stage2_flags.z > 0.5f ? 1.0f : g.z;\n"
+                  "        output.projected_eye = mul(float4(input.position, 1), reflection_world_view).xyz;\n"
                   "    }\n"
                   "    if (abs(reflection_flags.x - 1.0f) < 0.5f || abs(filter_texel.z - 1.0f) < 0.5f ||\n"
                   "        (reflection_stage2_flags.x > 0.5f && reflection_stage2_flags.w < 0.5f)) {\n"
@@ -302,6 +321,7 @@ int buildDrawShaderSource(
                   "        output.texcoord = g.xy;\n"
                   "        output.volume_coord = g.z;\n"
                   "        output.projected_q = reflection_stage2_flags.z > 0.5f ? 1.0f : g.z;\n"
+                  "        output.projected_eye = mul(float4(input.position, 1), reflection_world_view).xyz;\n"
                   "    }\n"
                   "    if (abs(reflection_flags.x - 1.0f) < 0.5f || abs(filter_texel.z - 1.0f) < 0.5f ||\n"
                   "        (reflection_stage2_flags.x > 0.5f && reflection_stage2_flags.w < 0.5f)) {\n"
@@ -747,6 +767,12 @@ bool recomp_d3d_draw_constants(
         std::memcpy(constants_out + 140 + 192 * 4 + 492, draw.reflection_stage2_transform, 64u);
         constants_out[140 + 192 * 4 + 508] = 1.0f;
         constants_out[140 + 192 * 4 + 511] = draw.reflection_stage2_mesh_uv ? 1.0f : 0.0f;
+    }
+    if (draw.projected_stage_count != 0u) {
+        float *projected = constants_out + 140 + 192 * 4 + 516;
+        std::memcpy(projected, draw.projected_transforms, sizeof draw.projected_transforms);
+        projected[48] = static_cast<float>(draw.projected_stage_count);
+        for (unsigned i = 0u; i < 3u; ++i) projected[52 + i] = static_cast<float>(draw.projected_slots[i]);
     }
     if (draw.stage1_alpha_mask)
         constants_out[138] = draw.stage1_kill_only ? 3.0f : draw.stage1_alpha_kill ? 2.0f : 1.0f;

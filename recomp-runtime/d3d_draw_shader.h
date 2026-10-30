@@ -17,8 +17,9 @@
    then post-filter flags, texel size and four constants (24 floats), the
    stage-1 texture matrix (16), bump matrices, bump fog and fog color (16),
    the extra reflection world-view/normal transforms (96), and the stage-2
-   texture matrix and flags (20), then scaled receiver depth bias (4). */
-constexpr uint32_t kRecompD3dDrawConstantFloats = 140u + 192u * 4u + 512u + 4u;
+   texture matrix and flags (20), then scaled receiver depth bias (4), then the
+   projected stage 1-3 matrices, count and slots (56). */
+constexpr uint32_t kRecompD3dDrawConstantFloats = 140u + 192u * 4u + 512u + 4u + 56u;
 
 /* Every FVF seen across all logged runs (14). Compiling them at boot keeps
    first use of each scene from stalling ~85 ms per shader. */

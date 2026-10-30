@@ -570,7 +570,8 @@ RecompD3dPresenterError bindTarget(RecompD3dPresenter *presenter,
         const RecompD3dTextureDesc &desc = target.color;
         if (desc.depth || desc.data == 0u || desc.width == 0u || desc.height == 0u ||
             desc.width > kMaxTextureSize || desc.height > kMaxTextureSize ||
-            (desc.format_byte != RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8 && desc.format_byte != 0x12u)) {
+            (desc.format_byte != RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8 && desc.format_byte != 0x07u &&
+             desc.format_byte != 0x12u)) {
             std::fprintf(stderr,
                 "recomp d3d presenter: unsupported target data=0x%08X fmt=0x%02X size=%ux%u no_depth=%d\n",
                 desc.data, desc.format_byte, desc.width, desc.height, target.no_depth ? 1 : 0);
@@ -1924,6 +1925,24 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
             draw.reflection_stage2_byte_count);
         if (bump == nullptr || mask == nullptr || texture == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
+    if (draw.projected_stage_count != 0u) {
+        if (!draw.texgen_projected || draw.projected_stage_count > 3u || texture == nullptr ||
+            draw.has_alpha_mask || draw.has_reflection || draw.program_count || draw.distortion ||
+            draw.stage1_alpha_mask || draw.bump_env || draw.reflection_stage2)
+            return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        bool slots[3]{};
+        for (uint32_t i = 0u; i < draw.projected_stage_count; ++i)
+            if (draw.projected_slots[i] >= 0 && draw.projected_slots[i] < 3) slots[draw.projected_slots[i]] = true;
+        if (slots[1]) {
+            mask = reflectionLookup(draw.reflection_texture, draw.reflection_bytes, draw.reflection_byte_count);
+            if (mask == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        }
+        if (slots[2]) {
+            bump = reflectionLookup(draw.reflection_stage2_texture, draw.reflection_stage2_bytes,
+                draw.reflection_stage2_byte_count);
+            if (bump == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+        }
+    }
     if (draw.bump_env) {
         if (!draw.program_count || draw.has_alpha_mask || draw.has_reflection || draw.program_alpha_mask ||
             draw.distortion || draw.stage1_alpha_mask || draw.four_tap_filter || draw.bright_pass)
@@ -2044,11 +2063,12 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
         : lookupDrawSampler(presenter, draw.address_u, draw.address_v, draw.point_mip_filter,
             draw.mip_lod_bias, volume ? draw.address_w : 1u);
     bindings.samplers[1] = draw.program_alpha_mask ? presenter->program_mask_sampler
-        : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env
+        : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env ||
+            draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_address_u, draw.reflection_address_v,
             draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
         : presenter->filter_sampler;
-    bindings.samplers[2] = draw.reflection_stage2
+    bindings.samplers[2] = draw.reflection_stage2 || draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_stage2_address_u, draw.reflection_stage2_address_v,
             draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
         : draw.bump_env ? lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, 0.0f)
@@ -2061,9 +2081,10 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
             bindings.samplers[slot] == presenter->program_mask_sampler ? 0.0f : bias;
     };
     biasOf(0u, draw.mip_lod_bias);
-    biasOf(1u, draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env
-        ? draw.reflection_mip_lod_bias : 0.0f);
-    biasOf(2u, draw.reflection_stage2 ? draw.reflection_stage2_mip_lod_bias : 0.0f);
+    biasOf(1u, draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env ||
+        draw.projected_stage_count != 0u ? draw.reflection_mip_lod_bias : 0.0f);
+    biasOf(2u, draw.reflection_stage2 || draw.projected_stage_count != 0u
+        ? draw.reflection_stage2_mip_lod_bias : 0.0f);
     bindings.sampler_bias[3] = bindings.sampler_bias[0];
     for (SDL_GPUSampler *sampler : bindings.samplers) {
         if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;

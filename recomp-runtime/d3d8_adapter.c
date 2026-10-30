@@ -74,6 +74,17 @@ uint32_t recomp_d3d8_require_device(void)
 
 void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
 {
+    /* X8R8G8B8 (0x07) targets store no alpha and sample it as 1; host targets are
+       BGRA8, so clear alpha to 1 and leave it unwritten. Tina's Story ending (0x258a30)
+       blends its alternating scene textures by that alpha. */
+    RecompD3dPresenterCommand opaque;
+    if ((command->type == RECOMP_D3D_PRESENTER_COMMAND_CLEAR && command->data.clear.target.color.format_byte == 7u) ||
+        (command->type == RECOMP_D3D_PRESENTER_COMMAND_DRAW && command->data.draw.target.color.format_byte == 7u)) {
+        opaque = *command;
+        if (opaque.type == RECOMP_D3D_PRESENTER_COMMAND_CLEAR) opaque.data.clear.color |= 0xff000000u;
+        else opaque.data.draw.blend.color_write_mask &= 7u;
+        command = &opaque;
+    }
     if ((command->type == RECOMP_D3D_PRESENTER_COMMAND_CLEAR && command->data.clear.clear_color &&
          !command->data.clear.target.offscreen) ||
         (command->type == RECOMP_D3D_PRESENTER_COMMAND_DRAW && !command->data.draw.target.offscreen)) {
@@ -143,9 +154,10 @@ static void target_surface(uint32_t surface, bool depth, RecompD3dTextureDesc *d
         (!depth && !desc->render_target) || desc->bits_per_pixel != 32u || desc->data == 0u ||
         desc->width == 0u || desc->height == 0u || desc->width > 16384u || desc->height > 16384u ||
         (depth ? (desc->format_byte != 0x2eu && desc->format_byte != 0x2au) :
-            (desc->format_byte != 0x12u && desc->format_byte != 0x06u)) ||
+            (desc->format_byte != 0x12u && desc->format_byte != 0x06u && desc->format_byte != 0x07u)) ||
         (desc->linear && desc->pitch < desc->width * 4u)) {
-        recomp_stop(2, "d3d8:target-surface:%08x", surface);
+        recomp_stop(2, "d3d8:target-surface:%08x:%08x:%08x:%08x", surface, *recomp_memory_u32(surface),
+            *recomp_memory_u32(surface + 12u), *recomp_memory_u32(surface + 16u));
     }
     const uint64_t bytes = desc->linear ? (uint64_t)desc->pitch * desc->height :
         (uint64_t)desc->width * desc->height * 4u;

@@ -578,6 +578,17 @@ int main(void)
         submitted.data.clear.target.depth.data == 0x300000u &&
         *recomp_memory_u32(DEVICE + 0x948u) == 0x4b7fffffu &&
         *recomp_memory_u32(DEVICE + 0x94cu) == 960u);
+    /* 0x258a30 renders its scene into X8R8G8B8 textures, whose alpha samples as 1. */
+    *recomp_memory_u32(OFFSCREEN + 12u) = 0x10729u;
+    arguments[0] = OFFSCREEN; arguments[1] = 0u;
+    passed &= call(0x3447d0u, arguments, 2u, NULL);
+    arguments[0] = 0u; arguments[2] = 0xf0u;
+    passed &= call(0x347920u, arguments, 6u, NULL);
+    passed &= expect("X8R8G8B8 target clears with opaque alpha",
+        submitted.data.clear.target.color.format_byte == 7u && submitted.data.clear.color == 0xff203040u);
+    *recomp_memory_u32(OFFSCREEN + 12u) = offscreen.format;
+    arguments[0] = OFFSCREEN; arguments[1] = OFFSCREEN_DEPTH; arguments[2] = 0xf3u;
+    passed &= call(0x3447d0u, arguments, 2u, NULL);
     arguments[0] = COLOR_HEADER + 24u; arguments[1] = 0u;
     passed &= call(0x3447d0u, arguments, 2u, "d3d8:target-front-buffer-unbound");
     arguments[0] = COLOR_HEADER; arguments[1] = OFFSCREEN_DEPTH;
