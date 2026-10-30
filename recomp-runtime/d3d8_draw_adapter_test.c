@@ -717,6 +717,8 @@ static int lighting_tests(void)
     uint32_t light_stages[3][32];
     recomp_guest_load(light_stages, STAGES, sizeof light_stages);
     const uint32_t saved_stage1_texture = *recomp_memory_u32(DEVICE + 0xf8cu);
+    float saved_stage1_matrix[16];
+    recomp_guest_load(saved_stage1_matrix, DEVICE + 0xd20u, sizeof saved_stage1_matrix);
     *recomp_memory_u32(DEVICE + 0x798u) = 0x142u;
     *recomp_memory_u32(DEVICE + 0xf8cu) = 0x7000u;
     *recomp_memory_u32(STAGES + 21u * 4u) = *recomp_memory_u32(STAGES + 128u + 21u * 4u) = 0x103u;
@@ -747,6 +749,7 @@ static int lighting_tests(void)
     invoke(0x348240u, 5u, 3u, VERTICES, 24u);
     CHECK(projected->projected_stage_count == 1u && projected->projected_slots[0] == -1);
     recomp_guest_store(STAGES, light_stages, sizeof light_stages);
+    recomp_guest_store(DEVICE + 0xd20u, saved_stage1_matrix, sizeof saved_stage1_matrix);
     *recomp_memory_u32(DEVICE + 0xf8cu) = saved_stage1_texture;
     *recomp_memory_u32(DEVICE + 0x798u) = 0x112u;
     *recomp_memory_u32(STAGES + 44u) = 0u;

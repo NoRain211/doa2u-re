@@ -1054,6 +1054,11 @@ RecompD3dPresenterError bindTarget(
             }
             presenter->target_bytes += bytes;
             entry = &presenter->render_targets.back();
+            // X8R8G8B8 samples alpha as 1, even before the guest's first clear.
+            if (desc.format_byte == 0x07u) {
+                const float opaque[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                presenter->context->ClearRenderTargetView(entry->render_view, opaque);
+            }
             std::fprintf(stderr,
                 "recomp d3d presenter: render target data=0x%08X "
                 "fmt=0x%02X size=%ux%u\n",

@@ -197,6 +197,9 @@ int main()
     // Projected texgen alone still reads the reflection matrices.
     value.data.draw.texgen_projected = true;
     value.data.draw.reflection_transform[5] = 2.5f;
+    value.data.draw.projected_stage_count = 2u;
+    value.data.draw.projected_slots[1] = -1;
+    value.data.draw.projected_transforms[1][12] = 0.5f;
     CHECK(packet.add(value) == RECOMP_D3D_PRESENTER_OK);
     packet.seal();
     CHECK(packet.count() == 8u);
@@ -227,6 +230,8 @@ int main()
     CHECK(!packet.command(6).data.draw.directional.enabled && !packet.command(6).data.draw.has_reflection);
     CHECK(packet.command(6).data.draw.directional.stage_mode && packet.command(6).data.draw.directional.stage[2] == 1.0f);
     CHECK(packet.command(7).data.draw.texgen_projected && packet.command(7).data.draw.reflection_transform[5] == 2.5f);
+    CHECK(packet.command(7).data.draw.projected_stage_count == 2u && packet.command(7).data.draw.projected_slots[1] == -1 &&
+        packet.command(7).data.draw.projected_transforms[1][12] == 0.5f);
     CHECK(packet.command(6).data.draw.texture_bytes != sources[2].data());
     CHECK(packet.command(6).data.draw.vertex_bytes != sources[0].data());
     packet.clear();

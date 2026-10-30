@@ -586,6 +586,11 @@ int main(void)
     passed &= call(0x347920u, arguments, 6u, NULL);
     passed &= expect("X8R8G8B8 target clears with opaque alpha",
         submitted.data.clear.target.color.format_byte == 7u && submitted.data.clear.color == 0xff203040u);
+    RecompD3dPresenterCommand x8_draw = {.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+    x8_draw.data.draw.target = submitted.data.clear.target;
+    x8_draw.data.draw.blend.color_write_mask = 15u;
+    recomp_d3d8_submit(&x8_draw);
+    passed &= expect("X8R8G8B8 draws leave alpha unwritten", submitted.data.draw.blend.color_write_mask == 7u);
     *recomp_memory_u32(OFFSCREEN + 12u) = offscreen.format;
     arguments[0] = OFFSCREEN; arguments[1] = OFFSCREEN_DEPTH; arguments[2] = 0xf3u;
     passed &= call(0x3447d0u, arguments, 2u, NULL);

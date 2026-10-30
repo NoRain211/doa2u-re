@@ -978,9 +978,9 @@ static void projected_stages(uint32_t device, const uint32_t stage[4][32],
     for (uint32_t i = 1u; i < 4u && stage[i][12] != 1u; ++i) {
         const uint32_t *s = stage[i];
         if (s[12] != 7u || s[14] != 2u || s[15] != 1u || s[16] != 2u || s[18] != 1u ||
-            s[21] != 0x103u || s[28] != 0x20000u || s[7] != 0u || s[11] != 0u)
-            recomp_stop(2, "d3d8:projected-stage:%u:%u,%u,%u/%u,%u:%x,%x:maxmip=%u:kill=%u",
-                i, s[12], s[14], s[15], s[16], s[18], s[21], s[28], s[7], s[11]);
+            s[21] != 0x103u || s[28] != 0x20000u || s[7] != 0u || s[11] != 0u || s[3] != 2u || s[4] != 2u)
+            recomp_stop(2, "d3d8:projected-stage:%u:%u,%u,%u/%u,%u:%x,%x:maxmip=%u:kill=%u:filter=%u,%u",
+                i, s[12], s[14], s[15], s[16], s[18], s[21], s[28], s[7], s[11], s[3], s[4]);
         draw->projected_stage_count = i;
         draw->projected_slots[i - 1u] = -1;
         RecompD3dPresenterDrawCommand bound = {0};
@@ -1716,8 +1716,8 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
          *recomp_memory_u32(device + PIXEL_HANDLE) != 0u ||
          draw->address_w < 1u || draw->address_w > 3u))
         recomp_stop(2, "d3d8:volume-draw-layout:fvf=%x:w=%u", draw->fvf, draw->address_w);
-    if (!program && !points && !(draw->has_texture && projected_add_stages(device)))
-        attach_lighting(device, &layout, draw);
+    const bool unlit_projected = !program && !points && draw->has_texture && projected_add_stages(device);
+    if (!program && !points && !unlit_projected) attach_lighting(device, &layout, draw);
     uint8_t *expanded = NULL;
     if (points && (program || *recomp_memory_u32(device + PIXEL_HANDLE) != 0u)) {
         recomp_stop(2, "d3d8:draw-points-unbound");
@@ -1737,6 +1737,8 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
             free(packed);
             return;
         }
+        if (unlit_projected && draw->projected_stage_count == 0u)
+            recomp_stop(2, "d3d8:projected-stages-unrouted");
     }
     command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
     if (native_line) {

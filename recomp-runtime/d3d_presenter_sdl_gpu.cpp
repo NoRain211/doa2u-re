@@ -442,6 +442,8 @@ void resolveTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *source, SDL_GP
 }
 
 void flushSegment(RecompD3dPresenter *presenter);
+void clearTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *color, const SDL_FColor *clear_color,
+    SDL_GPUTexture *depth, const float *clear_depth, const uint8_t *clear_stencil);
 
 void resolveMain(RecompD3dPresenter *presenter)
 {
@@ -614,6 +616,12 @@ RecompD3dPresenterError bindTarget(RecompD3dPresenter *presenter,
             presenter->render_targets.push_back(created);
             presenter->target_bytes += bytes;
             entry = &presenter->render_targets.back();
+            // X8R8G8B8 samples alpha as 1, even before the guest's first clear.
+            if (desc.format_byte == 0x07u) {
+                flushSegment(presenter);
+                const SDL_FColor opaque = {0.0f, 0.0f, 0.0f, 1.0f};
+                clearTexture(presenter, entry->render, &opaque, nullptr, nullptr, nullptr);
+            }
             std::fprintf(stderr, "recomp d3d presenter: render target data=0x%08X fmt=0x%02X size=%ux%u\n",
                 desc.data, desc.format_byte, desc.width, desc.height);
         }
