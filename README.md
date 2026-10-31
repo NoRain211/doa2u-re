@@ -76,7 +76,7 @@ keeps running.
 ## Status
 
 > [!WARNING]
-> **0.1.12 Alpha is bring-up software.** Story, Watch and the attract demo play
+> **0.1.13 Alpha is bring-up software.** Story, Watch and the attract demo play
 > in development runs on every stage, but many modes and characters have not
 > been tried. A draw the port cannot render yet stops the game with a message
 > in the log.
@@ -233,9 +233,9 @@ profiles already saved with the unlock keep it.
 To package a release ZIP from a clean checkout:
 
 ```powershell
-python tools/package_test.py 0.1.12-Alpha
-python tools/package_test.py 0.1.12-Alpha --platform macos
-python tools/package_test.py 0.1.12-Alpha --platform linux
+python tools/package_test.py 0.1.13-Alpha
+python tools/package_test.py 0.1.13-Alpha --platform macos
+python tools/package_test.py 0.1.13-Alpha --platform linux
 ```
 
 It zips the files of committed HEAD that building and playing on that platform
