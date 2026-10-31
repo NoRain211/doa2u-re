@@ -212,6 +212,7 @@ int buildDrawShaderSource(
         "        else if (blend_flags.y > 1.5f) shaded *= texture_factor;\n"
         "    }\n"
         /* Projected ADD stages (0x257ee0) precede the final combiner's specular. */
+        "#ifdef RECOMP_PROJECTED_STAGES\n"
         "    if (projected_stages.x > 0.5f) {\n"
         "        [unroll] for (uint i = 0; i < 3; ++i) {\n"
         "            float slot = projected_slots[i];\n"
@@ -225,6 +226,7 @@ int buildDrawShaderSource(
         "            shaded.rgb = saturate(shaded.rgb + t.rgb);\n"
         "        }\n"
         "    }\n"
+        "#endif\n"
         /* Fixed function adds specular after the texture stages, textured or not. */
         "    if (directional_flags.w > 0.5f) shaded.rgb += input.lit_specular;\n"
         /* A stage-1 mask; z > 1.5 adds its ALPHAKILL, and z > 2.5 only kills. */
@@ -404,6 +406,7 @@ bool recomp_d3d_draw_shader_source(
     if (buildDrawShaderSource(layout, compiled_source.data(), compiled_source.size(),
             pipeline.coverage_only) != source_size) return false;
     compiled_source.resize(static_cast<size_t>(source_size));
+    if (pipeline.projected_stages) compiled_source.insert(0, "#define RECOMP_PROJECTED_STAGES\n");
     if (pipeline.coverage_only) return true;
     if (layout.blend_weight_count != 0u && !layout.pretransformed &&
         layout.texcoord_offset != RECOMP_D3D_FVF_ABSENT) {

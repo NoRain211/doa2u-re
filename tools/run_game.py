@@ -113,7 +113,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             env[name] = str(int(value))
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
-    # The SDL_GPU presenter keeps compiled shaders here; Direct3D 11 ignores it.
+    # Both presenters keep compiled draw shaders here and load them at the next start.
     shader_cache = ROOT / "private/shader-cache"
     shader_cache.mkdir(parents=True, exist_ok=True)
     env.setdefault("RECOMP_SHADER_CACHE", str(shader_cache))
