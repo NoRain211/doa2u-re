@@ -1249,8 +1249,13 @@ unsigned loadCachedDrawShaders(const std::atomic<bool> *stop)
     std::vector<std::filesystem::path> entries;
     std::error_code error;
     for (std::filesystem::directory_iterator it(any.parent_path(), error), end;
-         !error && it != end; it.increment(error))
-        if (it->path().extension() == L".dxbc") entries.push_back(it->path());
+         !error && it != end; it.increment(error)) {
+        // Only names shaderCachePath writes: 16 hex digits and .dxbc.
+        const std::wstring stem = it->path().stem().wstring();
+        if (it->path().extension() == L".dxbc" && stem.size() == 16u &&
+            stem.find_first_not_of(L"0123456789abcdef") == std::wstring::npos)
+            entries.push_back(it->path());
+    }
     if (entries.size() > kShaderCacheLimit) {
         for (const std::filesystem::path &path : entries) std::filesystem::remove(path, error);
         return 0u;
