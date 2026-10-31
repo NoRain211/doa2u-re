@@ -551,16 +551,35 @@ channel. The factor uses the existing per-channel selection and does not read
 material alpha when it replaces diffuse alpha. Native pixels check sampled
 alpha times factor alpha without vertex or material alpha. Lit points admit
 texture-only RGB, optionally scaled by TFACTOR:
-the effect at `0x1f5030` keeps LIGHTING enabled, but consumes only lit alpha.
-The SDK (`0x34fc80`) takes that alpha from material diffuse alpha even with
-vertex-color sources. The adapter supplies it once through the existing
-texture-alpha multiplier, and ignores unused lighting RGB inputs. Texture-only
-alpha does not read material alpha. Lit vertex RGB, two-sided lit points,
-unscaled sizes, shaders and projections that mix eye x/y into w stay guarded.
+the effect at `0x1f5030` and the snow of Koku-An (`0x1ed3a0`) and the snowy
+White Storm (`0x1a54a0`) keep LIGHTING enabled, but consume only lit alpha. That
+alpha follows NV2A's color-material diffuse source, which
+`d3d_color_material_sources` (`0x34ee70`) builds from COLORVERTEX and
+DIFFUSEMATERIALSOURCE, dropping COLOR1 when the stream has no vertex color.
+With COLOR1, as these effects use over XYZ|DIFFUSE points, the vertex alpha
+passes through; the snow's material alpha is 0 in fights. With MATERIAL, the adapter
+supplies the diffuse alpha `0x34fc80` uploads once through the existing
+texture-alpha multiplier. Unused lighting RGB inputs are ignored. Texture-only
+alpha reads neither. Lit vertex RGB, specular alpha sources, two-sided lit
+points, unscaled sizes, shaders and projections that mix eye x/y into w stay
+guarded.
 Hardware size rounding and
 frustum culling of whole points are not modelled: a quad that crosses the
 screen edge is clipped instead.
 there is no separate guest CPU cache or direct GPU consumer of guest bytes.
+
+Fixed-function draws apply D3D8 table fog as `0x34f5f0` programs it from the
+per-stage settings `FUN_00286000` writes: FogEnable `0x3553d0`, table mode
+`0x3553d4`, start, end and density at `0x3553d8`-`0x3553e0` and color
+`0x355488`. Linear mode pushes bias `1 + end/(end - start)` and scale
+`-1/(end - start)`; NV2A subtracts 1, which leaves `(end - d)/(end - start)` on
+planar eye depth. The presenter recovers that depth from clip w, evaluates the
+factor per pixel and blends RGB toward the fog color after specular. Koku-An
+uses linear fog from 12.3 or 35 to 90.5; the snowy White Storm moves its range
+and color during a fight. EXP and EXP2 use D3D8's density formulas,
+unchecked against the SDK's scaled encoding. Range fog, vertex fog,
+pretransformed and shader draws, and projections that mix eye x/y into w stay
+unfogged.
 
 Leaving character select, the game (0x282770) widens the old headers, persists
 the display, and Resets back to type 0x11. That Reset writes the same SDK fields

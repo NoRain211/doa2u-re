@@ -1508,7 +1508,7 @@ bool ensureSharedDrawState(RecompD3dPresenter *presenter)
        stage-1 texture matrix (16), bump matrices, bump fog and fog color (16),
        the extra reflection world-view/normal transforms (96), and the stage-2
        texture matrix and flags (20), then scaled receiver depth bias (4), then the
-       projected stage 1-3 matrices, count and slots (56). */
+       projected stage 1-3 matrices, count and slots (56), then table fog (8). */
     constant_desc.ByteWidth = kRecompD3dDrawConstantFloats * sizeof(float);
     constant_desc.Usage = D3D11_USAGE_DYNAMIC;
     constant_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
