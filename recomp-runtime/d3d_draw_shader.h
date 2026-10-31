@@ -35,6 +35,8 @@ struct RecompD3dDrawShaderKey {
     bool coverage_only;
     bool scaled_depth_bias;
     bool sample_depth_bias;
+    /* Tina's ending lights; only these shaders carry the projected-stage loop. */
+    bool projected_stages;
 };
 
 /* Builds the HLSL for one FVF, plus its vertex program when it has one.

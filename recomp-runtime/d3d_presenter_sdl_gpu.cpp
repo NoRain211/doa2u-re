@@ -191,7 +191,7 @@ struct ShaderKey {
     uint32_t program_count;
     uint64_t program_hash;
     uint8_t coverage_only, scaled_depth_bias, sample_depth_bias, count_pass;
-    uint32_t samples;
+    uint16_t samples, projected_stages;  // two halves keep the memcmp key free of padding
 };
 
 struct ShaderKeyHash {
@@ -1068,7 +1068,8 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     key.scaled_depth_bias = draw_key.scaled_depth_bias;
     key.sample_depth_bias = draw_key.sample_depth_bias;
     key.count_pass = count_pass;
-    key.samples = draw_key.sample_depth_bias ? presenter->msaa_count : 0u;
+    key.samples = static_cast<uint16_t>(draw_key.sample_depth_bias ? presenter->msaa_count : 0u);
+    key.projected_stages = draw_key.projected_stages;
     {
         std::lock_guard<std::mutex> lock(presenter->shader_lock);
         const auto found = presenter->shaders.find(key);
@@ -1847,7 +1848,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     const uint32_t shader_fvf = geometry_line ? 0x44u : draw.fvf;
     const RecompD3dDrawShaderKey shader_key{shader_fvf, draw.program_count,
         draw.program_count ? draw.program : nullptr, false, scaled_bias,
-        scaled_bias && presenter->msaa_count > 1u};
+        scaled_bias && presenter->msaa_count > 1u, draw.projected_stage_count != 0u};
     const ShaderPair shaders = lookupShaders(presenter, shader_key, false);
     if (shaders.vertex == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
 

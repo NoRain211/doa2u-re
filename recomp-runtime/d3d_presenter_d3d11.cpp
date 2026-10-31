@@ -108,6 +108,7 @@ struct DrawPipeline {
     bool scaled_depth_bias;
     bool sample_depth_bias;
     bool coverage_only;
+    bool projected_stages;
     ID3D11VertexShader *vertex_shader;
     ID3D11GeometryShader *geometry_shader;
     ID3D11PixelShader *pixel_shader;
@@ -1268,7 +1269,8 @@ bool createDrawPipeline(
     RecompD3dVertexLayout layout;
     std::string compiled_source;
     const RecompD3dDrawShaderKey key{fvf, pipeline.program_count, pipeline.program,
-        pipeline.coverage_only, pipeline.scaled_depth_bias, pipeline.sample_depth_bias};
+        pipeline.coverage_only, pipeline.scaled_depth_bias, pipeline.sample_depth_bias,
+        pipeline.projected_stages};
     if (!recomp_d3d_draw_shader_source(key, layout, compiled_source)) {
         return false;
     }
@@ -1454,6 +1456,7 @@ const DrawPipeline *lookupDrawPipeline(
         (!draw->target.offscreen || (draw->target.color.width == presenter->config.width &&
             draw->target.color.height == presenter->config.height)) &&
         draw->slope_scaled_depth_bias != 0.0f;
+    const bool projected = draw && draw->projected_stage_count != 0u;
     if (count > 136u) return nullptr;
     for (uint32_t i = 0u; i < presenter->draw_pipeline_count; ++i) {
         DrawPipeline &pipeline = presenter->draw_pipelines[i];
@@ -1461,6 +1464,7 @@ const DrawPipeline *lookupDrawPipeline(
         if (pipeline.used && pipeline.fvf == fvf && pipeline.program_count == count &&
             pipeline.coverage_only == coverage_only &&
             pipeline.scaled_depth_bias == scaled_bias &&
+            pipeline.projected_stages == projected &&
             (!count || std::memcmp(pipeline.program, draw->program, count * 16u) == 0)) {
             return pipeline.failed ? nullptr : &pipeline;
         }
@@ -1483,6 +1487,7 @@ const DrawPipeline *lookupDrawPipeline(
     pipeline.coverage_only = coverage_only;
     pipeline.scaled_depth_bias = scaled_bias;
     pipeline.sample_depth_bias = scaled_bias && presenter->msaa > 1u;
+    pipeline.projected_stages = projected;
     pipeline.program_count = count;
     if (count) std::memcpy(pipeline.program, draw->program, count * 16u);
     pipeline.used = true;
