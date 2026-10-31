@@ -1198,9 +1198,15 @@ ID3DBlob *readShaderCache(const std::filesystem::path &path)
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     const std::streamoff size = file ? static_cast<std::streamoff>(file.tellg()) : 0;
     ID3DBlob *blob = nullptr;
-    if (size <= 0 || FAILED(D3DCreateBlob(static_cast<SIZE_T>(size), &blob))) return nullptr;
+    if (size < 32 || FAILED(D3DCreateBlob(static_cast<SIZE_T>(size), &blob))) return nullptr;
     file.seekg(0);
-    if (!file.read(static_cast<char *>(blob->GetBufferPointer()), size)) releaseCom(blob);
+    const char *bytes = static_cast<const char *>(blob->GetBufferPointer());
+    uint32_t total = 0u;
+    // A DXBC container starts with its magic and states its own size at byte 24.
+    if (!file.read(static_cast<char *>(blob->GetBufferPointer()), size) ||
+        std::memcmp(bytes, "DXBC", 4u) != 0 ||
+        (std::memcpy(&total, bytes + 24, sizeof total), total != static_cast<uint32_t>(size)))
+        releaseCom(blob);
     return blob;
 }
 
@@ -1211,8 +1217,14 @@ void writeShaderCache(const std::filesystem::path &path, ID3DBlob *blob)
     partial += L".tmp" + std::to_wstring(GetCurrentThreadId());
     {
         std::ofstream file(partial, std::ios::binary | std::ios::trunc);
-        if (!file.write(static_cast<const char *>(blob->GetBufferPointer()),
-                static_cast<std::streamsize>(blob->GetBufferSize()))) return;
+        file.write(static_cast<const char *>(blob->GetBufferPointer()),
+            static_cast<std::streamsize>(blob->GetBufferSize()));
+        file.close();
+        if (!file) {
+            std::error_code ignored;
+            std::filesystem::remove(partial, ignored);
+            return;
+        }
     }
     std::error_code error;
     std::filesystem::rename(partial, path, error);
@@ -1226,17 +1238,26 @@ void rememberShader(uint64_t hash, ID3DBlob *blob)
     if (compiled_shaders.emplace(hash, blob).second) blob->AddRef();
 }
 
-// shortcut: entries from older runtimes are loaded too and never pruned; prune if the folder grows large.
+/* Entries from older runtimes stay until the folder passes kShaderCacheLimit,
+   which clears it; a version uses about 40, so that is many updates. */
+constexpr unsigned kShaderCacheLimit = 1024u;
+
 unsigned loadCachedDrawShaders(const std::atomic<bool> *stop)
 {
     const std::filesystem::path any = shaderCachePath(0u);
     if (any.empty()) return 0u;
-    unsigned loaded = 0u;
+    std::vector<std::filesystem::path> entries;
     std::error_code error;
     for (std::filesystem::directory_iterator it(any.parent_path(), error), end;
-         !error && it != end && !stop->load(); it.increment(error)) {
-        const std::filesystem::path &path = it->path();
-        if (path.extension() != L".dxbc") continue;
+         !error && it != end; it.increment(error))
+        if (it->path().extension() == L".dxbc") entries.push_back(it->path());
+    if (entries.size() > kShaderCacheLimit) {
+        for (const std::filesystem::path &path : entries) std::filesystem::remove(path, error);
+        return 0u;
+    }
+    unsigned loaded = 0u;
+    for (const std::filesystem::path &path : entries) {
+        if (stop->load()) break;
         const uint64_t hash = std::wcstoull(path.stem().c_str(), nullptr, 16);
         ID3DBlob *blob = readShaderCache(path);
         if (blob == nullptr) continue;
@@ -1316,10 +1337,12 @@ void precompileDrawShaders(const std::atomic<bool> *stop)
     unsigned loaded = 0u;
     try {
         loaded = loadCachedDrawShaders(stop);
-        for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
+        std::vector<RecompD3dDrawShaderKey> keys;
+        for (const uint32_t fvf : kRecompD3dBootDrawFvfs) keys.push_back({fvf, 0u, nullptr, false, false, false});
+        keys.push_back({0x142u, 0u, nullptr, false, false, false, true});
+        for (const RecompD3dDrawShaderKey &key : keys) {
             RecompD3dVertexLayout layout;
             std::string source;
-            const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
             if (!recomp_d3d_draw_shader_source(key, layout, source)) continue;
             for (const char *stage : {"vs", "ps"}) {
                 if (stop->load()) return;

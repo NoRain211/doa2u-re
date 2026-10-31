@@ -1124,6 +1124,8 @@ void precompileDrawShaders(RecompD3dPresenter *presenter)
         const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
         compiled += lookupShaders(presenter, key, false).vertex != nullptr;
     }
+    const RecompD3dDrawShaderKey projected{0x142u, 0u, nullptr, false, false, false, true};
+    if (!presenter->precompile_stop.load()) compiled += lookupShaders(presenter, projected, false).vertex != nullptr;
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
