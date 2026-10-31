@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <new>
 #include <memory>
@@ -1175,10 +1177,75 @@ RecompD3dPresenterError submitClear(
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-/* Compiled draw shaders, keyed by entry point and source. Shared by the boot
-   precompile thread and the render worker; blobs live until exit. */
+/* Compiled draw shaders, keyed by a hash of target, entry point and source. Shared
+   by the boot precompile thread and the render worker; blobs live until exit. */
 std::mutex compiled_shaders_lock;
-std::unordered_map<std::string, ID3DBlob *> compiled_shaders;
+std::unordered_map<uint64_t, ID3DBlob *> compiled_shaders;
+
+/* RECOMP_SHADER_CACHE keeps compiled draw shaders as <hash>.dxbc, so a later launch
+   loads them at boot instead of compiling them in the middle of a fight. */
+std::filesystem::path shaderCachePath(uint64_t hash)
+{
+    const wchar_t *folder = _wgetenv(L"RECOMP_SHADER_CACHE");
+    if (folder == nullptr || folder[0] == L'\0') return {};
+    char name[24];
+    std::snprintf(name, sizeof name, "%016llx.dxbc", static_cast<unsigned long long>(hash));
+    return std::filesystem::path(folder) / name;
+}
+
+ID3DBlob *readShaderCache(const std::filesystem::path &path)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    const std::streamoff size = file ? static_cast<std::streamoff>(file.tellg()) : 0;
+    ID3DBlob *blob = nullptr;
+    if (size <= 0 || FAILED(D3DCreateBlob(static_cast<SIZE_T>(size), &blob))) return nullptr;
+    file.seekg(0);
+    if (!file.read(static_cast<char *>(blob->GetBufferPointer()), size)) releaseCom(blob);
+    return blob;
+}
+
+void writeShaderCache(const std::filesystem::path &path, ID3DBlob *blob)
+{
+    // Written beside the entry and renamed, so a reader never sees half of one.
+    std::filesystem::path partial = path;
+    partial += L".tmp" + std::to_wstring(GetCurrentThreadId());
+    {
+        std::ofstream file(partial, std::ios::binary | std::ios::trunc);
+        if (!file.write(static_cast<const char *>(blob->GetBufferPointer()),
+                static_cast<std::streamsize>(blob->GetBufferSize()))) return;
+    }
+    std::error_code error;
+    std::filesystem::rename(partial, path, error);
+    if (error) std::filesystem::remove(partial, error);
+}
+
+/* Keeps a blob for later lookups; the caller keeps its own reference. */
+void rememberShader(uint64_t hash, ID3DBlob *blob)
+{
+    std::lock_guard<std::mutex> lock(compiled_shaders_lock);
+    if (compiled_shaders.emplace(hash, blob).second) blob->AddRef();
+}
+
+// shortcut: entries from older runtimes are loaded too and never pruned; prune if the folder grows large.
+unsigned loadCachedDrawShaders(const std::atomic<bool> *stop)
+{
+    const std::filesystem::path any = shaderCachePath(0u);
+    if (any.empty()) return 0u;
+    unsigned loaded = 0u;
+    std::error_code error;
+    for (std::filesystem::directory_iterator it(any.parent_path(), error), end;
+         !error && it != end && !stop->load(); it.increment(error)) {
+        const std::filesystem::path &path = it->path();
+        if (path.extension() != L".dxbc") continue;
+        const uint64_t hash = std::wcstoull(path.stem().c_str(), nullptr, 16);
+        ID3DBlob *blob = readShaderCache(path);
+        if (blob == nullptr) continue;
+        rememberShader(hash, blob);
+        releaseCom(blob);
+        ++loaded;
+    }
+    return loaded;
+}
 
 bool compileDrawShader(
     const char *source,
@@ -1186,15 +1253,25 @@ bool compileDrawShader(
     const char *target,
     ID3DBlob **blob)
 {
-    std::string key = std::string(target) + '\n' + entry_point + '\n' + source;
+    uint64_t hash = 0xcbf29ce484222325ull;
+    for (const char *text : {"doa2u-d3d11-shader-1", target, entry_point, source}) {
+        for (const unsigned char *c = reinterpret_cast<const unsigned char *>(text); *c; ++c)
+            hash = (hash ^ *c) * 0x100000001b3ull;
+        hash = (hash ^ 0xffu) * 0x100000001b3ull;
+    }
     {
         std::lock_guard<std::mutex> lock(compiled_shaders_lock);
-        const auto found = compiled_shaders.find(key);
+        const auto found = compiled_shaders.find(hash);
         if (found != compiled_shaders.end()) {
             *blob = found->second;
             (*blob)->AddRef();
             return true;
         }
+    }
+    const std::filesystem::path cached = shaderCachePath(hash);
+    if (!cached.empty() && (*blob = readShaderCache(cached)) != nullptr) {
+        rememberShader(hash, *blob);
+        return true;
     }
 
     ID3DBlob *errors = nullptr;
@@ -1223,21 +1300,22 @@ bool compileDrawShader(
     }
     releaseCom(errors);
     if (SUCCEEDED(result)) {
-        std::lock_guard<std::mutex> lock(compiled_shaders_lock);
-        if (compiled_shaders.emplace(std::move(key), *blob).second) {
-            (*blob)->AddRef();
-        }
+        rememberShader(hash, *blob);
+        if (!cached.empty()) writeShaderCache(cached, *blob);
     }
     return SUCCEEDED(result);
 }
 
-// ponytail: fixed list; vertex-program shaders and unlisted FVFs still compile on first use.
+/* Loads every shader an earlier launch compiled, including vertex-program ones,
+   then compiles the fixed FVF list; anything else still compiles on first use. */
 void precompileDrawShaders(const std::atomic<bool> *stop)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     const ULONGLONG start = GetTickCount64();
     uint32_t compiled = 0u;
+    unsigned loaded = 0u;
     try {
+        loaded = loadCachedDrawShaders(stop);
         for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
             RecompD3dVertexLayout layout;
             std::string source;
@@ -1255,8 +1333,8 @@ void precompileDrawShaders(const std::atomic<bool> *stop)
     } catch (const std::exception &) {
         return;  // Remaining shaders compile on first use.
     }
-    std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %llu ms\n",
-        compiled, static_cast<unsigned long long>(GetTickCount64() - start));
+    std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders (%u cached) in %llu ms\n",
+        compiled, loaded, static_cast<unsigned long long>(GetTickCount64() - start));
 }
 
 /* Builds the shader pair and input layout for one FVF from its decoded
