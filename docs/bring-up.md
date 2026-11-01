@@ -26,6 +26,12 @@ overwrite PCR. Heap and contiguous allocations grow toward each other and
 reject overlap. The loader checks sections, source digests, stack/TLS bounds
 and reserved ranges before running code.
 
+The loader fills a scratch image that the runner then copies into the 64 MB
+guest block. On Windows that block is allocated with `MEM_WRITE_WATCH`, which
+cannot be added later, so rollback snapshots (`guest_snapshot.c`,
+`docs/rollback-netcode.md`) can copy only the pages written since the last
+save.
+
 Memory statistics report the arena's available pages and reusable allocation
 capacity, with image, pool, stack and virtual reservations accounted for.
 Raw runtime allocations and alignment gaps stay consumed. Cache pages are

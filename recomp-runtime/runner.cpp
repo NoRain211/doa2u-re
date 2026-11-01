@@ -2,6 +2,7 @@
 #include "host_diagnostics.h"
 #include "d3d8_adapter.h"
 #include "dsound_api_adapter.h"
+#include "guest_snapshot.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
@@ -37,6 +38,8 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 
 static RecompInputPulseSource inputPulses;
 static bool scriptedInputOnly;
+// Rollback snapshots read this; write tracking is fixed when guest RAM is allocated.
+static bool guestRamWriteWatch;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
@@ -329,12 +332,19 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: XBE SHA-256 differs from the authenticated program target\n";
         return 1;
     }
-    std::vector<std::uint8_t> memory(RECOMP_XBOX_RAM_SIZE, 0u);
+    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
     std::string error;
-    if (!recomp_load_xbe(parsed, memory, error)) {
+    if (!recomp_load_xbe(parsed, image, error)) {
         std::cerr << "recomp runner: " << error << '\n';
         return 1;
     }
+    std::uint8_t *memory = recomp_guest_ram_allocate(RECOMP_XBOX_RAM_SIZE, &guestRamWriteWatch);
+    if (memory == nullptr) {
+        std::cerr << "recomp runner: guest RAM allocation failed\n";
+        return 1;
+    }
+    std::memcpy(memory, image.data(), image.size());
+    std::vector<std::uint8_t>().swap(image);
     const auto imageEnd = static_cast<std::uint64_t>(parsed.metadata.header.baseAddress) +
         parsed.metadata.header.sizeImage;
     if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
@@ -353,7 +363,7 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         return 2;
     }
-    const RecompMemoryRegion region = {0u, memory.size(), memory.data()};
+    const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     recomp_input_adapter_reset();

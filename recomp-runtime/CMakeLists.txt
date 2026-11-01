@@ -322,6 +322,8 @@ add_test(NAME recomp-runtime-program-abi-call COMMAND recomp_program_abi_call_te
 
 add_executable(recomp_guest_heap_test guest_heap.c guest_heap_test.c)
 add_test(NAME recomp-runtime-guest-heap COMMAND recomp_guest_heap_test)
+add_executable(recomp_guest_snapshot_test guest_snapshot.c guest_snapshot_test.c)
+add_test(NAME recomp-runtime-guest-snapshot COMMAND recomp_guest_snapshot_test)
 
 add_library(recomp_xbe STATIC ../xbe/sha.cpp ../xbe/xbe_parser.cpp runner_load.cpp)
 target_include_directories(recomp_xbe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../xbe" "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -340,7 +342,7 @@ else()
 endif()
 
     add_library(recomp_kernel STATIC
-        runtime.c stop_report.c guest_heap.c xapi_clock.cpp native_fiber.c
+        runtime.c stop_report.c guest_heap.c guest_snapshot.c xapi_clock.cpp native_fiber.c
         fiber_model.c fiber_adapter.c
         kernel_config.c kernel_crypto.c kernel_debug.c kernel_device.c
         kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c
