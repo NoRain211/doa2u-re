@@ -7,6 +7,8 @@
 
 RecompFunction recomp_d3d8_state_lookup_manual(uint32_t address);
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void);
+void recomp_d3d8_render_state_save(RecompD3dRenderStateModel *state);
+void recomp_d3d8_render_state_restore(const RecompD3dRenderStateModel *state);
 void recomp_d3d8_state_reset(void);
 /* Replays the SDK CreateDevice render-state defaults into shadow and model. */
 void recomp_d3d8_state_write_defaults(bool auto_depth);

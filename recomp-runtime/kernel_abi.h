@@ -86,10 +86,43 @@ void recomp_kernel_wait_for_vblank(uint64_t deadline_ns);
 bool recomp_kernel_wait_host(bool (*done)(void *context), void *context);
 /* Offer a scheduler slice while any recomp_kernel_wait_host is pending. */
 void recomp_kernel_poll_host_waits(void);
+/* Threads blocked on host work. A host read worker may still be writing guest
+   RAM, so a frame snapshot is not rewound across one. */
+unsigned recomp_kernel_host_waits(void);
 void recomp_kernel_thread_times(char *out, size_t size);
+/* Guest-visible scheduler state for a frame snapshot: thread records, wait
+   objects, events and armed timers. Host profiler counters stay live. */
+size_t recomp_kernel_thread_state_size(void);
+void recomp_kernel_thread_state_save(void *state);
+void recomp_kernel_thread_state_restore(const void *state);
+/* Each parked guest thread's native continuation, beside its guest state. */
+size_t recomp_kernel_thread_fiber_state_size(void);
+void recomp_kernel_thread_fiber_state_save(void *state);
+void recomp_kernel_thread_fiber_state_restore(const void *state);
+bool recomp_kernel_thread_fiber_state_restorable(const void *state);
+/* Guest-visible file positions, which a rewind has to put back. */
+size_t recomp_kernel_file_state_size(void);
+void recomp_kernel_file_state_save(void *state);
+void recomp_kernel_file_state_restore(const void *state);
+/* Reads finish inside the guest call instead of on a host worker, so no read
+   is in flight at a frame boundary that a rewind may return to. */
+void recomp_kernel_file_set_synchronous_reads(bool enabled);
+size_t recomp_kernel_memory_state_size(void);
+void recomp_kernel_memory_state_save(void *state);
+void recomp_kernel_memory_state_restore(const void *state);
+/* Guest stacks owned by live kernel threads; stack contents are scratch. */
+typedef struct RecompGuestStackRange {
+    uint32_t base;
+    uint32_t size;
+} RecompGuestStackRange;
+size_t recomp_kernel_memory_stack_ranges(RecompGuestStackRange *ranges, size_t capacity);
+/* Stack range of each live guest thread, below its TLS block. */
+size_t recomp_kernel_thread_stack_ranges(RecompGuestStackRange *ranges, size_t capacity);
 RecompFunction recomp_kernel_video(uint32_t ordinal);
 RecompFunction recomp_kernel_file(uint32_t ordinal);
 bool recomp_kernel_save_handles_closed(uint32_t owner);
+/* Counts opens that may change save storage; see kernel_file.c. */
+uint32_t recomp_kernel_profile_mutations(void);
 /* Close native profile handles so a rollback can rebuild the tree. */
 void recomp_kernel_release_profile_handles(void);
 /* File close model shared by the import bridge and ownership checks. */

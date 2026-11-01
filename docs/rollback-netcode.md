@@ -1,10 +1,13 @@
 # Rollback netcode
 
-Status: design and first host pieces. Two runners will connect through a
+Status: design and the save/replay core. Two runners will connect through a
 host-owned lobby and play the offline Versus mode, with rollback over the
-fight. Guest RAM snapshots exist (`guest_snapshot.c`); nothing uses them
-yet. Game addresses below come from static analysis of `/DOA2.xbe` in
-Ghidra unless a section says otherwise.
+fight. A frame-locked clock and SyncTest (`docs/bring-up.md`, Determinism
+checks) save, replay and compare whole frames, with guest RAM in page
+snapshots (`guest_snapshot.c`). SyncTest replays one frame at a time from a
+single save point; rollback needs a ring of module states beside the RAM
+ring, input injection and a transport. Game addresses below come from
+static analysis of `/DOA2.xbe` in Ghidra unless a section says otherwise.
 
 ## The game's Xbox Live lockstep
 
@@ -62,30 +65,33 @@ streams and the seed, at least on the Xbox. The virtual pad slots and
 the XOnline session and role handshakes between rounds are tied to Xbox
 Live and do not carry over.
 
-## Host blockers
+## Host state
 
 Rollback needs a save and restore of everything a fight frame changes, taken
-every frame and restored several frames at a time.
+every frame and restored several frames at a time. Most of it now exists for
+SyncTest.
 
 - Guest RAM snapshots: on Windows the runner allocates guest RAM with
   `MEM_WRITE_WATCH`, and `guest_snapshot.c` keeps a ring of save points
   that each store only the pages written since the previous save. Write
   watch also reports `ReadFile` writes, which host read workers make
   straight into guest RAM. Other hosts compare every page with a shadow
-  copy. Saves and loads must run while no host thread writes guest RAM.
-- Each XAPI fiber keeps its C continuation on a native 1 MB host stack
-  (`fiber_adapter.c`). Restoring guest RAM does not rewind a parked task,
-  so either the fight task must be parked at the same host frame every
-  frame, or rollback must step the fight's update directly outside the
-  fiber scheduler.
-- Host state referenced from guest memory also has to match after a
-  restore: the guest heap allocator, kernel objects, the fiber model and the
-  D3D8 and DirectSound adapters' handle tables.
+  copy. Saves and loads must run while no host thread writes guest RAM, so
+  netplay makes file reads synchronous as SyncTest does.
+- Each XAPI fiber keeps its C continuation on a native host stack. Parked
+  fibers are saved with their captured context and live stack, so a rewind
+  restores the C frames as well as the guest registers.
+- The other host modules (heap, allocations, threads, files, input, D3D8,
+  DirectSound) save and restore their own state.
 - `frame_time_update` (`0xfefc0`) feeds QueryPerformanceCounter time into
   `g_frame_time_6000ths` and `g_frame_fps`. `0x2506f0` spawns into a pool
   only when the frame time is below 101, so a slow frame changes guest RAM.
-  Re-simulation needs a clock locked to the frame count.
-- Re-simulated frames must not present, play sound or rumble.
+  The frame-locked clock makes time a function of the frame count.
+- Re-simulated frames must not present, play sound or rumble. The D3D8
+  adapter can skip the flip and GPU work, and the buffer adapter can drop
+  audio output, while their models keep advancing.
+- Frames that write saves or present from the display mode change cannot be
+  rewound. A rollback window must not reach back past one.
 - Both peers must produce identical floating-point results. The same build
   on x86-64 is the safe case; macOS arm64 and host libm differences are
   unverified.

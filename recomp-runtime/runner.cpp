@@ -3,11 +3,13 @@
 #include "d3d8_adapter.h"
 #include "dsound_api_adapter.h"
 #include "guest_snapshot.h"
+#include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
@@ -38,7 +40,7 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 
 static RecompInputPulseSource inputPulses;
 static bool scriptedInputOnly;
-// Rollback snapshots read this; write tracking is fixed when guest RAM is allocated.
+// SyncTest's RAM snapshots read this; write tracking is fixed when guest RAM is allocated.
 static bool guestRamWriteWatch;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
@@ -199,6 +201,27 @@ static void onSwap(std::uint32_t frame)
     if (!cardPending) return;
     cardPending = false;
     showCard();
+}
+
+static void saveInputPulses(void *state)
+{
+    std::memcpy(state, &inputPulses, sizeof inputPulses);
+}
+
+static void restoreInputPulses(const void *state)
+{
+    std::memcpy(&inputPulses, state, sizeof inputPulses);
+}
+
+static void onFrameBoundary(std::uint32_t frame)
+{
+    /* A snapshot from before the main fiber exists cannot be restored. */
+    if (recomp_fiber_adapter_model()->current_handle == 0u) return;
+    const RecompSyncTestResult result = recomp_synctest_frame(frame);
+    if (result == RECOMP_SYNCTEST_MISMATCH) recomp_stop(2, "synctest:mismatch");
+    if (result == RECOMP_SYNCTEST_SKIP) recomp_stop(3, "synctest:skip");
+    if (result == RECOMP_SYNCTEST_MATCH && !recomp_synctest_loop())
+        recomp_stop(0, "synctest:match");
 }
 
 int main(int argc, char **argv)
@@ -366,6 +389,16 @@ int main(int argc, char **argv)
     const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
+    if (recomp_synctest_enabled()) {
+        const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
+        if (clock == nullptr || std::strcmp(clock, "0") != 0)
+            recomp_xapi_frame_clock_set_enabled(true);
+        recomp_synctest_set_guest_ram(memory, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
+        recomp_kernel_file_set_synchronous_reads(true);
+        recomp_synctest_install_default_modules();
+        recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
+        recomp_d3d_frame_boundary_hook = onFrameBoundary;
+    }
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
