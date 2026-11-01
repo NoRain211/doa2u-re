@@ -1421,11 +1421,20 @@ static uint8_t *point_sprites(uint32_t device, const RecompD3dVertexLayout *layo
     const bool lighting = *recomp_memory_u32(0x3553f8u) != 0u;
     if (lighting && (!(color_texture || color_factor) || *recomp_memory_u32(0x355494u) != 0u))
         recomp_stop(2, "d3d8:point-sprite-lighting");
+    /* Lit alpha follows NV2A's color-material diffuse source, which 0x34ee70 builds
+       from COLORVERTEX (0x355404) and DIFFUSEMATERIALSOURCE (0x35541c), dropping
+       COLOR1 without a vertex color: COLOR1 keeps vertex alpha, MATERIAL takes the
+       diffuse alpha 0x34fc80 uploads. Koku-An's (0x1ed3a0) and the snowy White
+       Storm's (0x1a54a0) snow is lit COLOR1 with material alpha 0. */
+    const uint32_t diffuse_source = *recomp_memory_u32(0x355404u) != 0u ? *recomp_memory_u32(0x35541cu) : 0u;
+    if (lighting && diffuse_source == 2u && layout->specular_offset != RECOMP_D3D_FVF_ABSENT)
+        recomp_stop(2, "d3d8:point-sprite-specular-alpha");
+    const bool material_alpha = lighting &&
+        !(diffuse_source == 1u && layout->diffuse_offset != RECOMP_D3D_FVF_ABSENT);
     if (color_factor || alpha_factor)
         draw->directional.stage_mode = stage0_select(stage, draw->directional.stage, NULL);
-    if (lighting && alpha_modulate) {
-        /* 0x34fc80 supplies material diffuse alpha even with vertex-color sources;
-           texture-only RGB does not consume the lighting RGB calculation. */
+    if (material_alpha && alpha_modulate) {
+        /* Texture-only RGB does not consume the lighting RGB calculation. */
         float alpha;
         recomp_guest_load(&alpha, device + 0xf0cu, sizeof alpha);
         if (isnan(alpha)) alpha = signbit(alpha) ? 0.0f : 1.0f;
@@ -1478,7 +1487,7 @@ static uint8_t *point_sprites(uint32_t device, const RecompD3dVertexLayout *layo
         if (layout->diffuse_offset != RECOMP_D3D_FVF_ABSENT)
             memcpy(&diffuse, vertex + layout->diffuse_offset, sizeof diffuse);
         if (color_texture) diffuse |= 0x00ffffffu;
-        if (alpha_texture || lighting) diffuse |= 0xff000000u;
+        if (alpha_texture || material_alpha) diffuse |= 0xff000000u;
         for (uint32_t k = 0u; k < 4u; ++k) {
             const float u = (float)(k & 1u), v = (float)(k >> 1u);
             corners[i * 4u + k] = (Corner){eye[0] + (2.0f * u - 1.0f) * dx,
@@ -1497,6 +1506,34 @@ static uint8_t *point_sprites(uint32_t device, const RecompD3dVertexLayout *layo
     draw->cull_mode = RECOMP_D3D_CULL_NONE;
     memcpy(draw->transform, p, sizeof p);
     return storage;
+}
+
+/* D3D8 table fog as 0x34f5f0 programs it: FogEnable 0x3553d0, table mode 0x3553d4
+   (1 EXP, 2 EXP2, 3 LINEAR), start, end and density at 0x3553d8-0x3553e0 and the
+   color at 0x355488 (FUN_00286000 sets them per stage). Linear pushes bias
+   1 + end/(end - start) and scale -1/(end - start); NV2A is assumed to subtract 1
+   as xemu models it (unmeasured), leaving (end - d)/(end - start) on planar eye depth d.
+   shortcut: range fog (0x3553e4), vertex fog (mode 0), projections that mix eye
+   x/y into w and invalid ranges stay unfogged, and EXP/EXP2 use D3D8's density
+   formulas over the SDK's scaled encoding; check a hardware capture if they differ. */
+static void attach_fog(uint32_t device, RecompD3dPresenterDrawCommand *draw)
+{
+    const uint32_t mode = *recomp_memory_u32(0x3553d4u);
+    if (*recomp_memory_u32(0x3553d0u) == 0u || *recomp_memory_u32(0x3553e4u) != 0u ||
+        mode == 0u || mode > 3u) return;
+    float range[3], p[16];
+    recomp_guest_load(range, 0x3553d8u, sizeof range);
+    recomp_guest_load(p, device + 0xca0u, sizeof p);
+    if (p[3] != 0.0f || p[7] != 0.0f || p[11] == 0.0f || !isfinite(p[11]) || !isfinite(p[15])) return;
+    if (mode == 3u ? !(isfinite(range[0]) && isfinite(range[1]) && range[1] != range[0])
+        : !(isfinite(range[2]) && range[2] >= 0.0f)) return;
+    draw->fog_mode = mode == 3u ? 1u : mode + 1u;
+    draw->fog_start = range[0];
+    draw->fog_end = range[1];
+    draw->fog_density = range[2];
+    draw->fog_depth[0] = 1.0f / p[11];
+    draw->fog_depth[1] = -p[15] / p[11];
+    draw->fog_color = *recomp_memory_u32(0x355488u);
 }
 
 /* Stage 1 ADDs a texture over stage 0's camera-space projection, as Tina's Story
@@ -1741,6 +1778,8 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
             recomp_stop(2, "d3d8:projected-stages-unrouted");
     }
     command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+    if (!program && !layout.pretransformed && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u)
+        attach_fog(device, draw);
     if (native_line) {
         draw->line_width = line_width();
         draw->line_antialias = state->edge_antialias != 0u;

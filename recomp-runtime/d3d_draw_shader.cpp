@@ -72,6 +72,8 @@ constexpr char kDrawShaderPrologue[] =
     "    row_major float4x4 projected_transform[3];\n"
     "    float4 projected_stages;\n"
     "    float4 projected_slots;\n"
+    "    float4 table_fog;\n"
+    "    float4 table_fog_color;\n"
     "}\n"
     "Texture2D guest_texture : register(t0);\n"
     "Texture3D guest_volume : register(t3);\n"
@@ -149,6 +151,7 @@ int buildDrawShaderSource(
         "    float projected_q : TEXCOORD7;\n"
         "    float2 reflection_coord2 : TEXCOORD10;\n"
         "    float3 projected_eye : TEXCOORD12;\n"
+        "    float table_fog : TEXCOORD13;\n"
         "%s"
         "};\n"
         "VSOut vs_main(VSIn input) {\n"
@@ -160,6 +163,8 @@ int buildDrawShaderSource(
         "    output.reflection_coord = float2(0, 0);\n"
         "%s"
         "%s"
+        /* Planar eye depth for table fog, from clip w. */
+        "    output.table_fog = output.position.w * table_fog.w + table_fog_color.w;\n"
         "    return output;\n"
         "}\n"
         "float4 ps_main(VSOut input) : SV_TARGET {\n"
@@ -234,6 +239,13 @@ int buildDrawShaderSource(
         "        float mask = alpha_mask.SampleBias(mask_sampler, input.reflection_coord, reflection_flags.w).a;\n"
         "        if (reflection_flags.z > 1.5f && mask == 0.0f) discard;\n"
         "        if (reflection_flags.z < 2.5f) shaded.a *= mask;\n"
+        "    }\n"
+        /* Table fog per pixel: x 1 linear, 2 exp, 3 exp2; y end or density, z 1/(end - start). */
+        "    if (table_fog.x > 0.5f) {\n"
+        "        float d = max(input.table_fog, 0.0f);\n"
+        "        float f = table_fog.x < 1.5f ? (table_fog.y - d) * table_fog.z\n"
+        "            : table_fog.x < 2.5f ? exp(-d * table_fog.y) : exp(-d * d * table_fog.y * table_fog.y);\n"
+        "        shaded.rgb = lerp(table_fog_color.rgb, shaded.rgb, saturate(f));\n"
         "    }\n"
         /* NV2A compares rounded 8-bit alpha. Function values follow
            RecompD3dCompareFunc, from NEVER (0) to ALWAYS (7). */
@@ -539,6 +551,7 @@ bool recomp_d3d_draw_shader_source(
             "        if (da<0 || db<0) {\n"
             "            float t=da/(da-db); VSOut c=(VSOut)0;\n"
             "            c.position=lerp(a.position,b.position,t); c.color=lerp(a.color,b.color,t);\n"
+            "            c.table_fog=lerp(a.table_fog,b.table_fog,t);\n"
             "            if (da<0) a=c; else b=c;\n"
             "        }\n"
             "    }\n"
@@ -776,6 +789,17 @@ bool recomp_d3d_draw_constants(
         std::memcpy(projected, draw.projected_transforms, sizeof draw.projected_transforms);
         projected[48] = static_cast<float>(draw.projected_stage_count);
         for (unsigned i = 0u; i < 3u; ++i) projected[52 + i] = static_cast<float>(draw.projected_slots[i]);
+    }
+    if (draw.fog_mode != 0u && !draw.program_count) {
+        float *fog = constants_out + 140 + 192 * 4 + 512 + 4 + 56;
+        fog[0] = static_cast<float>(draw.fog_mode);
+        fog[1] = draw.fog_mode == 1u ? draw.fog_end : draw.fog_density;
+        fog[2] = draw.fog_mode == 1u ? 1.0f / (draw.fog_end - draw.fog_start) : 0.0f;
+        fog[3] = draw.fog_depth[0];
+        fog[4] = ((draw.fog_color >> 16u) & 0xffu) / 255.0f;
+        fog[5] = ((draw.fog_color >> 8u) & 0xffu) / 255.0f;
+        fog[6] = (draw.fog_color & 0xffu) / 255.0f;
+        fog[7] = draw.fog_depth[1];
     }
     if (draw.stage1_alpha_mask)
         constants_out[138] = draw.stage1_kill_only ? 3.0f : draw.stage1_alpha_kill ? 2.0f : 1.0f;

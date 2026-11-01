@@ -502,7 +502,8 @@ static int point_tests(void)
     CHECK(*recomp_memory_u32(DEVICE + 0xf94u) == 0x7000u);
     inline_texture_active = false;
     texture.data = saved_data;
-    /* 0x1f5030 leaves LIGHTING on for texture-RGB/material-alpha point sprites. */
+    /* 0x1f5030 and the snow at 0x1ed3a0 and 0x1a54a0 leave LIGHTING on for texture-RGB
+       point sprites. With COLORVERTEX and a COLOR1 source, lit alpha is vertex alpha. */
     *recomp_memory_u32(0x3553f8u) = *recomp_memory_u32(0x355404u) = 1u;
     *recomp_memory_u32(0x355408u) = *recomp_memory_u32(0x355418u) = 2u;
     *recomp_memory_u32(0x35540cu) = *recomp_memory_u32(0x35541cu) = 1u;
@@ -510,6 +511,28 @@ static int point_tests(void)
     recomp_guest_store(DEVICE + 0xf0cu, &material_alpha, sizeof material_alpha);
     /* Unused lighting RGB data must not affect this material or trigger guards. */
     *recomp_memory_u32(DEVICE + 0xf00u) = 0x7fc00000u;
+    invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+    memcpy(&diffuse, &captured_vertices[3], sizeof diffuse);
+    CHECK(!draw->directional.enabled && diffuse == 0x80ffffffu &&
+        draw->material_alpha_mode == RECOMP_D3D_MATERIAL_ALPHA_NONE);
+    /* Koku-An's linear table fog (FUN_00286000) reaches the draw on eye depth. */
+    const float fog_range[3] = {12.3f, 90.5f, 0.0f};
+    recomp_guest_store(0x3553d8u, fog_range, sizeof fog_range);
+    *recomp_memory_u32(0x3553d0u) = 1u;
+    *recomp_memory_u32(0x3553d4u) = 3u;
+    *recomp_memory_u32(0x355488u) = 0xff37414eu;
+    invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+    CHECK(draw->fog_mode == 1u && draw->fog_start == 12.3f && draw->fog_end == 90.5f &&
+        draw->fog_depth[0] == 1.0f && draw->fog_depth[1] == 0.0f && draw->fog_color == 0xff37414eu);
+    *recomp_memory_u32(0x3553e4u) = 1u;
+    invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+    CHECK(draw->fog_mode == 0u);
+    *recomp_memory_u32(0x3553e4u) = 0u;
+    *recomp_memory_u32(0x3553d0u) = 0u;
+    invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+    CHECK(draw->fog_mode == 0u);
+    /* A MATERIAL diffuse source takes the material's diffuse alpha instead. */
+    *recomp_memory_u32(0x35541cu) = 0u;
     invoke(0x348240u, 1u, 1u, VERTICES, 16u);
     memcpy(&diffuse, &captured_vertices[3], sizeof diffuse);
     CHECK(!draw->directional.enabled && diffuse == 0xffffffffu &&

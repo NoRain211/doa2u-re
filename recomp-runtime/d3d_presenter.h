@@ -210,7 +210,14 @@ typedef struct RecompD3dPresenterDrawCommand {
     bool bump_water;
     float bump_matrices[2][4];
     float bump_fog[3];
+    /* Also the table fog color. */
     uint32_t fog_color;
+    /* D3D8 table fog on a fixed-function draw (0x34f5f0): mode 0 off, 1 linear
+       (end - d) / (end - start), 2 exp e^(-d density), 3 exp2 e^(-(d density)^2),
+       where planar eye depth d = clip w * fog_depth[0] + fog_depth[1]. */
+    uint32_t fog_mode;
+    float fog_start, fog_end, fog_density;
+    float fog_depth[2];
     uint32_t bump_address_u, bump_address_v;
     /* Stage-0 MODULATE(TEXTURE, TFACTOR) color over white vertices. */
     bool texture_factor_modulate;

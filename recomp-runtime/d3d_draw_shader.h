@@ -18,8 +18,8 @@
    stage-1 texture matrix (16), bump matrices, bump fog and fog color (16),
    the extra reflection world-view/normal transforms (96), and the stage-2
    texture matrix and flags (20), then scaled receiver depth bias (4), then the
-   projected stage 1-3 matrices, count and slots (56). */
-constexpr uint32_t kRecompD3dDrawConstantFloats = 140u + 192u * 4u + 512u + 4u + 56u;
+   projected stage 1-3 matrices, count and slots (56), then table fog (8). */
+constexpr uint32_t kRecompD3dDrawConstantFloats = 140u + 192u * 4u + 512u + 4u + 56u + 8u;
 
 /* FVFs compiled at boot (17): those seen in the developers' logged runs plus
    0x012, 0x102 and 0x204 from a player's log (#61). Compiling them at boot keeps
