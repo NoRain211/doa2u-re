@@ -556,10 +556,10 @@ White Storm (`0x1a54a0`) keep LIGHTING enabled, but consume only lit alpha. That
 alpha follows NV2A's color-material diffuse source, which
 `d3d_color_material_sources` (`0x34ee70`) builds from COLORVERTEX and
 DIFFUSEMATERIALSOURCE, dropping COLOR1 when the stream has no vertex color.
-With COLOR1, as these effects use over XYZ|DIFFUSE points, the vertex alpha
-passes through; the snow's material alpha is 0 in fights. With MATERIAL, the adapter
-supplies the diffuse alpha `0x34fc80` uploads once through the existing
-texture-alpha multiplier. Unused lighting RGB inputs are ignored. Texture-only
+These effects draw XYZ|DIFFUSE points with COLOR1, so the vertex alpha passes
+through and the snow's material alpha of 0 in fights is never read. With
+MATERIAL, the adapter applies the diffuse alpha that `0x34fc80` uploads, once,
+through the existing texture-alpha multiplier. Unused lighting RGB inputs are ignored. Texture-only
 alpha reads neither. Lit vertex RGB, specular alpha sources, two-sided lit
 points, unscaled sizes, shaders and projections that mix eye x/y into w stay
 guarded.
@@ -572,8 +572,9 @@ Fixed-function draws apply D3D8 table fog as `0x34f5f0` programs it from the
 per-stage settings `FUN_00286000` writes: FogEnable `0x3553d0`, table mode
 `0x3553d4`, start, end and density at `0x3553d8`-`0x3553e0` and color
 `0x355488`. Linear mode pushes bias `1 + end/(end - start)` and scale
-`-1/(end - start)`; NV2A subtracts 1, which leaves `(end - d)/(end - start)` on
-planar eye depth. The presenter recovers that depth from clip w, evaluates the
+`-1/(end - start)`. The port assumes NV2A then subtracts 1, as xemu models it
+(unmeasured on hardware), which leaves `(end - d)/(end - start)` on planar eye
+depth. The presenter recovers that depth from clip w, evaluates the
 factor per pixel and blends RGB toward the fog color after specular. Koku-An
 uses linear fog from 12.3 or 35 to 90.5; the snowy White Storm moves its range
 and color during a fight. EXP and EXP2 use D3D8's density formulas,

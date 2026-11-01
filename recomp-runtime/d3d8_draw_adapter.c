@@ -1511,8 +1511,8 @@ static uint8_t *point_sprites(uint32_t device, const RecompD3dVertexLayout *layo
 /* D3D8 table fog as 0x34f5f0 programs it: FogEnable 0x3553d0, table mode 0x3553d4
    (1 EXP, 2 EXP2, 3 LINEAR), start, end and density at 0x3553d8-0x3553e0 and the
    color at 0x355488 (FUN_00286000 sets them per stage). Linear pushes bias
-   1 + end/(end - start) and scale -1/(end - start); NV2A subtracts 1, leaving
-   (end - d)/(end - start) on planar eye depth d.
+   1 + end/(end - start) and scale -1/(end - start); NV2A is assumed to subtract 1
+   as xemu models it (unmeasured), leaving (end - d)/(end - start) on planar eye depth d.
    shortcut: range fog (0x3553e4), vertex fog (mode 0), projections that mix eye
    x/y into w and invalid ranges stay unfogged, and EXP/EXP2 use D3D8's density
    formulas over the SDK's scaled encoding; check a hardware capture if they differ. */
