@@ -1519,7 +1519,8 @@ static uint8_t *point_sprites(uint32_t device, const RecompD3dVertexLayout *layo
 static void attach_fog(uint32_t device, RecompD3dPresenterDrawCommand *draw)
 {
     const uint32_t mode = *recomp_memory_u32(0x3553d4u);
-    if (*recomp_memory_u32(0x3553d0u) == 0u || mode == 0u || mode > 3u) return;
+    if (*recomp_memory_u32(0x3553d0u) == 0u || *recomp_memory_u32(0x3553e4u) != 0u ||
+        mode == 0u || mode > 3u) return;
     float range[3], p[16];
     recomp_guest_load(range, 0x3553d8u, sizeof range);
     recomp_guest_load(p, device + 0xca0u, sizeof p);

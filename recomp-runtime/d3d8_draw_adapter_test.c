@@ -524,6 +524,10 @@ static int point_tests(void)
     invoke(0x348240u, 1u, 1u, VERTICES, 16u);
     CHECK(draw->fog_mode == 1u && draw->fog_start == 12.3f && draw->fog_end == 90.5f &&
         draw->fog_depth[0] == 1.0f && draw->fog_depth[1] == 0.0f && draw->fog_color == 0xff37414eu);
+    *recomp_memory_u32(0x3553e4u) = 1u;
+    invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+    CHECK(draw->fog_mode == 0u);
+    *recomp_memory_u32(0x3553e4u) = 0u;
     *recomp_memory_u32(0x3553d0u) = 0u;
     invoke(0x348240u, 1u, 1u, VERTICES, 16u);
     CHECK(draw->fog_mode == 0u);
