@@ -307,6 +307,57 @@ static bool compare_ram(void)
         .equal = ram_equal}, ram_reference, ram_live);
 }
 
+static Snapshot *ring;
+static size_t ring_size, ring_newest, ring_count;
+static RecompGuestSnapshots ring_ram;
+
+bool recomp_rollback_ring_init(size_t frames)
+{
+    ring_size = frames + 1u;
+    ring = calloc(ring_size, sizeof *ring);
+    if (ring == NULL) return false;
+    for (size_t i = 0u; i < ring_size; ++i) allocate_snapshot(&ring[i]);
+    recomp_snapshots_free(&ring_ram);
+    ring_newest = ring_count = 0u;
+    return true;
+}
+
+bool recomp_rollback_ring_save(void)
+{
+    bool saved = true;
+    if (ram_live != NULL) {
+        saved = ring_ram.ram == NULL
+            ? recomp_snapshots_init(&ring_ram, ram_live, ram_size, ram_write_watch, ring_size - 1u)
+            : recomp_snapshots_save(&ring_ram);
+    }
+    ring_newest = (ring_newest + 1u) % ring_size;
+    save_snapshot(&ring[ring_newest]);
+    if (!saved) ring_count = 1u;
+    else if (ring_count < ring_size) ++ring_count;
+    return saved;
+}
+
+bool recomp_rollback_ring_load(size_t back)
+{
+    if (back >= ring_count) return false;
+    const size_t index = (ring_newest + ring_size - back) % ring_size;
+    const Snapshot *saved = &ring[index];
+    if (saved->swap_caller != recomp_d3d8_swap_caller()) {
+        fprintf(stderr, "recomp rollback: Present returned to %08x, save resumes in %08x\n",
+            (unsigned)recomp_d3d8_swap_caller(), (unsigned)saved->swap_caller);
+        return false;
+    }
+    if (!snapshots_restorable(saved)) return false;
+    load_snapshot(saved);
+    if (ram_live != NULL && !recomp_snapshots_load(&ring_ram, back)) {
+        fprintf(stderr, "recomp rollback: guest RAM rewind failed\n");
+        exit(2);
+    }
+    ring_newest = index;
+    ring_count -= back;
+    return true;
+}
+
 RecompSyncTestResult recomp_synctest_frame(uint32_t swap_counter)
 {
     read_env();

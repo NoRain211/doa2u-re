@@ -1,13 +1,13 @@
 # Rollback netcode
 
-Status: design and the save/replay core. Two runners will connect through a
-host-owned lobby and play the offline Versus mode, with rollback over the
-fight. A frame-locked clock and SyncTest (`docs/bring-up.md`, Determinism
-checks) save, replay and compare whole frames, with guest RAM in page
-snapshots (`guest_snapshot.c`). SyncTest replays one frame at a time from a
-single save point; rollback needs a ring of module states beside the RAM
-ring, input injection and a transport. Game addresses below come from
-static analysis of `/DOA2.xbe` in Ghidra unless a section says otherwise.
+Status: the save/replay core, a rollback ring, input prediction and a
+loopback test. Two runners will connect through a host-owned lobby and play
+the offline Versus mode, with rollback over the fight. A frame-locked clock
+and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
+compare whole frames, with guest RAM in page snapshots
+(`guest_snapshot.c`). The transport, frame pacing and the lobby remain.
+Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
+unless a section says otherwise.
 
 ## The game's Xbox Live lockstep
 
@@ -89,12 +89,56 @@ SyncTest.
   The frame-locked clock makes time a function of the frame count.
 - Re-simulated frames must not present, play sound or rumble. The D3D8
   adapter can skip the flip and GPU work, and the buffer adapter can drop
-  audio output, while their models keep advancing.
+  audio output, while their models keep advancing. A skipped flip still
+  runs Present's vblank wait, which moves guest time even though the frame
+  clock never sleeps there; without it hidden frames diverged.
 - Frames that write saves or present from the display mode change cannot be
   rewound. A rollback window must not reach back past one.
 - Both peers must produce identical floating-point results. The same build
   on x86-64 is the safe case; macOS arm64 and host libm differences are
   unverified.
+
+## Rollback session
+
+`rollback.c` keeps both sides' pads by frame. A remote frame that has not
+arrived runs with the last remote pad; when its pad arrives and differs from
+the one that ran, the session rewinds to the earliest wrong frame. The local
+side runs at most `RECOMP_ROLLBACK_WINDOW` (8) frames past the last remote
+pad. The ring in `synctest.c` keeps one save per frame of SyncTest's modules
+and the guest RAM pages, and refuses a load that SyncTest would skip.
+
+The runner drives the session from the Swap boundary. At the newest frame it
+adds the pads that arrived, then either loads the earliest mispredicted
+frame or saves the frame about to run. The frame's pads become the input
+adapter's sample source, so every XInputGetState in that frame reads the
+same pad however often the game polls. Frames run again are hidden.
+
+`RECOMP_ROLLBACK=loopback` tests this without a peer. From swap
+`RECOMP_ROLLBACK_START`, a generated remote player on port 0 changes pads
+nearly every frame, and its pads arrive `RECOMP_ROLLBACK_LAG` frames late
+(default 4, at most 8). At session frame `RECOMP_ROLLBACK_FRAMES` (default
+600) every pad arrives. After the last rollback the runner writes guest RAM,
+with SyncTest's host-scheduled ranges zeroed, to `RECOMP_ROLLBACK_DUMP` and
+exits 0. Lag 0 never predicts, so its dump is the reference.
+
+From swap 3000 of the scripted Story fight, lag 4 over 600 frames rolled
+back 594 times (2,376 frames run again) and lag 8 over 900 frames 890 times
+(7,120 frames). Both dumps matched lag 0 byte for byte, and two lag 0 runs
+match each other, so separate processes simulate the same frames. A hidden
+frame costs about 3.7 ms on the development machine (26.4 s more than the
+paced lag 0 run for 7,120 frames), so about three frames of rollback fit in
+a 60 Hz frame; longer delays need input delay as well.
+
+Limits of this stage:
+
+- A save that cannot be rewound ends the run (`rollback:unrestorable`). At
+  lag 8 the Story save after the fight, about 1,050 frames in, does this.
+  The session must fall back to lockstep before the game saves.
+- Loopback has no local player, so port 1 stays empty. Rumble from hidden
+  frames is not suppressed.
+- Two of about ten hidden-frame runs ended with exit code -1 and no host
+  report, and WerFault crashed while handling one. None of the runs under a
+  debugger crashed, and the cause is unknown.
 
 ## Entry point
 

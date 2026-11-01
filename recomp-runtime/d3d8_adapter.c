@@ -645,10 +645,10 @@ static void swap(void)
     if (result.error != RECOMP_D3D_FRAME_OK) recomp_stop(2, "d3d8:swap:%u", (unsigned)result.error);
     for (uint32_t i = 0; i < 2u; ++i) load(&device_state.color[i], color_header(i), sizeof device_state.color[i]);
     if (recomp_d3d_device_swap_buffers(&device_state) != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:swap-headers");
-    if (!present_suppressed) {
-        recomp_d3d_wait_present();
-        recomp_d3d8_submit(&result.command);
-    }
+    /* The wait also moves guest time, so a hidden frame keeps it; under the
+       frame clock it never sleeps. */
+    recomp_d3d_wait_present();
+    if (!present_suppressed) recomp_d3d8_submit(&result.command);
     back_buffer_displayed = true;
     back_buffer_saved = false;
     if (display_mode_pending) {

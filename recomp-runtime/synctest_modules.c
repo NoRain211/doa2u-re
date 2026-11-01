@@ -96,6 +96,17 @@ static bool ram_equal(const void *left, const void *right, size_t size)
     return true;
 }
 
+void recomp_synctest_mask_ignored(uint8_t *ram, size_t size)
+{
+    IgnoreRange ranges[64];
+    const size_t range_count = build_ignore_ranges(ranges, 64u);
+    for (size_t i = 0u; i < range_count; ++i) {
+        if (ranges[i].start >= size) continue;
+        const size_t stop = ranges[i].stop < size ? ranges[i].stop : size;
+        memset(ram + ranges[i].start, 0, stop - ranges[i].start);
+    }
+}
+
 /* Guest time plus the presenter marks derived from it; both rewind together
    or a replayed frame waits on a vblank from the abandoned timeline. */
 typedef struct ClockState {
