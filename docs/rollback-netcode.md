@@ -228,16 +228,27 @@ The hello carries the SHA-256 of the joiner's runner executable, and the
 host refuses any other build. That also refuses a Windows and Linux pair,
 whose floating point is unverified. The host answers with its input delay
 (`--netplay-delay`, default 2) and the options that change the simulation
-(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. The host keeps
-answering repeated hellos once the session runs, so a lost answer costs
-only a retry.
+(`--no-unlock-all`, `--skip-intro`), which the joiner adopts, and the size
+of its profile.
+
+The host first recovers its own save journal, then packs its
+`.recomp-storage/partition1` (`UDATA` profiles and `TDATA` title saves)
+into one blob of at most 1 MiB with a SHA-256 of its contents. The joiner
+asks for 16 chunks of 1 KiB at a time from the first one it lacks, asks
+again when a burst has arrived or after 100 ms, and says when it has them
+all. The host answers hellos and requests until then; if that last message
+is lost, the joiner's first session packet ends the wait. Before writing,
+each side checks the hash, a limit of 512 entries and every path: relative,
+below `UDATA` or `TDATA`, letters, digits, `.`, `_` and `-` only, and
+no Windows device names. The host's 92 KB profile arrives in one run of
+bursts on a local network.
 
 Both runners then boot and play one session from their first frame. Until
 it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
 neither machine's other pads reach the game. Saves go to
 `.recomp-storage/netplay/partition1` with their own undo journal, wiped when
-each session starts, so both sides start from the same empty profile and
-neither player's own profile changes. The cached archives in partitions 3 to
+each session starts and filled with the host's profile, so both sides start
+alike and neither player's own profile changes. The cached archives in partitions 3 to
 5 stay shared; `run_game.py` prepares them the same way on every machine.
 During a session the host reports no file times, which differ between
 machines.
@@ -275,8 +286,6 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- Both players start from a new profile every session. Sending the host's
-  profile to the joiner would keep unlocks and settings.
 - The launcher has no lobby screen, and there is no NAT traversal: the host
   must accept UDP on its port.
 - When one runner quits, the other stops 5 s later

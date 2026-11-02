@@ -24,10 +24,16 @@ typedef socklen_t SocketLength;
 enum {
     MAGIC = 0x42523244u,       /* "D2RB" */
     LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
-    LOBBY_VERSION = 1u,
+    LOBBY_VERSION = 2u,
     LOBBY_HELLO = 1u,
     LOBBY_WELCOME = 2u,
-    LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u,
+    LOBBY_REQUEST = 3u, /* joiner: send chunks from this index; past the last, done */
+    LOBBY_CHUNK = 4u,   /* host: one chunk of its profile */
+    LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
+    PART_HEADER = 10u,
+    CHUNK_BYTES = 1024u,
+    CHUNKS_PER_REQUEST = 16u,
+    MAX_CHUNKS = RECOMP_NETPLAY_MAX_PROFILE / CHUNK_BYTES,
 };
 
 static void put32(uint8_t *out, uint32_t value)
@@ -128,7 +134,7 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     return true;
 }
 
-/* Layout: magic, version, kind, digest, delay, flags. */
+/* Layout: magic, version, kind, digest, delay, flags, profile size. */
 static size_t encode_lobby(uint8_t kind, const RecompNetplayLobby *lobby, uint8_t *out)
 {
     put32(out, LOBBY_MAGIC);
@@ -137,6 +143,7 @@ static size_t encode_lobby(uint8_t kind, const RecompNetplayLobby *lobby, uint8_
     memcpy(out + 6, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES);
     out[6u + RECOMP_NETPLAY_DIGEST_BYTES] = lobby->delay;
     out[7u + RECOMP_NETPLAY_DIGEST_BYTES] = lobby->flags;
+    put32(out + 8u + RECOMP_NETPLAY_DIGEST_BYTES, lobby->profile_size);
     return LOBBY_BYTES;
 }
 
@@ -147,7 +154,34 @@ static uint8_t decode_lobby(const uint8_t *in, size_t size, RecompNetplayLobby *
     memcpy(lobby->digest, in + 6, RECOMP_NETPLAY_DIGEST_BYTES);
     lobby->delay = in[6u + RECOMP_NETPLAY_DIGEST_BYTES];
     lobby->flags = in[7u + RECOMP_NETPLAY_DIGEST_BYTES];
+    lobby->profile_size = get32(in + 8u + RECOMP_NETPLAY_DIGEST_BYTES);
     return in[5];
+}
+
+/* A request or chunk: magic, version, kind, chunk index, then a chunk's bytes. */
+static size_t encode_part(uint8_t kind, uint32_t index, uint8_t *out)
+{
+    put32(out, LOBBY_MAGIC);
+    out[4] = LOBBY_VERSION;
+    out[5] = kind;
+    put32(out + 6, index);
+    return PART_HEADER;
+}
+
+static bool decode_part(const uint8_t *in, size_t size, uint8_t kind, uint32_t *index)
+{
+    if (size < PART_HEADER || get32(in) != LOBBY_MAGIC || in[4] != LOBBY_VERSION || in[5] != kind)
+        return false;
+    *index = get32(in + 6);
+    return true;
+}
+
+static uint32_t chunk_count(uint32_t size) { return (size + CHUNK_BYTES - 1u) / CHUNK_BYTES; }
+
+static uint32_t chunk_size(uint32_t size, uint32_t index)
+{
+    const uint32_t left = size - index * CHUNK_BYTES;
+    return left < CHUNK_BYTES ? left : CHUNK_BYTES;
 }
 
 static bool open_socket(RecompNetplay *net, uint16_t local_port)
@@ -265,26 +299,39 @@ static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
 }
 
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, uint32_t timeout_ms)
+    const RecompNetplayLobby *lobby, const uint8_t *profile, uint32_t timeout_ms)
 {
     if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
-    net->hosting = true;
-    net->lobby = *lobby;
     const uint64_t deadline = now_ms() + timeout_ms;
-    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], welcome[LOBBY_BYTES];
+    const uint32_t chunks = chunk_count(lobby->profile_size);
+    bool joined = false;
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], welcome[LOBBY_BYTES], chunk[PART_HEADER + CHUNK_BYTES];
     const size_t welcome_size = encode_lobby(LOBBY_WELCOME, lobby, welcome);
     for (;;) {
         struct sockaddr_in from;
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+            if (joined && !from_peer(net, &from)) continue;
             RecompNetplayLobby hello;
-            if (decode_lobby(packet, (size_t)size, &hello) != LOBBY_HELLO) continue;
-            send_to(net, from.sin_addr.s_addr, from.sin_port, welcome, welcome_size);
-            if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
-                return RECOMP_NETPLAY_LOBBY_MISMATCH;
-            net->peer_address = from.sin_addr.s_addr;
-            net->peer_port = from.sin_port;
-            return RECOMP_NETPLAY_LOBBY_OK;
+            uint32_t index;
+            if (decode_lobby(packet, (size_t)size, &hello) == LOBBY_HELLO) {
+                send_to(net, from.sin_addr.s_addr, from.sin_port, welcome, welcome_size);
+                if (joined) continue;
+                if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
+                    return RECOMP_NETPLAY_LOBBY_MISMATCH;
+                net->peer_address = from.sin_addr.s_addr;
+                net->peer_port = from.sin_port;
+                joined = true;
+            } else if (joined && decode_part(packet, (size_t)size, LOBBY_REQUEST, &index)) {
+                if (index >= chunks) return RECOMP_NETPLAY_LOBBY_OK;
+                for (uint32_t i = index; i < chunks && i < index + CHUNKS_PER_REQUEST; ++i) {
+                    const uint32_t bytes = chunk_size(lobby->profile_size, i);
+                    memcpy(chunk + encode_part(LOBBY_CHUNK, i, chunk), profile + i * CHUNK_BYTES, bytes);
+                    send_to(net, net->peer_address, net->peer_port, chunk, PART_HEADER + bytes);
+                }
+            } else if (joined && size >= 4 && get32(packet) == MAGIC) {
+                return RECOMP_NETPLAY_LOBBY_OK; /* its done was lost and its session has started */
+            }
         }
         if (now_ms() >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
         wait_readable(net, 100u);
@@ -292,34 +339,60 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
 }
 
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, uint32_t timeout_ms)
+    uint16_t port, RecompNetplayLobby *lobby, uint8_t *profile, uint32_t timeout_ms)
 {
     if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
-    uint64_t next_hello = 0u;
-    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], hello[LOBBY_BYTES];
+    uint64_t next_send = 0u;
+    bool welcomed = false, have[MAX_CHUNKS] = {false};
+    uint32_t chunks = 0u, missing = 0u, asked = 0u;
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], hello[LOBBY_BYTES], request[PART_HEADER];
     const size_t hello_size = encode_lobby(LOBBY_HELLO, lobby, hello);
     for (;;) {
         const uint64_t now = now_ms();
-        if (now >= next_hello) {
-            send_to(net, net->peer_address, net->peer_port, hello, hello_size);
-            next_hello = now + 100u;
+        if (welcomed && missing == chunks) {
+            /* A lost done is covered by the session's first packet. */
+            for (int i = 0; i < 3; ++i)
+                send_to(net, net->peer_address, net->peer_port, request,
+                    encode_part(LOBBY_REQUEST, chunks, request));
+            return RECOMP_NETPLAY_LOBBY_OK;
+        }
+        /* Ask again once a burst has arrived, or after a loss. */
+        if (now >= next_send || (welcomed && missing >= asked + CHUNKS_PER_REQUEST)) {
+            if (welcomed) {
+                send_to(net, net->peer_address, net->peer_port, request,
+                    encode_part(LOBBY_REQUEST, missing, request));
+                asked = missing;
+            } else {
+                send_to(net, net->peer_address, net->peer_port, hello, hello_size);
+            }
+            next_send = now + 100u;
         }
         struct sockaddr_in from;
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+            if (!from_peer(net, &from)) continue;
             RecompNetplayLobby welcome;
-            if (!from_peer(net, &from) ||
-                decode_lobby(packet, (size_t)size, &welcome) != LOBBY_WELCOME)
-                continue;
-            if (memcmp(welcome.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
-                return RECOMP_NETPLAY_LOBBY_MISMATCH;
-            lobby->delay = welcome.delay;
-            lobby->flags = welcome.flags;
-            return RECOMP_NETPLAY_LOBBY_OK;
+            uint32_t index;
+            if (!welcomed && decode_lobby(packet, (size_t)size, &welcome) == LOBBY_WELCOME) {
+                if (memcmp(welcome.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
+                    return RECOMP_NETPLAY_LOBBY_MISMATCH;
+                if (welcome.profile_size > RECOMP_NETPLAY_MAX_PROFILE) continue;
+                lobby->delay = welcome.delay;
+                lobby->flags = welcome.flags;
+                lobby->profile_size = welcome.profile_size;
+                chunks = chunk_count(welcome.profile_size);
+                welcomed = true;
+                next_send = 0u;
+            } else if (welcomed && decode_part(packet, (size_t)size, LOBBY_CHUNK, &index) &&
+                index < chunks && (size_t)size == PART_HEADER + chunk_size(lobby->profile_size, index)) {
+                memcpy(profile + index * CHUNK_BYTES, packet + PART_HEADER, (size_t)size - PART_HEADER);
+                have[index] = true;
+            }
         }
+        while (missing < chunks && have[missing]) ++missing;
         if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
-        wait_readable(net, 100u);
+        if (!welcomed || missing != chunks) wait_readable(net, 20u);
     }
 }
 
@@ -328,17 +401,8 @@ void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *s)
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
     struct sockaddr_in from;
     int size;
-    while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
-        if (!from_peer(net, &from)) continue;
-        RecompNetplayLobby hello;
-        if (net->hosting && decode_lobby(packet, (size_t)size, &hello) == LOBBY_HELLO) {
-            uint8_t welcome[LOBBY_BYTES];
-            send_to(net, net->peer_address, net->peer_port, welcome,
-                encode_lobby(LOBBY_WELCOME, &net->lobby, welcome));
-            continue;
-        }
-        (void)recomp_netplay_decode(net, s, packet, (size_t)size);
-    }
+    while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0)
+        if (from_peer(net, &from)) (void)recomp_netplay_decode(net, s, packet, (size_t)size);
 }
 
 uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage)

@@ -25,6 +25,7 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 }
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -552,9 +553,107 @@ static std::string runnerDigest()
     return doaxbv::sha256Hex(bytes);
 }
 
+/* Partition 1 (UDATA profiles, TDATA title saves) as one blob: the SHA-256 of
+   the rest, then per entry a kind (0 folder, 1 file), a 2-byte path length,
+   the path below partition 1 and, for a file, a 4-byte size and its bytes. */
+static bool packProfile(const std::filesystem::path &root, std::vector<std::uint8_t> &blob)
+{
+    namespace fs = std::filesystem;
+    std::vector<std::uint8_t> body;
+    const auto put = [&body](std::size_t value, unsigned bytes) {
+        for (unsigned i = 0; i < bytes; ++i) body.push_back(static_cast<std::uint8_t>(value >> (8u * i)));
+    };
+    std::error_code error;
+    if (fs::exists(root, error)) {
+        for (fs::recursive_directory_iterator it(root, error), end; !error && it != end; it.increment(error)) {
+            const fs::file_status status = it->symlink_status(error);
+            const bool folder = fs::is_directory(status);
+            if (error || (!folder && !fs::is_regular_file(status))) return false;
+            const std::string name = it->path().lexically_relative(root).generic_string();
+            body.push_back(folder ? 0u : 1u);
+            put(name.size(), 2u);
+            body.insert(body.end(), name.begin(), name.end());
+            if (folder) continue;
+            const std::uintmax_t size = fs::file_size(it->path(), error);
+            if (error || size > RECOMP_NETPLAY_MAX_PROFILE) return false;
+            std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+            std::ifstream file(it->path(), std::ios::binary);
+            if (!file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return false;
+            put(bytes.size(), 4u);
+            body.insert(body.end(), bytes.begin(), bytes.end());
+        }
+    }
+    if (error) return false;
+    const std::string hash = doaxbv::sha256Hex(body);
+    blob.assign(hash.begin(), hash.end());
+    blob.insert(blob.end(), body.begin(), body.end());
+    return true;
+}
+
+// A path from the host: relative, below UDATA or TDATA, plain names, no Windows device names.
+static bool safeProfilePath(const std::string &name)
+{
+    std::size_t start = 0u;
+    for (bool first = true;; first = false) {
+        const std::size_t slash = name.find('/', start);
+        const std::string part = name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        if (part.empty() || part == "." || part == "..") return false;
+        for (const char c : part)
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
+        if (first && part != "UDATA" && part != "TDATA") return false;
+        std::string stem = part.substr(0u, part.find('.'));
+        for (char &c : stem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+            (stem.size() == 4u && (stem.rfind("COM", 0u) == 0u || stem.rfind("LPT", 0u) == 0u) &&
+                std::isdigit(static_cast<unsigned char>(stem[3]))))
+            return false;
+        if (slash == std::string::npos) return true;
+        start = slash + 1u;
+    }
+}
+
+// Writes a packProfile blob below root; false for a damaged or unsafe one.
+static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root)
+{
+    namespace fs = std::filesystem;
+    if (size < 64u) return false;
+    const std::vector<std::uint8_t> body(blob + 64, blob + size);
+    if (doaxbv::sha256Hex(body) != std::string(reinterpret_cast<const char *>(blob), 64u)) return false;
+    std::size_t at = 0u;
+    const auto get = [&](unsigned bytes, std::uint32_t &value) {
+        if (body.size() - at < bytes) return false;
+        value = 0u;
+        for (unsigned i = 0; i < bytes; ++i) value |= static_cast<std::uint32_t>(body[at++]) << (8u * i);
+        return true;
+    };
+    std::error_code error;
+    fs::create_directories(root, error);
+    for (unsigned entries = 0u; !error && at < body.size(); ++entries) {
+        std::uint32_t kind, length, bytes;
+        if (entries == 512u || !get(1u, kind) || kind > 1u || !get(2u, length) || length > 200u ||
+            body.size() - at < length)
+            return false;
+        const std::string name(body.begin() + static_cast<std::ptrdiff_t>(at),
+            body.begin() + static_cast<std::ptrdiff_t>(at + length));
+        at += length;
+        if (!safeProfilePath(name)) return false;
+        const fs::path path = root / fs::path(name);
+        if (kind == 0u) {
+            fs::create_directories(path, error);
+            continue;
+        }
+        if (!get(4u, bytes) || body.size() - at < bytes) return false;
+        fs::create_directories(path.parent_path(), error);
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
+        at += bytes;
+    }
+    return !error;
+}
+
 /* Connects the two runners before either boots. The host's input delay and
-   options win, and the session keeps its saves in a folder wiped each time,
-   so both sides start alike and neither player's profile changes. */
+   options win, and both sides play from a fresh copy of the host's profile,
+   so they start alike and neither player's own profile changes. */
 static bool joinLobby(const std::filesystem::path &discPath)
 {
     if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
@@ -571,10 +670,24 @@ static bool joinLobby(const std::filesystem::path &discPath)
     lobby.delay = static_cast<std::uint8_t>(netplayDelay);
     lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
     const bool hosting = netplayHostPort != 0u;
+    const std::filesystem::path storage = discPath / ".recomp-storage";
+    std::vector<std::uint8_t> profile;
+    if (hosting) {
+        // Recovery first, so an interrupted save is never sent.
+        if (!recomp_save_initialize(recomp_disc_root_path) || !packProfile(storage / "partition1", profile) ||
+            profile.size() > RECOMP_NETPLAY_MAX_PROFILE) {
+            std::cerr << "recomp runner: cannot read the profile to send, or it is over 1 MiB\n";
+            return false;
+        }
+        lobby.profile_size = static_cast<std::uint32_t>(profile.size());
+    } else {
+        profile.resize(RECOMP_NETPLAY_MAX_PROFILE);
+    }
     RecompNetplayLobbyResult result;
     if (hosting) {
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, static_cast<std::uint16_t>(netplayHostPort), &lobby, 10u * 60u * 1000u);
+        result = recomp_netplay_host(&rollback.net, static_cast<std::uint16_t>(netplayHostPort), &lobby,
+            profile.data(), 10u * 60u * 1000u);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
@@ -584,7 +697,7 @@ static bool joinLobby(const std::filesystem::path &discPath)
         }
         std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
         result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
-            static_cast<std::uint16_t>(port), &lobby, 2u * 60u * 1000u);
+            static_cast<std::uint16_t>(port), &lobby, profile.data(), 2u * 60u * 1000u);
     }
     if (result != RECOMP_NETPLAY_LOBBY_OK) {
         std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
@@ -605,9 +718,13 @@ static bool joinLobby(const std::filesystem::path &discPath)
         rollback.stop = static_cast<std::uint32_t>(std::strtoul(frames, nullptr, 10));
     rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
     std::error_code error;
-    std::filesystem::remove_all(discPath / ".recomp-storage" / "netplay", error);
+    std::filesystem::remove_all(storage / "netplay", error);
     if (error) {
         std::cerr << "recomp runner: cannot clear the netplay save folder\n";
+        return false;
+    }
+    if (!unpackProfile(profile.data(), lobby.profile_size, storage / "netplay" / "partition1")) {
+        std::cerr << "recomp runner: the host's profile is damaged or unsafe\n";
         return false;
     }
     recomp_save_session = "netplay";
