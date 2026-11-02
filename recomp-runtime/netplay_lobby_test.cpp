@@ -21,28 +21,33 @@ static RecompNetplayLobby lobby(char build, std::uint8_t delay, std::uint8_t fla
     std::memset(value.digest, build, sizeof value.digest);
     value.delay = delay;
     value.flags = flags;
-    value.profile_size = 0u;
     return value;
 }
 
 int main()
 {
-    // The joiner adopts the host's settings and profile, and the host learns the joiner's address.
+    // The joiner adopts the host's settings, the two swap profiles, and the host learns the joiner's address.
     RecompNetplay host, joiner;
     RecompNetplayLobbyResult hosted = RECOMP_NETPLAY_LOBBY_SOCKET;
-    RecompNetplayLobby offered = lobby('a', 2u, 3u);
-    std::vector<std::uint8_t> sent(70000u), received(RECOMP_NETPLAY_MAX_PROFILE);
-    for (std::size_t i = 0; i < sent.size(); ++i) sent[i] = static_cast<std::uint8_t>(i * 7u + i / 1024u);
-    offered.profile_size = static_cast<std::uint32_t>(sent.size());
-    std::thread wait([&] { hosted = recomp_netplay_host(&host, 47611u, &offered, sent.data(), 5000u); });
+    const RecompNetplayLobby offered = lobby('a', 2u, 3u);
+    std::vector<std::uint8_t> hostSent(70000u), joinerSent(5000u), hostGot(RECOMP_NETPLAY_MAX_PROFILE),
+        joinerGot(RECOMP_NETPLAY_MAX_PROFILE);
+    for (std::size_t i = 0; i < hostSent.size(); ++i) hostSent[i] = static_cast<std::uint8_t>(i * 7u + i / 1024u);
+    for (std::size_t i = 0; i < joinerSent.size(); ++i) joinerSent[i] = static_cast<std::uint8_t>(i * 13u + 1u);
+    RecompNetplayProfiles hostProfiles{hostSent.data(), static_cast<std::uint32_t>(hostSent.size()), hostGot.data(), 0u};
+    RecompNetplayProfiles joinerProfiles{joinerSent.data(), static_cast<std::uint32_t>(joinerSent.size()),
+        joinerGot.data(), 0u};
+    std::thread wait([&] { hosted = recomp_netplay_host(&host, 47611u, &offered, &hostProfiles, 5000u); });
     RecompNetplayLobby asked = lobby('a', 0u, 0u);
     const RecompNetplayLobbyResult joined =
-        recomp_netplay_join(&joiner, "127.0.0.1", 47611u, &asked, received.data(), 5000u);
+        recomp_netplay_join(&joiner, "127.0.0.1", 47611u, &asked, &joinerProfiles, 5000u);
     wait.join();
     check("join", joined == RECOMP_NETPLAY_LOBBY_OK && hosted == RECOMP_NETPLAY_LOBBY_OK);
     check("settings adopted", asked.delay == 2u && asked.flags == 3u);
-    check("profile copied", asked.profile_size == sent.size() &&
-        std::memcmp(received.data(), sent.data(), sent.size()) == 0);
+    check("host profile copied", joinerProfiles.theirs_size == hostSent.size() &&
+        std::memcmp(joinerGot.data(), hostSent.data(), hostSent.size()) == 0);
+    check("joiner profile copied", hostProfiles.theirs_size == joinerSent.size() &&
+        std::memcmp(hostGot.data(), joinerSent.data(), joinerSent.size()) == 0);
     check("host knows joiner", host.peer_port != 0u);
 
     // Pads then cross both ways on the lobby's sockets.
@@ -64,24 +69,24 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
-    // A host without a profile sends none.
-    offered.profile_size = 0u;
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47614u, &offered, nullptr, 5000u); });
+    // Players without profiles send none.
+    RecompNetplayProfiles none{nullptr, 0u, hostGot.data(), 1u};
+    RecompNetplayProfiles noneJoiner{nullptr, 0u, joinerGot.data(), 1u};
+    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47614u, &offered, &none, 5000u); });
     asked = lobby('a', 0u, 0u);
-    asked.profile_size = 1u;
-    check("no profile", recomp_netplay_join(&joiner, "127.0.0.1", 47614u, &asked, received.data(), 5000u) ==
-        RECOMP_NETPLAY_LOBBY_OK && asked.profile_size == 0u);
+    check("no profile", recomp_netplay_join(&joiner, "127.0.0.1", 47614u, &asked, &noneJoiner, 5000u) ==
+        RECOMP_NETPLAY_LOBBY_OK && noneJoiner.theirs_size == 0u);
     wait.join();
-    check("no profile host", hosted == RECOMP_NETPLAY_LOBBY_OK);
+    check("no profile host", hosted == RECOMP_NETPLAY_LOBBY_OK && none.theirs_size == 0u);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
     // A different build is refused on both sides.
     const RecompNetplayLobby other = lobby('b', 2u, 0u);
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47612u, &offered, nullptr, 5000u); });
+    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47612u, &offered, &none, 5000u); });
     asked = other;
     const RecompNetplayLobbyResult refused =
-        recomp_netplay_join(&joiner, "127.0.0.1", 47612u, &asked, received.data(), 5000u);
+        recomp_netplay_join(&joiner, "127.0.0.1", 47612u, &asked, &noneJoiner, 5000u);
     wait.join();
     check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && hosted == RECOMP_NETPLAY_LOBBY_MISMATCH);
     recomp_netplay_close(&host);
@@ -89,11 +94,11 @@ int main()
 
     // Nobody hosting: the joiner gives up.
     asked = offered;
-    check("timeout", recomp_netplay_join(&joiner, "127.0.0.1", 47613u, &asked, received.data(), 300u) ==
+    check("timeout", recomp_netplay_join(&joiner, "127.0.0.1", 47613u, &asked, &noneJoiner, 300u) ==
         RECOMP_NETPLAY_LOBBY_TIMEOUT);
     recomp_netplay_close(&joiner);
 
     if (failures != 0) return 1;
-    std::puts("PASS netplay lobby joins one build, copies its profile and refuses another");
+    std::puts("PASS netplay lobby joins one build, swaps profiles and refuses another");
     return 0;
 }

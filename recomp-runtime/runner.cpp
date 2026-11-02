@@ -579,15 +579,72 @@ static std::string runnerDigest()
     return doaxbv::sha256Hex(bytes);
 }
 
-/* Partition 1 (UDATA profiles, TDATA title saves) as one blob: the SHA-256 of
-   the rest, then per entry a kind (0 folder, 1 file), a 2-byte path length,
-   the path below partition 1 and, for a file, a 4-byte size and its bytes. */
-static bool packProfile(const std::filesystem::path &root, std::vector<std::uint8_t> &blob)
+// The save name on a profile's SaveMeta.xbx "Name=" line (UTF-16), as UTF-8.
+static std::string saveName(const std::uint8_t *bytes, std::size_t size)
+{
+    std::string line;
+    for (std::size_t i = 0u; i + 1u < size; i += 2u) {
+        const std::uint32_t c = bytes[i] | bytes[i + 1u] << 8;
+        if (c == '\r' || c == '\n') {
+            if (line.rfind("Name=", 0u) == 0u) break;
+            line.clear();
+        } else if (c == 0xfeffu || c == 0x200bu || c < 0x20u) {
+            continue; // byte order mark, the game's zero-width space, controls
+        } else if (c < 0x80u) {
+            line += static_cast<char>(c);
+        } else if (c < 0x800u) {
+            line += static_cast<char>(0xc0u | c >> 6);
+            line += static_cast<char>(0x80u | (c & 0x3fu));
+        } else {
+            line += static_cast<char>(0xe0u | c >> 12);
+            line += static_cast<char>(0x80u | (c >> 6 & 0x3fu));
+            line += static_cast<char>(0x80u | (c & 0x3fu));
+        }
+    }
+    return line.rfind("Name=", 0u) == 0u ? line.substr(5u) : std::string();
+}
+
+// The profile this player saved last, as UDATA/<title>/<save>, or empty without one.
+static std::string latestProfile(const std::filesystem::path &root)
+{
+    namespace fs = std::filesystem;
+    std::string latest;
+    fs::file_time_type newest{};
+    std::error_code error;
+    for (const auto &title : fs::directory_iterator(root / "UDATA", error)) {
+        for (const auto &save : fs::directory_iterator(title.path(), error)) {
+            if (!fs::is_regular_file(save.path() / "SaveMeta.xbx", error)) continue;
+            fs::file_time_type changed{};
+            for (const auto &file : fs::directory_iterator(save.path(), error))
+                changed = std::max(changed, fs::last_write_time(file.path(), error));
+            if (latest.empty() || changed > newest) {
+                latest = save.path().lexically_relative(root).generic_string();
+                newest = changed;
+            }
+        }
+    }
+    return latest;
+}
+
+/* Part of partition 1 as one blob: profile's tree and, with title, the title
+   saves (TDATA) and the files beside the profiles. The blob is the SHA-256
+   of the rest, then per entry a kind (0 folder, 1 file), a 2-byte path
+   length, the path below partition 1 and, for a file, a 4-byte size and its
+   bytes. */
+static bool packProfile(const std::filesystem::path &root, const std::string &profile, bool title,
+    std::vector<std::uint8_t> &blob)
 {
     namespace fs = std::filesystem;
     std::vector<std::uint8_t> body;
     const auto put = [&body](std::size_t value, unsigned bytes) {
         for (unsigned i = 0; i < bytes; ++i) body.push_back(static_cast<std::uint8_t>(value >> (8u * i)));
+    };
+    const auto keep = [&](const std::string &name, bool folder) {
+        if (!profile.empty() && (name == profile || name.rfind(profile + "/", 0u) == 0u)) return true;
+        if (!title) return false;
+        if (name == "TDATA" || name.rfind("TDATA/", 0u) == 0u) return true;
+        const auto depth = std::count(name.begin(), name.end(), '/');
+        return (name == "UDATA" || name.rfind("UDATA/", 0u) == 0u) && (depth < 2 || (depth == 2 && !folder));
     };
     std::error_code error;
     if (fs::exists(root, error)) {
@@ -596,6 +653,7 @@ static bool packProfile(const std::filesystem::path &root, std::vector<std::uint
             const bool folder = fs::is_directory(status);
             if (error || (!folder && !fs::is_regular_file(status))) return false;
             const std::string name = it->path().lexically_relative(root).generic_string();
+            if (!keep(name, folder)) continue;
             body.push_back(folder ? 0u : 1u);
             put(name.size(), 2u);
             body.insert(body.end(), name.begin(), name.end());
@@ -638,8 +696,9 @@ static bool safeProfilePath(const std::string &name)
     }
 }
 
-// Writes a packProfile blob below root; false for a damaged or unsafe one.
-static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root)
+// Writes a packProfile blob below root, adding its save names; false for a damaged or unsafe one.
+static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root,
+    std::vector<std::string> &names)
 {
     namespace fs = std::filesystem;
     if (size < 64u) return false;
@@ -672,14 +731,16 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
         fs::create_directories(path.parent_path(), error);
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
+        if (path.filename() == "SaveMeta.xbx") names.push_back(saveName(body.data() + at, bytes));
         at += bytes;
     }
     return !error;
 }
 
 /* Connects the two runners before either boots. The host's input delay and
-   options win, and both sides play from a fresh copy of the host's profile,
-   so they start alike and neither player's own profile changes. */
+   options win. Each player sends the profile they saved last, and both
+   sides play from fresh copies of the two, with the host's title saves, so
+   they start alike and neither player's own profile changes. */
 static bool joinLobby(const std::filesystem::path &discPath)
 {
     if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
@@ -697,24 +758,21 @@ static bool joinLobby(const std::filesystem::path &discPath)
     lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
     const bool hosting = netplayHostPort != 0u;
     const std::filesystem::path storage = discPath / ".recomp-storage";
-    std::vector<std::uint8_t> profile;
-    if (hosting) {
-        // Recovery first, so an interrupted save is never sent.
-        if (!recomp_save_initialize(recomp_disc_root_path) || !packProfile(storage / "partition1", profile) ||
-            profile.size() > RECOMP_NETPLAY_MAX_PROFILE) {
-            std::cerr << "recomp runner: cannot read the profile to send, or it is over 1 MiB\n";
-            return false;
-        }
-        lobby.profile_size = static_cast<std::uint32_t>(profile.size());
-    } else {
-        profile.resize(RECOMP_NETPLAY_MAX_PROFILE);
+    // Recovery first, so an interrupted save is never sent.
+    const std::string own = recomp_save_initialize(recomp_disc_root_path) ? latestProfile(storage / "partition1") : "";
+    std::vector<std::uint8_t> mine, theirs(RECOMP_NETPLAY_MAX_PROFILE);
+    if (!recomp_save_ready() || !packProfile(storage / "partition1", own, hosting, mine) ||
+        mine.size() > RECOMP_NETPLAY_MAX_PROFILE) {
+        std::cerr << "recomp runner: cannot read your profile to send, or it is over 1 MiB\n";
+        return false;
     }
+    RecompNetplayProfiles profiles{mine.data(), static_cast<std::uint32_t>(mine.size()), theirs.data(), 0u};
     RecompNetplayLobbyResult result;
     if (hosting) {
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
         if (recomp_netplay_open_router_port(port)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, port, &lobby, profile.data(), 10u * 60u * 1000u);
+        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
@@ -724,7 +782,7 @@ static bool joinLobby(const std::filesystem::path &discPath)
         }
         std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
         result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
-            static_cast<std::uint16_t>(port), &lobby, profile.data(), 2u * 60u * 1000u);
+            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u);
     }
     if (result != RECOMP_NETPLAY_LOBBY_OK) {
         std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
@@ -750,13 +808,22 @@ static bool joinLobby(const std::filesystem::path &discPath)
         std::cerr << "recomp runner: cannot clear the netplay save folder\n";
         return false;
     }
-    if (!unpackProfile(profile.data(), lobby.profile_size, storage / "netplay" / "partition1")) {
-        std::cerr << "recomp runner: the host's profile is damaged or unsafe\n";
+    // The host's blob first; a joiner's profile with the same name, and so the same folder, replaces the host's.
+    const std::filesystem::path session = storage / "netplay" / "partition1";
+    std::vector<std::string> ownNames, peerNames;
+    if (!unpackProfile(hosting ? mine.data() : theirs.data(), hosting ? mine.size() : profiles.theirs_size, session,
+            hosting ? ownNames : peerNames) ||
+        !unpackProfile(hosting ? theirs.data() : mine.data(), hosting ? profiles.theirs_size : mine.size(), session,
+            hosting ? peerNames : ownNames)) {
+        std::cerr << "recomp runner: the other player's profile is damaged or unsafe\n";
         return false;
     }
     recomp_save_session = "netplay";
-    std::fprintf(stderr, "recomp netplay: connected as player %u with %u frames of input delay\n",
-        rollback.player + 1u, rollback.delay);
+    const auto shown = [](const std::vector<std::string> &names) {
+        return names.empty() ? std::string("no profile") : names.front();
+    };
+    std::fprintf(stderr, "recomp netplay: connected as player %u (%s) against %s with %u frames of input delay\n",
+        rollback.player + 1u, shown(ownNames).c_str(), shown(peerNames).c_str(), rollback.delay);
     return true;
 }
 

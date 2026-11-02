@@ -228,20 +228,22 @@ The hello carries the SHA-256 of the joiner's runner executable, and the
 host refuses any other build. That also refuses a Windows and Linux pair,
 whose floating point is unverified. The host answers with its input delay
 (`--netplay-delay`, default 2) and the options that change the simulation
-(`--no-unlock-all`, `--skip-intro`), which the joiner adopts, and the size
-of its profile.
+(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
+messages carry the size of the sender's profile.
 
-The host first recovers its own save journal, then packs its
-`.recomp-storage/partition1` (`UDATA` profiles and `TDATA` title saves)
-into one blob of at most 1 MiB with a SHA-256 of its contents. The joiner
-asks for 16 chunks of 1 KiB at a time from the first one it lacks, asks
-again when a burst has arrived or after 100 ms, and says when it has them
-all. The host answers hellos and requests until then; if that last message
-is lost, the joiner's first session packet ends the wait. Before writing,
+Each side first recovers its own save journal, then packs the profile it
+saved last (`UDATA/<title>/<save>`) into one blob of at most 1 MiB with a
+SHA-256 of its contents. The host's blob also holds its `TDATA` title saves
+and the files beside the profiles. Each side asks the other for 16 chunks
+of 1 KiB at a time from the first one it lacks, asks again when a burst has
+arrived or after 100 ms, and says when it has them all. Each answers hellos
+and requests until the other is done; a request past the last chunk or a
+session packet also counts as done. Before writing,
 each side checks the hash, a limit of 512 entries and every path: relative,
 below `UDATA` or `TDATA`, letters, digits, `.`, `_` and `-` only, and
-no Windows device names. The host's 92 KB profile arrives in one run of
-bursts on a local network.
+no Windows device names. The host's 92 KB blob arrives in one run of
+bursts on a local network. The log names both players from the `Name=`
+line of each profile's `SaveMeta.xbx`.
 
 Before it waits, the host asks the router to forward its UDP port with UPnP
 (miniupnpc 2.3.3), and removes the forward when the runner exits. It sends
@@ -259,8 +261,10 @@ Both runners then boot and play one session from their first frame. Until
 it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
 neither machine's other pads reach the game. Saves go to
 `.recomp-storage/netplay/partition1` with their own undo journal, wiped when
-each session starts and filled with the host's profile, so both sides start
-alike and neither player's own profile changes. The cached archives in partitions 3 to
+each session starts and filled with the host's blob and then the joiner's,
+so both sides start alike and neither player's own profile changes. Two
+profiles with the same save folder collide, and the joiner's wins. The
+cached archives in partitions 3 to
 5 stay shared; `run_game.py` prepares them the same way on every machine.
 During a session the host reports no file times, which differ between
 machines.
@@ -300,7 +304,9 @@ a character, and the joiner picked one and pressed random buttons in live
 rounds. In the first four runs both sides started from an empty profile,
 and the host's script made one (nickname and flag); the last two started
 from the host's copied profile, where the host paused at frame 4,300 and
-chose Quit:
+chose Quit. A later run swapped both players' profiles and played a live
+round to frame 4,200 at delay 0 with 199 rollbacks on the host; the two
+session save trees and guest RAM matched:
 
 | Input delay | Frames | Rollbacks (host) | Window changes | Guest RAM at the end |
 |---|---|---|---|---|
@@ -317,6 +323,8 @@ Limits of the lobby:
 
 - The launcher has no lobby screen. Without UPnP the host must forward its
   UDP port by hand; there is no hole punching or relay.
+- The game's own menus still choose which profile plays each side, and two
+  copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the
   next host run replaces it.
 - When one runner quits, the other stops 5 s later

@@ -31,8 +31,15 @@ typedef struct RecompNetplayLobby {
     char digest[RECOMP_NETPLAY_DIGEST_BYTES]; /* runner build; both sides must match */
     uint8_t delay;                            /* input delay in frames */
     uint8_t flags;                            /* host options the joiner adopts */
-    uint32_t profile_size;                    /* bytes of the host's profile */
 } RecompNetplayLobby;
+
+/* The two players' profiles, which the lobby swaps. */
+typedef struct RecompNetplayProfiles {
+    const uint8_t *mine;
+    uint32_t mine_size;   /* at most RECOMP_NETPLAY_MAX_PROFILE */
+    uint8_t *theirs;      /* holds RECOMP_NETPLAY_MAX_PROFILE bytes */
+    uint32_t theirs_size; /* set by a successful lobby */
+} RecompNetplayProfiles;
 
 typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_OK,
@@ -64,15 +71,15 @@ bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     const char *peer_host, uint16_t peer_port);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
-   digest ends the wait with MISMATCH. Returns once the peer holds all
-   lobby->profile_size bytes of profile, at most RECOMP_NETPLAY_MAX_PROFILE. */
+   digest ends the wait with MISMATCH. Returns once both sides hold both
+   profiles. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, const uint8_t *profile, uint32_t timeout_ms);
-/* Says hello to the host until it answers, copies the host's delay, flags and
-   profile size into lobby, then fetches the profile into profile, which holds
-   RECOMP_NETPLAY_MAX_PROFILE bytes. Binds an ephemeral local port. */
+    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
+/* Says hello to the host until it answers, copies the host's delay and flags
+   into lobby, then swaps profiles as the host does. Binds an ephemeral local
+   port. */
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, uint8_t *profile, uint32_t timeout_ms);
+    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
 void recomp_netplay_close(RecompNetplay *net);
 /* The local IPv4 address of the interface that reaches the internet, as
    text; it also starts Winsock on Windows. */
