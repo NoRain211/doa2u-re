@@ -21,6 +21,8 @@ bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size);
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size);
 void recomp_d3d8_shutdown(void);
+/* Shutdown for a reboot: the window stays, and the next CreateDevice reuses it. */
+void recomp_d3d8_reset_keeping_window(void);
 /* Hidden run-ahead frames keep their device model but skip the flip. */
 void recomp_d3d8_set_present_suppressed(bool suppressed);
 /* Repeated run-ahead frames also skip draws, clears, copies and visibility tests. */

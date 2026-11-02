@@ -268,6 +268,17 @@ void recomp_d3d8_shutdown(void)
     memset(visibility_valid, 0, sizeof visibility_valid);
 }
 
+void recomp_d3d8_reset_keeping_window(void)
+{
+    RecompD3dPresenter *kept = presenter;
+    presenter = NULL;
+    recomp_d3d8_shutdown();
+    presenter = kept;
+    swap_caller = 0u;
+    present_suppressed = gpu_work_suppressed = false;
+    recomp_d3d8_release_memory(0u, RECOMP_XBOX_RAM_SIZE);
+}
+
 static uint32_t color_header(uint32_t index)
 {
     return DEVICE + COLOR_HEADERS + index * sizeof(RecompD3dSurfaceHeader);
@@ -448,10 +459,12 @@ static void create_device(void)
     if (error != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:create-device-model:%u", (unsigned)error);
     for (uint32_t i = 0; i < 2u; ++i) validate_storage(&colors[i]);
     validate_storage(&depth);
-    const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
-    if (host_error != RECOMP_D3D_PRESENTER_OK) {
-        result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
-        goto returned;
+    if (presenter == NULL) { // a reboot keeps the window
+        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
+        if (host_error != RECOMP_D3D_PRESENTER_OK) {
+            result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
+            goto returned;
+        }
     }
     device_state = candidate;
     write_initial_device(&request.presentation);

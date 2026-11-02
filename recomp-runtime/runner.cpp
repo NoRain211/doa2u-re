@@ -21,6 +21,7 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
+#include "native_fiber.h"
 #include "program_manual.h"
 #include "stop_report.h"
 RecompFunction recomp_program_lookup(std::uint32_t address);
@@ -253,10 +254,13 @@ static void showCard()
         duration_cast<nanoseconds>(steady_clock::now() - start).count()));
 }
 
+static void startRoomSession();
+
 static void onSwap(std::uint32_t frame)
 {
     if (unlockAll) unlockProfile(frame);
     if (storyFinale) applyStoryFinale();
+    startRoomSession();
     if (!cardPending) return;
     cardPending = false;
     showCard();
@@ -975,6 +979,60 @@ static bool joinLobby(const std::filesystem::path &discPath)
     return true;
 }
 
+static const doaxbv::XbeParseResult *xbe;
+static std::filesystem::path discFolder;
+
+static bool loadImage()
+{
+    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
+    std::string error;
+    if (!recomp_load_xbe(*xbe, image, error)) {
+        std::cerr << "recomp runner: " << error << '\n';
+        return false;
+    }
+    std::memcpy(guestRam, image.data(), image.size());
+    const auto imageEnd = static_cast<std::uint64_t>(xbe->metadata.header.baseAddress) + xbe->metadata.header.sizeImage;
+    if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
+        std::cerr << "recomp runner: invalid heap image boundary\n";
+        return false;
+    }
+    return true;
+}
+
+static void bootGuest();
+
+static VOID WINAPI rebootGuest(void *)
+{
+    recomp_reset_runtime_modules();
+    if (!loadImage()) recomp_stop(2, "runner:reboot-image");
+    bootGuest();
+}
+
+/* A room's launch: connect while the menu's last frame stays up, then boot
+   the game again in this process, so the window stays open. */
+static void startRoomSession()
+{
+    std::uint32_t port = 0u, delay = 0u;
+    std::string join;
+    if (!recomp_netplay_menu_take_launch(port, delay, join)) return;
+    netplayHostPort = port;
+    netplayDelay = delay;
+    netplayJoin = join;
+    // The room's players skip the intro and land on Versus character select.
+    recomp_skip_intro = true;
+    landOnVersus = true;
+    noticeTitle = "STARTING MATCH";
+    noticeDetail = port != 0u ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST";
+    recomp_d3d8_present_overlay(drawNotice);
+    // shortcut: a failed connection restarts the runner at the title (exit 4); return to the room if players hit it.
+    if (!joinLobby(discFolder)) recomp_stop(4, "netplay:session-failed");
+    recomp_input_host_stop_vibration();
+    // The guest's stacks are never resumed; the new fiber frees them.
+    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
+    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
+    recomp_native_fiber_switch(fiber);
+}
+
 int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
@@ -1129,26 +1187,14 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: XBE SHA-256 differs from the authenticated program target\n";
         return 1;
     }
-    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
-    std::string error;
-    if (!recomp_load_xbe(parsed, image, error)) {
-        std::cerr << "recomp runner: " << error << '\n';
-        return 1;
-    }
+    xbe = &parsed;
     std::uint8_t *memory = recomp_guest_ram_allocate(RECOMP_XBOX_RAM_SIZE, &guestRamWriteWatch);
     guestRam = memory;
     if (memory == nullptr) {
         std::cerr << "recomp runner: guest RAM allocation failed\n";
         return 1;
     }
-    std::memcpy(memory, image.data(), image.size());
-    std::vector<std::uint8_t>().swap(image);
-    const auto imageEnd = static_cast<std::uint64_t>(parsed.metadata.header.baseAddress) +
-        parsed.metadata.header.sizeImage;
-    if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
-        std::cerr << "recomp runner: invalid heap image boundary\n";
-        return 1;
-    }
+    if (!loadImage()) return 1;
     if (discRoot.empty()) discRoot = std::filesystem::absolute(std::filesystem::u8path(xbePath)).parent_path().string();
     const auto discPath = std::filesystem::u8path(discRoot);
     std::error_code filesystemError;
@@ -1157,35 +1203,39 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
-    const std::filesystem::path storage = discPath / ".recomp-storage";
-    // A lobby room from the Versus menu restarts the runner into its session.
-    if (netplayHostPort == 0u && netplayJoin.empty() &&
-        recomp_netplay_menu_take_launch(storage, netplayHostPort, netplayDelay, netplayJoin)) {
-        // The room's players skip the intro and land on Versus character select.
-        recomp_skip_intro = true;
-        landOnVersus = true;
-    }
+    discFolder = discPath;
     if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
+    bootGuest();
+}
+
+static void bootGuest()
+{
+    static bool booted;
+    const bool first = !booted;
+    booted = true;
+    const std::filesystem::path storage = discFolder / ".recomp-storage";
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
-        return 2;
+        std::exit(2);
     }
-    const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
+    static RecompMemoryRegion region;
+    region = {0u, RECOMP_XBOX_RAM_SIZE, guestRam};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!rollback.lobby && !readRollbackConfig()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
                   << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";
-        return 1;
+        std::exit(1);
     }
     const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
+    // Set once: only a menu boot reboots, into a session.
     if (rollback.mode == RollbackMode::Udp) std::atexit(sayGoodbye);
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)
             recomp_xapi_frame_clock_set_enabled(true);
-        recomp_synctest_set_guest_ram(memory, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
+        recomp_synctest_set_guest_ram(guestRam, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
         recomp_kernel_file_set_synchronous_reads(true);
         recomp_synctest_install_default_modules();
         if (rollbackEnabled) {
@@ -1202,25 +1252,28 @@ int main(int argc, char **argv)
     recomp_d3d_present_hook = onSwap;
     if (rollback.lobby) {
         networkDisplay = recomp_netplay_menu_display(storage);
-        if (networkDisplay != 0) recomp_d3d_overlay_hook = drawNetworkStats;
+        recomp_d3d_overlay_hook = networkDisplay != 0 ? drawNetworkStats : nullptr;
     } else if (!rollbackEnabled && !recomp_synctest_enabled()) {
         recomp_netplay_menu_install(storage, runnerDigest(), [storage] { return ownProfileName(storage / "partition1"); });
     }
-    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
+    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(setVibration);
-    std::atexit(recomp_input_host_stop_vibration);
-    std::atexit(recomp_d3d8_shutdown);
-    std::atexit(recomp_dsound_api_shutdown);
+    if (first) {
+        std::atexit(recomp_input_host_stop_vibration);
+        std::atexit(recomp_d3d8_shutdown);
+        std::atexit(recomp_dsound_api_shutdown);
+        recomp_watchdog_start();
+    }
     recomp_runtime.registers.esp = XBOX_STARTUP_STACK_TOP;
     std::fprintf(stderr, "recomp runner: entry=0x%08x image_end=0x%08x native-d3d8-dsound\n",
-        parsed.metadata.selectedEntryPoint, static_cast<unsigned>(imageEnd));
-    recomp_watchdog_start();
+        xbe->metadata.selectedEntryPoint,
+        static_cast<unsigned>(xbe->metadata.header.baseAddress + xbe->metadata.header.sizeImage));
     recomp_runtime.registers.esp -= 4u;
     *recomp_memory_u32(recomp_runtime.registers.esp) = 0u;
-    recomp_dispatch_indirect_site(parsed.metadata.selectedEntryPoint,
+    recomp_dispatch_indirect_site(xbe->metadata.selectedEntryPoint,
         XBOX_STARTUP_STACK_TOP, __FILE__, __LINE__);
     recomp_kernel_run_threads();
     recomp_stop(0, "program-returned");

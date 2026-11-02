@@ -74,6 +74,7 @@ void recomp_runtime_init(
        extended precision. The guest CRT reads this back through FNSTCW. */
     recomp_runtime.fpu_control_word = 0x037fu;
     recomp_runtime.fpu_compare = 0;
+    dispatch_depth = 0u;
     recomp_ohci_init(&usb0_ohci);
     recomp_apu_init(&mcpx_apu);
     mmio_u32_access = (RecompMmioU32Access){0};

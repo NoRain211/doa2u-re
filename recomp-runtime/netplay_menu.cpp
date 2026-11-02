@@ -62,7 +62,7 @@ struct Menu {
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
-    bool hosting = false, ready = false, starting = false;
+    bool hosting = false, ready = false, starting = false, launched = false;
     std::string name, peerAddress;
     RecompNetplay net{};
     RecompNetplayRoom room{};
@@ -283,16 +283,8 @@ bool updateRoom(std::uint16_t keys)
         menu.startAt = now;
     }
     // The host keeps saying start for a moment so the joiner hears it.
-    if (menu.hosting && menu.starting && now - menu.startAt >= std::chrono::milliseconds(600)) {
-        std::ofstream(menu.storage / "netplay-launch.txt", std::ios::trunc)
-            << "host " << menu.port << ' ' << menu.delay << '\n';
-        return true;
-    }
-    if (!menu.hosting && room.start && menu.ready && peerAllowed) {
-        std::ofstream(menu.storage / "netplay-launch.txt", std::ios::trunc) << "join " << menu.peerAddress << '\n';
-        return true;
-    }
-    return false;
+    if (menu.hosting && menu.starting && now - menu.startAt >= std::chrono::milliseconds(600)) return true;
+    return !menu.hosting && room.start && menu.ready && peerAllowed;
 }
 
 void update(std::uint16_t keys, bool &launch)
@@ -532,10 +524,16 @@ void onOverlay(const RecompD3dPresenterTarget *target)
         if (directions == 0u || (keys & directions) != 0u) menu.repeat = 0u;
         else if (++menu.repeat >= 18u && (menu.repeat - 18u) % 4u == 0u) keys |= directions;
         update(keys, launch);
+        if (launch) {
+            // The session binds this port again; the host's router forward stays for it.
+            recomp_netplay_close(&menu.net);
+            menu.screen = Screen::Closed;
+            menu.launched = true;
+            return;
+        }
         draw();
         recomp_overlay_submit(target, menu.aspect);
     }
-    if (launch) recomp_stop(4, "netplay:room-start");
 }
 
 } // namespace
@@ -587,29 +585,14 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
     *pad = RecompInputGamepad{};
 }
 
-bool recomp_netplay_menu_take_launch(const std::filesystem::path &storage, std::uint32_t &hostPort,
-    std::uint32_t &delay, std::string &join)
+bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join)
 {
-    const std::filesystem::path path = storage / "netplay-launch.txt";
-    std::string kind, value;
-    unsigned long frames = 0u;
-    {
-        std::ifstream file(path);
-        if (!file) return false;
-        file >> kind >> value;
-        if (kind == "host") file >> frames;
-    }
-    std::error_code error;
-    std::filesystem::remove(path, error); // one start per note, even a failed one
-    if (kind == "host") {
-        const unsigned long port = std::strtoul(value.c_str(), nullptr, 10);
-        if (port == 0u || port > 65535u || frames > RECOMP_ROLLBACK_WINDOW) return false;
-        hostPort = static_cast<std::uint32_t>(port);
-        delay = static_cast<std::uint32_t>(frames);
-        return true;
-    }
-    if (kind != "join" || value.empty()) return false;
-    join = value;
+    std::lock_guard<std::mutex> guard(menu.lock);
+    if (!menu.launched) return false;
+    menu.launched = false;
+    hostPort = menu.hosting ? menu.port : 0u;
+    delay = menu.delay;
+    join = menu.hosting ? std::string() : menu.peerAddress;
     return true;
 }
 

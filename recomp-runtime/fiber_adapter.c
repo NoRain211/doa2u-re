@@ -244,9 +244,11 @@ size_t recomp_fiber_adapter_stack_ranges(RecompFiberStackRange *ranges, size_t c
 
 void recomp_fiber_adapter_reset(void)
 {
+    void *running = recomp_native_fiber_current();
     for (size_t i = 0u; i < RECOMP_FIBER_MAX_COUNT; ++i) {
         RecompHostFiber *host = &host_fibers[i];
-        if (host != current_host_fiber && host->native_fiber != NULL) {
+        /* A converted thread's fiber belongs to its guest thread. */
+        if (host->native_fiber != NULL && host->native_fiber != running && host->guest_stack_base != 0u) {
             recomp_native_fiber_delete(host->native_fiber);
         }
         *host = (RecompHostFiber){0};

@@ -13,6 +13,8 @@ void recomp_dsound_require_device(uint32_t handle);
 void recomp_dsound_device_add_owner(void);
 void recomp_dsound_device_release_owner(void);
 void recomp_dsound_api_shutdown(void);
+/* Releases the guest's device and buffers but keeps the host output open. */
+void recomp_dsound_api_reset(void);
 size_t recomp_dsound_api_state_size(void);
 void recomp_dsound_api_state_save(void *state);
 void recomp_dsound_api_state_restore(const void *state);

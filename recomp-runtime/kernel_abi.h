@@ -107,6 +107,14 @@ void recomp_kernel_file_state_restore(const void *state);
 /* Reads finish inside the guest call instead of on a host worker, so no read
    is in flight at a frame boundary that a rewind may return to. */
 void recomp_kernel_file_set_synchronous_reads(bool enabled);
+/* Power-on state for an in-process reboot, run on a host fiber no guest
+   thread owns. The file reset goes first: it waits out host reads, which
+   write guest RAM and parked stacks. */
+void recomp_kernel_file_reset(void);
+void recomp_kernel_thread_reset(void);
+void recomp_kernel_memory_reset(void);
+void recomp_kernel_interrupt_reset(void);
+void recomp_kernel_video_reset(void);
 size_t recomp_kernel_memory_state_size(void);
 void recomp_kernel_memory_state_save(void *state);
 void recomp_kernel_memory_state_restore(const void *state);

@@ -34,6 +34,10 @@ typedef enum RecompSyncTestResult {
 void recomp_synctest_set_modules(const RecompSyncTestModule *modules, size_t count);
 /* The runtime's real state table; defined beside the runtime, not the core. */
 void recomp_synctest_install_default_modules(void);
+/* Puts the same modules back to power-on state for an in-process reboot,
+   keeping the window. Call on a host fiber no guest thread owns; guest RAM
+   and the CPU state (recomp_runtime_init) are the caller's. */
+void recomp_reset_runtime_modules(void);
 /* Extra state the runner owns (its scripted input schedule). */
 void recomp_synctest_set_extra_state(
     size_t size, void (*save)(void *), void (*restore)(const void *));

@@ -263,11 +263,15 @@ the d-pad or the clipboard. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate. When both are
-ready the host says start for 600 ms, and each runner writes
-`.recomp-storage/netplay-launch.txt` and stops with exit code 4, which
-`run_game.py` already restarts. The new runner takes the note, deletes
-it, and runs the session lobby below as if started with
-`--netplay-host` or `--netplay-join`, with the intro skipped. Its lobby
+ready the host says start for 600 ms. Each runner closes the room, shows
+STARTING MATCH over its last frame, and runs the session lobby below as if
+started with `--netplay-host` or `--netplay-join`, with the intro skipped.
+It then reboots the game in the same process and window: on a fresh host
+fiber it puts the runtime modules back to power-on state
+(`recomp_reset_runtime_modules`, which frees the old guest stacks and
+keeps the D3D window and audio output), reloads the XBE image and enters
+it again. A failed lobby stops with exit code 4 instead, which
+`run_game.py` restarts offline. Its lobby
 flag tells the joiner to do the same walk to Versus character select
 (frontend scene 3): both sides replace the frame's pads with Start until
 `g_game_mode_state` is 4, Right until the main menu has Versus, then A,
@@ -277,7 +281,9 @@ is pending (`g_frontend_scene_target`, `0xdf5dda`). Both sides decide from
 the same guest state in the same frame, so they stay in step. Two scripted
 runners on one machine went from the Versus menu through the room to
 character select at session frame 334, with identical guest RAM at frame
-1,200. When the session ends with code 4, the runner restarts offline.
+1,200. With the reboot, both players' guest RAM at frame 1,500 matched each
+other and a session started by restarting the runners byte for byte. When
+the session ends with code 4, the runner restarts offline.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
@@ -384,9 +390,9 @@ Limits of the lobby:
 - Without UPnP the host must forward its UDP port by hand; there is no hole
   punching or relay. A joiner types an IPv4 address; host names and room
   codes are not supported.
-- Starting the session restarts both runners; the window closes and reopens,
-  and the title and menus flash past for about 6 s on the way to character
-  select.
+- The title and menus flash past for about 6 s on the way to character
+  select. Ending a session still restarts the runner, so the window closes
+  and reopens then.
 - The room has no chat. The clipboard works only on Windows.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
