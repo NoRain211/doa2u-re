@@ -435,6 +435,32 @@ static bool roundLive()
     return true;
 }
 
+/* A session started from the Versus menu's room walks to Versus character
+   select (frontend scene 3): Start until the front end runs
+   (g_game_mode_state 4), Right until the main menu (scene 0) has Versus
+   (mode 5) chosen, A, then A for Single Battle, the first choice on the
+   battle type menu (scene 2). It presses for one frame in every 16 and never
+   while a scene change is pending (g_frontend_scene_target 0xdf5dda past 0).
+   Both sides set the frame's pads the same way from the same guest state. */
+static bool landOnVersus;
+static void driveToVersus(std::uint32_t frame)
+{
+    if (!landOnVersus) return;
+    const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
+                       target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
+    if (state == 4u && scene != 0u && scene != 2u) {
+        landOnVersus = false;
+        std::fprintf(stderr, "recomp netplay: Versus character select from frame %u\n", frame);
+        return;
+    }
+    RecompInputGamepad &pad = rollback.pads[0];
+    pad = rollback.pads[1] = RecompInputGamepad{};
+    if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return;
+    if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
+    else if (scene == 0u && mode != 5u) pad.buttons = 8u; // d-pad right
+    else pad.analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
+}
+
 static void setWindow(std::uint32_t window)
 {
     RecompRollbackSession &s = rollback.session;
@@ -517,6 +543,7 @@ static void onRollbackFrame(std::uint32_t swap)
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
     recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
+    driveToVersus(s.frame);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
 }
 
@@ -559,7 +586,7 @@ static bool readRollbackConfig()
 // --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
 static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
 static std::string netplayJoin;
-enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u };
+enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
 
 // SHA-256 of this runner's executable, so both sides of a lobby run one build.
 static std::string runnerDigest()
@@ -771,7 +798,8 @@ static bool joinLobby(const std::filesystem::path &discPath)
     }
     std::memcpy(lobby.digest, digest.data(), sizeof lobby.digest);
     lobby.delay = static_cast<std::uint8_t>(netplayDelay);
-    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
+    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) |
+        (recomp_skip_intro ? LobbySkipIntro : 0u) | (landOnVersus ? LobbyVersus : 0u));
     const bool hosting = netplayHostPort != 0u;
     const std::filesystem::path storage = discPath / ".recomp-storage";
     // Recovery first, so an interrupted save is never sent.
@@ -813,6 +841,7 @@ static bool joinLobby(const std::filesystem::path &discPath)
     if (lobby.delay > RECOMP_ROLLBACK_WINDOW) return false;
     unlockAll = (lobby.flags & LobbyUnlockAll) != 0u;
     recomp_skip_intro = (lobby.flags & LobbySkipIntro) != 0u;
+    landOnVersus = (lobby.flags & LobbyVersus) != 0u;
     rollback.mode = RollbackMode::Udp;
     rollback.lobby = true;
     rollback.player = hosting ? 0u : 1u;
@@ -1037,8 +1066,12 @@ int main(int argc, char **argv)
     recomp_disc_root_path = discRoot.c_str();
     const std::filesystem::path storage = discPath / ".recomp-storage";
     // A lobby room from the Versus menu restarts the runner into its session.
-    if (netplayHostPort == 0u && netplayJoin.empty())
-        (void)recomp_netplay_menu_take_launch(storage, netplayHostPort, netplayDelay, netplayJoin);
+    if (netplayHostPort == 0u && netplayJoin.empty() &&
+        recomp_netplay_menu_take_launch(storage, netplayHostPort, netplayDelay, netplayJoin)) {
+        // The room's players skip the intro and land on Versus character select.
+        recomp_skip_intro = true;
+        landOnVersus = true;
+    }
     if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";

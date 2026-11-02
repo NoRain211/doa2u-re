@@ -245,9 +245,17 @@ ready the host says start for 600 ms, and each runner writes
 `.recomp-storage/netplay-launch.txt` and stops with exit code 4, which
 `run_game.py` already restarts. The new runner takes the note, deletes
 it, and runs the session lobby below as if started with
-`--netplay-host` or `--netplay-join`. Two scripted runners on one machine
-went from the Versus menu through the room into a session this way. When the
-session ends with code 4, the runner restarts offline.
+`--netplay-host` or `--netplay-join`, with the intro skipped. Its lobby
+flag tells the joiner to do the same walk to Versus character select
+(frontend scene 3): both sides replace the frame's pads with Start until
+`g_game_mode_state` is 4, Right until the main menu has Versus, then A,
+and A again for Single Battle, the first choice of the battle type menu
+(scene 2). Presses last one frame in every 16 and wait while a scene change
+is pending (`g_frontend_scene_target`, `0xdf5dda`). Both sides decide from
+the same guest state in the same frame, so they stay in step. Two scripted
+runners on one machine went from the Versus menu through the room to
+character select at session frame 334, with identical guest RAM at frame
+1,200. When the session ends with code 4, the runner restarts offline.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
@@ -355,7 +363,8 @@ Limits of the lobby:
   punching or relay. A joiner types an IPv4 address; host names and room
   codes are not supported.
 - Starting the session restarts both runners; the window closes and reopens,
-  and the session starts at the title screen.
+  and the title and menus flash past for about 6 s on the way to character
+  select.
 - The room has no chat. The clipboard works only on Windows.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
