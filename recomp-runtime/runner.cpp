@@ -90,6 +90,11 @@ struct RollbackRun {
 };
 static RollbackRun rollback;
 
+/* After a room session ends, the game boots offline and walks to the main
+   menu's Versus entry behind the reopened room (walkToVersus). */
+static bool backToVersus;
+static RecompInputGamepad backPad;
+
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     // Both runners must see the same controllers: the session's two ports, once it runs.
@@ -114,6 +119,10 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         startHeld = start;
     }
     if (sampled) recomp_netplay_menu_filter(0u, gamepad);
+    if (backToVersus) {
+        *gamepad = backPad;
+        return true;
+    }
     return sampled;
 }
 
@@ -255,11 +264,16 @@ static void showCard()
 }
 
 static void startRoomSession();
+static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &pad);
 
 static void onSwap(std::uint32_t frame)
 {
     if (unlockAll) unlockProfile(frame);
     if (storyFinale) applyStoryFinale();
+    if (backToVersus && walkToVersus(frame, false, backPad)) {
+        backToVersus = false;
+        std::fprintf(stderr, "recomp netplay: back at the Versus menu from frame %u\n", frame);
+    }
     startRoomSession();
     if (!cardPending) return;
     cardPending = false;
@@ -352,6 +366,7 @@ static bool interrupted;
 static std::chrono::steady_clock::time_point noticeShown;
 static const char *noticeTitle;
 static std::string noticeDetail;
+static void endSession(const char *reason);
 
 static void drawNotice(const RecompD3dPresenterTarget *target)
 {
@@ -373,13 +388,13 @@ static void stalled(std::chrono::steady_clock::time_point began)
         noticeDetail = "ENDING THE SESSION";
         recomp_d3d8_present_overlay(drawNotice);
         std::this_thread::sleep_for(seconds(2));
-        recomp_stop(4, "rollback:peer-left");
+        endSession("rollback:peer-left");
     }
     const auto now = steady_clock::now();
     const bool heard = rollback.net.peer_seen;
     const seconds grace(heard ? 15 : 120);
     const auto waited = now - began;
-    if (waited > grace) recomp_stop(4, "rollback:peer-timeout");
+    if (waited > grace) endSession("rollback:peer-timeout");
     if (waited < seconds(1) || now - noticeShown < milliseconds(100)) return;
     if (!interrupted && heard)
         std::fprintf(stderr, "recomp netplay: the other player went quiet at frame %u\n", rollback.session.frame);
@@ -498,30 +513,38 @@ static bool roundLive()
     return true;
 }
 
-/* A session started from the Versus menu's room walks to Versus character
-   select (frontend scene 3): Start until the front end runs
+/* Sets the frame's press toward Versus: Start until the front end runs
    (g_game_mode_state 4), Right until the main menu (scene 0) has Versus
-   (mode 5) chosen, A, then A for Single Battle, the first choice on the
-   battle type menu (scene 2). It presses for one frame in every 16 and never
-   while a scene change is pending (g_frontend_scene_target 0xdf5dda past 0).
+   (mode 5) chosen, then with select A, and A for Single Battle, the first
+   choice on the battle type menu (scene 2), to character select (frontend
+   scene 3). It presses for one frame in every 16 and never while a scene
+   change is pending (g_frontend_scene_target 0xdf5dda past 0). True on
+   arrival, leaving pad alone. */
+static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &pad)
+{
+    const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
+                       target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
+    if (state == 4u && (select ? scene != 0u && scene != 2u : scene == 0u && mode == 5u)) return true;
+    pad = RecompInputGamepad{};
+    if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;
+    if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
+    else if (scene == 0u && mode != 5u) pad.buttons = 8u; // d-pad right
+    else pad.analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
+    return false;
+}
+
+/* A session started from the Versus menu's room walks to character select.
    Both sides set the frame's pads the same way from the same guest state. */
 static bool landOnVersus;
 static void driveToVersus(std::uint32_t frame)
 {
     if (!landOnVersus) return;
-    const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
-                       target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
-    if (state == 4u && scene != 0u && scene != 2u) {
+    if (walkToVersus(frame, true, rollback.pads[0])) {
         landOnVersus = false;
         std::fprintf(stderr, "recomp netplay: Versus character select from frame %u\n", frame);
         return;
     }
-    RecompInputGamepad &pad = rollback.pads[0];
-    pad = rollback.pads[1] = RecompInputGamepad{};
-    if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return;
-    if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
-    else if (scene == 0u && mode != 5u) pad.buttons = 8u; // d-pad right
-    else pad.analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
+    rollback.pads[1] = RecompInputGamepad{};
 }
 
 static void setWindow(std::uint32_t window)
@@ -552,13 +575,14 @@ static void confirmSaveFrame()
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     resumed(began);
-    if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
+    if (s.rewind_to <= running) endSession("rollback:save-mispredicted");
 }
 
 static void sayGoodbye()
 {
     // Both sides of a scripted run stop at the same frame and need no goodbye.
-    if (rollback.session.frame < rollback.stop) recomp_netplay_send_goodbye(&rollback.net);
+    if (rollback.mode == RollbackMode::Udp && rollback.session.frame < rollback.stop)
+        recomp_netplay_send_goodbye(&rollback.net);
 }
 
 /* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
@@ -610,7 +634,7 @@ static void onRollbackFrame(std::uint32_t swap)
             // The newest save is the frame before the frontier.
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
             if (!recomp_rollback_ring_load(rollback.frontier - 1u - target))
-                recomp_stop(4, "rollback:unrestorable");
+                endSession("rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
             const auto now = std::chrono::steady_clock::now();
@@ -1008,6 +1032,17 @@ static VOID WINAPI rebootGuest(void *)
     bootGuest();
 }
 
+static void reboot()
+{
+    recomp_input_host_stop_vibration();
+    // The guest's stacks are never resumed; the new fiber frees them.
+    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
+    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
+    recomp_native_fiber_switch(fiber);
+}
+
+static bool roomSession, ownUnlockAll;
+
 /* A room's launch: connect while the menu's last frame stays up, then boot
    the game again in this process, so the window stays open. */
 static void startRoomSession()
@@ -1018,19 +1053,42 @@ static void startRoomSession()
     netplayHostPort = port;
     netplayDelay = delay;
     netplayJoin = join;
+    roomSession = true;
+    ownUnlockAll = unlockAll;
     // The room's players skip the intro and land on Versus character select.
     recomp_skip_intro = true;
     landOnVersus = true;
     noticeTitle = "STARTING MATCH";
     noticeDetail = port != 0u ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST";
     recomp_d3d8_present_overlay(drawNotice);
-    // shortcut: a failed connection restarts the runner at the title (exit 4); return to the room if players hit it.
-    if (!joinLobby(discFolder)) recomp_stop(4, "netplay:session-failed");
-    recomp_input_host_stop_vibration();
-    // The guest's stacks are never resumed; the new fiber frees them.
-    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
-    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
-    recomp_native_fiber_switch(fiber);
+    if (!joinLobby(discFolder)) endSession("netplay:session-failed");
+    reboot();
+}
+
+/* A room session that ends boots the game offline again and reopens its
+   room. Sessions started from the command line stop with exit code 4. */
+static void endSession(const char *reason)
+{
+    if (!roomSession) recomp_stop(4, "%s", reason);
+    std::fprintf(stderr, "recomp netplay: session ended (%s); back to the room\n", reason);
+    sayGoodbye();
+    recomp_netplay_close(&rollback.net);
+    rollback = RollbackRun{};
+    roomSession = false;
+    netplayHostPort = 0u;
+    netplayJoin.clear();
+    recomp_save_session = nullptr;
+    unlockAll = ownUnlockAll;
+    landOnVersus = false;
+    backToVersus = true;
+    interrupted = false;
+    recomp_d3d_frame_boundary_hook = nullptr;
+    recomp_kernel_profile_mutation_hook = nullptr;
+    recomp_xapi_frame_clock_set_enabled(false);
+    recomp_kernel_file_set_synchronous_reads(false);
+    recomp_dsound_buffer_set_output_suppressed(false);
+    recomp_netplay_menu_return_to_room();
+    reboot();
 }
 
 int main(int argc, char **argv)
@@ -1229,8 +1287,6 @@ static void bootGuest()
         std::exit(1);
     }
     const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
-    // Set once: only a menu boot reboots, into a session.
-    if (rollback.mode == RollbackMode::Udp) std::atexit(sayGoodbye);
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)
@@ -1262,6 +1318,7 @@ static void bootGuest()
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(setVibration);
     if (first) {
+        std::atexit(sayGoodbye);
         std::atexit(recomp_input_host_stop_vibration);
         std::atexit(recomp_d3d8_shutdown);
         std::atexit(recomp_dsound_api_shutdown);

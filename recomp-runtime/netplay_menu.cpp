@@ -602,3 +602,19 @@ int recomp_netplay_menu_display(const std::filesystem::path &storage)
     loadSettings();
     return menu.display;
 }
+
+void recomp_netplay_menu_return_to_room()
+{
+    std::lock_guard<std::mutex> guard(menu.lock);
+    menu.openedBy = 0u;
+    menu.message.clear();
+    // A failure leaves the Versus screen up with its message.
+    menu.screen = Screen::Versus;
+    menu.cursor = menu.hosting ? 1 : 2;
+    if (menu.hosting) {
+        host();
+    } else {
+        menu.address = menu.peerAddress;
+        join();
+    }
+}

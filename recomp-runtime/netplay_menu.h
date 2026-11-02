@@ -24,5 +24,8 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad);
 bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join);
 /* The session's network display from NETPLAY SETTINGS: 0 off, 1 ping, 2 full. */
 int recomp_netplay_menu_display(const std::filesystem::path &storage);
+/* Opens the room a session came from again: the host listens on its port,
+   the joiner calls the host's address. */
+void recomp_netplay_menu_return_to_room();
 
 #endif

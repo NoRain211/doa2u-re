@@ -313,6 +313,12 @@ static RecompGuestSnapshots ring_ram;
 
 bool recomp_rollback_ring_init(size_t frames)
 {
+    /* A second session in one process replaces the first one's ring. */
+    for (size_t i = 0u; ring != NULL && i < ring_size; ++i) {
+        for (size_t m = 0u; m < MAX_MODULES; ++m) free(ring[i].block[m]);
+        free(ring[i].extra);
+    }
+    free(ring);
     ring_size = frames + 1u;
     ring = calloc(ring_size, sizeof *ring);
     if (ring == NULL) return false;

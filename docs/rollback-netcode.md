@@ -171,9 +171,9 @@ panel, and the session then played on into a live round with identical
 guest RAM at frame 4,400; killing the joiner ended the host's session 15 s
 later. A runner that quits, by closing its window or stopping on an error,
 sends the other a goodbye first. The other runner then shows OPPONENT LEFT
-for 2 s and stops (`rollback:peer-left`); closing the joiner's window ended
-the host's session 2.1 s later. Scripted runs that reach their last frame
-send none.
+for 2 s and ends the session (`rollback:peer-left`); closing the joiner's
+window ended the host's session 2.1 s later. Scripted runs that reach their
+last frame send none.
 
 NETPLAY SETTINGS chooses a network display for sessions, kept per player:
 off, ping, or full, which adds the input delay, the deepest rewind of the
@@ -270,8 +270,7 @@ It then reboots the game in the same process and window: on a fresh host
 fiber it puts the runtime modules back to power-on state
 (`recomp_reset_runtime_modules`, which frees the old guest stacks and
 keeps the D3D window and audio output), reloads the XBE image and enters
-it again. A failed lobby stops with exit code 4 instead, which
-`run_game.py` restarts offline. Its lobby
+it again. Its lobby
 flag tells the joiner to do the same walk to Versus character select
 (frontend scene 3): both sides replace the frame's pads with Start until
 `g_game_mode_state` is 4, Right until the main menu has Versus, then A,
@@ -282,8 +281,20 @@ the same guest state in the same frame, so they stay in step. Two scripted
 runners on one machine went from the Versus menu through the room to
 character select at session frame 334, with identical guest RAM at frame
 1,200. With the reboot, both players' guest RAM at frame 1,500 matched each
-other and a session started by restarting the runners byte for byte. When
-the session ends with code 4, the runner restarts offline.
+other and a session started by restarting the runners byte for byte.
+
+A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
+`rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
+fails to connect) goes back to its room. The runner says goodbye, drops the
+session's state, reboots the game offline the same way and reopens the
+room: the host listens on its port again and the joiner calls the host's
+address. Behind the room, the port 0 pad walks to the main menu with Versus
+chosen, so leaving the room lands where the Versus menu was opened. Both
+players press READY again for a rematch. A host kept as one process
+through a session, its joiner quitting, the return to the room and a
+second session with a new joiner matched that joiner's guest RAM at frame
+3,000, with one window throughout. Sessions started with `--netplay-host`
+or `--netplay-join` still stop with exit code 4.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
@@ -391,8 +402,9 @@ Limits of the lobby:
   punching or relay. A joiner types an IPv4 address; host names and room
   codes are not supported.
 - The title and menus flash past for about 6 s on the way to character
-  select. Ending a session still restarts the runner, so the window closes
-  and reopens then.
+  select, and for about 3 s behind the room after a session.
+- The host can only cancel STARTING MATCH by closing the window; it waits
+  up to 10 minutes for the joiner.
 - The room has no chat. The clipboard works only on Windows.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
