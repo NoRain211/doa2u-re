@@ -342,7 +342,8 @@ static void receivePads()
    due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
 /* A stalled session shows a notice over its last frame after 1 s, which also
    keeps the window answering, and ends after its grace: 15 s once the other
-   player has been heard, 120 s while their runner may still be booting. */
+   player has been heard, 120 s while their runner may still be booting. A
+   goodbye from the other runner ends it at once; a killed runner sends none. */
 static bool interrupted;
 static std::chrono::steady_clock::time_point noticeShown;
 static const char *noticeTitle;
@@ -362,6 +363,14 @@ static void drawNotice(const RecompD3dPresenterTarget *target)
 static void stalled(std::chrono::steady_clock::time_point began)
 {
     using namespace std::chrono;
+    if (rollback.net.peer_left) {
+        std::fprintf(stderr, "recomp netplay: the other player left at frame %u\n", rollback.session.frame);
+        noticeTitle = "OPPONENT LEFT";
+        noticeDetail = "ENDING THE SESSION";
+        recomp_d3d8_present_overlay(drawNotice);
+        std::this_thread::sleep_for(seconds(2));
+        recomp_stop(4, "rollback:peer-left");
+    }
     const auto now = steady_clock::now();
     const bool heard = rollback.net.peer_seen;
     const seconds grace(heard ? 15 : 120);
@@ -540,6 +549,12 @@ static void confirmSaveFrame()
     }
     resumed(began);
     if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
+}
+
+static void sayGoodbye()
+{
+    // Both sides of a scripted run stop at the same frame and need no goodbye.
+    if (rollback.session.frame < rollback.stop) recomp_netplay_send_goodbye(&rollback.net);
 }
 
 /* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
@@ -1165,6 +1180,7 @@ int main(int argc, char **argv)
         return 1;
     }
     const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
+    if (rollback.mode == RollbackMode::Udp) std::atexit(sayGoodbye);
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)

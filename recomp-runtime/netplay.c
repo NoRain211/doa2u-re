@@ -23,6 +23,7 @@ typedef socklen_t SocketLength;
 
 enum {
     MAGIC = 0x42523244u,       /* "D2RB" */
+    GOODBYE_MAGIC = 0x59423244u, /* "D2BY", the whole packet */
     LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
     LOBBY_VERSION = 3u,
     LOBBY_HELLO = 1u,
@@ -111,6 +112,10 @@ static uint64_t now_ms(void);
 bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     const uint8_t *packet, size_t size)
 {
+    if (size == 4u && get32(packet) == GOODBYE_MAGIC) {
+        net->peer_left = true;
+        return true;
+    }
     if (size < RECOMP_NETPLAY_HEADER_BYTES || get32(packet) != MAGIC) return false;
     const uint32_t count = packet[20];
     if (count > RECOMP_NETPLAY_MAX_PADS ||
@@ -302,6 +307,13 @@ void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *s, int
         net->pad_sent_ms[net->pads_stamped % RECOMP_NETPLAY_MAX_PADS] = now;
     send_to(net, net->peer_address, net->peer_port, packet,
         recomp_netplay_encode(net, s, advantage, packet));
+}
+
+void recomp_netplay_send_goodbye(const RecompNetplay *net)
+{
+    uint8_t packet[4];
+    put32(packet, GOODBYE_MAGIC);
+    for (int i = 0; i < 3; ++i) send_to(net, net->peer_address, net->peer_port, packet, sizeof packet);
 }
 
 /* The next queued packet's size, or -1 when none is left. */

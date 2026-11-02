@@ -169,7 +169,11 @@ A save waiting for the other player's pads shows the same panel.
 Freezing the joiner's process for 6 s in the menus held the host on the
 panel, and the session then played on into a live round with identical
 guest RAM at frame 4,400; killing the joiner ended the host's session 15 s
-later.
+later. A runner that quits, by closing its window or stopping on an error,
+sends the other a goodbye first. The other runner then shows OPPONENT LEFT
+for 2 s and stops (`rollback:peer-left`); closing the joiner's window ended
+the host's session 2.1 s later. Scripted runs that reach their last frame
+send none.
 
 NETPLAY SETTINGS chooses a network display for sessions, kept per player:
 off, ping, or full, which adds the input delay, the deepest rewind of the
@@ -388,8 +392,8 @@ Limits of the lobby:
   copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the
   next host run replaces it.
-- When one runner quits, the other counts down for 15 s and then stops
-  (`rollback:peer-timeout`); a goodbye message would end it at once.
+- A runner that is killed or loses its network sends no goodbye; the other
+  then counts down for 15 s and stops (`rollback:peer-timeout`).
 - A save in a frame that ran with a wrong guess still ends the session; no
   save site seen so far comes within the 8-frame window of a live round.
 - The condition reads two fighters; Tag matches and rounds without a time

@@ -70,6 +70,7 @@ typedef struct RecompNetplay {
     uint32_t pads_stamped;
     uint32_t rtt_ms; /* smoothed over the last few samples */
     bool rtt_known;
+    bool peer_left; /* the other runner said goodbye */
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are
@@ -130,6 +131,8 @@ void recomp_netplay_close_router_port(void);
 bool recomp_netplay_name_banned(const char *name);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);
+/* Tells the peer this runner is quitting, a few times since UDP may drop one. */
+void recomp_netplay_send_goodbye(const RecompNetplay *net);
 /* Drains the socket into the session. */
 void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *session);
 /* Frames to wait now so neither side runs ahead: half the difference of the
@@ -139,7 +142,7 @@ uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage);
 
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage, uint8_t *packet);
-/* False for a malformed packet, which changes nothing. */
+/* False for a malformed packet, which changes nothing. A goodbye sets peer_left. */
 bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *session,
     const uint8_t *packet, size_t size);
 
