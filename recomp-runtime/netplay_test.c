@@ -107,7 +107,20 @@ int main(void)
     recomp_netplay_close(&net_a);
     recomp_netplay_close(&net_b);
 
+    static const char *const allowed[] = {"PLAYER1", "Ayane", "Raccoon", "Tycoon", "Spice", "Nigeria",
+        "Homer", "Pakistan", "Hayabusa 2", ""};
+    for (size_t i = 0u; i < sizeof allowed / sizeof *allowed; ++i)
+        check(allowed[i], !recomp_netplay_name_banned(allowed[i]));
+    static const char *const banned[] = {"N1GG3R", "xX_n i g g a_Xx", "f4g", "FAGS", "FAG123", "Tr4nny",
+        "c00n", "Dyke_99", "niiiggggerrr", "\xc3\xa9" "faggot"};
+    for (size_t i = 0u; i < sizeof banned / sizeof *banned; ++i)
+        check(banned[i], recomp_netplay_name_banned(banned[i]));
+    char longName[300];
+    memset(longName, 'a', sizeof longName - 1u);
+    longName[sizeof longName - 1u] = 0;
+    check("too long to check", recomp_netplay_name_banned(longName));
+
     if (failures != 0) return 1;
-    puts("PASS netplay carries pads, acks and advantage over UDP");
+    puts("PASS netplay carries pads, acks and advantage over UDP and screens names");
     return 0;
 }

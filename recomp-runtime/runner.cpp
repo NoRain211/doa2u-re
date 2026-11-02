@@ -760,6 +760,14 @@ static bool joinLobby(const std::filesystem::path &discPath)
     const std::filesystem::path storage = discPath / ".recomp-storage";
     // Recovery first, so an interrupted save is never sent.
     const std::string own = recomp_save_initialize(recomp_disc_root_path) ? latestProfile(storage / "partition1") : "";
+    if (!own.empty()) {
+        std::ifstream meta(storage / "partition1" / own / "SaveMeta.xbx", std::ios::binary);
+        const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
+        if (recomp_netplay_name_banned(saveName(bytes.data(), bytes.size()).c_str())) {
+            std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
+            return false;
+        }
+    }
     std::vector<std::uint8_t> mine, theirs(RECOMP_NETPLAY_MAX_PROFILE);
     if (!recomp_save_ready() || !packProfile(storage / "partition1", own, hosting, mine) ||
         mine.size() > RECOMP_NETPLAY_MAX_PROFILE) {
@@ -817,6 +825,12 @@ static bool joinLobby(const std::filesystem::path &discPath)
             hosting ? peerNames : ownNames)) {
         std::cerr << "recomp runner: the other player's profile is damaged or unsafe\n";
         return false;
+    }
+    for (const std::string &name : peerNames) {
+        if (recomp_netplay_name_banned(name.c_str())) {
+            std::cerr << "recomp runner: the other player's profile name is not allowed online\n";
+            return false;
+        }
     }
     recomp_save_session = "netplay";
     const auto shown = [](const std::vector<std::string> &names) {

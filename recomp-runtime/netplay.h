@@ -90,6 +90,10 @@ bool recomp_netplay_route_address(char *text, size_t size);
 bool recomp_netplay_open_router_port(uint16_t port);
 /* Removes that forward; nothing when none was made. */
 void recomp_netplay_close_router_port(void);
+/* True for a profile name holding a racist, homophobic or transphobic slur,
+   also spelled with digits, symbols, spacing or repeated letters, and for
+   one too long to check. Takes UTF-8. */
+bool recomp_netplay_name_banned(const char *name);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);
 /* Drains the socket into the session. */
