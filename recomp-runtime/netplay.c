@@ -237,6 +237,28 @@ void recomp_netplay_close(RecompNetplay *net)
     net->socket = (uintptr_t)INVALID_SOCKET;
 }
 
+bool recomp_netplay_route_address(char *text, size_t size)
+{
+#ifdef _WIN32
+    WSADATA data;
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return false;
+#endif
+    const SOCKET handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (handle == INVALID_SOCKET) return false;
+    /* Connecting a UDP socket sends nothing; it only picks the route. */
+    struct sockaddr_in remote, local;
+    memset(&remote, 0, sizeof remote);
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(53);
+    remote.sin_addr.s_addr = htonl(0x08080808u);
+    SocketLength length = sizeof local;
+    const bool found = connect(handle, (const struct sockaddr *)&remote, sizeof remote) == 0 &&
+        getsockname(handle, (struct sockaddr *)&local, &length) == 0 &&
+        inet_ntop(AF_INET, &local.sin_addr, text, (SocketLength)size) != NULL;
+    closesocket(handle);
+    return found;
+}
+
 static void send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
     const uint8_t *packet, size_t size)
 {

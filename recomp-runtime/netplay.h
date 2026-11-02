@@ -74,6 +74,15 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
     uint16_t port, RecompNetplayLobby *lobby, uint8_t *profile, uint32_t timeout_ms);
 void recomp_netplay_close(RecompNetplay *net);
+/* The local IPv4 address of the interface that reaches the internet, as
+   text; it also starts Winsock on Windows. */
+bool recomp_netplay_route_address(char *text, size_t size);
+/* Asks the router over UPnP to forward UDP port to this computer, and
+   prints the outcome and the address the other player joins. False when no
+   router answered or it refused; the port may still be reachable. */
+bool recomp_netplay_open_router_port(uint16_t port);
+/* Removes that forward; nothing when none was made. */
+void recomp_netplay_close_router_port(void);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);
 /* Drains the socket into the session. */

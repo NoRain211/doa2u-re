@@ -243,6 +243,18 @@ below `UDATA` or `TDATA`, letters, digits, `.`, `_` and `-` only, and
 no Windows device names. The host's 92 KB profile arrives in one run of
 bursts on a local network.
 
+Before it waits, the host asks the router to forward its UDP port with UPnP
+(miniupnpc 2.3.3), and removes the forward when the runner exits. It sends
+the search from the address its default route uses: on the development
+machine, Tailscale, WSL and Hyper-V adapters took the default multicast
+route, and the router never heard a search sent without it. The log names
+the public address the other player joins, or says the port must be
+forwarded by hand. A router whose own address is private (carrier-grade
+NAT) still forwards, but players outside the provider's network cannot
+reach it, and the log says so. On the development network the router
+(MiniUPnPd, IGD v2) listed the forward during a session and had removed it
+after the runner stopped.
+
 Both runners then boot and play one session from their first frame. Until
 it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
 neither machine's other pads reach the game. Saves go to
@@ -303,8 +315,10 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- The launcher has no lobby screen, and there is no NAT traversal: the host
-  must accept UDP on its port.
+- The launcher has no lobby screen. Without UPnP the host must forward its
+  UDP port by hand; there is no hole punching or relay.
+- A runner that is killed leaves its port forward on the router until the
+  next host run replaces it.
 - When one runner quits, the other stops 5 s later
   (`rollback:peer-timeout`).
 - A save in a frame that ran with a wrong guess still ends the session; no

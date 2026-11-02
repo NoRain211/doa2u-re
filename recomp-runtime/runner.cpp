@@ -711,9 +711,10 @@ static bool joinLobby(const std::filesystem::path &discPath)
     }
     RecompNetplayLobbyResult result;
     if (hosting) {
+        const auto port = static_cast<std::uint16_t>(netplayHostPort);
+        if (recomp_netplay_open_router_port(port)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, static_cast<std::uint16_t>(netplayHostPort), &lobby,
-            profile.data(), 10u * 60u * 1000u);
+        result = recomp_netplay_host(&rollback.net, port, &lobby, profile.data(), 10u * 60u * 1000u);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
