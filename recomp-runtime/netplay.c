@@ -106,6 +106,8 @@ size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSessi
     return RECOMP_NETPLAY_HEADER_BYTES + count * RECOMP_NETPLAY_PAD_BYTES;
 }
 
+static uint64_t now_ms(void);
+
 bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     const uint8_t *packet, size_t size)
 {
@@ -126,7 +128,15 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
         net->peer_frame = frame;
         net->peer_advantage = advantage;
     }
-    if (ack > net->peer_ack) net->peer_ack = ack;
+    if (ack > net->peer_ack) {
+        /* The newest pad the peer holds was sent once, when it was stamped. */
+        if (ack <= net->pads_stamped && ack + RECOMP_NETPLAY_MAX_PADS > net->pads_stamped) {
+            const uint64_t sample = now_ms() - net->pad_sent_ms[(ack - 1u) % RECOMP_NETPLAY_MAX_PADS];
+            net->rtt_ms = net->rtt_known ? (uint32_t)((net->rtt_ms * 7u + sample) / 8u) : (uint32_t)sample;
+            net->rtt_known = true;
+        }
+        net->peer_ack = ack;
+    }
     net->peer_seen = true;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t frame = first + i;
@@ -287,6 +297,9 @@ static void send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *s, int32_t advantage)
 {
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET];
+    const uint64_t now = now_ms();
+    for (; net->pads_stamped < s->local_count; ++net->pads_stamped)
+        net->pad_sent_ms[net->pads_stamped % RECOMP_NETPLAY_MAX_PADS] = now;
     send_to(net, net->peer_address, net->peer_port, packet,
         recomp_netplay_encode(net, s, advantage, packet));
 }

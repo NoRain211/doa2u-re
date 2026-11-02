@@ -159,8 +159,26 @@ use the same delay and start swap. The local pad is the host's first
 controller, and only the local player's port in shown frames drives its
 rumble. Runs with `--input-script-only` play a generated stream for each
 player instead. While the session is outside its window, the newest frame
-waits and sends every 4 ms, for up to 120 s before first contact and 5 s
-after it.
+waits and sends every 4 ms, for up to 120 s before first contact and 15 s
+after it. After 1 s of waiting, the runner presents its last frame again
+every 100 ms with an opaque WAITING FOR OPPONENT panel and a countdown
+(CONNECTING before first contact), which also keeps the window answering.
+If pads arrive in time the session goes on where it stopped; the log names
+the frame where the other player went quiet and how long they were gone.
+A save waiting for the other player's pads shows the same panel.
+Freezing the joiner's process for 6 s in the menus held the host on the
+panel, and the session then played on into a live round with identical
+guest RAM at frame 4,400; killing the joiner ended the host's session 15 s
+later.
+
+NETPLAY SETTINGS chooses a network display for sessions, kept per player:
+off, ping, or full, which adds the input delay, the deepest rewind of the
+last second and how many frames this side runs ahead of the other. It is
+drawn in the bottom right corner of shown frames, after the game's own
+draws, so it never reaches guest state. The ping runs from a local pad's
+first send until the other player's packet says it holds that pad,
+averaged over about eight samples, so it includes up to a frame on each
+side.
 
 The presenter holds shown frames to 60 Hz, but the guest may run up to two
 frames ahead into its queue, and a sleep there only used up that slack. So
@@ -370,8 +388,8 @@ Limits of the lobby:
   copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the
   next host run replaces it.
-- When one runner quits, the other stops 5 s later
-  (`rollback:peer-timeout`).
+- When one runner quits, the other counts down for 15 s and then stops
+  (`rollback:peer-timeout`); a goodbye message would end it at once.
 - A save in a frame that ran with a wrong guess still ends the session; no
   save site seen so far comes within the 8-frame window of a live round.
 - The condition reads two fighters; Tag matches and rounds without a time

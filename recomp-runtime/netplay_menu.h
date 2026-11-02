@@ -24,5 +24,7 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad);
    or join as host:port for the joiner. */
 bool recomp_netplay_menu_take_launch(const std::filesystem::path &storage, std::uint32_t &hostPort,
     std::uint32_t &delay, std::string &join);
+/* The session's network display from NETPLAY SETTINGS: 0 off, 1 ping, 2 full. */
+int recomp_netplay_menu_display(const std::filesystem::path &storage);
 
 #endif

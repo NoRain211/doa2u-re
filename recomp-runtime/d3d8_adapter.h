@@ -29,6 +29,9 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed);
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
     float display_aspect, uint8_t level);
+/* Presents the last shown frame again with draw's shapes over it, for a
+   wait between guest frames; shapes drawn opaque look the same each time. */
+void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *target));
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 /* Optional host hook that draws over a shown frame, into target, just

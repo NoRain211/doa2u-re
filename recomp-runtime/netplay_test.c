@@ -104,6 +104,15 @@ int main(void)
     }
     check("socket pads", a.remote_count == 1u && a.remote[0].buttons == 9u &&
         b.remote_count == 1u && b.remote[0].buttons == 7u);
+    // Each side has now heard the other hold its pad, which times the round trip.
+    for (int i = 0; i < 50 && !(net_a.rtt_known && net_b.rtt_known); ++i) {
+        recomp_netplay_send(&net_a, &a, 0);
+        recomp_netplay_send(&net_b, &b, 0);
+        sleep_ms(5u);
+        recomp_netplay_receive(&net_a, &a);
+        recomp_netplay_receive(&net_b, &b);
+    }
+    check("round trip", net_a.rtt_known && net_b.rtt_known && net_a.rtt_ms < 1000u && net_b.rtt_ms < 1000u);
     recomp_netplay_close(&net_a);
     recomp_netplay_close(&net_b);
 

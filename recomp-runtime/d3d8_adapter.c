@@ -706,6 +706,22 @@ static void block_until_vertical_blank(void)
     recomp_runtime.registers.esp += 4u;
 }
 
+void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *target))
+{
+    recomp_d3d8_require_device();
+    RecompD3dPresenterTarget target;
+    resolve_target(color_header(0u), 0u, &target);
+    /* A rewound frame may have left GPU work off. */
+    const bool suppressed = gpu_work_suppressed;
+    gpu_work_suppressed = false;
+    draw(&target);
+    gpu_work_suppressed = suppressed;
+    RecompD3dPresenterCommand command = {.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    command.data.present.effective_flags = 5u;
+    command.data.present.swap_counter = frame_state.swap_counter;
+    recomp_d3d8_submit(&command);
+}
+
 static void flush(bool wait)
 {
     recomp_d3d8_require_device();

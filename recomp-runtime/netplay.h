@@ -65,6 +65,11 @@ typedef struct RecompNetplay {
     uint32_t local_count;
     uint32_t peer_count;
     uint32_t cooldown;
+    /* Round trip: from a local pad's first send until the peer says it holds it. */
+    uint64_t pad_sent_ms[RECOMP_NETPLAY_MAX_PADS];
+    uint32_t pads_stamped;
+    uint32_t rtt_ms; /* smoothed over the last few samples */
+    bool rtt_known;
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are

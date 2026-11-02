@@ -4,6 +4,7 @@
 #include "d3d_draw_model.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 enum { MAX_QUADS = 8192u, FVF_XYZRHW_DIFFUSE = 0x44u };
 
@@ -176,5 +177,11 @@ void recomp_overlay_submit(const RecompD3dPresenterTarget *target, float display
     draw->target = *target;
     recomp_d3d8_submit(&command);
     quad_count = 0u;
+}
+
+float recomp_overlay_display_aspect(void)
+{
+    const char *wide = getenv("RECOMP_D3D_WIDESCREEN");
+    return wide != NULL && strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
 }
 

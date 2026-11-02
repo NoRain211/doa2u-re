@@ -10,6 +10,7 @@
 #include "input_pulse_source.h"
 #include "netplay.h"
 #include "netplay_menu.h"
+#include "overlay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -339,6 +340,51 @@ static void receivePads()
 
 /* At the newest frame: gathers pads until the frame may run or a rewind is
    due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
+/* A stalled session shows a notice over its last frame after 1 s, which also
+   keeps the window answering, and ends after its grace: 15 s once the other
+   player has been heard, 120 s while their runner may still be booting. */
+static bool interrupted;
+static std::chrono::steady_clock::time_point noticeShown;
+static const char *noticeTitle;
+static std::string noticeDetail;
+
+static void drawNotice(const RecompD3dPresenterTarget *target)
+{
+    recomp_overlay_rect(120.0f, 194.0f, 400.0f, 92.0f, 0xff181820u); // opaque, so each redraw looks the same
+    recomp_overlay_rect(120.0f, 194.0f, 400.0f, 4.0f, 0xffd8283cu);
+    recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeTitle, 3.0f) / 2.0f, 214.0f, 3.0f, 0xffffffffu,
+        noticeTitle);
+    recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeDetail.c_str(), 2.0f) / 2.0f, 252.0f, 2.0f,
+        0xffa8a8b0u, noticeDetail.c_str());
+    recomp_overlay_submit(target, recomp_overlay_display_aspect());
+}
+
+static void stalled(std::chrono::steady_clock::time_point began)
+{
+    using namespace std::chrono;
+    const auto now = steady_clock::now();
+    const bool heard = rollback.net.peer_seen;
+    const seconds grace(heard ? 15 : 120);
+    const auto waited = now - began;
+    if (waited > grace) recomp_stop(4, "rollback:peer-timeout");
+    if (waited < seconds(1) || now - noticeShown < milliseconds(100)) return;
+    if (!interrupted && heard)
+        std::fprintf(stderr, "recomp netplay: the other player went quiet at frame %u\n", rollback.session.frame);
+    interrupted = true;
+    noticeShown = now;
+    noticeTitle = heard ? "WAITING FOR OPPONENT" : "CONNECTING";
+    noticeDetail = "ENDING THE SESSION IN " + std::to_string(duration_cast<seconds>(grace - waited).count() + 1) + " S";
+    recomp_d3d8_present_overlay(drawNotice);
+}
+
+static void resumed(std::chrono::steady_clock::time_point began)
+{
+    if (!interrupted) return;
+    interrupted = false;
+    std::fprintf(stderr, "recomp netplay: the other player is back after %.1f s\n",
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
+}
+
 static std::uint32_t awaitFrontier(bool last)
 {
     using Clock = std::chrono::steady_clock;
@@ -352,7 +398,10 @@ static std::uint32_t awaitFrontier(bool last)
         // Rewinds wait for it too, so one replay covers every pad that arrived.
         const bool started = Clock::now() >= rollback.next_frame;
         const std::uint32_t target = started ? recomp_rollback_take_rewind(&s) : RECOMP_ROLLBACK_NONE;
-        if (target != RECOMP_ROLLBACK_NONE) return target;
+        if (target != RECOMP_ROLLBACK_NONE) {
+            resumed(began);
+            return target;
+        }
         if (started) {
             while (s.local_count <= s.frame + rollback.delay) {
                 const RecompInputGamepad pad = localPad(s.local_count);
@@ -362,16 +411,17 @@ static std::uint32_t awaitFrontier(bool last)
         const bool ready = last
             ? s.remote_count >= rollback.stop && (!udp || rollback.net.peer_ack >= rollback.stop)
             : started && recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
-        if (ready) return RECOMP_ROLLBACK_NONE;
+        if (ready) {
+            resumed(began);
+            return RECOMP_ROLLBACK_NONE;
+        }
         if (!udp) recomp_stop(4, "rollback:stalled");
         const Clock::time_point now = Clock::now();
         if (now - sent >= std::chrono::milliseconds(4)) {
             recomp_netplay_send(&rollback.net, &s, rollback.advantage);
             sent = now;
         }
-        // The first contact waits out the other runner's boot.
-        if (now - began > std::chrono::seconds(rollback.net.peer_seen ? 5 : 120))
-            recomp_stop(4, "rollback:peer-timeout");
+        stalled(began);
         // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
         Clock::time_point until = now + std::chrono::milliseconds(2);
         if (rollback.next_frame > now && rollback.next_frame < until) until = rollback.next_frame;
@@ -485,11 +535,35 @@ static void confirmSaveFrame()
     while (s.remote_count <= running) {
         recomp_netplay_receive(&rollback.net, &s);
         recomp_netplay_send(&rollback.net, &s, rollback.advantage);
-        if (std::chrono::steady_clock::now() - began > std::chrono::seconds(5))
-            recomp_stop(4, "rollback:peer-timeout");
+        stalled(began);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    resumed(began);
     if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
+}
+
+/* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
+   the deepest rewind of the last second and how many frames this side runs
+   ahead of the other. */
+static int networkDisplay;
+static std::uint32_t rewindDepth;
+static std::chrono::steady_clock::time_point rewoundAt;
+
+static void drawNetworkStats(const RecompD3dPresenterTarget *target)
+{
+    const RecompNetplay &net = rollback.net;
+    std::string text = "PING " + (net.rtt_known ? std::to_string(net.rtt_ms) + " MS" : std::string("--"));
+    if (networkDisplay == 2) {
+        const bool recent = std::chrono::steady_clock::now() - rewoundAt < std::chrono::seconds(1);
+        text += "  DELAY " + std::to_string(rollback.delay) + "  ROLLBACK " +
+            std::to_string(recent ? rewindDepth : 0u) + "F  AHEAD " + std::to_string(rollback.advantage) + 'F';
+    }
+    const std::uint32_t color = !net.rtt_known || net.rtt_ms < 80u ? 0xff60e080u
+        : net.rtt_ms < 150u ? 0xffffd040u : 0xffff5050u;
+    const float width = recomp_overlay_text_width(text.c_str(), 2.0f);
+    recomp_overlay_rect(628.0f - width - 12.0f, 446.0f, width + 12.0f, 24.0f, 0xa0000000u);
+    recomp_overlay_text(628.0f - width - 6.0f, 451.0f, 2.0f, color, text.c_str());
+    recomp_overlay_submit(target, recomp_overlay_display_aspect());
 }
 
 static void onRollbackFrame(std::uint32_t swap)
@@ -520,6 +594,10 @@ static void onRollbackFrame(std::uint32_t swap)
                 recomp_stop(4, "rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
+            const auto now = std::chrono::steady_clock::now();
+            const std::uint32_t depth = rollback.frontier - target;
+            rewindDepth = now - rewoundAt < std::chrono::seconds(1) ? std::max(rewindDepth, depth) : depth;
+            rewoundAt = now;
         } else if (s.frame == rollback.stop) {
             finishRollback();
             return;
@@ -1106,8 +1184,12 @@ int main(int argc, char **argv)
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
-    if (!rollbackEnabled && !recomp_synctest_enabled())
+    if (rollback.lobby) {
+        networkDisplay = recomp_netplay_menu_display(storage);
+        if (networkDisplay != 0) recomp_d3d_overlay_hook = drawNetworkStats;
+    } else if (!rollbackEnabled && !recomp_synctest_enabled()) {
         recomp_netplay_menu_install(storage, runnerDigest(), [storage] { return ownProfileName(storage / "partition1"); });
+    }
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");

@@ -39,6 +39,7 @@ constexpr std::uint32_t White = 0xffffffffu, Gray = 0xffa8a8b0u, Dim = 0xff68687
 constexpr std::uint32_t DefaultPort = 47701u;
 constexpr std::size_t MaxAddress = 21u; // 255.255.255.255:65535
 const std::string AddressCharacters = "0123456789.:";
+const char *const DisplayNames[3] = {"off", "ping", "full"};
 
 struct Menu {
     bool installed = false;
@@ -57,6 +58,7 @@ struct Menu {
     int cursor = 0;
     std::string message;
     std::uint32_t delay = 2u, port = DefaultPort;
+    int display = 1; // the session's network display: off, ping, full
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
@@ -138,13 +140,16 @@ void loadSettings()
         if (key == "delay" && number <= RECOMP_ROLLBACK_WINDOW) menu.delay = static_cast<std::uint32_t>(number);
         else if (key == "port" && number >= 1024u && number <= 65535u) menu.port = static_cast<std::uint32_t>(number);
         else if (key == "recent" && value.size() <= MaxAddress) menu.recent = value;
+        else if (key == "display")
+            for (int i = 0; i < 3; ++i)
+                if (value == DisplayNames[i]) menu.display = i;
     }
 }
 
 void saveSettings()
 {
     std::ofstream file(menu.storage / "netplay.txt", std::ios::trunc);
-    file << "delay " << menu.delay << "\nport " << menu.port << '\n';
+    file << "delay " << menu.delay << "\nport " << menu.port << "\ndisplay " << DisplayNames[menu.display] << '\n';
     if (!menu.recent.empty()) file << "recent " << menu.recent << '\n';
 }
 
@@ -314,15 +319,18 @@ void update(std::uint16_t keys, bool &launch)
         }
         return;
     case Screen::Settings:
-        if (keys & (Up | Down)) menu.cursor ^= 1;
+        if (keys & Up) menu.cursor = (menu.cursor + 2) % 3;
+        if (keys & Down) menu.cursor = (menu.cursor + 1) % 3;
         if (keys & (Left | Right)) {
             const int step = (keys & Right) ? 1 : -1;
             if (menu.cursor == 0) {
                 const int delay = static_cast<int>(menu.delay) + step;
                 if (delay >= 0 && delay <= static_cast<int>(RECOMP_ROLLBACK_WINDOW)) menu.delay = static_cast<std::uint32_t>(delay);
-            } else {
+            } else if (menu.cursor == 1) {
                 const int port = static_cast<int>(menu.port) + step;
                 if (port >= 1024 && port <= 65535) menu.port = static_cast<std::uint32_t>(port);
+            } else {
+                menu.display = (menu.display + 3 + step) % 3;
             }
         }
         if (keys & (A | B)) {
@@ -475,8 +483,16 @@ void draw()
         recomp_overlay_text(600.0f - recomp_overlay_text_width(delay.c_str(), 2.0f), 138.0f, 2.0f, White, delay.c_str());
         item(186.0f, menu.cursor == 1, "PORT");
         recomp_overlay_text(600.0f - recomp_overlay_text_width(port.c_str(), 2.0f), 190.0f, 2.0f, White, port.c_str());
-        recomp_overlay_text(40.0f, 362.0f, 2.0f, White,
-            menu.cursor == 0 ? "LOWER DELAY FEELS SHARPER, MORE ROLLBACK." : "THE HOST'S ROUTER MUST LET THIS PORT IN.");
+        const std::string display = std::string("< ") + DisplayNames[menu.display] + " >";
+        item(238.0f, menu.cursor == 2, "NETWORK DISPLAY");
+        recomp_overlay_text(600.0f - recomp_overlay_text_width(display.c_str(), 2.0f), 242.0f, 2.0f, White,
+            display.c_str());
+        static const char *const details[3] = {
+            "LOWER DELAY FEELS SHARPER, MORE ROLLBACK.",
+            "THE HOST'S ROUTER MUST LET THIS PORT IN.",
+            "PING, OR FULL STATS, IN A SESSION'S CORNER.",
+        };
+        recomp_overlay_text(40.0f, 362.0f, 2.0f, White, details[menu.cursor]);
         footer("LEFT/RIGHT CHANGE   B BACK");
         return;
     }
@@ -532,8 +548,7 @@ void recomp_netplay_menu_install(const std::filesystem::path &storage, const std
     menu.digest = digest;
     menu.digest.resize(RECOMP_NETPLAY_DIGEST_BYTES, '0');
     menu.ownName = std::move(ownName);
-    const char *wide = std::getenv("RECOMP_D3D_WIDESCREEN");
-    menu.aspect = wide != nullptr && std::strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
+    menu.aspect = recomp_overlay_display_aspect();
     loadSettings();
     recomp_d3d_overlay_hook = onOverlay;
 }
@@ -596,4 +611,11 @@ bool recomp_netplay_menu_take_launch(const std::filesystem::path &storage, std::
     if (kind != "join" || value.empty()) return false;
     join = value;
     return true;
+}
+
+int recomp_netplay_menu_display(const std::filesystem::path &storage)
+{
+    menu.storage = storage;
+    loadSettings();
+    return menu.display;
 }
