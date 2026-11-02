@@ -8,6 +8,7 @@
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
+#include "netplay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -33,6 +34,7 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #include <iterator>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 #include <charconv>
 #ifndef _WIN32
@@ -46,32 +48,36 @@ static bool scriptedInputOnly;
 static bool guestRamWriteWatch;
 static std::uint8_t *guestRam;
 
-/* Rollback over a fight (docs/rollback-netcode.md). RECOMP_ROLLBACK=loopback
-   starts a session at swap RECOMP_ROLLBACK_START with a generated remote
-   player on port 0 whose pads arrive RECOMP_ROLLBACK_LAG frames late, so most
-   frames run on a wrong prediction and are rolled back. At session frame
-   RECOMP_ROLLBACK_FRAMES every pad arrives; once the last rollback has run
-   again, guest RAM goes to RECOMP_ROLLBACK_DUMP. Lag 0 never predicts, so
-   its dump is the reference. */
+/* Rollback over a fight (docs/rollback-netcode.md), from swap
+   RECOMP_ROLLBACK_START. RECOMP_ROLLBACK=loopback plays a generated remote
+   player on port 0 whose pads arrive RECOMP_ROLLBACK_LAG frames late.
+   RECOMP_ROLLBACK=udp:<local port>:<peer host>:<peer port> plays a peer runner;
+   RECOMP_ROLLBACK_PLAYER (0 or 1) picks the local port and
+   RECOMP_ROLLBACK_DELAY the input delay, both matching on the two sides. At
+   session frame RECOMP_ROLLBACK_FRAMES every pad is confirmed and guest RAM
+   goes to RECOMP_ROLLBACK_DUMP. */
+enum class RollbackMode { Off, Loopback, Udp };
 struct RollbackRun {
-    bool enabled = false;
+    RollbackMode mode = RollbackMode::Off;
     bool active = false;
-    std::uint32_t start = 0u, stop = 600u, lag = 4u;
+    bool hidden = false;
+    std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
-    std::uint32_t rollbacks = 0u, replayed = 0u;
+    std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u;
     std::chrono::steady_clock::time_point started;
     const char *dump = nullptr;
     RecompRollbackSession session;
-    RecompInputGamepad remotePad{};
+    RecompNetplay net;
+    RecompInputGamepad pads[2]{}; // the running frame's pads by guest port
 };
 static RollbackRun rollback;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     if (rollback.active && port < 2u) {
-        // shortcut: loopback has no local player, so port 1 stays empty; netplay fills it.
-        if (port != 0u) return false;
-        *gamepad = rollback.remotePad;
+        // Loopback has no local player, so its port stays empty.
+        if (rollback.mode == RollbackMode::Loopback && port == rollback.player) return false;
+        *gamepad = rollback.pads[port];
         return true;
     }
     if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
@@ -254,7 +260,7 @@ static void onFrameBoundary(std::uint32_t frame)
 }
 
 // A new pad nearly every frame, so repeating the last pad mispredicts.
-static RecompInputGamepad loopbackPad(std::uint32_t frame)
+static RecompInputGamepad generatedPad(std::uint32_t frame)
 {
     std::uint32_t x = frame * 2654435761u;
     x ^= x >> 13;
@@ -264,19 +270,96 @@ static RecompInputGamepad loopbackPad(std::uint32_t frame)
     return pad;
 }
 
+static RecompInputGamepad localPad(std::uint32_t frame)
+{
+    RecompInputGamepad pad{};
+    if (rollback.mode == RollbackMode::Loopback) return pad;
+    // Scripted runs play a generated stream per player so two runners differ.
+    if (scriptedInputOnly) return generatedPad(frame * 2u + rollback.player);
+    (void)recomp_input_host_sample(0u, &pad);
+    return pad;
+}
+
+// The local player's port drives the local pad; the peer's port and hidden frames stay still.
+static void setVibration(std::uint32_t port, std::uint16_t left, std::uint16_t right)
+{
+    if (!rollback.active) {
+        recomp_input_host_set_vibration(port, left, right);
+        return;
+    }
+    // shortcut: a motor change made only in a hidden frame is dropped until the next visible one.
+    if (port == rollback.player && !rollback.hidden) recomp_input_host_set_vibration(0u, left, right);
+}
+
+static void receivePads()
+{
+    RecompRollbackSession &s = rollback.session;
+    if (rollback.mode == RollbackMode::Udp) {
+        recomp_netplay_receive(&rollback.net, &s);
+        return;
+    }
+    const std::uint32_t lag = s.frame >= rollback.stop ? 0u : rollback.lag;
+    while (s.remote_count + lag <= s.frame) {
+        const RecompInputGamepad pad = generatedPad(s.remote_count);
+        recomp_rollback_add_remote(&s, &pad);
+    }
+}
+
+static std::int32_t advantage()
+{
+    return static_cast<std::int32_t>(rollback.session.frame - rollback.net.peer_frame);
+}
+
+/* At the newest frame: gathers pads until the frame may run or a rewind is
+   due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
+static std::uint32_t awaitFrontier(bool last)
+{
+    using Clock = std::chrono::steady_clock;
+    RecompRollbackSession &s = rollback.session;
+    const bool udp = rollback.mode == RollbackMode::Udp;
+    Clock::time_point sent{};
+    const Clock::time_point began = Clock::now();
+    for (;;) {
+        receivePads();
+        const std::uint32_t target = recomp_rollback_take_rewind(&s);
+        if (target != RECOMP_ROLLBACK_NONE) return target;
+        const bool ready = last
+            ? s.remote_count >= rollback.stop && (!udp || rollback.net.peer_ack >= rollback.stop)
+            : recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
+        if (ready) return RECOMP_ROLLBACK_NONE;
+        if (!udp) recomp_stop(4, "rollback:stalled");
+        const Clock::time_point now = Clock::now();
+        if (now - sent >= std::chrono::milliseconds(4)) {
+            recomp_netplay_send(&rollback.net, &s, advantage());
+            sent = now;
+        }
+        // The first contact waits out the other runner's boot.
+        if (now - began > std::chrono::seconds(rollback.net.peer_seen ? 5 : 120))
+            recomp_stop(4, "rollback:peer-timeout");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
 static void finishRollback()
 {
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - rollback.started).count();
     std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
-        "(%u frames run again) in %.1f s\n",
-        rollback.session.frame, rollback.rollbacks, rollback.replayed, seconds);
+        "(%u frames run again, %u waited) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, seconds);
     if (rollback.dump != nullptr) {
         std::vector<std::uint8_t> ram(guestRam, guestRam + RECOMP_XBOX_RAM_SIZE);
         recomp_synctest_mask_ignored(ram.data(), ram.size());
         std::ofstream out(rollback.dump, std::ios::binary);
         out.write(reinterpret_cast<const char *>(ram.data()), static_cast<std::streamsize>(ram.size()));
         if (!out) recomp_stop(4, "rollback:dump");
+    }
+    if (rollback.mode == RollbackMode::Udp) {
+        // shortcut: the peer may still need our acknowledgement; repeat it briefly instead of a close handshake.
+        for (int i = 0; i < 50; ++i) {
+            recomp_netplay_send(&rollback.net, &rollback.session, 0);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
     }
     recomp_stop(0, "rollback:done");
 }
@@ -286,22 +369,20 @@ static void onRollbackFrame(std::uint32_t swap)
     RecompRollbackSession &s = rollback.session;
     if (!rollback.active) {
         if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
-        recomp_rollback_init(&s, 0u);
+        recomp_rollback_init(&s, rollback.delay);
         if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
         rollback.active = true;
         rollback.started = std::chrono::steady_clock::now();
-        std::fprintf(stderr, "recomp rollback: session starts at swap %u, lag %u\n", swap, rollback.lag);
+        std::fprintf(stderr, "recomp rollback: session starts at swap %u as player %u\n",
+            swap, rollback.player);
     }
     bool saved = true;
     if (s.frame == rollback.frontier) {
-        const std::uint32_t lag = s.frame >= rollback.stop ? 0u : rollback.lag;
-        while (s.remote_count + lag <= s.frame) {
-            const RecompInputGamepad pad = loopbackPad(s.remote_count);
-            recomp_rollback_add_remote(&s, &pad);
+        while (s.local_count <= s.frame + rollback.delay) {
+            const RecompInputGamepad pad = localPad(s.local_count);
+            recomp_rollback_add_local(&s, &pad);
         }
-        const RecompInputGamepad neutral{};
-        while (s.local_count <= s.frame) recomp_rollback_add_local(&s, &neutral);
-        const std::uint32_t target = recomp_rollback_take_rewind(&s);
+        const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
             // The newest save is the frame before the frontier.
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
@@ -314,20 +395,23 @@ static void onRollbackFrame(std::uint32_t swap)
             return;
         } else {
             saved = recomp_rollback_ring_save();
+            if (rollback.mode == RollbackMode::Udp) {
+                recomp_netplay_send(&rollback.net, &s, advantage());
+                const std::uint32_t wait = recomp_netplay_wait_frames(&rollback.net, advantage());
+                rollback.waited += wait;
+                std::this_thread::sleep_for(std::chrono::microseconds(16667u * wait));
+            }
         }
     } else {
         saved = recomp_rollback_ring_save();
     }
     if (!saved) recomp_stop(4, "rollback:save");
-    // shortcut: loopback never runs out of window; netplay waits here for the peer.
-    if (!recomp_rollback_can_run(&s)) recomp_stop(4, "rollback:stalled");
     // Frames run again were already shown and heard with the predicted pads.
-    const bool hidden = s.frame < rollback.frontier;
-    recomp_d3d8_set_present_suppressed(hidden);
-    recomp_d3d8_set_gpu_work_suppressed(hidden);
-    recomp_dsound_buffer_set_output_suppressed(hidden);
-    RecompInputGamepad local;
-    recomp_rollback_run(&s, &local, &rollback.remotePad);
+    rollback.hidden = s.frame < rollback.frontier;
+    recomp_d3d8_set_present_suppressed(rollback.hidden);
+    recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
+    recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
+    recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
 }
 
@@ -335,17 +419,36 @@ static bool readRollbackConfig()
 {
     const char *mode = std::getenv("RECOMP_ROLLBACK");
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
-    if (std::strcmp(mode, "loopback") != 0) return false;
-    rollback.enabled = true;
     const auto number = [](const char *name, std::uint32_t &value) {
         if (const char *text = std::getenv(name); text != nullptr && *text != '\0')
             value = static_cast<std::uint32_t>(std::strtoul(text, nullptr, 10));
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
-    number("RECOMP_ROLLBACK_LAG", rollback.lag);
     rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
-    return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+    if (std::strcmp(mode, "loopback") == 0) {
+        rollback.mode = RollbackMode::Loopback;
+        rollback.player = 1u;
+        if (std::getenv("RECOMP_ROLLBACK_FRAMES") == nullptr) rollback.stop = 600u;
+        number("RECOMP_ROLLBACK_LAG", rollback.lag);
+        return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+    }
+    // udp:<local port>:<peer host>:<peer port>
+    if (std::strncmp(mode, "udp:", 4u) != 0) return false;
+    const std::string spec = mode + 4;
+    const std::size_t hostAt = spec.find(':'), portAt = spec.rfind(':');
+    if (hostAt == std::string::npos || portAt == hostAt) return false;
+    const unsigned long localPort = std::strtoul(spec.substr(0u, hostAt).c_str(), nullptr, 10);
+    const unsigned long peerPort = std::strtoul(spec.substr(portAt + 1u).c_str(), nullptr, 10);
+    const std::string host = spec.substr(hostAt + 1u, portAt - hostAt - 1u);
+    number("RECOMP_ROLLBACK_PLAYER", rollback.player);
+    number("RECOMP_ROLLBACK_DELAY", rollback.delay);
+    if (localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
+        rollback.player > 1u || rollback.delay > RECOMP_ROLLBACK_WINDOW)
+        return false;
+    rollback.mode = RollbackMode::Udp;
+    return recomp_netplay_open(&rollback.net, static_cast<std::uint16_t>(localPort), host.c_str(),
+        static_cast<std::uint16_t>(peerPort));
 }
 
 int main(int argc, char **argv)
@@ -515,18 +618,20 @@ int main(int argc, char **argv)
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!readRollbackConfig()) {
-        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with a lag of at most "
-                  << RECOMP_ROLLBACK_WINDOW << " frames\n";
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
+                  << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
+                  << " frames, and the UDP port must open\n";
         return 1;
     }
-    if (recomp_synctest_enabled() || rollback.enabled) {
+    const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
+    if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)
             recomp_xapi_frame_clock_set_enabled(true);
         recomp_synctest_set_guest_ram(memory, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
         recomp_kernel_file_set_synchronous_reads(true);
         recomp_synctest_install_default_modules();
-        if (rollback.enabled) {
+        if (rollbackEnabled) {
             // Rollback input lives in the session, outside the saved state.
             recomp_d3d_frame_boundary_hook = onRollbackFrame;
         } else {
@@ -541,7 +646,7 @@ int main(int argc, char **argv)
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
-    if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(recomp_input_host_set_vibration);
+    if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(setVibration);
     std::atexit(recomp_input_host_stop_vibration);
     std::atexit(recomp_d3d8_shutdown);
     std::atexit(recomp_dsound_api_shutdown);

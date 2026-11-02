@@ -1,11 +1,12 @@
 # Rollback netcode
 
-Status: the save/replay core, a rollback ring, input prediction and a
-loopback test. Two runners will connect through a host-owned lobby and play
-the offline Versus mode, with rollback over the fight. A frame-locked clock
-and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
-compare whole frames, with guest RAM in page snapshots
-(`guest_snapshot.c`). The transport, frame pacing and the lobby remain.
+Status: the save/replay core, a rollback ring, input prediction, a UDP
+transport with frame sync, and loopback and two-runner tests. Two runners
+will connect through a host-owned lobby and play the offline Versus mode,
+with rollback over the fight. A frame-locked clock and SyncTest
+(`docs/bring-up.md`, Determinism checks) save, replay and compare whole
+frames, with guest RAM in page snapshots (`guest_snapshot.c`). The lobby
+and the switch between lockstep menus and the rolled-back fight remain.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -134,11 +135,60 @@ Limits of this stage:
 - A save that cannot be rewound ends the run (`rollback:unrestorable`). At
   lag 8 the Story save after the fight, about 1,050 frames in, does this.
   The session must fall back to lockstep before the game saves.
-- Loopback has no local player, so port 1 stays empty. Rumble from hidden
-  frames is not suppressed.
+- Loopback has no local player, so port 1 stays empty.
 - Two of about ten hidden-frame runs ended with exit code -1 and no host
   report, and WerFault crashed while handling one. None of the runs under a
   debugger crashed, and the cause is unknown.
+
+## Transport and pacing
+
+`netplay.c` sends one UDP packet per frame. It carries the sender's frame,
+how many of the receiver's pads it holds, its frame advantage and every
+local pad the receiver has not acknowledged, so the next packet covers a
+lost one and nothing is resent. Packets from any address other than the
+configured peer are dropped, and a malformed packet changes nothing.
+
+`RECOMP_ROLLBACK=udp:<local port>:<peer host>:<peer port>` plays a session
+against another runner. `RECOMP_ROLLBACK_PLAYER` (0 or 1) is the local
+player's port and `RECOMP_ROLLBACK_DELAY` the input delay; both sides must
+use the same delay and start swap. The local pad is the host's first
+controller, and only the local player's port in shown frames drives its
+rumble. Runs with `--input-script-only` play a generated stream for each
+player instead. While the session is outside its window, the newest frame
+waits and sends every 4 ms, for up to 120 s before first contact and 5 s
+after it.
+
+Shown frames are already held to 60 Hz by the presenter (its vsync
+interval, or its own 1/60 s grid with VRR); hidden frames run unpaced. Each
+side also reports its advantage: its frame minus the peer's last reported
+frame. Both sides' advantages include the same latency, so half their
+difference is how far ahead one side really is. Averaged over 32 frames,
+the side that is a frame or more ahead sleeps that many frames, then waits
+32 frames before it checks again.
+
+Two runners on one machine, each in its own hardlinked play folder, started
+at swap 3000 and stopped at frame 900 with every pad confirmed. The lossy
+link went through a relay that delayed each packet 50 ms ±20% and dropped 5%:
+
+| Link | Input delay | Rollbacks per side | Frames run again | Time |
+|---|---|---|---|---|
+| localhost | 0 | about 460 | about 470 | 15.1 s |
+| localhost | 2 | 0 to 1 | 0 to 1 | 15.0 s |
+| 50 ms, 5% loss | 0 | about 410 | about 1,410 | 17.0 s |
+
+In every pair the two sides' guest RAM matched except for one save file's
+times, which the game lists at boot and the host reports from each play
+folder. Players' profiles and save metadata will differ the same way, so
+the lobby must start both sides from the same profile. Frame sync did not
+need to wait in these runs, because both sides carried the same load; only
+its unit test covers it.
+
+Limits of the transport:
+
+- IPv4 only. There is no close handshake: a finished side repeats its last
+  packet for half a second.
+- The window does not process messages while a frame waits for the peer.
+- There is no desync check between peers yet.
 
 ## Entry point
 

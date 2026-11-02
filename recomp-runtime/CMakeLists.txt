@@ -289,6 +289,11 @@ add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
 add_test(NAME recomp-runtime-synctest COMMAND recomp_synctest_test)
 add_executable(recomp_rollback_test rollback.c rollback_test.c)
 add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
+add_executable(recomp_netplay_test netplay.c rollback.c netplay_test.c)
+if(WIN32)
+    target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -477,7 +482,7 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c
+        synctest.c synctest_modules.c rollback.c netplay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)
@@ -490,7 +495,7 @@ if(RECOMP_PROGRAM_DIR)
     endif()
     target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio)
     if(WIN32)
-        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32)
+        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
     endif()
     recomp_use_sdl3(recomp_program_runner)
     target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")
