@@ -29,7 +29,12 @@ enum {
     LOBBY_WELCOME = 2u,
     LOBBY_REQUEST = 3u, /* send your chunks from this index; past your last, I hold them all */
     LOBBY_CHUNK = 4u,   /* one chunk of the sender's profile */
+    LOBBY_ROOM = 5u,    /* a room member's state */
     LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
+    ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u,
+    ROOM_READY = 1u,
+    ROOM_START = 2u,
+    ROOM_SILENCE_MS = 3000u,
     PART_HEADER = 10u,
     CHUNK_BYTES = 1024u,
     CHUNKS_PER_REQUEST = 16u,
@@ -239,6 +244,11 @@ void recomp_netplay_close(RecompNetplay *net)
     net->socket = (uintptr_t)INVALID_SOCKET;
 }
 
+bool recomp_netplay_listen(RecompNetplay *net, uint16_t port)
+{
+    return open_socket(net, port);
+}
+
 bool recomp_netplay_route_address(char *text, size_t size)
 {
 #ifdef _WIN32
@@ -311,6 +321,68 @@ static uint64_t now_ms(void)
     struct timespec now;
     if (timespec_get(&now, TIME_UTC) != TIME_UTC) return 0u;
     return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+}
+
+/* Layout: magic, version, kind, digest, flags, name length, name, the
+   sender's clock, the last clock it heard and how long ago, for the ping. */
+void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
+    const char *name, bool ready, bool start)
+{
+    const uint64_t now = now_ms();
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
+    struct sockaddr_in from;
+    int size;
+    while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+        if (size != ROOM_BYTES || get32(packet) != LOBBY_MAGIC || packet[4] != LOBBY_VERSION ||
+            packet[5] != LOBBY_ROOM)
+            continue;
+        if (!from_peer(net, &from)) {
+            if (!room->hosting || room->joined) continue;
+            net->peer_address = from.sin_addr.s_addr;
+            net->peer_port = from.sin_port;
+            room->pinged = false;
+        }
+        const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+        room->joined = true;
+        room->heard_ms = now;
+        room->mismatch = memcmp(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0;
+        room->ready = (at[0] & ROOM_READY) != 0u;
+        room->start = (at[0] & ROOM_START) != 0u;
+        const size_t length = at[1] < RECOMP_NETPLAY_NAME_BYTES ? at[1] : RECOMP_NETPLAY_NAME_BYTES;
+        memcpy(room->name, at + 2u, length);
+        room->name[length] = '\0';
+        at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+        room->echo = get32(at);
+        room->echo_at_ms = now;
+        const uint32_t echo = get32(at + 4u), age = get16(at + 8u);
+        if (echo != 0u) {
+            room->ping_ms = (uint32_t)now - echo - age;
+            room->pinged = true;
+        }
+    }
+    if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) {
+        room->joined = room->ready = room->start = room->pinged = false;
+        room->echo = 0u;
+        if (room->hosting) net->peer_port = 0u; /* let another player in */
+    }
+    if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
+    room->sent_ms = now;
+    memset(packet, 0, ROOM_BYTES);
+    put32(packet, LOBBY_MAGIC);
+    packet[4] = LOBBY_VERSION;
+    packet[5] = LOBBY_ROOM;
+    memcpy(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+    at[0] = (uint8_t)((ready ? ROOM_READY : 0u) | (start ? ROOM_START : 0u));
+    const size_t length = strlen(name);
+    at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
+    memcpy(at + 2u, name, at[1]);
+    at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+    put32(at, (uint32_t)now | 1u); /* never 0, which means no clock heard */
+    put32(at + 4u, room->echo);
+    const uint64_t age = now - room->echo_at_ms;
+    put16(at + 8u, (uint16_t)(room->echo == 0u ? 0u : age > 65535u ? 65535u : age));
+    send_to(net, net->peer_address, net->peer_port, packet, ROOM_BYTES);
 }
 
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)

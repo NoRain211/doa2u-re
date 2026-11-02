@@ -98,7 +98,42 @@ int main()
         RECOMP_NETPLAY_LOBBY_TIMEOUT);
     recomp_netplay_close(&joiner);
 
+    // In a room the two hear each other's names, readiness and ping, and the joiner hears the start.
+    char digest[RECOMP_NETPLAY_DIGEST_BYTES], otherDigest[RECOMP_NETPLAY_DIGEST_BYTES];
+    std::memset(digest, 'a', sizeof digest);
+    std::memset(otherDigest, 'b', sizeof otherDigest);
+    RecompNetplayRoom hostRoom{}, joinerRoom{};
+    hostRoom.hosting = true;
+    check("room opens", recomp_netplay_listen(&host, 47615u) &&
+        recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47615u));
+    for (int i = 0; i < 100 && !(joinerRoom.start && hostRoom.pinged && joinerRoom.pinged); ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", true, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, hostRoom.ready);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("room names", std::strcmp(hostRoom.name, "JOINER") == 0 && std::strcmp(joinerRoom.name, "HOST") == 0);
+    check("room ready and start", hostRoom.ready && joinerRoom.start && !joinerRoom.ready);
+    check("room ping", hostRoom.pinged && joinerRoom.pinged && hostRoom.ping_ms < 1000u &&
+        joinerRoom.ping_ms < 1000u);
+    check("room same build", hostRoom.joined && joinerRoom.joined && !hostRoom.mismatch && !joinerRoom.mismatch);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+
+    hostRoom = RecompNetplayRoom{};
+    joinerRoom = RecompNetplayRoom{};
+    hostRoom.hosting = true;
+    check("room reopens", recomp_netplay_listen(&host, 47616u) &&
+        recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47616u));
+    for (int i = 0; i < 100 && !(hostRoom.joined && joinerRoom.joined); ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, otherDigest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("room other build", hostRoom.mismatch && joinerRoom.mismatch);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+
     if (failures != 0) return 1;
-    std::puts("PASS netplay lobby joins one build, swaps profiles and refuses another");
+    std::puts("PASS netplay lobby joins one build, swaps profiles, refuses another and runs a room");
     return 0;
 }

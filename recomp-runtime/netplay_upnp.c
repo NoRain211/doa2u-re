@@ -10,10 +10,11 @@ static struct UPNPUrls urls;
 static struct IGDdatas data;
 static char mapped_port[6];
 
-bool recomp_netplay_open_router_port(uint16_t port)
+bool recomp_netplay_open_router_port(uint16_t port, char *address, size_t size)
 {
     int error = 0;
     char route[64] = "", lan[64] = "", wan[64] = "", text[6];
+    if (size != 0u) address[0] = '\0';
     /* VPN, WSL and Hyper-V adapters can take the default multicast route,
        and the router never hears the search. */
     const bool routed = recomp_netplay_route_address(route, sizeof route);
@@ -42,9 +43,11 @@ bool recomp_netplay_open_router_port(uint16_t port)
     if (found == UPNP_PRIVATEIP_IGD)
         fprintf(stderr, "recomp netplay: the router forwards UDP port %u, but its own address %s is "
             "private, so players outside your provider's network cannot reach it\n", port, wan);
-    else
+    else {
         fprintf(stderr, "recomp netplay: the router forwards UDP port %u; the other player joins %s:%u\n",
             port, wan, port);
+        if (size != 0u) snprintf(address, size, "%s:%u", wan, port);
+    }
     return true;
 }
 

@@ -6,7 +6,8 @@ session from their first frame. Menus run in lockstep and live rounds roll
 back; two scripted runners have played offline Versus this way. A frame-locked clock
 and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
 compare whole frames, with guest RAM in page snapshots
-(`guest_snapshot.c`). The launcher has no lobby screen yet.
+(`guest_snapshot.c`). Players meet in a lobby room from the game's
+Versus menu.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -222,6 +223,32 @@ XBE. Instead a lobby on the host connects two runners, which then play the
 game's offline modes together, the host on the first controller port and the
 joiner on the second. That avoids all of XOnline.
 
+Choosing Versus on the main menu opens the runner's own menu: LOCAL, HOST
+ONLINE, JOIN ONLINE and NETPLAY SETTINGS (`netplay_menu.cpp`). The runner
+draws it over the game as untextured quads with a built-in 5 x 7 font
+(`overlay.c`), sent just before each Present, and the game sees idle pads
+until it closes. The menu opens on an A press while frontend scene
+`g_frontend_scene_current` (`0xdf5dd8`) is 0, the main menu, with
+`g_frontend_selected_mode` (`0xdf57b4`) at 5, Versus, and
+`g_game_mode_state` at 4. LOCAL hands the game an A press once every
+button is up; B closes the menu and holds the game's pads idle until then,
+so the game never sees it. The input delay, the host's port and the last
+host joined are kept in `.recomp-storage/netplay.txt`.
+
+HOST ONLINE binds the port, asks the router for a forward on a background
+thread and shows the address to send. JOIN ONLINE takes an address from
+the d-pad or the clipboard. In the room each side says its build, profile
+name and readiness ten times a second; both plates show the names, ready
+states and the round-trip time. Names are checked as in the session lobby,
+and a different build shows on the other player's plate. When both are
+ready the host says start for 600 ms, and each runner writes
+`.recomp-storage/netplay-launch.txt` and stops with exit code 4, which
+`run_game.py` already restarts. The new runner takes the note, deletes
+it, and runs the session lobby below as if started with
+`--netplay-host` or `--netplay-join`. Two scripted runners on one machine
+went from the Versus menu through the room into a session this way. When the
+session ends with code 4, the runner restarts offline.
+
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the SHA-256 of the joiner's runner executable, and the
@@ -324,8 +351,12 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- The launcher has no lobby screen. Without UPnP the host must forward its
-  UDP port by hand; there is no hole punching or relay.
+- Without UPnP the host must forward its UDP port by hand; there is no hole
+  punching or relay. A joiner types an IPv4 address; host names and room
+  codes are not supported.
+- Starting the session restarts both runners; the window closes and reopens,
+  and the session starts at the title screen.
+- The room has no chat. The clipboard works only on Windows.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the

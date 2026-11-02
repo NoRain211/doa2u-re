@@ -36,6 +36,7 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
+void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool gpu_work_suppressed;
 
@@ -648,6 +649,11 @@ static void swap(void)
     /* The wait also moves guest time, so a hidden frame keeps it; under the
        frame clock it never sleeps. */
     recomp_d3d_wait_present();
+    if (!present_suppressed && recomp_d3d_overlay_hook != NULL) {
+        RecompD3dPresenterTarget target;
+        resolve_target(color_header(0u), 0u, &target);
+        recomp_d3d_overlay_hook(&target);
+    }
     if (!present_suppressed) recomp_d3d8_submit(&result.command);
     back_buffer_displayed = true;
     back_buffer_saved = false;

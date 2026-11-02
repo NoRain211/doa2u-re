@@ -24,6 +24,8 @@ enum {
     RECOMP_NETPLAY_DIGEST_BYTES = 64u,
     /* The largest profile a host sends; it arrives in 1 KiB chunks. */
     RECOMP_NETPLAY_MAX_PROFILE = 1024u * 1024u,
+    /* The longest profile name a room passes on, in UTF-8 bytes. */
+    RECOMP_NETPLAY_NAME_BYTES = 32u,
 };
 
 /* What the lobby agrees on before either runner boots. */
@@ -69,6 +71,32 @@ typedef struct RecompNetplay {
    dropped. shortcut: IPv4 only; add AF_INET6 when the lobby needs it. */
 bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     const char *peer_host, uint16_t peer_port);
+/* Binds port on all interfaces with no peer yet, for a room's host. */
+bool recomp_netplay_listen(RecompNetplay *net, uint16_t port);
+
+/* The room two players wait in, from the Versus menu, before the runners
+   restart into a session. Each side says its build, name and readiness ten
+   times a second; the host also says when to start. */
+typedef struct RecompNetplayRoom {
+    bool hosting;  /* set before the first tick; a host takes the first player who talks */
+    bool joined;   /* the other player spoke in the last 3 s */
+    bool mismatch; /* the other player runs another build */
+    bool ready;
+    bool start;    /* from the host: restart into the session now */
+    bool pinged;
+    uint32_t ping_ms;
+    char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    /* Kept between ticks. */
+    uint64_t heard_ms, sent_ms, echo_at_ms;
+    uint32_t echo;
+} RecompNetplayRoom;
+
+/* Reads what the other player said and, every 100 ms or every call while
+   start is set, says this side's state. digest holds
+   RECOMP_NETPLAY_DIGEST_BYTES bytes; name is UTF-8 and cut to
+   RECOMP_NETPLAY_NAME_BYTES. */
+void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
+    const char *name, bool ready, bool start);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
    digest ends the wait with MISMATCH. Returns once both sides hold both
@@ -85,9 +113,11 @@ void recomp_netplay_close(RecompNetplay *net);
    text; it also starts Winsock on Windows. */
 bool recomp_netplay_route_address(char *text, size_t size);
 /* Asks the router over UPnP to forward UDP port to this computer, and
-   prints the outcome and the address the other player joins. False when no
-   router answered or it refused; the port may still be reachable. */
-bool recomp_netplay_open_router_port(uint16_t port);
+   prints the outcome and the address the other player joins, which also
+   goes to address as host:port (empty when the router's own address is
+   private). False when no router answered or it refused; the port may
+   still be reachable. Takes seconds. */
+bool recomp_netplay_open_router_port(uint16_t port, char *address, size_t size);
 /* Removes that forward; nothing when none was made. */
 void recomp_netplay_close_router_port(void);
 /* True for a profile name that is not allowed online, or one too long to

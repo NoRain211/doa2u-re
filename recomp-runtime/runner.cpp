@@ -9,6 +9,7 @@
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "netplay.h"
+#include "netplay_menu.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -97,7 +98,11 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         *gamepad = rollback.pads[port];
         return true;
     }
-    if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
+    if (port != 0u) {
+        const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
+        if (sampled) recomp_netplay_menu_filter(port, gamepad);
+        return sampled;
+    }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
     static bool startHeld;
     const bool start = sampled && (gamepad->buttons & RECOMP_INPUT_BUTTON_START) != 0u;
@@ -106,6 +111,7 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
     }
+    if (sampled) recomp_netplay_menu_filter(0u, gamepad);
     return sampled;
 }
 
@@ -626,6 +632,16 @@ static std::string latestProfile(const std::filesystem::path &root)
     return latest;
 }
 
+// The name on the profile this player saved last, or empty without one.
+static std::string ownProfileName(const std::filesystem::path &partition1)
+{
+    const std::string own = latestProfile(partition1);
+    if (own.empty()) return {};
+    std::ifstream meta(partition1 / own / "SaveMeta.xbx", std::ios::binary);
+    const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
+    return saveName(bytes.data(), bytes.size());
+}
+
 /* Part of partition 1 as one blob: profile's tree and, with title, the title
    saves (TDATA) and the files beside the profiles. The blob is the SHA-256
    of the rest, then per entry a kind (0 folder, 1 file), a 2-byte path
@@ -760,13 +776,9 @@ static bool joinLobby(const std::filesystem::path &discPath)
     const std::filesystem::path storage = discPath / ".recomp-storage";
     // Recovery first, so an interrupted save is never sent.
     const std::string own = recomp_save_initialize(recomp_disc_root_path) ? latestProfile(storage / "partition1") : "";
-    if (!own.empty()) {
-        std::ifstream meta(storage / "partition1" / own / "SaveMeta.xbx", std::ios::binary);
-        const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
-        if (recomp_netplay_name_banned(saveName(bytes.data(), bytes.size()).c_str())) {
-            std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
-            return false;
-        }
+    if (recomp_netplay_name_banned(ownProfileName(storage / "partition1").c_str())) {
+        std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
+        return false;
     }
     std::vector<std::uint8_t> mine, theirs(RECOMP_NETPLAY_MAX_PROFILE);
     if (!recomp_save_ready() || !packProfile(storage / "partition1", own, hosting, mine) ||
@@ -778,7 +790,7 @@ static bool joinLobby(const std::filesystem::path &discPath)
     RecompNetplayLobbyResult result;
     if (hosting) {
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
-        if (recomp_netplay_open_router_port(port)) std::atexit(recomp_netplay_close_router_port);
+        if (recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
         result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
     } else {
@@ -1023,6 +1035,10 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
+    const std::filesystem::path storage = discPath / ".recomp-storage";
+    // A lobby room from the Versus menu restarts the runner into its session.
+    if (netplayHostPort == 0u && netplayJoin.empty())
+        (void)recomp_netplay_menu_take_launch(storage, netplayHostPort, netplayDelay, netplayJoin);
     if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
@@ -1057,6 +1073,8 @@ int main(int argc, char **argv)
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
+    if (!rollbackEnabled && !recomp_synctest_enabled())
+        recomp_netplay_menu_install(storage, runnerDigest(), [storage] { return ownProfileName(storage / "partition1"); });
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
