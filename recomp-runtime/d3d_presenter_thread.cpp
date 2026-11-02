@@ -188,6 +188,49 @@ bool resolveVisibility(PresenterThread &thread, RecompD3dPresenter *backend)
     }
 }
 
+// Runs the oldest submitted packet; false when none is waiting.
+bool runPacket(PresenterThread &thread, RecompD3dPresenter *backend, bool &querying)
+{
+    D3dCapturePacket *packet = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(thread.mutex);
+        if (thread.pending != 0) packet = &thread.packets[thread.front];
+    }
+    if (packet == nullptr) return false;
+    execute(thread, backend, *packet);
+    packet->clear();
+    querying = resolveVisibility(thread, backend);
+    {
+        std::lock_guard<std::mutex> lock(thread.mutex);
+        thread.front = (thread.front + 1) % 3;
+        --thread.pending;
+    }
+    thread.changed.notify_all();
+    return true;
+}
+
+/* Dragging or resizing the window runs Windows' own message loop inside
+   pump() until the mouse is released. That loop still delivers the window's
+   timer to this callback, which keeps drawing, so the game never waits on a
+   full queue. A timer without a window is not delivered there. */
+thread_local PresenterThread *timer_thread;
+thread_local RecompD3dPresenter *timer_backend;
+thread_local bool timer_querying;
+
+VOID CALLBACK drawDuringModalLoop(HWND, UINT, UINT_PTR, DWORD)
+{
+    while (runPacket(*timer_thread, timer_backend, timer_querying)) {
+    }
+}
+
+BOOL CALLBACK findPresenterWindow(HWND window, LPARAM found)
+{
+    wchar_t name[32];
+    if (GetClassNameW(window, name, 32) == 0 || std::wcscmp(name, L"DOA2URecompPresenterWindow") != 0) return TRUE;
+    *reinterpret_cast<HWND *>(found) = window;
+    return FALSE;
+}
+
 void run(PresenterThread &thread, RecompD3dPresenterConfig config)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
@@ -209,34 +252,28 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
     thread.changed.notify_all();
     if (created != RECOMP_D3D_PRESENTER_OK) return;
 
-    bool querying = false;
+    timer_thread = &thread;
+    timer_backend = backend;
+    HWND window = nullptr;
+    EnumThreadWindows(GetCurrentThreadId(), findPresenterWindow, reinterpret_cast<LPARAM>(&window));
+    if (window != nullptr) SetTimer(window, 1, USER_TIMER_MINIMUM, drawDuringModalLoop);
+    bool &querying = timer_querying;
     for (;;) {
         pump(thread);
-        D3dCapturePacket *packet = nullptr;
+        if (runPacket(thread, backend, querying)) continue;
         {
             std::lock_guard<std::mutex> lock(thread.mutex);
-            if (thread.pending != 0) packet = &thread.packets[thread.front];
-            else if (thread.shutdown) break;
+            if (thread.pending != 0) continue;
+            if (thread.shutdown) break;
         }
-        if (packet == nullptr) {
-            // Resolve queries off the GPU while idle, polling until none remain.
-            if (querying) querying = resolveVisibility(thread, backend);
-            if (MsgWaitForMultipleObjects(1, &thread.wake, FALSE,
-                    querying ? 1u : INFINITE, QS_ALLINPUT) == WAIT_FAILED) {
-                fail(thread, RECOMP_D3D_PRESENTER_HOST_FAILURE);
-            }
-            continue;
+        // Resolve queries off the GPU while idle, polling until none remain.
+        if (querying) querying = resolveVisibility(thread, backend);
+        if (MsgWaitForMultipleObjects(1, &thread.wake, FALSE,
+                querying ? 1u : INFINITE, QS_ALLINPUT) == WAIT_FAILED) {
+            fail(thread, RECOMP_D3D_PRESENTER_HOST_FAILURE);
         }
-        execute(thread, backend, *packet);
-        packet->clear();
-        querying = resolveVisibility(thread, backend);
-        {
-            std::lock_guard<std::mutex> lock(thread.mutex);
-            thread.front = (thread.front + 1) % 3;
-            --thread.pending;
-        }
-        thread.changed.notify_all();
     }
+    if (window != nullptr && IsWindow(window)) KillTimer(window, 1);
     thread.destroyed = d3d_backend_destroy(&backend);
     std::fprintf(stderr, "recomp d3d presenter thread: draw declines=%u\n",
         thread.draw_declines);
