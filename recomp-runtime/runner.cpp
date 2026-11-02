@@ -7,6 +7,7 @@
 #include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
+#include "input_keyboard_win32.h"
 #include "input_pulse_source.h"
 #include "netplay.h"
 #include "netplay_menu.h"
@@ -364,18 +365,22 @@ static void receivePads()
    goodbye from the other runner ends it at once; a killed runner sends none. */
 static bool interrupted;
 static std::chrono::steady_clock::time_point noticeShown;
-static const char *noticeTitle;
+static const char *noticeTitle, *noticeHint;
 static std::string noticeDetail;
 static void endSession(const char *reason);
 
 static void drawNotice(const RecompD3dPresenterTarget *target)
 {
-    recomp_overlay_rect(120.0f, 194.0f, 400.0f, 92.0f, 0xff181820u); // opaque, so each redraw looks the same
+    // opaque, so each redraw looks the same
+    recomp_overlay_rect(120.0f, 194.0f, 400.0f, noticeHint != nullptr ? 118.0f : 92.0f, 0xff181820u);
     recomp_overlay_rect(120.0f, 194.0f, 400.0f, 4.0f, 0xffd8283cu);
     recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeTitle, 3.0f) / 2.0f, 214.0f, 3.0f, 0xffffffffu,
         noticeTitle);
     recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeDetail.c_str(), 2.0f) / 2.0f, 252.0f, 2.0f,
         0xffa8a8b0u, noticeDetail.c_str());
+    if (noticeHint != nullptr)
+        recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeHint, 2.0f) / 2.0f, 282.0f, 2.0f, 0xff707078u,
+            noticeHint);
     recomp_overlay_submit(target, recomp_overlay_display_aspect());
 }
 
@@ -905,7 +910,7 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
    options win. Each player sends the profile they saved last, and both
    sides play from fresh copies of the two, with the host's title saves, so
    they start alike and neither player's own profile changes. */
-static bool joinLobby(const std::filesystem::path &discPath)
+static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)() = nullptr)
 {
     if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
         std::cerr << "recomp runner: RECOMP_ROLLBACK cannot be combined with --netplay-host or --netplay-join\n";
@@ -941,7 +946,7 @@ static bool joinLobby(const std::filesystem::path &discPath)
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
         if (recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
+        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
@@ -951,11 +956,12 @@ static bool joinLobby(const std::filesystem::path &discPath)
         }
         std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
         result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
-            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u);
+            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u, cancelled);
     }
     if (result != RECOMP_NETPLAY_LOBBY_OK) {
-        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
-            ? "refused: the other player runs a different build"
+        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_CANCELLED
+            ? (rollback.net.peer_left ? "cancelled by the other player" : "cancelled")
+            : result == RECOMP_NETPLAY_LOBBY_MISMATCH ? "refused: the other player runs a different build"
             : result == RECOMP_NETPLAY_LOBBY_TIMEOUT ? "timed out" : "could not open its UDP port") << '\n';
         return false;
     }
@@ -1043,6 +1049,21 @@ static void reboot()
 
 static bool roomSession, ownUnlockAll;
 
+// B, Back or Esc, pressed while STARTING MATCH shows; one already held must be let go first.
+static bool cancelHeld;
+static bool cancelPressed()
+{
+    std::uint8_t keys[RECOMP_INPUT_KEY_COUNT];
+    recomp_input_keyboard_sample(keys); // before the pad, which would take the press edges
+    RecompInputGamepad pad{};
+    (void)recomp_input_host_sample(0u, &pad);
+    const bool down = keys[0x1bu] != 0u || pad.analog_buttons[RECOMP_INPUT_ANALOG_B] > 0x40u ||
+        (pad.buttons & 0x20u) != 0u; // Esc, B, Back
+    const bool pressed = down && !cancelHeld;
+    cancelHeld = down;
+    return pressed;
+}
+
 /* A room's launch: connect while the menu's last frame stays up, then boot
    the game again in this process, so the window stays open. */
 static void startRoomSession()
@@ -1060,8 +1081,12 @@ static void startRoomSession()
     landOnVersus = true;
     noticeTitle = "STARTING MATCH";
     noticeDetail = port != 0u ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST";
+    noticeHint = "B / ESC CANCEL";
     recomp_d3d8_present_overlay(drawNotice);
-    if (!joinLobby(discFolder)) endSession("netplay:session-failed");
+    cancelHeld = true;
+    const bool joined = joinLobby(discFolder, cancelPressed);
+    noticeHint = nullptr;
+    if (!joined) endSession("netplay:session-failed");
     reboot();
 }
 

@@ -48,6 +48,7 @@ typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_TIMEOUT,
     RECOMP_NETPLAY_LOBBY_MISMATCH, /* the other runner is a different build */
     RECOMP_NETPLAY_LOBBY_SOCKET,
+    RECOMP_NETPLAY_LOBBY_CANCELLED, /* by this side, or by the other when peer_left is set */
 } RecompNetplayLobbyResult;
 
 typedef struct RecompNetplay {
@@ -100,20 +101,24 @@ typedef struct RecompNetplayRoom {
 /* Reads what the other player said and, every 100 ms or every call while
    start is set, says this side's state. digest holds
    RECOMP_NETPLAY_DIGEST_BYTES bytes; name is UTF-8 and cut to
-   RECOMP_NETPLAY_NAME_BYTES. */
+   RECOMP_NETPLAY_NAME_BYTES. A host not starting answers a joiner still
+   calling its last match with a goodbye. */
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
     const char *name, bool ready, bool start);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
    digest ends the wait with MISMATCH. Returns once both sides hold both
-   profiles. */
+   profiles. cancelled, when not null, is polled every 20 ms; either side
+   cancelling sends the other a goodbye, which ends its wait too. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
+    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void));
 /* Says hello to the host until it answers, copies the host's delay and flags
    into lobby, then swaps profiles as the host does. Binds an ephemeral local
    port. */
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
+    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void));
 void recomp_netplay_close(RecompNetplay *net);
 /* The local IPv4 address of the interface that reaches the internet, as
    text; it also starts Winsock on Windows. */

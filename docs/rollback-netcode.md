@@ -296,6 +296,17 @@ second session with a new joiner matched that joiner's guest RAM at frame
 3,000, with one window throughout. Sessions started with `--netplay-host`
 or `--netplay-join` still stop with exit code 4.
 
+B, Back or Esc on STARTING MATCH cancels it, and the runner goes back to
+its room. The side that cancels says goodbye to the other once it knows it,
+which ends that side's wait too, and a host back in its room answers a
+joiner still calling the old match with a goodbye. With two scripted
+runners, the host cancelled while its joiner was suspended, and that joiner
+was sent back when it resumed. The joiner then cancelled while the host was
+suspended, and the host went back when it resumed. A rematch after both
+matched guest RAM at frame 3,000. A host that closed its window mid-session
+sent its joiner back to the room, and a new host process then played that
+joiner to frame 3,000 with matching guest RAM.
+
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the SHA-256 of the joiner's runner executable, and the
@@ -403,8 +414,9 @@ Limits of the lobby:
   codes are not supported.
 - The title and menus flash past for about 6 s on the way to character
   select, and for about 3 s behind the room after a session.
-- The host can only cancel STARTING MATCH by closing the window; it waits
-  up to 10 minutes for the joiner.
+- A joiner that cancels before the host has heard its hello, in practice
+  during the host's 600 ms of saying start, goes unheard; that host waits
+  on STARTING MATCH until it cancels too.
 - The room has no chat. The clipboard works only on Windows.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.

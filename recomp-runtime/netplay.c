@@ -358,6 +358,14 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     struct sockaddr_in from;
     int size;
     while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+        if (room->hosting && !start && size == LOBBY_BYTES && get32(packet) == LOBBY_MAGIC &&
+            packet[5] == LOBBY_HELLO) {
+            /* A joiner calling a match this host cancelled: send it back to its room. */
+            uint8_t goodbye[4];
+            put32(goodbye, GOODBYE_MAGIC);
+            send_to(net, from.sin_addr.s_addr, from.sin_port, goodbye, sizeof goodbye);
+            continue;
+        }
         if (size != ROOM_BYTES || get32(packet) != LOBBY_MAGIC || packet[4] != LOBBY_VERSION ||
             packet[5] != LOBBY_ROOM)
             continue;
@@ -480,8 +488,14 @@ static bool transfer_tick(RecompNetplay *net, Transfer *t, uint64_t now)
     return done;
 }
 
+static bool is_goodbye(const uint8_t *packet, int size)
+{
+    return size == 4 && get32(packet) == GOODBYE_MAGIC;
+}
+
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
+    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void))
 {
     if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
@@ -495,6 +509,10 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
             if (t.known && !from_peer(net, &from)) continue;
+            if (t.known && is_goodbye(packet, size)) {
+                net->peer_left = true;
+                return RECOMP_NETPLAY_LOBBY_CANCELLED;
+            }
             RecompNetplayLobby hello;
             uint32_t theirs;
             if (decode_lobby(packet, (size_t)size, &hello, &theirs) == LOBBY_HELLO) {
@@ -516,12 +534,17 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
         const uint64_t now = now_ms();
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
         if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (cancelled != NULL && cancelled()) {
+            if (t.known) recomp_netplay_send_goodbye(net);
+            return RECOMP_NETPLAY_LOBBY_CANCELLED;
+        }
         wait_readable(net, 20u);
     }
 }
 
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
+    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void))
 {
     if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
@@ -536,6 +559,10 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *hos
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
             if (!from_peer(net, &from)) continue;
+            if (is_goodbye(packet, size)) {
+                net->peer_left = true;
+                return RECOMP_NETPLAY_LOBBY_CANCELLED;
+            }
             RecompNetplayLobby welcome;
             uint32_t theirs;
             if (!t.known && decode_lobby(packet, (size_t)size, &welcome, &theirs) == LOBBY_WELCOME) {
@@ -556,6 +583,10 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *hos
         }
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
         if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (cancelled != NULL && cancelled()) {
+            recomp_netplay_send_goodbye(net);
+            return RECOMP_NETPLAY_LOBBY_CANCELLED;
+        }
         wait_readable(net, 20u);
     }
 }
