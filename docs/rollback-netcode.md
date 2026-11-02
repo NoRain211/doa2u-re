@@ -1,12 +1,12 @@
 # Rollback netcode
 
 Status: the save/replay core, a rollback ring, input prediction, a UDP
-transport with frame sync, and loopback and two-runner tests. Two runners
-will connect through a host-owned lobby and play the offline Versus mode,
-with rollback over the fight. A frame-locked clock and SyncTest
-(`docs/bring-up.md`, Determinism checks) save, replay and compare whole
-frames, with guest RAM in page snapshots (`guest_snapshot.c`). The lobby
-and the switch between lockstep menus and the rolled-back fight remain.
+transport with frame sync, and a lobby that connects two runners into one
+session from their first frame. Menus run in lockstep and live rounds roll
+back; two scripted runners have played offline Versus this way. A frame-locked clock
+and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
+compare whole frames, with guest RAM in page snapshots
+(`guest_snapshot.c`). The launcher has no lobby screen yet.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -134,7 +134,8 @@ Limits of this stage:
 
 - A save that cannot be rewound ends the run (`rollback:unrestorable`). At
   lag 8 the Story save after the fight, about 1,050 frames in, does this.
-  The session must fall back to lockstep before the game saves.
+  Lobby sessions return to lockstep before the save after a match (see
+  Lobby); `RECOMP_ROLLBACK` runs do not.
 - Loopback has no local player, so port 1 stays empty.
 - Two early hidden-frame runs ended with exit code -1 and no host report.
   Both started while the runner was being rebuilt and other runners were
@@ -213,12 +214,76 @@ Limits of the transport:
 - The grid assumes the 60 Hz progressive mode. With a display slower than
   60 Hz the guest would wait in the presenter queue instead; that is untested.
 
-## Entry point
+## Lobby
 
 The Live menus need XOnline logon, match search, QoS, friends and stats
 services before they reach a fight, and no System Link text appears in the
-XBE. A host-owned lobby connects two runners and then drives the offline
-Versus mode, with the remote player on the second controller port, which
-avoids all of XOnline. Menus stay in delay-based lockstep and rollback covers
-only the fight.
+XBE. Instead a lobby on the host connects two runners, which then play the
+game's offline modes together, the host on the first controller port and the
+joiner on the second. That avoids all of XOnline.
+
+`--netplay-host <port>` waits up to 10 minutes for a joiner, and
+`--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
+The hello carries the SHA-256 of the joiner's runner executable, and the
+host refuses any other build. That also refuses a Windows and Linux pair,
+whose floating point is unverified. The host answers with its input delay
+(`--netplay-delay`, default 2) and the options that change the simulation
+(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. The host keeps
+answering repeated hellos once the session runs, so a lost answer costs
+only a retry.
+
+Both runners then boot and play one session from their first frame. Until
+it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
+neither machine's other pads reach the game. Saves go to
+`.recomp-storage/netplay/partition1` with their own undo journal, wiped when
+each session starts, so both sides start from the same empty profile and
+neither player's own profile changes. The cached archives in partitions 3 to
+5 stay shared; `run_game.py` prepares them the same way on every machine.
+During a session the host reports no file times, which differ between
+machines.
+
+The session runs in lockstep, where a frame runs only once the remote pad
+has arrived, and predicts up to 8 frames only while a round is live:
+
+- `g_game_mode_state` (`0x8a56d0`) is 5, the match state that
+  `game_mode_frontend_update` (`0xd87c0`) enters for every playable mode;
+- `g_round_timer_seconds` (`0x87ae08`), which `round_timer_tick`
+  (`0x119320`) counts down, is above 0;
+- both fighters' life (`0x87ae54`, stride `0x94`) is above 0.
+
+Each side decides from its own frames, as the window only limits how far it
+runs ahead. In the scripted Story fight the condition turned true 25 frames
+into the match state, while the stage still loaded for about 15 more frames;
+the display mode change came before it. A KO or time-over closes the window
+seconds before the save at the end of a match. Before the timer was part of
+the condition, that save ran in the frame the match state ended while the
+window was still open.
+
+Two runners on one machine, each in its own play folder, played scripted
+sessions. The host's input script made a profile (nickname and flag), chose
+Versus and Single Battle and picked a character, and the joiner picked one
+and pressed random buttons in live rounds:
+
+| Input delay | Frames | Rollbacks (host) | Window changes | Guest RAM at the end |
+|---|---|---|---|---|
+| 2 | 6,000, title screen only | 0 | none | identical |
+| 2 | 7,000 | 0 | rollback from 3,744 | identical |
+| 0 | 14,000 | 2,465 | two rounds; lockstep at both time-overs | identical |
+| 0 | 19,000 | 3,367 | two matches of two rounds | identical |
+
+None of the comparisons masked a byte.
+
+Limits of the lobby:
+
+- Both players start from a new profile every session. Sending the host's
+  profile to the joiner would keep unlocks and settings.
+- The launcher has no lobby screen, and there is no NAT traversal: the host
+  must accept UDP on its port.
+- When one runner quits, the other stops 5 s later
+  (`rollback:peer-timeout`).
+- Quitting a match from the pause menu mid-round may save while the window
+  is open; a rewind across that save ends the run. Saves could wait for
+  confirmed input instead.
+- The condition reads two fighters; Tag matches and rounds without a time
+  limit are unverified.
 

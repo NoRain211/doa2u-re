@@ -12,6 +12,7 @@
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "sha.h"
 #include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
@@ -41,6 +42,12 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #include <strings.h>
 #define _stricmp strcasecmp
 #endif
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 static RecompInputPulseSource inputPulses;
 static bool scriptedInputOnly;
@@ -55,12 +62,14 @@ static std::uint8_t *guestRam;
    RECOMP_ROLLBACK_PLAYER (0 or 1) picks the local port and
    RECOMP_ROLLBACK_DELAY the input delay, both matching on the two sides. At
    session frame RECOMP_ROLLBACK_FRAMES every pad is confirmed and guest RAM
-   goes to RECOMP_ROLLBACK_DUMP. */
+   goes to RECOMP_ROLLBACK_DUMP. --netplay-host and --netplay-join start a
+   lobby session from the first frame instead. */
 enum class RollbackMode { Off, Loopback, Udp };
 struct RollbackRun {
     RollbackMode mode = RollbackMode::Off;
     bool active = false;
     bool hidden = false;
+    bool lobby = false; // lockstep menus, rollback over live rounds
     std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
     std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u;
@@ -79,6 +88,8 @@ static RollbackRun rollback;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
+    // Both runners must see the same controllers: the session's two ports, once it runs.
+    if (rollback.lobby && (port >= 2u || !rollback.active)) return false;
     if (rollback.active && port < 2u) {
         // Loopback has no local player, so its port stays empty.
         if (rollback.mode == RollbackMode::Loopback && port == rollback.player) return false;
@@ -275,12 +286,21 @@ static RecompInputGamepad generatedPad(std::uint32_t frame)
     return pad;
 }
 
+static bool roundLive();
+
 static RecompInputGamepad localPad(std::uint32_t frame)
 {
     RecompInputGamepad pad{};
     if (rollback.mode == RollbackMode::Loopback) return pad;
-    // Scripted runs play a generated stream per player so two runners differ.
-    if (scriptedInputOnly) return generatedPad(frame * 2u + rollback.player);
+    if (scriptedInputOnly) {
+        // Scripted runs play a generated stream per player so two runners differ.
+        if (!rollback.lobby) return generatedPad(frame * 2u + rollback.player);
+        // A scripted lobby: each side walks the menus with its input script, one
+        // sample per frame, and the joiner mashes in live rounds.
+        if (rollback.player == 1u && roundLive()) pad = generatedPad(frame);
+        else (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
+        return pad;
+    }
     (void)recomp_input_host_sample(0u, &pad);
     return pad;
 }
@@ -389,12 +409,37 @@ static void scheduleFrame()
     rollback.wait = 0u;
 }
 
+/* A lobby session predicts only while a round is live: the game-mode task in
+   its match state (g_game_mode_state, 0x8a56d0, is 5), time left
+   (g_round_timer_seconds, 0x87ae08) and both fighters' life (0x87ae54,
+   stride 0x94) above 0. A KO or time-over ends it seconds before the save
+   at the end of a match, so menus and saves run in lockstep, which never
+   rewinds. */
+static bool roundLive()
+{
+    if (*recomp_memory(0x008a56d0u, 1u) != 5u || *recomp_memory(0x0087ae08u, 1u) == 0u) return false;
+    for (std::uint32_t side = 0; side < 2u; ++side) {
+        const std::uint8_t *life = recomp_memory(0x0087ae54u + side * 0x94u, 2u);
+        if (static_cast<std::int16_t>(life[0] | life[1] << 8) <= 0) return false;
+    }
+    return true;
+}
+
+static void setWindow(std::uint32_t window)
+{
+    RecompRollbackSession &s = rollback.session;
+    if (s.window == window) return;
+    s.window = window;
+    std::fprintf(stderr, "recomp netplay: %s from frame %u\n", window != 0u ? "rollback" : "lockstep", s.frame);
+}
+
 static void onRollbackFrame(std::uint32_t swap)
 {
     RecompRollbackSession &s = rollback.session;
     if (!rollback.active) {
         if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
         recomp_rollback_init(&s, rollback.delay);
+        if (rollback.lobby) s.window = 0u;
         if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
         rollback.active = true;
         rollback.started = std::chrono::steady_clock::now();
@@ -403,6 +448,7 @@ static void onRollbackFrame(std::uint32_t swap)
     }
     bool saved = true;
     if (s.frame == rollback.frontier) {
+        if (rollback.lobby) setWindow(roundLive() ? RECOMP_ROLLBACK_WINDOW : 0u);
         if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
             scheduleFrame();
             rollback.paced = s.frame;
@@ -477,6 +523,99 @@ static bool readRollbackConfig()
         static_cast<std::uint16_t>(peerPort));
 }
 
+// --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
+static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
+static std::string netplayJoin;
+enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u };
+
+// SHA-256 of this runner's executable, so both sides of a lobby run one build.
+static std::string runnerDigest()
+{
+    std::filesystem::path path;
+#ifdef _WIN32
+    std::wstring buffer(32768u, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length != 0u && length < buffer.size()) path = buffer.substr(0u, length);
+#elif defined(__APPLE__)
+    char buffer[4096];
+    std::uint32_t size = sizeof buffer;
+    if (_NSGetExecutablePath(buffer, &size) == 0) path = buffer;
+#else
+    std::error_code error;
+    path = std::filesystem::read_symlink("/proc/self/exe", error);
+#endif
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (path.empty() || !file) return {};
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(file.tellg()));
+    file.seekg(0);
+    if (!file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return {};
+    return doaxbv::sha256Hex(bytes);
+}
+
+/* Connects the two runners before either boots. The host's input delay and
+   options win, and the session keeps its saves in a folder wiped each time,
+   so both sides start alike and neither player's profile changes. */
+static bool joinLobby(const std::filesystem::path &discPath)
+{
+    if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
+        std::cerr << "recomp runner: RECOMP_ROLLBACK cannot be combined with --netplay-host or --netplay-join\n";
+        return false;
+    }
+    RecompNetplayLobby lobby{};
+    const std::string digest = runnerDigest();
+    if (digest.size() != sizeof lobby.digest) {
+        std::cerr << "recomp runner: cannot read this runner to identify its build\n";
+        return false;
+    }
+    std::memcpy(lobby.digest, digest.data(), sizeof lobby.digest);
+    lobby.delay = static_cast<std::uint8_t>(netplayDelay);
+    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
+    const bool hosting = netplayHostPort != 0u;
+    RecompNetplayLobbyResult result;
+    if (hosting) {
+        std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
+        result = recomp_netplay_host(&rollback.net, static_cast<std::uint16_t>(netplayHostPort), &lobby, 10u * 60u * 1000u);
+    } else {
+        const std::size_t colon = netplayJoin.rfind(':');
+        const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
+        if (colon == 0u || port == 0u || port > 65535u) {
+            std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
+            return false;
+        }
+        std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
+        result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
+            static_cast<std::uint16_t>(port), &lobby, 2u * 60u * 1000u);
+    }
+    if (result != RECOMP_NETPLAY_LOBBY_OK) {
+        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
+            ? "refused: the other player runs a different build"
+            : result == RECOMP_NETPLAY_LOBBY_TIMEOUT ? "timed out" : "could not open its UDP port") << '\n';
+        return false;
+    }
+    if (lobby.delay > RECOMP_ROLLBACK_WINDOW) return false;
+    unlockAll = (lobby.flags & LobbyUnlockAll) != 0u;
+    recomp_skip_intro = (lobby.flags & LobbySkipIntro) != 0u;
+    rollback.mode = RollbackMode::Udp;
+    rollback.lobby = true;
+    rollback.player = hosting ? 0u : 1u;
+    rollback.delay = lobby.delay;
+    rollback.start = 0u;
+    // Test hooks, as for RECOMP_ROLLBACK.
+    if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames != nullptr && *frames != '\0')
+        rollback.stop = static_cast<std::uint32_t>(std::strtoul(frames, nullptr, 10));
+    rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
+    std::error_code error;
+    std::filesystem::remove_all(discPath / ".recomp-storage" / "netplay", error);
+    if (error) {
+        std::cerr << "recomp runner: cannot clear the netplay save folder\n";
+        return false;
+    }
+    recomp_save_session = "netplay";
+    std::fprintf(stderr, "recomp netplay: connected as player %u with %u frames of input delay\n",
+        rollback.player + 1u, rollback.delay);
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
@@ -500,6 +639,24 @@ int main(int argc, char **argv)
         }
         if (argument == "--skip-intro") {
             recomp_skip_intro = true;
+            continue;
+        }
+        if ((argument == "--netplay-host" || argument == "--netplay-delay") && i + 1 < argc) {
+            const std::string value = argv[++i];
+            std::uint32_t number = 0u;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
+            const bool host = argument == "--netplay-host";
+            if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() ||
+                (host ? number == 0u || number > 65535u : number > RECOMP_ROLLBACK_WINDOW)) {
+                std::cerr << "recomp runner: --netplay-host needs a UDP port and --netplay-delay at most "
+                          << RECOMP_ROLLBACK_WINDOW << " frames\n";
+                return 64;
+            }
+            (host ? netplayHostPort : netplayDelay) = number;
+            continue;
+        }
+        if (argument == "--netplay-join" && i + 1 < argc) {
+            netplayJoin = argv[++i];
             continue;
         }
         if (argument == "--input-start-pulse-at" && i + 1 < argc) {
@@ -584,7 +741,8 @@ int main(int argc, char **argv)
                 " [--input-buttons-pulse-at <poll> <decimal-mask>]"
                 " [--input-analog-pulse-at <poll> <button-index>]"
                 " [--input-analog-pulse-every <first-poll> <period> <last-poll> <button-index>]"
-                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]\n";
+                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]"
+                " [--netplay-host <port> [--netplay-delay <frames>] | --netplay-join <host>:<port>]\n";
             return 64;
         }
         const std::string value = argv[++i];
@@ -595,6 +753,10 @@ int main(int argc, char **argv)
     }
     if (xbePath.empty()) {
         std::cerr << "recomp runner: --xbe is required\n";
+        return 64;
+    }
+    if (netplayHostPort != 0u && !netplayJoin.empty()) {
+        std::cerr << "recomp runner: --netplay-host and --netplay-join cannot be combined\n";
         return 64;
     }
     recomp_stop_configure(expectStop.empty() ? nullptr : expectStop.c_str(),
@@ -636,6 +798,7 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
+    if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         return 2;
@@ -643,7 +806,7 @@ int main(int argc, char **argv)
     const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
-    if (!readRollbackConfig()) {
+    if (!rollback.lobby && !readRollbackConfig()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
                   << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";

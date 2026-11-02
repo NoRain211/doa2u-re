@@ -21,7 +21,22 @@ enum {
     RECOMP_NETPLAY_MAX_PACKET =
         RECOMP_NETPLAY_HEADER_BYTES + RECOMP_NETPLAY_MAX_PADS * RECOMP_NETPLAY_PAD_BYTES,
     RECOMP_NETPLAY_SYNC_FRAMES = 32u,
+    RECOMP_NETPLAY_DIGEST_BYTES = 64u,
 };
+
+/* What the lobby agrees on before either runner boots. */
+typedef struct RecompNetplayLobby {
+    char digest[RECOMP_NETPLAY_DIGEST_BYTES]; /* runner build; both sides must match */
+    uint8_t delay;                            /* input delay in frames */
+    uint8_t flags;                            /* host options the joiner adopts */
+} RecompNetplayLobby;
+
+typedef enum RecompNetplayLobbyResult {
+    RECOMP_NETPLAY_LOBBY_OK,
+    RECOMP_NETPLAY_LOBBY_TIMEOUT,
+    RECOMP_NETPLAY_LOBBY_MISMATCH, /* the other runner is a different build */
+    RECOMP_NETPLAY_LOBBY_SOCKET,
+} RecompNetplayLobbyResult;
 
 typedef struct RecompNetplay {
     uintptr_t socket;
@@ -38,12 +53,24 @@ typedef struct RecompNetplay {
     uint32_t local_count;
     uint32_t peer_count;
     uint32_t cooldown;
+    /* The host answers a repeated hello until the joiner's session starts. */
+    bool hosting;
+    RecompNetplayLobby lobby;
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are
    dropped. shortcut: IPv4 only; add AF_INET6 when the lobby needs it. */
 bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     const char *peer_host, uint16_t peer_port);
+/* Binds port and waits for a joiner's hello, answering each with the host's
+   digest and settings. The first joiner becomes the peer; one with another
+   digest ends the wait with MISMATCH. */
+RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
+    const RecompNetplayLobby *lobby, uint32_t timeout_ms);
+/* Says hello to the host until it answers, then copies the host's delay and
+   flags into lobby. Binds an ephemeral local port. */
+RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
+    uint16_t port, RecompNetplayLobby *lobby, uint32_t timeout_ms);
 void recomp_netplay_close(RecompNetplay *net);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);

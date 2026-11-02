@@ -1,6 +1,7 @@
 #include "netplay.h"
 
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -11,6 +12,7 @@ typedef int SocketLength;
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 typedef int SOCKET;
@@ -19,7 +21,14 @@ typedef socklen_t SocketLength;
 #define closesocket close
 #endif
 
-enum { MAGIC = 0x42523244u /* "D2RB" */ };
+enum {
+    MAGIC = 0x42523244u,       /* "D2RB" */
+    LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
+    LOBBY_VERSION = 1u,
+    LOBBY_HELLO = 1u,
+    LOBBY_WELCOME = 2u,
+    LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u,
+};
 
 static void put32(uint8_t *out, uint32_t value)
 {
@@ -119,8 +128,29 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     return true;
 }
 
-bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
-    const char *peer_host, uint16_t peer_port)
+/* Layout: magic, version, kind, digest, delay, flags. */
+static size_t encode_lobby(uint8_t kind, const RecompNetplayLobby *lobby, uint8_t *out)
+{
+    put32(out, LOBBY_MAGIC);
+    out[4] = LOBBY_VERSION;
+    out[5] = kind;
+    memcpy(out + 6, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    out[6u + RECOMP_NETPLAY_DIGEST_BYTES] = lobby->delay;
+    out[7u + RECOMP_NETPLAY_DIGEST_BYTES] = lobby->flags;
+    return LOBBY_BYTES;
+}
+
+/* The packet's kind, or 0 when it is not a lobby packet of this version. */
+static uint8_t decode_lobby(const uint8_t *in, size_t size, RecompNetplayLobby *lobby)
+{
+    if (size != LOBBY_BYTES || get32(in) != LOBBY_MAGIC || in[4] != LOBBY_VERSION) return 0u;
+    memcpy(lobby->digest, in + 6, RECOMP_NETPLAY_DIGEST_BYTES);
+    lobby->delay = in[6u + RECOMP_NETPLAY_DIGEST_BYTES];
+    lobby->flags = in[7u + RECOMP_NETPLAY_DIGEST_BYTES];
+    return in[5];
+}
+
+static bool open_socket(RecompNetplay *net, uint16_t local_port)
 {
     memset(net, 0, sizeof *net);
     net->socket = (uintptr_t)INVALID_SOCKET;
@@ -128,14 +158,6 @@ bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     WSADATA data;
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return false;
 #endif
-    struct addrinfo hints, *found = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-    if (getaddrinfo(peer_host, NULL, &hints, &found) != 0 || found == NULL) return false;
-    net->peer_address = ((const struct sockaddr_in *)(const void *)found->ai_addr)->sin_addr.s_addr;
-    freeaddrinfo(found);
-    net->peer_port = htons(peer_port);
     const SOCKET handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (handle == INVALID_SOCKET) return false;
     struct sockaddr_in local;
@@ -157,45 +179,164 @@ bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     return true;
 }
 
+bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
+    const char *peer_host, uint16_t peer_port)
+{
+    if (!open_socket(net, local_port)) return false;
+    struct addrinfo hints, *found = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(peer_host, NULL, &hints, &found) != 0 || found == NULL) {
+        recomp_netplay_close(net);
+        return false;
+    }
+    net->peer_address = ((const struct sockaddr_in *)(const void *)found->ai_addr)->sin_addr.s_addr;
+    freeaddrinfo(found);
+    net->peer_port = htons(peer_port);
+    return true;
+}
+
 void recomp_netplay_close(RecompNetplay *net)
 {
     if ((SOCKET)net->socket != INVALID_SOCKET) closesocket((SOCKET)net->socket);
     net->socket = (uintptr_t)INVALID_SOCKET;
 }
 
-void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *s, int32_t advantage)
+static void send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
+    const uint8_t *packet, size_t size)
 {
-    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET];
-    const size_t size = recomp_netplay_encode(net, s, advantage, packet);
     struct sockaddr_in peer;
     memset(&peer, 0, sizeof peer);
     peer.sin_family = AF_INET;
-    peer.sin_port = net->peer_port;
-    peer.sin_addr.s_addr = net->peer_address;
+    peer.sin_port = port;
+    peer.sin_addr.s_addr = address;
     /* A full send buffer drops this packet; the next one repeats its pads. */
     (void)sendto((SOCKET)net->socket, (const char *)packet, (int)size, 0,
         (const struct sockaddr *)&peer, sizeof peer);
 }
 
-void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *s)
+void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *s, int32_t advantage)
 {
-    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET];
+    send_to(net, net->peer_address, net->peer_port, packet,
+        recomp_netplay_encode(net, s, advantage, packet));
+}
+
+/* The next queued packet's size, or -1 when none is left. */
+static int receive_from(const RecompNetplay *net, uint8_t *packet, size_t capacity,
+    struct sockaddr_in *from)
+{
     for (;;) {
-        struct sockaddr_in from;
-        SocketLength from_size = sizeof from;
-        const int size = (int)recvfrom((SOCKET)net->socket, (char *)packet, (int)sizeof packet, 0,
-            (struct sockaddr *)&from, &from_size);
+        SocketLength from_size = sizeof *from;
+        const int size = (int)recvfrom((SOCKET)net->socket, (char *)packet, (int)capacity, 0,
+            (struct sockaddr *)from, &from_size);
         /* Windows reports an ICMP port-unreachable from an earlier send as a
            failed receive; it is not fatal before the peer has bound its port. */
         if (size < 0) {
 #ifdef _WIN32
             if (WSAGetLastError() == WSAECONNRESET) continue;
 #endif
-            return;
+            return -1;
         }
-        if (from.sin_family != AF_INET || from.sin_addr.s_addr != net->peer_address ||
-            from.sin_port != net->peer_port)
+        if (from->sin_family == AF_INET) return size;
+    }
+}
+
+static bool from_peer(const RecompNetplay *net, const struct sockaddr_in *from)
+{
+    return from->sin_addr.s_addr == net->peer_address && from->sin_port == net->peer_port;
+}
+
+static uint64_t now_ms(void)
+{
+    struct timespec now;
+    if (timespec_get(&now, TIME_UTC) != TIME_UTC) return 0u;
+    return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+}
+
+static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
+{
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET((SOCKET)net->socket, &readable);
+    struct timeval timeout = {0, (long)milliseconds * 1000L};
+    (void)select((int)net->socket + 1, &readable, NULL, NULL, &timeout);
+}
+
+RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
+    const RecompNetplayLobby *lobby, uint32_t timeout_ms)
+{
+    if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
+    net->hosting = true;
+    net->lobby = *lobby;
+    const uint64_t deadline = now_ms() + timeout_ms;
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], welcome[LOBBY_BYTES];
+    const size_t welcome_size = encode_lobby(LOBBY_WELCOME, lobby, welcome);
+    for (;;) {
+        struct sockaddr_in from;
+        int size;
+        while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+            RecompNetplayLobby hello;
+            if (decode_lobby(packet, (size_t)size, &hello) != LOBBY_HELLO) continue;
+            send_to(net, from.sin_addr.s_addr, from.sin_port, welcome, welcome_size);
+            if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
+                return RECOMP_NETPLAY_LOBBY_MISMATCH;
+            net->peer_address = from.sin_addr.s_addr;
+            net->peer_port = from.sin_port;
+            return RECOMP_NETPLAY_LOBBY_OK;
+        }
+        if (now_ms() >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        wait_readable(net, 100u);
+    }
+}
+
+RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
+    uint16_t port, RecompNetplayLobby *lobby, uint32_t timeout_ms)
+{
+    if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
+    const uint64_t deadline = now_ms() + timeout_ms;
+    uint64_t next_hello = 0u;
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u], hello[LOBBY_BYTES];
+    const size_t hello_size = encode_lobby(LOBBY_HELLO, lobby, hello);
+    for (;;) {
+        const uint64_t now = now_ms();
+        if (now >= next_hello) {
+            send_to(net, net->peer_address, net->peer_port, hello, hello_size);
+            next_hello = now + 100u;
+        }
+        struct sockaddr_in from;
+        int size;
+        while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+            RecompNetplayLobby welcome;
+            if (!from_peer(net, &from) ||
+                decode_lobby(packet, (size_t)size, &welcome) != LOBBY_WELCOME)
+                continue;
+            if (memcmp(welcome.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
+                return RECOMP_NETPLAY_LOBBY_MISMATCH;
+            lobby->delay = welcome.delay;
+            lobby->flags = welcome.flags;
+            return RECOMP_NETPLAY_LOBBY_OK;
+        }
+        if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        wait_readable(net, 100u);
+    }
+}
+
+void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *s)
+{
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
+    struct sockaddr_in from;
+    int size;
+    while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+        if (!from_peer(net, &from)) continue;
+        RecompNetplayLobby hello;
+        if (net->hosting && decode_lobby(packet, (size_t)size, &hello) == LOBBY_HELLO) {
+            uint8_t welcome[LOBBY_BYTES];
+            send_to(net, net->peer_address, net->peer_port, welcome,
+                encode_lobby(LOBBY_WELCOME, &net->lobby, welcome));
             continue;
+        }
         (void)recomp_netplay_decode(net, s, packet, (size_t)size);
     }
 }

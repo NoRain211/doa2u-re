@@ -9,6 +9,7 @@ void recomp_rollback_init(RecompRollbackSession *s, uint32_t input_delay)
     memset(s, 0, sizeof *s);
     s->local_count = s->remote_count = input_delay;
     s->rewind_to = RECOMP_ROLLBACK_NONE;
+    s->window = RECOMP_ROLLBACK_WINDOW;
 }
 
 /* A rewind reaches at most WINDOW frames back, so older history can be
@@ -39,7 +40,7 @@ bool recomp_rollback_add_remote(RecompRollbackSession *s, const RecompInputGamep
 
 bool recomp_rollback_can_run(const RecompRollbackSession *s)
 {
-    return s->frame < s->local_count && s->frame < s->remote_count + RECOMP_ROLLBACK_WINDOW;
+    return s->frame < s->local_count && s->frame < s->remote_count + s->window;
 }
 
 uint32_t recomp_rollback_take_rewind(RecompRollbackSession *s)

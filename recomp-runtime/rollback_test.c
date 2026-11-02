@@ -76,6 +76,14 @@ int main(void)
     recomp_rollback_run(&s, &local, &remote);
     check("delay frames neutral", local.buttons == 0u && remote.buttons == 0u);
 
+    // Lockstep: window 0 runs only frames whose remote pad has arrived.
+    recomp_rollback_init(&s, 0u);
+    s.window = 0u;
+    recomp_rollback_add_local(&s, &local);
+    check("lockstep waits for remote", !recomp_rollback_can_run(&s));
+    recomp_rollback_add_remote(&s, &two);
+    check("lockstep runs confirmed frame", recomp_rollback_can_run(&s));
+
     if (failures != 0) return 1;
     puts("PASS rollback predicts remote pads and rewinds to the first miss");
     return 0;
