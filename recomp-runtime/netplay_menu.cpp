@@ -62,7 +62,7 @@ struct Menu {
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
-    bool hosting = false, ready = false, starting = false, launched = false;
+    bool hosting = false, ready = false, starting = false, launched = false, covering = false;
     std::string name, peerAddress;
     RecompNetplay net{};
     RecompNetplayRoom room{};
@@ -375,7 +375,8 @@ void update(std::uint16_t keys, bool &launch)
 
 void title(const char *text)
 {
-    recomp_overlay_rect(-1000.0f, 0.0f, 2640.0f, 480.0f, Backdrop);
+    // Opaque while the game walks back to the Versus menu behind a reopened room.
+    recomp_overlay_rect(-1000.0f, 0.0f, 2640.0f, 480.0f, menu.covering ? 0xff000000u : Backdrop);
     recomp_overlay_rect(40.0f, 38.0f, 6.0f, 52.0f, Red);
     recomp_overlay_text(58.0f, 40.0f, 4.0f, White, text);
     recomp_overlay_text(60.0f, 78.0f, 2.0f, Gray, "DEAD OR ALIVE 2 ULTIMATE");
@@ -531,6 +532,7 @@ void onOverlay(const RecompD3dPresenterTarget *target)
             menu.launched = true;
             return;
         }
+        if (menu.covering && versusChosen()) menu.covering = false;
         draw();
         recomp_overlay_submit(target, menu.aspect);
     }
@@ -608,6 +610,7 @@ void recomp_netplay_menu_return_to_room()
     std::lock_guard<std::mutex> guard(menu.lock);
     menu.openedBy = 0u;
     menu.message.clear();
+    menu.covering = true;
     // A failure leaves the Versus screen up with its message.
     menu.screen = Screen::Versus;
     menu.cursor = menu.hosting ? 1 : 2;

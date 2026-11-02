@@ -273,6 +273,7 @@ static void onSwap(std::uint32_t frame)
     if (storyFinale) applyStoryFinale();
     if (backToVersus && walkToVersus(frame, false, backPad)) {
         backToVersus = false;
+        recomp_dsound_buffer_set_output_suppressed(false);
         std::fprintf(stderr, "recomp netplay: back at the Versus menu from frame %u\n", frame);
     }
     startRoomSession();
@@ -663,11 +664,11 @@ static void onRollbackFrame(std::uint32_t swap)
         saved = recomp_rollback_ring_save();
     }
     if (!saved) recomp_stop(4, "rollback:save");
-    // Frames run again were already shown and heard with the predicted pads.
+    // Frames run again were already shown and heard with the predicted pads; the walk to Versus stays unseen.
     rollback.hidden = s.frame < rollback.frontier;
-    recomp_d3d8_set_present_suppressed(rollback.hidden);
+    recomp_d3d8_set_present_suppressed(rollback.hidden || landOnVersus);
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
-    recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
+    recomp_dsound_buffer_set_output_suppressed(rollback.hidden || landOnVersus);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
     driveToVersus(s.frame);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
@@ -1087,6 +1088,10 @@ static void startRoomSession()
     const bool joined = joinLobby(discFolder, cancelPressed);
     noticeHint = nullptr;
     if (!joined) endSession("netplay:session-failed");
+    noticeDetail = "LOADING VERSUS";
+    noticeHint = ""; // keeps the panel's height, so it covers the cancel line
+    recomp_d3d8_present_overlay(drawNotice);
+    noticeHint = nullptr;
     reboot();
 }
 
@@ -1331,6 +1336,9 @@ static void bootGuest()
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
+    // The walks to Versus run unseen behind the last notice, and unheard (walkToVersus).
+    recomp_d3d8_set_present_suppressed(landOnVersus);
+    recomp_dsound_buffer_set_output_suppressed(landOnVersus || backToVersus);
     if (rollback.lobby) {
         networkDisplay = recomp_netplay_menu_display(storage);
         recomp_d3d_overlay_hook = networkDisplay != 0 ? drawNetworkStats : nullptr;

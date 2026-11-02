@@ -282,6 +282,11 @@ runners on one machine went from the Versus menu through the room to
 character select at session frame 334, with identical guest RAM at frame
 1,200. With the reboot, both players' guest RAM at frame 1,500 matched each
 other and a session started by restarting the runners byte for byte.
+The walk runs out of sight and earshot: each runner shows STARTING MATCH
+with LOADING VERSUS over its last frame, and turns off the game's presents
+and sound output until character select. The battle type menu's fade-out
+(frames 305 to 333) stays hidden, and the first frame shown is character
+select fading in. Game state is unchanged, so both sides still match.
 
 A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
 `rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
@@ -290,7 +295,9 @@ session's state, reboots the game offline the same way and reopens the
 room: the host listens on its port again and the joiner calls the host's
 address. Behind the room, the port 0 pad walks to the main menu with Versus
 chosen, so leaving the room lands where the Versus menu was opened. Both
-players press READY again for a rematch. A host kept as one process
+players press READY again for a rematch. Until the menu has Versus chosen,
+the room's backdrop is opaque and the game's sound is off, so the title and
+menus do not show through. A host kept as one process
 through a session, its joiner quitting, the return to the room and a
 second session with a new joiner matched that joiner's guest RAM at frame
 3,000, with one window throughout. Sessions started with `--netplay-host`
@@ -412,8 +419,8 @@ Limits of the lobby:
 - Without UPnP the host must forward its UDP port by hand; there is no hole
   punching or relay. A joiner types an IPv4 address; host names and room
   codes are not supported.
-- The title and menus flash past for about 6 s on the way to character
-  select, and for about 3 s behind the room after a session.
+- The hidden walks still take their time: about 6 s on STARTING MATCH
+  before character select, and about 3 s behind the room after a session.
 - A joiner that cancels before the host has heard its hello, in practice
   during the host's 600 ms of saying start, goes unheard; that host waits
   on STARTING MATCH until it cancels too.
