@@ -294,10 +294,17 @@ static unsigned save_write_number;
 /* Opens that may change save storage on disk. The disk is not part of a
    SyncTest snapshot, so a frame that makes one cannot be replayed. */
 static uint32_t profile_mutation_count;
+void (*recomp_kernel_profile_mutation_hook)(void);
 
 uint32_t recomp_kernel_profile_mutations(void)
 {
     return profile_mutation_count;
+}
+
+static void note_profile_mutation(void)
+{
+    ++profile_mutation_count;
+    if (recomp_kernel_profile_mutation_hook != NULL) recomp_kernel_profile_mutation_hook();
 }
 
 static unsigned save_fault_write(const char *name)
@@ -1393,7 +1400,7 @@ static void bridge_nt_open_file(void)
     bool profile_path = is_profile_path(host_path);
     bool required_save_io = requested_write ||
         (profile_path && (desired_access & (DELETE | FILE_WRITE_ATTRIBUTES)) != 0u);
-    if (required_save_io && profile_path) ++profile_mutation_count;
+    if (required_save_io && profile_path) note_profile_mutation();
     if (required_save_io && recomp_save_pending() &&
         ((profile_path && !recomp_save_active(save_owner)) ||
          (recomp_save_active(save_owner) && !profile_path))) {
@@ -1489,7 +1496,7 @@ static void bridge_nt_create_file(void)
     bool mutation = (desired_access & GENERIC_WRITE_ACCESS) != 0u ||
         (profile_path && (desired_access & (DELETE | FILE_WRITE_ATTRIBUTES)) != 0u) ||
         create_disposition != FILE_OPEN_DISPOSITION;
-    if (mutation && profile_path) ++profile_mutation_count;
+    if (mutation && profile_path) note_profile_mutation();
     if (mutation && recomp_save_pending() &&
         ((profile_path && !recomp_save_active(save_owner)) ||
          (recomp_save_active(save_owner) && !profile_path))) {

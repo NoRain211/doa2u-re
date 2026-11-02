@@ -258,6 +258,9 @@ has arrived, and predicts up to 8 frames only while a round is live:
 
 - `g_game_mode_state` (`0x8a56d0`) is 5, the match state that
   `game_mode_frontend_update` (`0xd87c0`) enters for every playable mode;
+- `g_game_tasks_suspended` (`0x8783c9`) is 0. `game_tasks_suspend`
+  (`0xd8d90`) sets it while the pause menu freezes the fight, and
+  `game_tasks_resume` (`0xd8e10`) clears it;
 - `g_round_timer_seconds` (`0x87ae08`), which `round_timer_tick`
   (`0x119320`) counts down, is above 0;
 - both fighters' life (`0x87ae54`, stride `0x94`) is above 0.
@@ -270,10 +273,22 @@ seconds before the save at the end of a match. Before the timer was part of
 the condition, that save ran in the frame the match state ended while the
 window was still open.
 
+Every open that may change the profile also waits, inside its frame, until
+the other player's pads through that frame have arrived
+(`recomp_kernel_profile_mutation_hook`). A save then never runs on a
+guess, and every later rewind lands after it. If an arrived pad differs from
+the one the frame ran with, the frame is already wrong, and the session
+stops before the write (`rollback:save-mispredicted`). With the window
+closed this never waits. Quitting from the pause menu saves about 20 frames
+after the quit, long after the window closed at the pause.
+
 Two runners on one machine, each in its own play folder, played scripted
-sessions. The host's input script made a profile (nickname and flag), chose
-Versus and Single Battle and picked a character, and the joiner picked one
-and pressed random buttons in live rounds:
+sessions. The host's input script chose Versus and Single Battle and picked
+a character, and the joiner picked one and pressed random buttons in live
+rounds. In the first four runs both sides started from an empty profile,
+and the host's script made one (nickname and flag); the last two started
+from the host's copied profile, where the host paused at frame 4,300 and
+chose Quit:
 
 | Input delay | Frames | Rollbacks (host) | Window changes | Guest RAM at the end |
 |---|---|---|---|---|
@@ -281,6 +296,8 @@ and pressed random buttons in live rounds:
 | 2 | 7,000 | 0 | rollback from 3,744 | identical |
 | 0 | 14,000 | 2,465 | two rounds; lockstep at both time-overs | identical |
 | 0 | 19,000 | 3,367 | two matches of two rounds | identical |
+| 0 | 6,000 | 233 | rollback from 3,748; lockstep from the pause | identical |
+| 0 | 5,000, test build with the window held open from 4,000 | 238 | the Quit save in frame 4,920 waited on both sides | identical |
 
 None of the comparisons masked a byte.
 
@@ -290,9 +307,8 @@ Limits of the lobby:
   must accept UDP on its port.
 - When one runner quits, the other stops 5 s later
   (`rollback:peer-timeout`).
-- Quitting a match from the pause menu mid-round may save while the window
-  is open; a rewind across that save ends the run. Saves could wait for
-  confirmed input instead.
+- A save in a frame that ran with a wrong guess still ends the session; no
+  save site seen so far comes within the 8-frame window of a live round.
 - The condition reads two fighters; Tag matches and rounds without a time
   limit are unverified.
 

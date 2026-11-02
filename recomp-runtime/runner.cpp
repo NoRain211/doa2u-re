@@ -411,14 +411,17 @@ static void scheduleFrame()
 }
 
 /* A lobby session predicts only while a round is live: the game-mode task in
-   its match state (g_game_mode_state, 0x8a56d0, is 5), time left
+   its match state (g_game_mode_state, 0x8a56d0, is 5), the fight not frozen
+   by the pause menu (g_game_tasks_suspended, 0x8783c9), time left
    (g_round_timer_seconds, 0x87ae08) and both fighters' life (0x87ae54,
    stride 0x94) above 0. A KO or time-over ends it seconds before the save
    at the end of a match, so menus and saves run in lockstep, which never
    rewinds. */
 static bool roundLive()
 {
-    if (*recomp_memory(0x008a56d0u, 1u) != 5u || *recomp_memory(0x0087ae08u, 1u) == 0u) return false;
+    if (*recomp_memory(0x008a56d0u, 1u) != 5u || *recomp_memory(0x008783c9u, 1u) != 0u ||
+        *recomp_memory(0x0087ae08u, 1u) == 0u)
+        return false;
     for (std::uint32_t side = 0; side < 2u; ++side) {
         const std::uint8_t *life = recomp_memory(0x0087ae54u + side * 0x94u, 2u);
         if (static_cast<std::int16_t>(life[0] | life[1] << 8) <= 0) return false;
@@ -432,6 +435,29 @@ static void setWindow(std::uint32_t window)
     if (s.window == window) return;
     s.window = window;
     std::fprintf(stderr, "recomp netplay: %s from frame %u\n", window != 0u ? "rollback" : "lockstep", s.frame);
+}
+
+/* A profile write cannot be rewound (synctest_modules.c, save storage), so
+   it waits until the peer's pads through the running frame have arrived.
+   The window is normally closed long before, and this never waits. A pad
+   that differs from the prediction means the frame is already wrong; the
+   session then ends before the write. */
+static void confirmSaveFrame()
+{
+    RecompRollbackSession &s = rollback.session;
+    if (!rollback.active || rollback.mode != RollbackMode::Udp || s.frame == 0u) return;
+    const std::uint32_t running = s.frame - 1u;
+    if (s.remote_count <= running)
+        std::fprintf(stderr, "recomp netplay: save in frame %u waits for the other player's input\n", running);
+    const auto began = std::chrono::steady_clock::now();
+    while (s.remote_count <= running) {
+        recomp_netplay_receive(&rollback.net, &s);
+        recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+        if (std::chrono::steady_clock::now() - began > std::chrono::seconds(5))
+            recomp_stop(4, "rollback:peer-timeout");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
 }
 
 static void onRollbackFrame(std::uint32_t swap)
@@ -940,6 +966,7 @@ int main(int argc, char **argv)
         if (rollbackEnabled) {
             // Rollback input lives in the session, outside the saved state.
             recomp_d3d_frame_boundary_hook = onRollbackFrame;
+            recomp_kernel_profile_mutation_hook = confirmSaveFrame;
         } else {
             recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
             recomp_d3d_frame_boundary_hook = onFrameBoundary;
