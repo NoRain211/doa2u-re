@@ -64,6 +64,11 @@ struct RollbackRun {
     std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
     std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u;
+    std::uint32_t wait = 0u, paced = UINT32_MAX; // frame sync's next wait; last frame paced
+    std::chrono::steady_clock::time_point next_frame{};
+    // Measured once per new frame and repeated while stalled, so a stall's
+    // inflated advantage never reaches the peer's frame sync.
+    std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
     const char *dump = nullptr;
     RecompRollbackSession session;
@@ -305,11 +310,6 @@ static void receivePads()
     }
 }
 
-static std::int32_t advantage()
-{
-    return static_cast<std::int32_t>(rollback.session.frame - rollback.net.peer_frame);
-}
-
 /* At the newest frame: gathers pads until the frame may run or a rewind is
    due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
 static std::uint32_t awaitFrontier(bool last)
@@ -321,22 +321,34 @@ static std::uint32_t awaitFrontier(bool last)
     const Clock::time_point began = Clock::now();
     for (;;) {
         receivePads();
-        const std::uint32_t target = recomp_rollback_take_rewind(&s);
+        // The local pad is read at the frame's start, so pacing adds no input lag.
+        // Rewinds wait for it too, so one replay covers every pad that arrived.
+        const bool started = Clock::now() >= rollback.next_frame;
+        const std::uint32_t target = started ? recomp_rollback_take_rewind(&s) : RECOMP_ROLLBACK_NONE;
         if (target != RECOMP_ROLLBACK_NONE) return target;
+        if (started) {
+            while (s.local_count <= s.frame + rollback.delay) {
+                const RecompInputGamepad pad = localPad(s.local_count);
+                recomp_rollback_add_local(&s, &pad);
+            }
+        }
         const bool ready = last
             ? s.remote_count >= rollback.stop && (!udp || rollback.net.peer_ack >= rollback.stop)
-            : recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
+            : started && recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
         if (ready) return RECOMP_ROLLBACK_NONE;
         if (!udp) recomp_stop(4, "rollback:stalled");
         const Clock::time_point now = Clock::now();
         if (now - sent >= std::chrono::milliseconds(4)) {
-            recomp_netplay_send(&rollback.net, &s, advantage());
+            recomp_netplay_send(&rollback.net, &s, rollback.advantage);
             sent = now;
         }
         // The first contact waits out the other runner's boot.
         if (now - began > std::chrono::seconds(rollback.net.peer_seen ? 5 : 120))
             recomp_stop(4, "rollback:peer-timeout");
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
+        Clock::time_point until = now + std::chrono::milliseconds(2);
+        if (rollback.next_frame > now && rollback.next_frame < until) until = rollback.next_frame;
+        recomp_d3d_sleep_until(std::chrono::duration_cast<std::chrono::nanoseconds>(until.time_since_epoch()).count());
     }
 }
 
@@ -364,6 +376,19 @@ static void finishRollback()
     recomp_stop(0, "rollback:done");
 }
 
+/* Schedules each new frame on a 60 Hz grid. Display backpressure alone let the
+   guest regain a frame sync wait from the presenter queue; a wait moves the grid. */
+static void scheduleFrame()
+{
+    using namespace std::chrono;
+    constexpr steady_clock::duration interval = nanoseconds(1000000000 / 60);
+    const steady_clock::time_point now = steady_clock::now();
+    // Late frames may catch up by the two the presenter queues.
+    rollback.next_frame = std::max(rollback.next_frame + interval, now - 2 * interval);
+    if (rollback.wait != 0u) rollback.next_frame = std::max(rollback.next_frame, now) + rollback.wait * interval;
+    rollback.wait = 0u;
+}
+
 static void onRollbackFrame(std::uint32_t swap)
 {
     RecompRollbackSession &s = rollback.session;
@@ -378,9 +403,9 @@ static void onRollbackFrame(std::uint32_t swap)
     }
     bool saved = true;
     if (s.frame == rollback.frontier) {
-        while (s.local_count <= s.frame + rollback.delay) {
-            const RecompInputGamepad pad = localPad(s.local_count);
-            recomp_rollback_add_local(&s, &pad);
+        if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
+            scheduleFrame();
+            rollback.paced = s.frame;
         }
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
@@ -396,10 +421,11 @@ static void onRollbackFrame(std::uint32_t swap)
         } else {
             saved = recomp_rollback_ring_save();
             if (rollback.mode == RollbackMode::Udp) {
-                recomp_netplay_send(&rollback.net, &s, advantage());
-                const std::uint32_t wait = recomp_netplay_wait_frames(&rollback.net, advantage());
+                rollback.advantage = static_cast<std::int32_t>(s.frame - rollback.net.peer_frame);
+                recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+                const std::uint32_t wait = recomp_netplay_wait_frames(&rollback.net, rollback.advantage);
                 rollback.waited += wait;
-                std::this_thread::sleep_for(std::chrono::microseconds(16667u * wait));
+                rollback.wait = wait;
             }
         }
     } else {

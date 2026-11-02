@@ -62,18 +62,30 @@ int main(void)
     check("ack beyond our pads rejected", (packet[8] = 9u, !recomp_netplay_decode(&net_b, &b, packet,
         RECOMP_NETPLAY_HEADER_BYTES)));
 
-    // Frame wait: a side 4 frames ahead waits about 2, then backs off.
+    // Frame wait: a side 4 frames ahead waits 2, then backs off.
     memset(&net_a, 0, sizeof net_a);
-    net_a.peer_advantage = -2;
+    for (unsigned i = 0u; i < RECOMP_NETPLAY_SYNC_FRAMES; ++i) net_a.peer_samples[i] = -2;
+    net_a.peer_count = RECOMP_NETPLAY_SYNC_FRAMES;
     uint32_t waited = 0u;
     for (unsigned i = 0u; i < RECOMP_NETPLAY_SYNC_FRAMES; ++i) waited += recomp_netplay_wait_frames(&net_a, 2);
     check("ahead side waits", waited == 2u);
     check("cooldown", recomp_netplay_wait_frames(&net_a, 2) == 0u);
     memset(&net_b, 0, sizeof net_b);
-    net_b.peer_advantage = 2;
+    for (unsigned i = 0u; i < RECOMP_NETPLAY_SYNC_FRAMES; ++i) net_b.peer_samples[i] = 2;
+    net_b.peer_count = RECOMP_NETPLAY_SYNC_FRAMES;
     waited = 0u;
     for (unsigned i = 0u; i < 2u * RECOMP_NETPLAY_SYNC_FRAMES; ++i) waited += recomp_netplay_wait_frames(&net_b, -2);
     check("behind side never waits", waited == 0u);
+
+    // A peer frame is sampled once, however many packets repeat it.
+    recomp_rollback_init(&a, 0u);
+    memset(&net_a, 0, sizeof net_a);
+    a.frame = 3u;
+    size = recomp_netplay_encode(&net_a, &a, 6, packet);
+    memset(&net_b, 0, sizeof net_b);
+    recomp_rollback_init(&b, 0u);
+    for (int i = 0; i < 5; ++i) recomp_netplay_decode(&net_b, &b, packet, size);
+    check("one sample per peer frame", net_b.peer_count == 1u && net_b.peer_samples[0] == 6);
 
     // Real sockets on loopback: pads cross both ways.
     recomp_rollback_init(&a, 0u);

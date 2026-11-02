@@ -136,9 +136,11 @@ Limits of this stage:
   lag 8 the Story save after the fight, about 1,050 frames in, does this.
   The session must fall back to lockstep before the game saves.
 - Loopback has no local player, so port 1 stays empty.
-- Two of about ten hidden-frame runs ended with exit code -1 and no host
-  report, and WerFault crashed while handling one. None of the runs under a
-  debugger crashed, and the cause is unknown.
+- Two early hidden-frame runs ended with exit code -1 and no host report.
+  Both started while the runner was being rebuilt and other runners were
+  being killed. 69 later lag 4 runs of 1,000 frames, several at once, on
+  this build and on a rebuild of the commit that first showed it, all exited
+  normally, so the cause is unconfirmed.
 
 ## Transport and pacing
 
@@ -158,37 +160,58 @@ player instead. While the session is outside its window, the newest frame
 waits and sends every 4 ms, for up to 120 s before first contact and 5 s
 after it.
 
-Shown frames are already held to 60 Hz by the presenter (its vsync
-interval, or its own 1/60 s grid with VRR); hidden frames run unpaced. Each
-side also reports its advantage: its frame minus the peer's last reported
-frame. Both sides' advantages include the same latency, so half their
-difference is how far ahead one side really is. Averaged over 32 frames,
-the side that is a frame or more ahead sleeps that many frames, then waits
-32 frames before it checks again.
+The presenter holds shown frames to 60 Hz, but the guest may run up to two
+frames ahead into its queue, and a sleep there only used up that slack. So
+each new frame of a UDP session starts on the runner's own 1/60 s grid, and
+a late frame may catch up by at most two frames. The local pad is read and
+any rewind taken when the frame's slot arrives, so pacing adds no input lag
+and one replay covers every pad that came in meanwhile. Hidden frames run
+unpaced.
+
+Each side also reports its advantage: its frame minus the peer's last
+reported frame, measured once per new frame and repeated unchanged while it
+stalls. The receiver keeps one sample per new peer frame. Both advantages
+include the same round trip, so half the difference of the two 32-frame
+averages is how far ahead one side really is. The side a frame or more
+ahead moves its grid back that many frames, then waits 32 frames before it
+checks again. On an asymmetric link the advantages settle equal, so both
+sides predict the same number of frames.
 
 Two runners on one machine, each in its own hardlinked play folder, started
 at swap 3000 and stopped at frame 900 with every pad confirmed. The lossy
-link went through a relay that delayed each packet 50 ms ±20% and dropped 5%:
+link went through a relay that delayed each packet ±20% and dropped some:
 
 | Link | Input delay | Rollbacks per side | Frames run again | Time |
 |---|---|---|---|---|
-| localhost | 0 | about 460 | about 470 | 15.1 s |
-| localhost | 2 | 0 to 1 | 0 to 1 | 15.0 s |
-| 50 ms, 5% loss | 0 | about 410 | about 1,410 | 17.0 s |
+| localhost | 0 | about 450 | about 455 | 15.0 to 15.2 s |
+| localhost | 2 | 0 | 0 | 15.0 s |
+| 50 ms each way, 5% loss | 0 | 350 to 390 | 1,210 to 1,270 | 18.9 to 19.1 s |
+| 10 ms out, 90 ms back, 2% loss | 0 | 380 to 460 | 1,240 to 1,460 | 17.5 to 19.4 s |
+| 10 ms out, 90 ms back, 2% loss | 2 | about 500 | about 950 | 15.4 to 15.5 s |
+
+Other work on the machine moved times by up to 2 s between identical runs.
+Alternating runs with and without the grid on the asymmetric link took the
+same time within that spread. At input delay 0 the replays cost more than a
+frame's budget, so both sides fall below 60 Hz together.
 
 In every pair the two sides' guest RAM matched except for one save file's
 times, which the game lists at boot and the host reports from each play
 folder. Players' profiles and save metadata will differ the same way, so
-the lobby must start both sides from the same profile. Frame sync did not
-need to wait in these runs, because both sides carried the same load; only
-its unit test covers it.
+the lobby must start both sides from the same profile.
+
+A temporary hook slept player 1 for 250 ms at frame 300 on localhost with
+input delay 2. Before the grid, player 0 settled a frame ahead (advantages
+about 2 and 0) and waited 15 times without closing the gap, because each
+sleep only drained the presenter queue. With the grid it waited 4 frames
+and both advantages were back to 0 by frame 420.
 
 Limits of the transport:
 
 - IPv4 only. There is no close handshake: a finished side repeats its last
   packet for half a second.
-- The window does not process messages while a frame waits for the peer.
 - There is no desync check between peers yet.
+- The grid assumes the 60 Hz progressive mode. With a display slower than
+  60 Hz the guest would wait in the presenter queue instead; that is untested.
 
 ## Entry point
 

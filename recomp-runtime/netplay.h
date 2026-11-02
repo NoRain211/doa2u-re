@@ -31,9 +31,12 @@ typedef struct RecompNetplay {
     uint32_t peer_ack;     /* local pads the peer holds */
     uint32_t peer_frame;   /* the peer's next frame when it last sent */
     int32_t peer_advantage;
-    /* Recent (local - peer advantage) samples for the frame wait. */
-    int32_t gaps[RECOMP_NETPLAY_SYNC_FRAMES];
-    uint32_t gap_count;
+    /* One advantage per frame on each side. Sampling the peer once per local
+       frame would count its stalls, when it sends nothing new, too often. */
+    int32_t local_samples[RECOMP_NETPLAY_SYNC_FRAMES];
+    int32_t peer_samples[RECOMP_NETPLAY_SYNC_FRAMES];
+    uint32_t local_count;
+    uint32_t peer_count;
     uint32_t cooldown;
 } RecompNetplay;
 
@@ -46,8 +49,9 @@ void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *sessio
     int32_t advantage);
 /* Drains the socket into the session. */
 void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *session);
-/* Frames to wait now so neither side runs ahead: half the averaged difference
-   of the two advantages, which cancels the latency both of them include. */
+/* Frames to wait now so neither side runs ahead: half the difference of the
+   two averaged advantages, which cancels the latency both of them include.
+   Call once per new frame with the advantage that frame sent. */
 uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage);
 
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *session,

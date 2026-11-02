@@ -97,10 +97,14 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     const uint32_t ack = get32(packet + 8);
     if (ack > s->local_count) return false;
     const uint32_t first = get32(packet + 16);
+    const uint32_t frame = get32(packet + 4);
+    const int32_t advantage = (int32_t)get32(packet + 12);
+    if (!net->peer_seen || frame > net->peer_frame)
+        net->peer_samples[net->peer_count++ % RECOMP_NETPLAY_SYNC_FRAMES] = advantage;
     /* Packets can arrive out of order; only newer state moves forward. */
-    if (!net->peer_seen || get32(packet + 4) >= net->peer_frame) {
-        net->peer_frame = get32(packet + 4);
-        net->peer_advantage = (int32_t)get32(packet + 12);
+    if (!net->peer_seen || frame >= net->peer_frame) {
+        net->peer_frame = frame;
+        net->peer_advantage = advantage;
     }
     if (ack > net->peer_ack) net->peer_ack = ack;
     net->peer_seen = true;
@@ -198,16 +202,18 @@ void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *s)
 
 uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage)
 {
-    net->gaps[net->gap_count++ % RECOMP_NETPLAY_SYNC_FRAMES] = advantage - net->peer_advantage;
+    enum { N = RECOMP_NETPLAY_SYNC_FRAMES };
+    net->local_samples[net->local_count++ % N] = advantage;
     if (net->cooldown != 0u) {
         --net->cooldown;
         return 0u;
     }
-    if (net->gap_count < RECOMP_NETPLAY_SYNC_FRAMES) return 0u;
-    int32_t sum = 0;
-    for (uint32_t i = 0u; i < RECOMP_NETPLAY_SYNC_FRAMES; ++i) sum += net->gaps[i];
-    /* Half the averaged difference, rounded down: a one-frame gap is noise. */
-    const int32_t wait = sum / (int32_t)(2u * RECOMP_NETPLAY_SYNC_FRAMES);
+    if (net->local_count < N || net->peer_count < N) return 0u;
+    int32_t difference = 0;
+    for (uint32_t i = 0u; i < N; ++i) difference += net->local_samples[i] - net->peer_samples[i];
+    if (difference <= 0) return 0u;
+    /* Half the averaged difference, rounded to the nearest frame. */
+    const int32_t wait = (difference + (int32_t)N) / (int32_t)(2u * N);
     if (wait <= 0) return 0u;
     /* The peer needs a round trip to report the new advantage. */
     net->cooldown = RECOMP_NETPLAY_SYNC_FRAMES;
