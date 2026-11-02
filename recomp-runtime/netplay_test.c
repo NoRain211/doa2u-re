@@ -108,11 +108,14 @@ int main(void)
     recomp_netplay_close(&net_b);
 
     static const char *const allowed[] = {"PLAYER1", "Ayane", "Raccoon", "Tycoon", "Spice", "Nigeria",
-        "Homer", "Pakistan", "Hayabusa 2", ""};
+        "Homer", "Pakistan", "Hayabusa 2", "Nazir", "Maryann", "Fascia", "Heilman", "Kasumi1988",
+        "Shelby88", ""};
     for (size_t i = 0u; i < sizeof allowed / sizeof *allowed; ++i)
         check(allowed[i], !recomp_netplay_name_banned(allowed[i]));
     static const char *const banned[] = {"N1GG3R", "xX_n i g g a_Xx", "f4g", "FAGS", "FAG123", "Tr4nny",
-        "c00n", "Dyke_99", "niiiggggerrr", "\xc3\xa9" "faggot"};
+        "c00n", "Dyke_99", "niiiggggerrr", "\xc3\xa9" "faggot", "1488", "14_88", "Kasumi14 88", "H1TL3R",
+        "Sieg Heil", "N4ZI", "Nazis", "xXneonaziXx", "Fascist", "facist", "WhitePower", "kkk_lord",
+        "Aryan", "HH88"};
     for (size_t i = 0u; i < sizeof banned / sizeof *banned; ++i)
         check(banned[i], recomp_netplay_name_banned(banned[i]));
     char longName[300];

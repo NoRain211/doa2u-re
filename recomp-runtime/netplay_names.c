@@ -3,17 +3,27 @@
 #include <ctype.h>
 #include <string.h>
 
-/* Slurs against race, sexuality and gender identity. Long ones match
-   anywhere in a name's letters; short ones, which hide inside ordinary
-   words, only as a whole word, with or without a plural s. A run of one
-   letter here needs at least as many of that letter in the name. */
+/* Slurs against race, sexuality and gender identity, and Nazi and fascist
+   references. Long ones match anywhere in a name's letters; short ones,
+   which hide inside ordinary words, only as a whole word, with or without a
+   plural s. A run of one letter here needs at least as many of that letter
+   in the name. */
 static const char *const anywhere[] = {
     "nigger", "nigga", "faggot", "tranny", "trannie", "shemale", "wetback", "raghead", "towelhead",
     "jigaboo", "porchmonkey", "zipperhead", "beaner", "spearchucker", "chingchong",
+    "hitler", "neonazi", "natsoc", "siegheil", "fuhrer", "fuehrer", "thirdreich", "fourthreich",
+    "swastika", "sonnenrad", "totenkopf", "zyklon", "holohoax", "gasthejews", "auschwitz",
+    "goebbels", "himmler", "mengele", "eichmann", "mussolini", "fascis", "facist", "whitepower",
+    "whitepride", "wpww", "rahowa", "bloodandhono", "fourteenwords", "kkk",
 };
 static const char *const whole[] = {
     "nig", "niga", "fag", "fagot", "chink", "gook", "spic", "spick", "kike", "coon", "dyke", "paki",
-    "homo", "troon",
+    "homo", "troon", "nazi", "heil", "aryan",
+};
+/* White supremacist number codes, in a name's letters and digits with
+   everything else dropped. */
+static const char *const codes[] = {
+    "1488", "14words", "hh88", "88hh", "6mwe",
 };
 
 enum { MAX_NAME = 256 };
@@ -71,6 +81,13 @@ static bool normalize(const char *name, bool leet, char *out, size_t *size)
 
 bool recomp_netplay_name_banned(const char *name)
 {
+    char code[MAX_NAME + 1u];
+    size_t code_size = 0u;
+    for (const unsigned char *c = (const unsigned char *)name; *c != 0u && code_size < MAX_NAME; ++c)
+        if (*c < 0x80u && isalnum(*c)) code[code_size++] = (char)tolower(*c);
+    code[code_size] = 0;
+    for (size_t i = 0u; i < sizeof codes / sizeof *codes; ++i)
+        if (strstr(code, codes[i]) != NULL) return true;
     for (int leet = 0; leet < 2; ++leet) {
         char text[MAX_NAME], letters[MAX_NAME];
         size_t size, joined = 0u;

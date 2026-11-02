@@ -91,6 +91,7 @@ bool recomp_netplay_open_router_port(uint16_t port);
 /* Removes that forward; nothing when none was made. */
 void recomp_netplay_close_router_port(void);
 /* True for a profile name holding a racist, homophobic or transphobic slur,
+   a Nazi or fascist reference or a white supremacist number code like 1488,
    also spelled with digits, symbols, spacing or repeated letters, and for
    one too long to check. Takes UTF-8. */
 bool recomp_netplay_name_banned(const char *name);

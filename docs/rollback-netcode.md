@@ -245,8 +245,10 @@ no Windows device names. The host's 92 KB blob arrives in one run of
 bursts on a local network. The log names both players from the `Name=`
 line of each profile's `SaveMeta.xbx`.
 
-Names holding a racist, homophobic or transphobic slur stay offline
-(`netplay_names.c`). The list ignores case and catches digits and symbols
+Names holding a racist, homophobic or transphobic slur, a Nazi or fascist
+reference, or a white supremacist number code such as 1488 stay offline
+(`netplay_names.c`). Number codes match the name's letters and digits with
+spacing and symbols dropped. The list ignores case and catches digits and symbols
 that stand for letters, letters spaced apart and repeated letters. Short
 words that hide inside ordinary ones match only as a whole word. A runner
 refuses to connect with such a name of its own, and refuses the other
