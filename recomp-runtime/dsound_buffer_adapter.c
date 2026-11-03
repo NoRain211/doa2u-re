@@ -69,6 +69,8 @@ void recomp_dsound_output_unlock(void) { output_held = false; pthread_mutex_unlo
 static bool pump_stopping;
 /* A failure seen by the pump thread, raised on the game thread's next DoWork. */
 static const char *pump_failure;
+/* When the game thread last pumped; looping rings play at most 100 ms past it. */
+static uint64_t game_pump_ms;
 
 static uint32_t canonical(uint32_t address)
 {
@@ -269,8 +271,14 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
         if (background) return;
         recomp_stop(2, "dsound:audio-output-failed");
     }
+    /* Every game-thread call counts, so a loop started by Play is not capped behind its start. */
+    if (!background) game_pump_ms = now;
     if (!buffer->model.playing || !buffer->pcm) return;
-    if (background && now - buffer->model.last_ms < 10u) return;
+    /* A stalled game cannot refill a ring; past CRI's ~200 ms lead the ring
+       would replay audio already heard, so a long stall goes quiet instead. */
+    if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING) && now > game_pump_ms + 100u)
+        now = game_pump_ms + 100u;
+    if (background && now < buffer->model.last_ms + 10u) return;
     uint32_t offset = 0u;
     uint32_t bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
     if (!bytes) return;
