@@ -79,8 +79,8 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 6. In Cloudflare DNS, add an A record such as `mm` with the VM's public
    address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
    proxied name would not reach a UDP server.
-7. Set MATCHMAKER to `mm.<domain>:47700` on two machines on different
-   home networks. HOST ONLINE should say LISTED ON FIND MATCH and the
+7. Leave MATCHMAKER on DEFAULT on two machines on different home
+   networks. HOST ONLINE should say LISTED ON FIND MATCH and the
    other should quick-match it, which is also the first test of punching
    through real routers.
 
@@ -113,8 +113,9 @@ returns if its host still says it is open. A joiner repeats JOIN every
 MATCHMAKER in NETPLAY SETTINGS names the server as host:port, edited like
 a JOIN ONLINE address with host names allowed, and is kept in
 `.recomp-storage/netplay.txt` as a line such as
-`matchmaker 203.0.113.7:47700`. Without one, FIND MATCH says to set it
-and HOST ONLINE is not listed. All of a room's matchmaking runs on the
+`matchmaker 203.0.113.7:47700`. Left empty, it shows DEFAULT and the
+runner uses its built-in server, so every HOST ONLINE room is listed
+while that server answers. All of a room's matchmaking runs on the
 room's own socket, in `recomp-runtime/netplay.c`. Its receives record the server's
 answers and unwrap relayed packets as if the peer sent them, and its sends
 wrap packets for a relayed peer. So the room, the session lobby and the
@@ -161,7 +162,8 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 
 ## Not done yet
 
-- The game has no default server.
+- The default server is not running yet; until it is, FIND MATCH says
+  THE MATCHMAKER CANNOT BE FOUND and hosts are not listed.
 - Check how to keep Oracle from reclaiming the idle VM, such as a Pay As
   You Go account, before relying on it.
 - Punching has only been tested on one machine, not through real routers.

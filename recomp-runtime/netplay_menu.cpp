@@ -224,14 +224,27 @@ void enterRoom(bool hosting)
     menu.screen = Screen::Room;
 }
 
-// Points the socket at the matchmaker from NETPLAY SETTINGS; false when none is set or it does not resolve.
+// The default matchmaker's host:port, XORed with 0x5a so it is not plain text in the source or the binary.
+// shortcut: this only keeps the name out of a casual search; DNS lookups still show it.
+std::string defaultMatchmaker()
+{
+    static const unsigned char coded[] = {0x37, 0x37, 0x74, 0x34, 0x3f, 0x3c, 0x3c, 0x39, 0x35, 0x28, 0x3e,
+        0x74, 0x39, 0x35, 0x37, 0x60, 0x6e, 0x6d, 0x6d, 0x6a, 0x6a};
+    std::string server;
+    for (const unsigned char c : coded) server.push_back(static_cast<char>(c ^ 0x5au));
+    return server;
+}
+
+// Points the socket at the matchmaker from NETPLAY SETTINGS, or the default when none is set; false when it
+// does not resolve.
 bool useMatchmaker(RecompNetplay &net)
 {
-    const std::size_t colon = menu.matchmaker.rfind(':');
+    const std::string server = menu.matchmaker.empty() ? defaultMatchmaker() : menu.matchmaker;
+    const std::size_t colon = server.rfind(':');
     if (colon == std::string::npos) return false;
-    const unsigned long port = std::strtoul(menu.matchmaker.c_str() + colon + 1u, nullptr, 10);
+    const unsigned long port = std::strtoul(server.c_str() + colon + 1u, nullptr, 10);
     return port != 0u && port <= 65535u &&
-        recomp_netplay_match_server(&net, menu.matchmaker.substr(0u, colon).c_str(), static_cast<std::uint16_t>(port));
+        recomp_netplay_match_server(&net, server.substr(0u, colon).c_str(), static_cast<std::uint16_t>(port));
 }
 
 // bound: the socket is already listening, handed back by a session.
@@ -243,7 +256,7 @@ void host(bool bound = false)
         menu.message = "UDP PORT " + std::to_string(menu.port) + " IS IN USE.";
         return;
     }
-    if (!bound) (void)useMatchmaker(menu.net); // listed for FIND MATCH when one is set
+    if (!bound) (void)useMatchmaker(menu.net); // listed for FIND MATCH when the matchmaker resolves
     openRouterPort(static_cast<std::uint16_t>(menu.port));
     menu.found = false;
     enterRoom(true);
@@ -277,13 +290,9 @@ void join(bool bound = false)
 void find()
 {
     if (!nameAllowed()) return;
-    if (menu.matchmaker.empty()) {
-        menu.message = "SET A MATCHMAKER IN NETPLAY SETTINGS.";
-        return;
-    }
     if (!recomp_netplay_listen(&menu.net, 0u) || !useMatchmaker(menu.net)) {
         recomp_netplay_close(&menu.net);
-        menu.message = "THE MATCHMAKER'S ADDRESS CANNOT BE USED.";
+        menu.message = "THE MATCHMAKER CANNOT BE FOUND.";
         return;
     }
     menu.listOk = menu.quick = false;
@@ -780,7 +789,7 @@ void draw()
         item(238.0f, menu.cursor == 2, "NETWORK DISPLAY");
         recomp_overlay_text(600.0f - recomp_overlay_text_width(display.c_str(), 2.0f), 242.0f, 2.0f, White,
             display.c_str());
-        const std::string server = menu.matchmaker.empty() ? "NONE" : menu.matchmaker;
+        const std::string server = menu.matchmaker.empty() ? "DEFAULT" : menu.matchmaker;
         item(290.0f, menu.cursor == 3, "MATCHMAKER");
         // A value too wide for the 132 pixels right of the highlight goes on its own line below the row.
         const bool fits = recomp_overlay_text_width(server.c_str(), 2.0f) <= 132.0f;
@@ -816,7 +825,7 @@ void draw()
         recomp_overlay_text(68.0f, 169.0f, 2.0f, White, menu.matchmaker.c_str());
         if ((menu.frame / 20u) % 2u == 0u)
             recomp_overlay_rect(68.0f + 12.0f * static_cast<float>(menu.caret), 186.0f, 10.0f, 2.0f, Red);
-        recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, "LEAVE IT EMPTY FOR NO MATCHMAKER.");
+        recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, "LEAVE IT EMPTY FOR THE DEFAULT SERVER.");
         editorHints("A/B DONE", "ENTER/ESC DONE");
         return;
     }
