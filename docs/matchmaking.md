@@ -67,17 +67,19 @@ returns if its host still says it is open. A joiner repeats JOIN every
 
 ## In the game
 
-`netplay.txt` in `.recomp-storage` names the server with a line such as
-`matchmaker 203.0.113.7:47700`; without one, FIND MATCH says so and HOST
-ONLINE is not listed. All of a room's matchmaking runs on the room's own
-socket, in `recomp-runtime/netplay.c`. Its receives record the server's
+MATCHMAKER in NETPLAY SETTINGS names the server as host:port, edited like
+a JOIN ONLINE address with host names allowed, and is kept in
+`.recomp-storage/netplay.txt` as a line such as
+`matchmaker 203.0.113.7:47700`. Without one, FIND MATCH says to set it
+and HOST ONLINE is not listed. All of a room's matchmaking runs on the
+room's own socket, in `recomp-runtime/netplay.c`. Its receives record the server's
 answers and unwrap relayed packets as if the peer sent them, and its sends
 wrap packets for a relayed peer. So the room, the session lobby and the
 session run the same way over either path.
 
 - HOST ONLINE says HOST every 5 s while its room is up, open while nobody
-  is in it, and LEAVE when the host leaves. Its room shows FIND MATCH
-  LISTED.
+  is in it, and LEAVE when the host leaves. Its room's status says LISTED
+  ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
   check. A joins the chosen room and Y quick-matches.
@@ -116,7 +118,7 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 
 ## Not done yet
 
-- The game has no default server and no way to set one from the menus.
+- The game has no default server.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.

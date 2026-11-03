@@ -256,7 +256,8 @@ until it closes. The menu opens on an A press while frontend scene
 `g_game_mode_state` at 4. LOCAL hands the game an A press once every
 button is up; B closes the menu and holds the game's pads idle until then,
 so the game never sees it. The input delay, the host's port and the last
-host joined are kept in `.recomp-storage/netplay.txt`.
+host joined are kept in `.recomp-storage/netplay.txt`, with the
+[matchmaker](matchmaking.md) set under NETPLAY SETTINGS.
 
 HOST ONLINE binds the port, asks the router for a forward on a background
 thread and shows the address to send. JOIN ONLINE takes an address from
