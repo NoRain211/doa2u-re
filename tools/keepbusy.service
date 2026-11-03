@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Keeps an Always Free VM above Oracle's idle line (7 days of 95th-percentile CPU
+# under 20%) without a paid upgrade: one spin loop held to 60% of one of the two
+# vCPUs, about 30% of the VM, at idle priority so the matchmaker always runs first.
+# docs/matchmaking.md has the install steps.
+[Unit]
+Description=Keep the matchmaker VM above Oracle's idle reclaim line
+
+[Service]
+ExecStart=/bin/sh -c 'while :; do :; done'
+CPUQuota=60%
+CPUSchedulingPolicy=idle
+Nice=19
+Restart=always
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+MemoryMax=16M
+
+[Install]
+WantedBy=multi-user.target

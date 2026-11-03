@@ -65,7 +65,8 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
    network, and memory on A1 shapes, under 20%), and the matchmaker always
    looks idle. Oracle's reclamation notices offered the upgrade as the way
    out; usage inside the Always Free limits stays free, and the alert
-   catches anything that is not.
+   catches anything that is not. An account that stays on Free Tier can run
+   `keepbusy.service` instead (step 5), which holds the VM at about 30% CPU.
 3. Create an instance from the Canonical Ubuntu 24.04 image on the
    VM.Standard.E2.1.Micro shape (1/8 OCPU, 1 GB, Always Free, two per
    account), with a public IPv4 address and SSH keys only. It is far more
@@ -81,6 +82,12 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
        sudo netfilter-persistent save
        sudo systemctl daemon-reload
        sudo systemctl enable --now doa2u-matchmaker
+
+   On a Free Tier account, also:
+
+       sudo install -m 0644 keepbusy.service /etc/systemd/system/doa2u-keepbusy.service
+       sudo systemctl daemon-reload
+       sudo systemctl enable --now doa2u-keepbusy
 
    Oracle's Ubuntu images end the INPUT chain with a REJECT, so the port
    is opened there as well as in the security list. To update the server,
