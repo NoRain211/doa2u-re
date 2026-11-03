@@ -781,10 +781,12 @@ void draw()
         recomp_overlay_text(600.0f - recomp_overlay_text_width(display.c_str(), 2.0f), 242.0f, 2.0f, White,
             display.c_str());
         const std::string server = menu.matchmaker.empty() ? "NONE" : menu.matchmaker;
-        const float scale = server.size() > 30u ? 1.5f : 2.0f; // long names stay clear of the label
         item(290.0f, menu.cursor == 3, "MATCHMAKER");
-        recomp_overlay_text(600.0f - recomp_overlay_text_width(server.c_str(), scale), 294.0f, scale, White,
-            server.c_str());
+        // A value too wide for the 132 pixels right of the highlight goes on its own line below the row.
+        const bool fits = recomp_overlay_text_width(server.c_str(), 2.0f) <= 132.0f;
+        const float scale = fits ? 2.0f : 1.5f;
+        recomp_overlay_text(600.0f - recomp_overlay_text_width(server.c_str(), scale), fits ? 294.0f : 330.0f, scale,
+            White, server.c_str());
         static const char *const details[4] = {
             "LOWER DELAY FEELS SHARPER, MORE ROLLBACK.",
             "THE HOST'S ROUTER MUST LET THIS PORT IN.",
