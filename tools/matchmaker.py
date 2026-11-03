@@ -31,6 +31,8 @@ MAX_RELAY = 1200
 HOST_BODY = struct.Struct(">64sBBB32s6s")  # digest, delay, open, name length, name, LAN endpoint
 JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, LAN endpoint
 ENTRY = struct.Struct(">IHBB32s")  # room id, age in seconds, delay, name length, name
+ENTRY_AT = struct.Struct(">IHBB32s6s")  # the same and the host's public endpoint, for a list that asks for it
+WITH_ENDPOINTS = 1  # the byte after a list request's digest; older clients send 0 and read ENTRY
 
 
 def header(kind):
@@ -78,7 +80,7 @@ class Matchmaker:
         if kind == HOST and len(body) == HOST_BODY.size:
             return self.host(body, sender, now)
         if kind == LIST and len(data) == LIST_BYTES:
-            return self.list(body[:DIGEST], sender, now)
+            return self.list(body[:DIGEST], body[DIGEST] == WITH_ENDPOINTS, sender, now)
         if kind == JOIN and len(body) == JOIN_BODY.size:
             return self.join(body, sender, now)
         if kind == LEAVE:
@@ -105,14 +107,18 @@ class Matchmaker:
         room.name, room.lan, room.seen = name[:length], lan, now
         return [(header(HOSTED) + struct.pack(">I", room.id) + endpoint(sender), sender)]
 
-    def list(self, digest, sender, now):
+    def list(self, digest, endpoints, sender, now):
         rooms = sorted((room for room in self.rooms.values()
                         if room.digest == digest and room.open and room.claimed_until <= now and room.host != sender),
                        key=lambda room: room.born)
-        rooms = rooms[:(LIST_BYTES - 7) // ENTRY.size]
+        entry = ENTRY_AT if endpoints else ENTRY
+        rooms = rooms[:(LIST_BYTES - 7) // entry.size]
         answer = header(ROOMS) + bytes((len(rooms),))
         for room in rooms:
-            answer += ENTRY.pack(room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name)
+            fields = (room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name)
+            if endpoints:  # a listed room is public, so joiners may ping its host
+                fields += (bytes(6) if self.relay_only else endpoint(room.host),)
+            answer += entry.pack(*fields)
         return [(answer, sender)]
 
     def join(self, body, sender, now):

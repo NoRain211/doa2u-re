@@ -136,6 +136,72 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     return met;
 }
 
+// A ROOMS answer listing one room named HOST, with its host at 127.0.0.1:port, or without an
+// endpoint, as an older server sends it.
+static std::vector<std::uint8_t> roomsPacket(std::uint32_t id, std::uint16_t port, bool endpoints)
+{
+    std::vector<std::uint8_t> packet = {'D', '2', 'M', 'M', 1u, 4u, 1u};
+    for (int shift = 24; shift >= 0; shift -= 8) packet.push_back(static_cast<std::uint8_t>(id >> shift));
+    const std::uint8_t rest[] = {0u, 7u, 2u, 4u, 'H', 'O', 'S', 'T'}; // age, delay, name length, name
+    packet.insert(packet.end(), rest, rest + sizeof rest);
+    packet.resize(7u + 40u);
+    if (endpoints) {
+        const std::uint8_t at[6] = {127u, 0u, 0u, 1u, static_cast<std::uint8_t>(port >> 8), static_cast<std::uint8_t>(port)};
+        packet.insert(packet.end(), at, at + 6);
+    }
+    return packet;
+}
+
+// FIND MATCH pings a listed host's room at the endpoint in the list, and keeps the ping when the
+// room is listed again. A room its host does not list stays quiet, and an older server's list has
+// no endpoint to ping.
+static void probeRooms()
+{
+    using std::chrono::steady_clock;
+    RecompNetplay server, host, joiner;
+    check("probe sockets", recomp_netplay_listen(&server, 47623u) && recomp_netplay_listen(&host, 47624u) &&
+        recomp_netplay_listen(&joiner, 47625u) && recomp_netplay_match_server(&joiner, "127.0.0.1", 47623u));
+    RecompNetplayRoom room{};
+    room.hosting = true;
+    char digest[RECOMP_NETPLAY_DIGEST_BYTES];
+    std::memset(digest, 'a', sizeof digest);
+    const RecompNetplayListedRoom &listed = joiner.match.rooms[0];
+    const auto list = [&](std::uint32_t id, std::uint16_t port, bool endpoints) {
+        sendFrom(server, 47625u, roomsPacket(id, port, endpoints));
+        const auto end = steady_clock::now() + std::chrono::seconds(2);
+        while (!joiner.match.listed && steady_clock::now() < end) {
+            recomp_netplay_match_poll(&joiner);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const bool heard = joiner.match.listed && joiner.match.room_count == 1u && listed.id == id &&
+            std::strcmp(listed.name, "HOST") == 0;
+        joiner.match.listed = false;
+        return heard;
+    };
+    const auto probe = [&](int milliseconds) {
+        recomp_netplay_match_probe(&joiner);
+        const auto end = steady_clock::now() + std::chrono::milliseconds(milliseconds);
+        while (!listed.pinged && steady_clock::now() < end) {
+            recomp_netplay_room_tick(&host, &room, digest, "HOST", false, false);
+            recomp_netplay_match_poll(&joiner);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return listed.pinged;
+    };
+    host.match.room_id = 0x01020304u; // as the server's HOSTED answer sets it
+    check("list carries the host's endpoint", list(0x01020304u, 47624u, true) &&
+        listed.address == htonl(0x7f000001u) && listed.port == htons(47624u) && !listed.pinged);
+    check("listed room answers a ping", probe(2000) && listed.ping_ms < 1000u);
+    check("a room listed again keeps its ping", list(0x01020304u, 47624u, true) && listed.pinged);
+    host.match.room_id = 0u; // private, or not listed yet
+    check("an unlisted room stays quiet", list(0x01020305u, 47624u, true) && !probe(300));
+    check("an older server's list has no endpoint", list(0x01020304u, 0u, false) && listed.port == 0u &&
+        !listed.pinged);
+    recomp_netplay_close(&server);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+}
+
 int main()
 {
     // The joiner adopts the host's settings, the two swap profiles, and the host learns the joiner's address.
@@ -320,6 +386,7 @@ int main()
     check("matched rooms punch through", matchRooms(47621u, 47620u, 4500, relayed) && !relayed);
     check("matched rooms relay without endpoints", matchRooms(0u, 0u, 5000, relayed) && relayed);
     check("matched rooms relay when punching fails", matchRooms(47629u, 47628u, 10000, relayed) && relayed);
+    probeRooms();
 
     if (failures != 0) return 1;
     std::puts("PASS netplay lobby joins one build, swaps profiles, refuses another and runs a room");

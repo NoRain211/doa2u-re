@@ -49,8 +49,10 @@ Only in memory, and the log holds only the status counts:
 - Each pair made by a join: the two public endpoints, kept 10 minutes past
   their last relayed packet.
 
-The room list shows ids, names, ages and delays. Endpoints go only to the
-two players of a join.
+The room list shows ids, names, ages and delays, and to a runner that asks,
+each host's public endpoint so the runner can ping the room; a listed room
+is public. Other endpoints go only to the two players of a join, and
+`--relay-only` sends none.
 
 ## Deploying
 
@@ -103,7 +105,7 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
 | 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint | 2 HOSTED: room id, the host's public endpoint |
-| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay and name per room, oldest first |
+| 3 LIST | anyone | digest, then 1 to ask for endpoints, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and, when asked, the host's public endpoint per room, oldest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public and LAN endpoints and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same packet to the other player, up to 250 a second |
@@ -113,6 +115,11 @@ address cannot turn the server into an amplifier. That is why LIST is
 padded. A joined room leaves the list for 10 s while the two connect, and
 returns if its host still says it is open. A joiner repeats JOIN every
 0.5 s until it hears, and the server answers its own claim again.
+
+A list entry is 40 bytes, or 46 with the endpoint. Runners before the ping
+send 0 after the digest and read 40-byte entries, and current runners read
+either, so old and new runners and servers still list and join each other;
+against an older server the list shows no pings.
 
 ## In the game
 
@@ -139,6 +146,14 @@ session run the same way over either path.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
   check. A joins the chosen room and Y quick-matches.
+- After each list, FIND MATCH sends each room's host a 12-byte ping
+  (`D2PI`, the room id and the runner's clock) at its listed endpoint. A
+  host's room answers with the same bytes as `D2PO` only while the server
+  lists it under that id, so a private room never answers, and a session
+  drops pings as it drops any packet from a stranger. The list shows each
+  room's round trip, or `--` until one answers. Quick match waits until
+  every room answered or a second passed, then takes the lowest ping, or
+  the oldest room when none answered.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. After 5 s without an answer, or with no endpoints,
@@ -160,8 +175,9 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 1. The host opens its room, asks the router over UPnP as now, and says
    HOST from its room socket. The server records the address the packet
    came from, which is the host's public endpoint.
-2. Quick match sends LIST, which returns only rooms on the same build, and
-   joins the oldest. With none open, the player hosts instead.
+2. Quick match sends LIST, which returns only rooms on the same build,
+   pings them and joins the nearest, or the oldest when none answered.
+   With none open, the player hosts instead.
 3. JOIN gives both players the other's public and LAN endpoints. Both then
    send room packets to both endpoints for about 5 s. The first that
    answers becomes the peer. Sending first opens each router for the
@@ -179,5 +195,7 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
-- Rooms carry no region, so quick match does not prefer nearby hosts.
+- A ping reaches a host only when its router lets a stranger's packet in,
+  as a UPnP or hand forward does. Other rooms show `--` and quick match
+  takes them only when no room answered.
 - IPv4 only.

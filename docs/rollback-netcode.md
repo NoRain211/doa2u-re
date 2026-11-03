@@ -266,6 +266,9 @@ the keyboard, the d-pad or the clipboard. In the room each side says its build, 
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
+Once the host's room has a round trip, INPUT DELAY suggests one frame per
+33 ms of it, rounded up, none up to 20 ms, at most the rollback window;
+Y sets the delay to it. The joiner still takes whatever the host chose.
 
 Once the other player is in, Enter opens a chat line from the keyboard;
 Enter sends it and Esc drops it. While a line is open, the room ignores the

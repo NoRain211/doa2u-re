@@ -93,7 +93,7 @@ struct Menu {
     bool listOk = false, quick = false;
     int choice = 0;
     std::uint32_t joining = 0u;
-    Clock::time_point listedAt, joinStarted, askedAt;
+    Clock::time_point listedAt, joinStarted, askedAt, probedAt;
 };
 Menu menu;
 
@@ -353,7 +353,7 @@ void find()
     menu.listOk = menu.quick = false;
     menu.choice = 0;
     menu.joining = 0u;
-    menu.listedAt = Clock::time_point{};
+    menu.listedAt = menu.probedAt = Clock::time_point{};
     menu.message.clear();
     menu.screen = Screen::Find;
 }
@@ -411,6 +411,8 @@ void updateFind(std::uint16_t keys)
     if (match.listed) {
         match.listed = false;
         menu.listOk = true;
+        recomp_netplay_match_probe(&menu.net);
+        if (menu.probedAt == Clock::time_point{}) menu.probedAt = now;
     }
     if (keys & B) {
         if (menu.joining == 0u) {
@@ -445,11 +447,18 @@ void updateFind(std::uint16_t keys)
     if ((keys & Down) && count > 0) menu.choice = (menu.choice + 1) % count;
     if ((keys & A) && count > 0) askToJoin(rooms[static_cast<std::size_t>(menu.choice)]->id, now);
     if (keys & Y) menu.quick = true;
-    // Quick match takes the oldest open room once a list is in, or hosts one.
-    if (menu.quick && menu.listOk) {
+    // Quick match takes the open room with the lowest ping once every room answered or a second
+    // passed, the oldest when none answered, or hosts one when none is open.
+    const RecompNetplayListedRoom *nearest = nullptr;
+    bool allPinged = true;
+    for (const RecompNetplayListedRoom *room : rooms) {
+        allPinged = allPinged && room->pinged;
+        if (room->pinged && (nearest == nullptr || room->ping_ms < nearest->ping_ms)) nearest = room;
+    }
+    if (menu.quick && menu.listOk && (allPinged || now - menu.probedAt >= std::chrono::seconds(1))) {
         menu.quick = false;
         if (count > 0) {
-            askToJoin(rooms.front()->id, now);
+            askToJoin((nearest != nullptr ? nearest : rooms.front())->id, now);
         } else {
             recomp_netplay_close(&menu.net);
             menu.screen = Screen::Versus; // where a failed host leaves its message
@@ -561,6 +570,8 @@ bool updateRoom(std::uint16_t keys)
         return false;
     }
     if ((keys & (Left | Right)) && menu.hosting && !room.joined && !menu.starting) setListed(!menu.listing);
+    if ((keys & Y) && menu.hosting && room.pinged && !menu.starting)
+        menu.delay = recomp_netplay_suggested_delay(room.ping_ms);
     if (!peerAllowed) menu.ready = false;
     else if ((keys & A) && !menu.starting) menu.ready = !menu.ready;
     if ((keys & X) && menu.hosting) {
@@ -803,7 +814,12 @@ void drawRoom()
     } else if (menu.hosting) {
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
-        recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, ("INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES").c_str());
+        std::string delay = "INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES";
+        if (room.pinged) {
+            const std::uint32_t suggested = recomp_netplay_suggested_delay(room.ping_ms);
+            delay += suggested == menu.delay ? "  SUGGESTED" : "  Y SUGGESTED " + std::to_string(suggested);
+        }
+        recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, delay.c_str());
         const char *const kinds[2] = {"PUBLIC", "PRIVATE"};
         const std::string kind = kinds[menu.listing ? 0 : 1];
         recomp_overlay_text(40.0f, 374.0f, 2.0f, Gray, ("ROOM  " + (peer ? kind : "< " + kind + " >")).c_str());
@@ -918,14 +934,16 @@ void draw()
             const bool selected = static_cast<int>(i) == menu.choice && menu.joining == 0u;
             if (selected) recomp_overlay_rect(40.0f, y - 10.0f, 560.0f, 37.0f, Red);
             plateName(60.0f, y - 2.0f, rooms[i]->name, selected ? White : Gray);
-            const std::string detail = "DELAY " + std::to_string(rooms[i]->delay) + "  " +
+            const std::string ping = rooms[i]->pinged ? std::to_string(rooms[i]->ping_ms) : "--";
+            const std::string detail = ping + " MS  DELAY " + std::to_string(rooms[i]->delay) + "  " +
                 std::to_string(rooms[i]->age_s / 60u) + " MIN";
             recomp_overlay_text(588.0f - recomp_overlay_text_width(detail.c_str(), 2.0f), y + 2.0f, 2.0f,
                 selected ? White : Gray, detail.c_str());
         }
         const char *status = menu.joining != 0u ? "JOINING..."
             : !menu.listOk ? "ASKING THE MATCHMAKER..."
-            : rooms.empty() ? "NO OPEN ROOMS. Y HOSTS ONE FOR OTHERS TO FIND." : nullptr;
+            : rooms.empty() ? "NO OPEN ROOMS. Y HOSTS ONE FOR OTHERS TO FIND."
+            : menu.quick ? "FINDING THE NEAREST ROOM..." : nullptr;
         if (status != nullptr && menu.message.empty()) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, status);
         footer(menu.joining != 0u ? "B STOP" : "A JOIN   Y QUICK MATCH   B BACK");
         return;

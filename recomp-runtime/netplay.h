@@ -61,6 +61,12 @@ typedef struct RecompNetplayListedRoom {
     uint32_t age_s;
     uint8_t delay;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    /* The host's public endpoint, network order; port 0 when the server sent none. */
+    uint32_t address;
+    uint16_t port;
+    /* From recomp_netplay_match_probe's echo, kept while the room stays listed. */
+    uint32_t ping_ms;
+    bool pinged;
 } RecompNetplayListedRoom;
 
 /* What a socket heard from the matchmaker (tools/matchmaker.py), which the
@@ -158,11 +164,18 @@ bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t 
 void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t delay, bool open,
     const char *name);
 void recomp_netplay_match_list(RecompNetplay *net, const char *digest);
+/* Sends each listed room with an endpoint a ping. A listed host's room ticks
+   echo it, and recomp_netplay_match_poll records the echo as the room's ping. */
+void recomp_netplay_match_probe(RecompNetplay *net);
 /* Asks to join a listed room; again until met or gone. */
 void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char *digest, const char *name);
 void recomp_netplay_match_leave(RecompNetplay *net);
-/* Drains the socket outside a room, keeping only the matchmaker's answers. */
+/* Drains the socket outside a room, keeping only the matchmaker's answers
+   and the listed rooms' pings. */
 void recomp_netplay_match_poll(RecompNetplay *net);
+/* The input delay to suggest for a round trip: none up to 20 ms, then a
+   frame per 33 ms rounded up, at most RECOMP_ROLLBACK_WINDOW. */
+uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
