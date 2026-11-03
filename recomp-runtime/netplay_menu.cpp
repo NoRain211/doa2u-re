@@ -1068,13 +1068,16 @@ void onOverlay(const RecompD3dPresenterTarget *target)
 void recomp_netplay_menu_install(const std::filesystem::path &storage, const std::string &digest,
     std::function<std::string()> ownName)
 {
+    // Later boots, back from a session, keep the menu's settings, such as a delay picked in the room.
+    if (!menu.installed) {
+        menu.storage = storage;
+        loadSettings();
+    }
     menu.installed = true;
-    menu.storage = storage;
     menu.digest = digest;
     menu.digest.resize(RECOMP_NETPLAY_DIGEST_BYTES, '0');
     menu.ownName = std::move(ownName);
     menu.aspect = recomp_overlay_display_aspect();
-    loadSettings();
     recomp_d3d_overlay_hook = onOverlay;
 }
 
@@ -1127,9 +1130,10 @@ bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &del
 
 int recomp_netplay_menu_display(const std::filesystem::path &storage)
 {
-    menu.storage = storage;
-    loadSettings();
-    return menu.display;
+    // A copy, so a delay the host picked in the room survives the session.
+    RecompNetplaySettings settings;
+    recomp_netplay_settings_load(storage / "netplay.txt", settings);
+    return settings.display;
 }
 
 void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
