@@ -505,7 +505,7 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_settings.cpp netplay_profile.cpp overlay.c
+        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)

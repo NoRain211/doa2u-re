@@ -445,7 +445,8 @@ forwarded by hand. A router whose own address is private (carrier-grade
 NAT) still forwards, but players outside the provider's network cannot
 reach it, and the log says so. On the development network the router
 (MiniUPnPd, IGD v2) listed the forward during a session and had removed it
-after the runner stopped.
+after the runner stopped. A session started from a room keeps the forward
+HOST ONLINE asked for and asks for none of its own.
 
 Both runners then boot and play one session from their first frame. Until
 it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
