@@ -246,7 +246,8 @@ game's offline modes together, the host on the first controller port and the
 joiner on the second. That avoids all of XOnline.
 
 Choosing Versus on the main menu opens the runner's own menu: LOCAL, HOST
-ONLINE, JOIN ONLINE and NETPLAY SETTINGS (`netplay_menu.cpp`). The runner
+ONLINE, JOIN ONLINE, FIND MATCH ([matchmaking](matchmaking.md)) and NETPLAY
+SETTINGS (`netplay_menu.cpp`). The runner
 draws it over the game as untextured quads with a built-in 5 x 7 font
 (`overlay.c`), sent just before each Present, and the game sees idle pads
 until it closes. The menu opens on an A press while frontend scene
@@ -435,9 +436,9 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- Without UPnP the host must forward its UDP port by hand. The
-  [matchmaker](matchmaking.md) for hole punching and relay is not wired
-  into the game yet. A joiner types an IPv4 address.
+- Without UPnP or a [matchmaker](matchmaking.md) for hole punching and
+  relay, the host must forward its UDP port by hand. JOIN ONLINE takes an
+  IPv4 address.
 - The hidden walks still take their time: about 6 s on STARTING MATCH
   before character select, and about 3 s behind the room after a session.
 - A joiner that cancels before the host has heard its hello, in practice

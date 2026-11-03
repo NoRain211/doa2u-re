@@ -451,7 +451,8 @@ static std::uint32_t awaitFrontier(bool last)
         }
         if (!udp) recomp_stop(4, "rollback:stalled");
         const Clock::time_point now = Clock::now();
-        if (now - sent >= std::chrono::milliseconds(4)) {
+        // Each repeat through the matchmaker's relay costs its bandwidth, so a relayed wait repeats less.
+        if (now - sent >= std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) {
             recomp_netplay_send(&rollback.net, &s, rollback.advantage);
             sent = now;
         }
@@ -956,7 +957,8 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
-        if (colon == 0u || port == 0u || port > 65535u) {
+        // A room's joiner, matched through the relay, may have no address; its socket is handed over.
+        if (!roomSession && (colon == 0u || port == 0u || port > 65535u)) {
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }

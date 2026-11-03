@@ -53,6 +53,36 @@ typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_CANCELLED, /* by this side, or by the other when peer_left is set */
 } RecompNetplayLobbyResult;
 
+enum { RECOMP_NETPLAY_LISTED_ROOMS = 12u };
+
+/* One open room from the matchmaker's list. */
+typedef struct RecompNetplayListedRoom {
+    uint32_t id;
+    uint32_t age_s;
+    uint8_t delay;
+    char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+} RecompNetplayListedRoom;
+
+/* What a socket heard from the matchmaker (tools/matchmaker.py), which the
+   socket's receives record on their way, and how it reaches its peer. */
+typedef struct RecompNetplayMatch {
+    uint32_t server_address; /* network order; port 0 means none */
+    uint16_t server_port;
+    uint32_t room_id; /* this host's listing, once the server answered */
+    RecompNetplayListedRoom rooms[RECOMP_NETPLAY_LISTED_ROOMS];
+    uint32_t room_count;
+    bool listed;  /* a list arrived; the caller clears it */
+    bool gone;    /* the room asked for is no longer open; the caller clears it */
+    bool met;     /* the server paired this socket with a player; the caller clears it */
+    /* The paired player's public and LAN endpoints, network order, port 0
+       when unknown. Room ticks send to both until one answers. */
+    uint32_t candidate_address[2];
+    uint16_t candidate_port[2];
+    bool punching;
+    uint64_t punch_ms;
+    bool relay; /* packets to the peer go through the server, as do its answers */
+} RecompNetplayMatch;
+
 typedef struct RecompNetplay {
     uintptr_t socket;
     uint32_t peer_address; /* IPv4, network order */
@@ -74,6 +104,7 @@ typedef struct RecompNetplay {
     uint32_t rtt_ms; /* smoothed over the last few samples */
     bool rtt_known;
     bool peer_left; /* the other runner said goodbye */
+    RecompNetplayMatch match;
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are
@@ -119,6 +150,19 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    side drops a line that is not printable ASCII or that
    recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
+
+/* Matchmaking, all from the room's own socket so the server sees the
+   endpoint the room uses. False when host does not resolve. */
+bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t port);
+/* A host's listing and heartbeat; say it every 5 s while the room is up. */
+void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t delay, bool open,
+    const char *name);
+void recomp_netplay_match_list(RecompNetplay *net, const char *digest);
+/* Asks to join a listed room; again until met or gone. */
+void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char *digest, const char *name);
+void recomp_netplay_match_leave(RecompNetplay *net);
+/* Drains the socket outside a room, keeping only the matchmaker's answers. */
+void recomp_netplay_match_poll(RecompNetplay *net);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another

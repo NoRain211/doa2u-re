@@ -1,10 +1,21 @@
 #include "netplay.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <winsock2.h>
+using RawSocket = SOCKET;
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+using RawSocket = int;
+#endif
 
 static int failures;
 static std::atomic<bool> cancelNow;
@@ -43,6 +54,69 @@ static RecompNetplayLobby lobby(char build, std::uint8_t delay, std::uint8_t fla
     value.delay = delay;
     value.flags = flags;
     return value;
+}
+
+// A socket standing in for tools/matchmaker.py: it pairs two rooms on 127.0.0.1 and relays between them.
+static void sendFrom(const RecompNetplay &from, std::uint16_t port, const std::vector<std::uint8_t> &packet)
+{
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(port);
+    to.sin_addr.s_addr = htonl(0x7f000001u);
+    sendto(static_cast<RawSocket>(from.socket), reinterpret_cast<const char *>(packet.data()),
+        static_cast<int>(packet.size()), 0, reinterpret_cast<const sockaddr *>(&to), sizeof to);
+}
+
+static std::vector<std::uint8_t> peerPacket(std::uint16_t port)
+{
+    std::vector<std::uint8_t> packet = {'D', '2', 'M', 'M', 1u, 6u};
+    const std::uint8_t endpoint[6] = {127u, 0u, 0u, 1u, static_cast<std::uint8_t>(port >> 8), static_cast<std::uint8_t>(port)};
+    if (port != 0u) packet.insert(packet.end(), endpoint, endpoint + 6);
+    else packet.resize(packet.size() + 6u);
+    packet.resize(packet.size() + 6u + 1u + RECOMP_NETPLAY_NAME_BYTES); // no LAN endpoint, no name
+    return packet;
+}
+
+// Pairs a host room on 47620 and a joiner room on 47621, telling each the other's port (0 for none).
+static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int milliseconds, bool &relayed)
+{
+    RecompNetplay server, host, joiner;
+    bool opened = recomp_netplay_listen(&server, 47622u) && recomp_netplay_listen(&host, 47620u) &&
+        recomp_netplay_listen(&joiner, 47621u) && recomp_netplay_match_server(&host, "127.0.0.1", 47622u) &&
+        recomp_netplay_match_server(&joiner, "127.0.0.1", 47622u);
+    sendFrom(server, 47620u, peerPacket(toHost));
+    sendFrom(server, 47621u, peerPacket(toJoiner));
+    RecompNetplayRoom hostRoom{}, joinerRoom{};
+    hostRoom.hosting = true;
+    char digest[RECOMP_NETPLAY_DIGEST_BYTES];
+    std::memset(digest, 'a', sizeof digest);
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+    while (opened && std::chrono::steady_clock::now() < end && !(hostRoom.pinged && joinerRoom.pinged)) {
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        std::uint8_t packet[2048];
+        sockaddr_in from{};
+#ifdef _WIN32
+        int size = sizeof from;
+#else
+        socklen_t size = sizeof from;
+#endif
+        for (int got; (got = static_cast<int>(recvfrom(static_cast<RawSocket>(server.socket),
+                           reinterpret_cast<char *>(packet), sizeof packet, 0, reinterpret_cast<sockaddr *>(&from),
+                           &size))) > 0;) {
+            if (got > 6 && packet[5] == 9u) // relay to the other room, as the server does
+                sendFrom(server, ntohs(from.sin_port) == 47620u ? 47621u : 47620u,
+                    std::vector<std::uint8_t>(packet, packet + got));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    relayed = host.match.relay && joiner.match.relay;
+    const bool met = hostRoom.pinged && joinerRoom.pinged && std::strcmp(hostRoom.name, "JOINER") == 0 &&
+        std::strcmp(joinerRoom.name, "HOST") == 0 && !host.match.punching && !joiner.match.punching;
+    recomp_netplay_close(&server);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+    return met;
 }
 
 int main()
@@ -228,6 +302,13 @@ int main()
     check("room other build", hostRoom.mismatch && joinerRoom.mismatch);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
+
+    // Matched rooms punch through to each other, or meet through the relay without
+    // endpoints, or after 5 s of punching at endpoints that never answer.
+    bool relayed = true;
+    check("matched rooms punch through", matchRooms(47621u, 47620u, 2000, relayed) && !relayed);
+    check("matched rooms relay without endpoints", matchRooms(0u, 0u, 2000, relayed) && relayed);
+    check("matched rooms relay when punching fails", matchRooms(47629u, 47628u, 7000, relayed) && relayed);
 
     if (failures != 0) return 1;
     std::puts("PASS netplay lobby joins one build, swaps profiles, refuses another and runs a room");
