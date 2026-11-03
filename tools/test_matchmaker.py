@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import socket
 import struct
+import threading
 import unittest
 
 import matchmaker as mm
@@ -135,6 +136,20 @@ class MatchmakerTest(unittest.TestCase):
         self.assertNotIn(HOST_AT[0], line)
         self.assertNotIn(JOINER_AT[0], line)
         self.assertTrue(self.server.status(4.0).endswith("joins 0, relayed 0 (0 KiB), over the relay cap 0"))
+
+    def test_probe_hears_a_matchmaker_and_nothing_else(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+            server.bind(("127.0.0.1", 0))
+
+            def answer():
+                data, sender = server.recvfrom(2048)
+                for packet, to in mm.Matchmaker().handle(data, sender, 0.0):
+                    server.sendto(packet, to)
+
+            threading.Thread(target=answer, daemon=True).start()
+            self.assertIsNotNone(mm.probe("127.0.0.1", server.getsockname()[1]))
+            silent = server.getsockname()[1]  # nothing answers a second ask
+            self.assertIsNone(mm.probe("127.0.0.1", silent, timeout=0.3))
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ import asyncio
 import os
 import socket
 import struct
+import sys
+import time
 
 MAGIC = b"D2MM"
 VERSION = 1
@@ -193,13 +195,34 @@ async def serve(address, port, relay_only, status_seconds):
         print(matchmaker.status(loop.time()), flush=True)
 
 
+def probe(host, port, timeout=3.0):
+    """Asks a matchmaker for its list; returns the answer's round trip in ms, or None without one."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ask:
+        ask.settimeout(timeout)
+        started = time.monotonic()
+        try:
+            ask.sendto(header(LIST).ljust(LIST_BYTES, b"\0"), (host, port))
+            answer = ask.recv(2048)
+        except OSError:  # a timeout, an unknown name, or Windows reporting a closed port
+            return None
+        if answer[:6] != header(ROOMS):
+            return None
+        return (time.monotonic() - started) * 1000.0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--address", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=47700)
     parser.add_argument("--relay-only", action="store_true", help="relay every pair, so no player learns another's address")
     parser.add_argument("--status", type=float, default=60.0, help="seconds between status lines, 0 for none")
+    parser.add_argument("--probe", metavar="HOST:PORT", help="check that a running matchmaker answers, then exit")
     arguments = parser.parse_args()
+    if arguments.probe:
+        host, _, port = arguments.probe.partition(":")
+        took = probe(host, int(port or 47700))
+        print(f"{arguments.probe}: " + (f"answered in {took:.0f} ms" if took is not None else "no answer"))
+        sys.exit(0 if took is not None else 1)
     asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status))
 
 

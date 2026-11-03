@@ -29,6 +29,9 @@ none. Each line counts rooms, open rooms and pairs, and the joins, relayed
 packets and KiB, and packets over the relay cap since the line before. It
 holds no addresses or names.
 
+`--probe HOST:PORT` asks a running server for its list and says whether
+and how fast it answered, exiting 1 when it did not.
+
 It is not deployed yet; [Deploying](#deploying) has the plan. The relay
 costs bandwidth: a session sends about 60 packets of about 100 bytes a
 second each way, which is about 45 MB an hour for a relayed match. A relay
@@ -54,15 +57,23 @@ two players of a join.
 The plan is an Oracle Cloud Always Free VM in a US region, named through
 Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 
-1. Sign up with a US home region. Always Free resources live only in the
-   home region, which cannot change later.
-2. Create an instance from the Canonical Ubuntu 24.04 image on an Always
-   Free shape (VM.Standard.E2.1.Micro, or a small VM.Standard.A1.Flex),
-   with a public IPv4 address and SSH keys only. Ubuntu 24.04 has Python
-   3.12; Oracle Linux 9's Python 3.9 is too old.
-3. In the subnet's security list, add an ingress rule: source 0.0.0.0/0,
+1. Sign up with a US home region. Always Free compute is created only in
+   the home region, so treat the choice as permanent; the region nearest
+   the middle of the players keeps relayed matches even.
+2. Upgrade the account to Pay As You Go and set a small budget alert.
+   Oracle may reclaim Always Free VMs that look idle for 7 days (CPU and
+   network, and memory on A1 shapes, under 20%), and the matchmaker always
+   looks idle. Oracle's reclamation notices offered the upgrade as the way
+   out; usage inside the Always Free limits stays free, and the alert
+   catches anything that is not.
+3. Create an instance from the Canonical Ubuntu 24.04 image on the
+   VM.Standard.E2.1.Micro shape (1/8 OCPU, 1 GB, Always Free, two per
+   account), with a public IPv4 address and SSH keys only. It is far more
+   than the server needs and avoids the A1 capacity shortages. Ubuntu
+   24.04 has Python 3.12; Oracle Linux 9's Python 3.9 is too old.
+4. In the subnet's security list, add an ingress rule: source 0.0.0.0/0,
    UDP, destination port 47700.
-4. On the VM, from a copy of this repository's `tools` folder, once:
+5. On the VM, from a copy of this repository's `tools` folder, once:
 
        sudo install -D -m 0644 matchmaker.py /opt/doa2u-matchmaker/matchmaker.py
        sudo install -m 0644 matchmaker.service /etc/systemd/system/doa2u-matchmaker.service
@@ -75,17 +86,16 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
    is opened there as well as in the security list. To update the server,
    copy `matchmaker.py` again and run
    `sudo systemctl restart doa2u-matchmaker`.
-5. `journalctl -u doa2u-matchmaker -f` shows a status line every minute.
-6. In Cloudflare DNS, add an A record such as `mm` with the VM's public
+   `journalctl -u doa2u-matchmaker -f` shows a status line every minute.
+6. From home, `python tools/matchmaker.py --probe <VM address>:47700`
+   should answer, which proves both firewalls let the port through.
+7. In Cloudflare DNS, add an A record such as `mm` with the VM's public
    address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
-   proxied name would not reach a UDP server.
-7. Leave MATCHMAKER on DEFAULT on two machines on different home
+   proxied name would not reach a UDP server. Probe the name too.
+8. Leave MATCHMAKER on DEFAULT on two machines on different home
    networks. HOST ONLINE should say LISTED ON FIND MATCH and the
    other should quick-match it, which is also the first test of punching
    through real routers.
-
-Oracle stops Always Free VMs that look idle for 7 days: CPU and network,
-and memory on A1 shapes, all under 20%. The matchmaker always looks idle.
 
 ## Packets
 
@@ -170,8 +180,8 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 
 - The default server is not running yet; until it is, FIND MATCH says
   THE MATCHMAKER CANNOT BE FOUND and hosts are not listed.
-- Check how to keep Oracle from reclaiming the idle VM, such as a Pay As
-  You Go account, before relying on it.
+- Oracle's docs do not say outright that Pay As You Go accounts are spared
+  idle reclamation; watch for its notice email after the first idle week.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
