@@ -114,8 +114,11 @@ MATCHMAKER in NETPLAY SETTINGS names the server as host:port, edited like
 a JOIN ONLINE address with host names allowed, and is kept in
 `.recomp-storage/netplay.txt` as a line such as
 `matchmaker 203.0.113.7:47700`. Left empty, it shows DEFAULT and the
-runner uses its built-in server, so every HOST ONLINE room is listed
-while that server answers. All of a room's matchmaking runs on the
+runner uses its built-in server. HOST ONLINE is PUBLIC or PRIVATE, chosen
+with left and right and kept in `netplay.txt`: a public room is listed
+while the server answers, and a private room never contacts it. The
+server's name is looked up on a background thread, so a slow answer does
+not hold the menu. All of a room's matchmaking runs on the
 room's own socket, in `recomp-runtime/netplay.c`. Its receives record the server's
 answers and unwrap relayed packets as if the peer sent them, and its sends
 wrap packets for a relayed peer. So the room, the session lobby and the
