@@ -24,6 +24,18 @@ static bool cancelled()
     return cancelNow;
 }
 
+// Each side cancels at a fixed point of the exchange from its own thread, so load cannot move the cancel.
+static const RecompNetplay *metHost;
+static bool hostMet()
+{
+    return metHost->peer_port != 0u; // set as the host welcomes the joiner, before any profile arrives
+}
+static const RecompNetplayLobby *welcomed;
+static bool joinerWelcomed()
+{
+    return welcomed->delay != 0xffu; // the host's welcome overwrites the joiner's marker
+}
+
 static void check(const char *name, bool passed)
 {
     if (!passed) {
@@ -113,6 +125,11 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     relayed = host.match.relay && joiner.match.relay;
     const bool met = hostRoom.pinged && joinerRoom.pinged && std::strcmp(hostRoom.name, "JOINER") == 0 &&
         std::strcmp(joinerRoom.name, "HOST") == 0 && !host.match.punching && !joiner.match.punching;
+    if (!met) // one failure under load has not been explained; this says which side stalled next time
+        std::fprintf(stderr, "rooms %u/%u: opened %d, pinged %d/%d, names %s/%s, punching %d/%d, relay %d/%d\n",
+            toHost, toJoiner, (int)opened, (int)hostRoom.pinged, (int)joinerRoom.pinged, hostRoom.name,
+            joinerRoom.name, (int)host.match.punching, (int)joiner.match.punching, (int)host.match.relay,
+            (int)joiner.match.relay);
     recomp_netplay_close(&server);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
@@ -201,33 +218,26 @@ int main()
     cancelNow = false;
     std::vector<std::uint8_t> big(RECOMP_NETPLAY_MAX_PROFILE, 7u);
     RecompNetplayProfiles bigJoiner{big.data(), static_cast<std::uint32_t>(big.size()), joinerGot.data(), 0u};
-    wait = std::thread([&] { hosted = hostOn(&host, 47617u, &offered, &none, 5000u, cancelled); });
-    std::thread watch([&] { // cancel once the host has met the joiner, while the 1 MiB profile is in flight
-        for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        cancelNow = true;
-    });
+    // The host cancels as it meets the joiner, while the 1 MiB profile is in flight.
+    metHost = &host;
+    wait = std::thread([&] { hosted = hostOn(&host, 47617u, &offered, &none, 5000u, hostMet); });
     asked = offered;
     const RecompNetplayLobbyResult sentBack =
         joinTo(&joiner, 47617u, &asked, &bigJoiner, 5000u, nullptr);
     wait.join();
-    watch.join();
     check("host cancels mid-exchange", hosted == RECOMP_NETPLAY_LOBBY_CANCELLED && !host.peer_left &&
         sentBack == RECOMP_NETPLAY_LOBBY_CANCELLED && joiner.peer_left);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
-    // A joiner cancelling sends the host back.
-    cancelNow = false;
+    // A joiner cancelling as the host's welcome arrives, with its profile in flight, sends the host back.
     wait = std::thread([&] { hosted = hostOn(&host, 47618u, &offered, &none, 5000u, nullptr); });
-    watch = std::thread([&] {
-        for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        cancelNow = true;
-    });
     asked = offered;
+    asked.delay = 0xffu;
+    welcomed = &asked;
     check("joiner cancels", joinTo(&joiner, 47618u, &asked, &bigJoiner, 5000u,
-        cancelled) == RECOMP_NETPLAY_LOBBY_CANCELLED);
+        joinerWelcomed) == RECOMP_NETPLAY_LOBBY_CANCELLED);
     wait.join();
-    watch.join();
     check("host hears the cancel", hosted == RECOMP_NETPLAY_LOBBY_CANCELLED && host.peer_left);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
@@ -306,9 +316,10 @@ int main()
     // Matched rooms punch through to each other, or meet through the relay without
     // endpoints, or after 5 s of punching at endpoints that never answer.
     bool relayed = true;
-    check("matched rooms punch through", matchRooms(47621u, 47620u, 2000, relayed) && !relayed);
-    check("matched rooms relay without endpoints", matchRooms(0u, 0u, 2000, relayed) && relayed);
-    check("matched rooms relay when punching fails", matchRooms(47629u, 47628u, 7000, relayed) && relayed);
+    // Each waits only until both rooms meet; punching must win inside the 5 s before the relay takes over.
+    check("matched rooms punch through", matchRooms(47621u, 47620u, 4500, relayed) && !relayed);
+    check("matched rooms relay without endpoints", matchRooms(0u, 0u, 5000, relayed) && relayed);
+    check("matched rooms relay when punching fails", matchRooms(47629u, 47628u, 10000, relayed) && relayed);
 
     if (failures != 0) return 1;
     std::puts("PASS netplay lobby joins one build, swaps profiles, refuses another and runs a room");
