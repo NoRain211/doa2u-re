@@ -306,9 +306,14 @@ A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
 `rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
 fails to connect) goes back to its room. The runner says goodbye, drops the
 session's state, reboots the game offline the same way and reopens the
-room: the host listens on its port again and the joiner calls the host's
-address. Behind the room, the port 0 pad walks to the main menu with Versus
-chosen, so leaving the room lands where the Versus menu was opened. Both
+room: the host listens again and the joiner calls the host. Each runner
+keeps one UDP socket from its room through the session and back: the room
+hands it to the session lobby at launch, and the session hands it back, so
+a path its routers opened stays open (see [matchmaking](matchmaking.md)).
+A joiner kept one local port through two cancelled lobbies, a session and
+each return to its room. Behind the room, the port 0 pad walks to the main
+menu with Versus chosen, so leaving the room lands where the Versus menu was
+opened. Both
 players press READY again for a rematch. Until the menu has Versus chosen,
 the room's backdrop is opaque and the game's sound is off, so the title and
 menus do not show through. A host kept as one process
@@ -430,9 +435,9 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- Without UPnP the host must forward its UDP port by hand; there is no hole
-  punching or relay. A joiner types an IPv4 address; host names and room
-  codes are not supported.
+- Without UPnP the host must forward its UDP port by hand. The
+  [matchmaker](matchmaking.md) for hole punching and relay is not wired
+  into the game yet. A joiner types an IPv4 address.
 - The hidden walks still take their time: about 6 s on STARTING MATCH
   before character select, and about 3 s behind the room after a session.
 - A joiner that cancels before the host has heard its hello, in practice

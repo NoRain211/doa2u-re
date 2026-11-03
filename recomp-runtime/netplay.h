@@ -119,20 +119,19 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    side drops a line that is not printable ASCII or that
    recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
-/* Binds port and waits for a joiner's hello, answering each with the host's
+/* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
+   hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
    digest ends the wait with MISMATCH. Returns once both sides hold both
    profiles. cancelled, when not null, is polled every 20 ms; either side
    cancelling sends the other a goodbye, which ends its wait too. */
-RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void));
-/* Says hello to the host until it answers, copies the host's delay and flags
-   into lobby, then swaps profiles as the host does. Binds an ephemeral local
-   port. */
-RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void));
+RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void));
+/* Says hello to the peer of a socket from recomp_netplay_open, or a room's,
+   until it answers, copies the host's delay and flags into lobby, then swaps
+   profiles as the host does. */
+RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void));
 void recomp_netplay_close(RecompNetplay *net);
 /* The local IPv4 address of the interface that reaches the internet, as
    text; it also starts Winsock on Windows. */

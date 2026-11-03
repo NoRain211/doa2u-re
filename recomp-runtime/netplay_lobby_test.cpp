@@ -21,6 +21,21 @@ static void check(const char *name, bool passed)
     }
 }
 
+// The lobby runs on a socket its caller opens, as a room's is handed over.
+static RecompNetplayLobbyResult hostOn(RecompNetplay *net, std::uint16_t port, const RecompNetplayLobby *offered,
+    RecompNetplayProfiles *profiles, std::uint32_t timeout, bool (*cancel)())
+{
+    return recomp_netplay_listen(net, port) ? recomp_netplay_host(net, offered, profiles, timeout, cancel)
+                                            : RECOMP_NETPLAY_LOBBY_SOCKET;
+}
+
+static RecompNetplayLobbyResult joinTo(RecompNetplay *net, std::uint16_t port, RecompNetplayLobby *asked,
+    RecompNetplayProfiles *profiles, std::uint32_t timeout, bool (*cancel)())
+{
+    return recomp_netplay_open(net, 0u, "127.0.0.1", port) ? recomp_netplay_join(net, asked, profiles, timeout, cancel)
+                                                         : RECOMP_NETPLAY_LOBBY_SOCKET;
+}
+
 static RecompNetplayLobby lobby(char build, std::uint8_t delay, std::uint8_t flags)
 {
     RecompNetplayLobby value;
@@ -43,10 +58,10 @@ int main()
     RecompNetplayProfiles hostProfiles{hostSent.data(), static_cast<std::uint32_t>(hostSent.size()), hostGot.data(), 0u};
     RecompNetplayProfiles joinerProfiles{joinerSent.data(), static_cast<std::uint32_t>(joinerSent.size()),
         joinerGot.data(), 0u};
-    std::thread wait([&] { hosted = recomp_netplay_host(&host, 47611u, &offered, &hostProfiles, 5000u, nullptr); });
+    std::thread wait([&] { hosted = hostOn(&host, 47611u, &offered, &hostProfiles, 5000u, nullptr); });
     RecompNetplayLobby asked = lobby('a', 0u, 0u);
     const RecompNetplayLobbyResult joined =
-        recomp_netplay_join(&joiner, "127.0.0.1", 47611u, &asked, &joinerProfiles, 5000u, nullptr);
+        joinTo(&joiner, 47611u, &asked, &joinerProfiles, 5000u, nullptr);
     wait.join();
     check("join", joined == RECOMP_NETPLAY_LOBBY_OK && hosted == RECOMP_NETPLAY_LOBBY_OK);
     check("settings adopted", asked.delay == 2u && asked.flags == 3u);
@@ -78,9 +93,9 @@ int main()
     // Players without profiles send none.
     RecompNetplayProfiles none{nullptr, 0u, hostGot.data(), 1u};
     RecompNetplayProfiles noneJoiner{nullptr, 0u, joinerGot.data(), 1u};
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47614u, &offered, &none, 5000u, nullptr); });
+    wait = std::thread([&] { hosted = hostOn(&host, 47614u, &offered, &none, 5000u, nullptr); });
     asked = lobby('a', 0u, 0u);
-    check("no profile", recomp_netplay_join(&joiner, "127.0.0.1", 47614u, &asked, &noneJoiner, 5000u, nullptr) ==
+    check("no profile", joinTo(&joiner, 47614u, &asked, &noneJoiner, 5000u, nullptr) ==
         RECOMP_NETPLAY_LOBBY_OK && noneJoiner.theirs_size == 0u);
     wait.join();
     check("no profile host", hosted == RECOMP_NETPLAY_LOBBY_OK && none.theirs_size == 0u);
@@ -89,10 +104,10 @@ int main()
 
     // A different build is refused on both sides.
     const RecompNetplayLobby other = lobby('b', 2u, 0u);
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47612u, &offered, &none, 5000u, nullptr); });
+    wait = std::thread([&] { hosted = hostOn(&host, 47612u, &offered, &none, 5000u, nullptr); });
     asked = other;
     const RecompNetplayLobbyResult refused =
-        recomp_netplay_join(&joiner, "127.0.0.1", 47612u, &asked, &noneJoiner, 5000u, nullptr);
+        joinTo(&joiner, 47612u, &asked, &noneJoiner, 5000u, nullptr);
     wait.join();
     check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && hosted == RECOMP_NETPLAY_LOBBY_MISMATCH);
     recomp_netplay_close(&host);
@@ -100,26 +115,26 @@ int main()
 
     // Nobody hosting: the joiner gives up.
     asked = offered;
-    check("timeout", recomp_netplay_join(&joiner, "127.0.0.1", 47613u, &asked, &noneJoiner, 300u, nullptr) ==
+    check("timeout", joinTo(&joiner, 47613u, &asked, &noneJoiner, 300u, nullptr) ==
         RECOMP_NETPLAY_LOBBY_TIMEOUT);
     recomp_netplay_close(&joiner);
 
     // A host cancelling alone ends its wait; one cancelling mid-exchange sends the joiner back too.
     cancelNow = true;
-    check("host cancels alone", recomp_netplay_host(&host, 47617u, &offered, &none, 5000u, cancelled) ==
+    check("host cancels alone", hostOn(&host, 47617u, &offered, &none, 5000u, cancelled) ==
         RECOMP_NETPLAY_LOBBY_CANCELLED && !host.peer_left);
     recomp_netplay_close(&host);
     cancelNow = false;
     std::vector<std::uint8_t> big(RECOMP_NETPLAY_MAX_PROFILE, 7u);
     RecompNetplayProfiles bigJoiner{big.data(), static_cast<std::uint32_t>(big.size()), joinerGot.data(), 0u};
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47617u, &offered, &none, 5000u, cancelled); });
+    wait = std::thread([&] { hosted = hostOn(&host, 47617u, &offered, &none, 5000u, cancelled); });
     std::thread watch([&] { // cancel once the host has met the joiner, while the 1 MiB profile is in flight
         for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         cancelNow = true;
     });
     asked = offered;
     const RecompNetplayLobbyResult sentBack =
-        recomp_netplay_join(&joiner, "127.0.0.1", 47617u, &asked, &bigJoiner, 5000u, nullptr);
+        joinTo(&joiner, 47617u, &asked, &bigJoiner, 5000u, nullptr);
     wait.join();
     watch.join();
     check("host cancels mid-exchange", hosted == RECOMP_NETPLAY_LOBBY_CANCELLED && !host.peer_left &&
@@ -129,13 +144,13 @@ int main()
 
     // A joiner cancelling sends the host back.
     cancelNow = false;
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47618u, &offered, &none, 5000u, nullptr); });
+    wait = std::thread([&] { hosted = hostOn(&host, 47618u, &offered, &none, 5000u, nullptr); });
     watch = std::thread([&] {
         for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         cancelNow = true;
     });
     asked = offered;
-    check("joiner cancels", recomp_netplay_join(&joiner, "127.0.0.1", 47618u, &asked, &bigJoiner, 5000u,
+    check("joiner cancels", joinTo(&joiner, 47618u, &asked, &bigJoiner, 5000u,
         cancelled) == RECOMP_NETPLAY_LOBBY_CANCELLED);
     wait.join();
     watch.join();
@@ -155,7 +170,7 @@ int main()
         }
     });
     asked = offered;
-    check("late joiner sent back", recomp_netplay_join(&joiner, "127.0.0.1", 47619u, &asked, &noneJoiner, 2000u,
+    check("late joiner sent back", joinTo(&joiner, 47619u, &asked, &noneJoiner, 2000u,
         nullptr) == RECOMP_NETPLAY_LOBBY_CANCELLED && joiner.peer_left);
     calling = false;
     wait.join();

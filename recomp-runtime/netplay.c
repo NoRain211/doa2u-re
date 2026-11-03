@@ -530,11 +530,9 @@ static bool is_goodbye(const uint8_t *packet, int size)
     return size == 4 && get32(packet) == GOODBYE_MAGIC;
 }
 
-RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void))
+RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void))
 {
-    if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
     memset(&t, 0, sizeof t);
@@ -579,11 +577,9 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
     }
 }
 
-RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void))
+RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void))
 {
-    if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
     memset(&t, 0, sizeof t);

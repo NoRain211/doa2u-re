@@ -211,10 +211,11 @@ void enterRoom(bool hosting)
     menu.screen = Screen::Room;
 }
 
-void host()
+// bound: the socket is already listening, handed back by a session.
+void host(bool bound = false)
 {
     if (!nameAllowed()) return;
-    if (!recomp_netplay_listen(&menu.net, static_cast<std::uint16_t>(menu.port))) {
+    if (!bound && !recomp_netplay_listen(&menu.net, static_cast<std::uint16_t>(menu.port))) {
         recomp_netplay_close(&menu.net);
         menu.message = "UDP PORT " + std::to_string(menu.port) + " IS IN USE.";
         return;
@@ -223,7 +224,7 @@ void host()
     enterRoom(true);
 }
 
-void join()
+void join(bool bound = false)
 {
     const std::size_t colon = menu.address.rfind(':');
     const std::string address = menu.address.substr(0u, colon);
@@ -234,7 +235,7 @@ void join()
         return;
     }
     if (!nameAllowed()) return;
-    if (!recomp_netplay_open(&menu.net, 0u, address.c_str(), static_cast<std::uint16_t>(port))) {
+    if (!bound && !recomp_netplay_open(&menu.net, 0u, address.c_str(), static_cast<std::uint16_t>(port))) {
         recomp_netplay_close(&menu.net);
         menu.message = "THAT ADDRESS CANNOT BE USED.";
         return;
@@ -606,8 +607,7 @@ void onOverlay(const RecompD3dPresenterTarget *target)
         else if (++menu.repeat >= 18u && (menu.repeat - 18u) % 4u == 0u) keys |= directions;
         update(keys, launch);
         if (launch) {
-            // The session binds this port again; the host's router forward stays for it.
-            recomp_netplay_close(&menu.net);
+            // The session takes the socket (recomp_netplay_menu_take_launch); the router forward stays for it.
             menu.screen = Screen::Closed;
             menu.launched = true;
             return;
@@ -667,7 +667,8 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
     *pad = RecompInputGamepad{};
 }
 
-bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join)
+bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join,
+    RecompNetplay &socket)
 {
     std::lock_guard<std::mutex> guard(menu.lock);
     if (!menu.launched) return false;
@@ -675,6 +676,7 @@ bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &del
     hostPort = menu.hosting ? menu.port : 0u;
     delay = menu.delay;
     join = menu.hosting ? std::string() : menu.peerAddress;
+    socket = menu.net; // the menu reopens nothing until the session hands it back
     return true;
 }
 
@@ -685,19 +687,25 @@ int recomp_netplay_menu_display(const std::filesystem::path &storage)
     return menu.display;
 }
 
-void recomp_netplay_menu_return_to_room()
+void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
 {
     std::lock_guard<std::mutex> guard(menu.lock);
     menu.openedBy = 0u;
     menu.message.clear();
     menu.covering = true;
+    // Only the socket and its peer carry over; the host's room greets the last joiner first.
+    menu.net = RecompNetplay{};
+    menu.net.socket = socket.socket;
+    menu.net.peer_address = socket.peer_address;
+    menu.net.peer_port = socket.peer_port;
     // A failure leaves the Versus screen up with its message.
     menu.screen = Screen::Versus;
     menu.cursor = menu.hosting ? 1 : 2;
     if (menu.hosting) {
-        host();
+        host(true);
     } else {
         menu.address = menu.peerAddress;
-        join();
+        join(true);
     }
+    if (menu.screen != Screen::Room) recomp_netplay_close(&menu.net);
 }
