@@ -62,6 +62,8 @@ void recomp_dsound_require_device(uint32_t handle)
     if (handle != DEVICE) recomp_stop(2, "dsound:invalid-device");
 }
 void recomp_dsound_buffers_refresh_routing(void) { ++refreshes; }
+void recomp_dsound_output_lock(void) {}
+void recomp_dsound_output_unlock(void) {}
 int recomp_audio_output_ready(void) { return backend_ready; }
 int recomp_audio_output_set_reverb(const RecompAudioReverb *parameters)
 {
