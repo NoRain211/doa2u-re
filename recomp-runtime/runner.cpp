@@ -99,7 +99,8 @@ static RecompInputGamepad backPad;
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     // Both runners must see the same controllers: the session's two ports, once it runs.
-    if (rollback.lobby && (port >= 2u || !rollback.active)) return false;
+    // A host pad unplugged or plugged in mid-session never reaches the guest.
+    if (rollback.active ? port >= 2u : rollback.lobby) return false;
     if (rollback.active && port < 2u) {
         // Loopback has no local player, so its port stays empty.
         if (rollback.mode == RollbackMode::Loopback && port == rollback.player) return false;
