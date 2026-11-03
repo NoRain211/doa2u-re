@@ -42,7 +42,8 @@ std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
     for (const auto &title : fs::directory_iterator(root / "UDATA", error)) {
         for (const auto &save : fs::directory_iterator(title.path(), error)) {
             if (!fs::is_regular_file(save.path() / "SaveMeta.xbx", error)) continue;
-            fs::file_time_type changed{};
+            // min(), not {}: libstdc++'s file clock starts in 2174, so {} is later than every file.
+            auto changed = fs::file_time_type::min();
             for (const auto &file : fs::directory_iterator(save.path(), error))
                 changed = std::max(changed, fs::last_write_time(file.path(), error));
             if (latest.empty() || changed > newest) {
