@@ -27,7 +27,7 @@ static const struct { uint32_t offset, size; } ram_ignore[] = {
     {0xdf3790u, 0x30u}, {0xa94810u, 0x60u},
 };
 
-typedef struct IgnoreRange { size_t start, stop; } IgnoreRange;
+typedef RecompRamRange IgnoreRange;
 
 static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
 {
@@ -106,6 +106,11 @@ void recomp_synctest_mask_ignored(uint8_t *ram, size_t size)
         const size_t stop = ranges[i].stop < size ? ranges[i].stop : size;
         memset(ram + ranges[i].start, 0, stop - ranges[i].start);
     }
+}
+
+size_t recomp_synctest_ignored_ranges(RecompRamRange *ranges, size_t capacity)
+{
+    return build_ignore_ranges(ranges, capacity);
 }
 
 /* Guest time plus the presenter marks derived from it; both rewind together

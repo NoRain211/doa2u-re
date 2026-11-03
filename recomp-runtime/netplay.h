@@ -16,11 +16,14 @@ extern "C" {
    and there is no resend. */
 enum {
     RECOMP_NETPLAY_PAD_BYTES = 18u,
-    RECOMP_NETPLAY_HEADER_BYTES = 21u,
+    RECOMP_NETPLAY_HEADER_BYTES = 33u,
     RECOMP_NETPLAY_MAX_PADS = RECOMP_ROLLBACK_HISTORY,
+    /* At most the 1,200 bytes the matchmaker relays (tools/matchmaker.py). */
     RECOMP_NETPLAY_MAX_PACKET =
         RECOMP_NETPLAY_HEADER_BYTES + RECOMP_NETPLAY_MAX_PADS * RECOMP_NETPLAY_PAD_BYTES,
     RECOMP_NETPLAY_SYNC_FRAMES = 32u,
+    /* Desync checks a side keeps to compare with the other's newest. */
+    RECOMP_NETPLAY_CHECKS = 8u,
     RECOMP_NETPLAY_DIGEST_BYTES = 64u,
     /* The largest profile a host sends; it arrives in 1 KiB chunks. */
     RECOMP_NETPLAY_MAX_PROFILE = 1024u * 1024u,
@@ -104,6 +107,13 @@ typedef struct RecompNetplay {
     uint32_t rtt_ms; /* smoothed over the last few samples */
     bool rtt_known;
     bool peer_left; /* the other runner said goodbye */
+    /* Desync checks: hashes of guest RAM at frames both sides' pads are
+       known for. Each packet carries this side's newest; frame 0 is none. */
+    uint32_t check_frames[RECOMP_NETPLAY_CHECKS];
+    uint64_t check_hashes[RECOMP_NETPLAY_CHECKS];
+    uint32_t check_count;
+    uint32_t peer_check_frame;
+    uint64_t peer_check_hash;
     RecompNetplayMatch match;
 } RecompNetplay;
 
@@ -201,6 +211,11 @@ void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *session);
    two averaged advantages, which cancels the latency both of them include.
    Call once per new frame with the advantage that frame sent. */
 uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage);
+/* Keeps this side's hash of a confirmed frame for its packets to carry. */
+void recomp_netplay_add_check(RecompNetplay *net, uint32_t frame, uint64_t hash);
+/* This side's hash for the frame of the other side's newest check (peer_check_frame);
+   false when this side has not hashed that frame or no longer keeps it. */
+bool recomp_netplay_own_check(const RecompNetplay *net, uint64_t *mine);
 
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage, uint8_t *packet);

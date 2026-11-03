@@ -1,6 +1,8 @@
 #ifndef DOA2U_RECOMP_SYNCTEST_H
 #define DOA2U_RECOMP_SYNCTEST_H
 
+#include "guest_snapshot.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -63,8 +65,13 @@ bool recomp_rollback_ring_save(void);
 /* Restores the save `back` saves before the newest and discards later ones.
    False, with nothing changed, when that save cannot be rewound. */
 bool recomp_rollback_ring_load(size_t back);
+/* A hash of guest RAM as of the ring's newest save or load, reading the
+   ignored ranges as zero (recomp_snapshots_hash). */
+bool recomp_rollback_ring_hash(const RecompRamRange *ignored, size_t count, uint64_t *hash);
 /* Zeroes the guest RAM ranges SyncTest ignores (host-scheduled state). */
 void recomp_synctest_mask_ignored(uint8_t *ram, size_t size);
+/* Those ranges, sorted; fewer than capacity. */
+size_t recomp_synctest_ignored_ranges(RecompRamRange *ranges, size_t capacity);
 
 #ifdef __cplusplus
 }
