@@ -21,6 +21,8 @@ struct RecompSyncTestState {
        from another routine leaves the host in a different native continuation,
        which a rewind cannot restore. */
     uint32_t swap_caller;
+    /* The session frame a rollback ring save was made for. */
+    uint32_t frame;
 };
 typedef struct RecompSyncTestState Snapshot;
 
@@ -328,7 +330,7 @@ bool recomp_rollback_ring_init(size_t frames)
     return true;
 }
 
-bool recomp_rollback_ring_save(void)
+bool recomp_rollback_ring_save(uint32_t frame)
 {
     bool saved = true;
     if (ram_live != NULL) {
@@ -338,14 +340,17 @@ bool recomp_rollback_ring_save(void)
     }
     ring_newest = (ring_newest + 1u) % ring_size;
     save_snapshot(&ring[ring_newest]);
+    ring[ring_newest].frame = frame;
     if (!saved) ring_count = 1u;
     else if (ring_count < ring_size) ++ring_count;
     return saved;
 }
 
-bool recomp_rollback_ring_load(size_t back)
+bool recomp_rollback_ring_load(uint32_t frame)
 {
-    if (back >= ring_count) return false;
+    size_t back = 0u;
+    while (back < ring_count && ring[(ring_newest + ring_size - back) % ring_size].frame != frame) ++back;
+    if (back == ring_count) return false;
     const size_t index = (ring_newest + ring_size - back) % ring_size;
     const Snapshot *saved = &ring[index];
     if (saved->swap_caller != recomp_d3d8_swap_caller()) {

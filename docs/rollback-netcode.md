@@ -112,12 +112,18 @@ SyncTest.
 arrived runs with the last remote pad; when its pad arrives and differs from
 the one that ran, the session rewinds to the earliest wrong frame. The local
 side runs at most `RECOMP_ROLLBACK_WINDOW` (8) frames past the last remote
-pad. The ring in `synctest.c` keeps one save per frame of SyncTest's modules
-and the guest RAM pages, and refuses a load that SyncTest would skip.
+pad. The ring in `synctest.c` keeps saves of SyncTest's modules and the
+guest RAM pages, each tagged with its frame, and refuses a load that SyncTest
+would skip.
 
 The runner drives the session from the Swap boundary. At the newest frame it
 adds the pads that arrived, then either loads the earliest mispredicted
-frame or saves the frame about to run. The frame's pads become the input
+frame or saves the frame about to run. A rewind only ever goes back to a
+frame that started before the other player's pad for it arrived, so only
+those frames save, plus every desync check frame, whose hash reads the
+newest save. Lockstep frames and frames whose pad came in time skip the
+save, and their RAM changes fold into the next one. In a localhost fight of
+2,400 frames the two sides made 79 and 106 saves. The frame's pads become the input
 adapter's sample source, so every XInputGetState in that frame reads the
 same pad however often the game polls. Frames run again are hidden.
 

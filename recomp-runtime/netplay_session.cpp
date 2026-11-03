@@ -60,7 +60,7 @@ struct RollbackRun {
     bool interrupted = false; // the other player went quiet (stalled)
     std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
-    std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u;
+    std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u, saves = 0u;
     std::uint32_t wait = 0u, paced = UINT32_MAX; // frame sync's next wait; last frame paced
     std::chrono::steady_clock::time_point next_frame{};
     // Measured once per new frame and repeated while stalled, so a stall's
@@ -347,8 +347,8 @@ static void finishRollback()
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - rollback.started).count();
     std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
-        "(%u frames run again, %u waited) in %.1f s\n",
-        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, seconds);
+        "(%u frames run again, %u waited, %u saves) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, rollback.saves, seconds);
     writeDump();
     if (rollback.mode == RollbackMode::Udp) {
         // shortcut: the peer may still need our acknowledgement; repeat it briefly instead of a close handshake.
@@ -431,10 +431,15 @@ static void sayGoodbye()
    other side for the same frame ends the session. */
 constexpr std::uint32_t desyncCheckFrames = 30u;
 
+static bool isCheckFrame(std::uint32_t frame)
+{
+    return rollback.mode == RollbackMode::Udp && frame != 0u && frame % desyncCheckFrames == 0u;
+}
+
 static void hashCheckFrame()
 {
     const std::uint32_t frame = rollback.session.frame;
-    if (rollback.mode != RollbackMode::Udp || frame == 0u || frame % desyncCheckFrames != 0u) return;
+    if (!isCheckFrame(frame)) return;
     const auto began = std::chrono::steady_clock::now();
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
     std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 2u);
@@ -449,6 +454,18 @@ static void hashCheckFrame()
     rollback.checkFrame = frame;
     rollback.slowestHashMs = std::max(rollback.slowestHashMs,
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+}
+
+/* A rewind goes back to the first frame whose guessed remote pad was wrong,
+   so only frames starting without the other player's pad need a save, plus
+   check frames, whose hash reads the newest save. Lockstep frames and frames
+   whose pad came in time skip it, which saves most of a fight's copying. */
+static bool saveFrame()
+{
+    const RecompRollbackSession &s = rollback.session;
+    if (s.frame < s.remote_count && !isCheckFrame(s.frame)) return true;
+    ++rollback.saves;
+    return recomp_rollback_ring_save(s.frame);
 }
 
 // Only from the newest frame once its rewinds are done, so the hash already ran with every confirmed pad.
@@ -547,9 +564,8 @@ static void onRollbackFrame(std::uint32_t swap)
         }
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
-            // The newest save is the frame before the frontier.
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
-            if (!recomp_rollback_ring_load(rollback.frontier - 1u - target))
+            if (!recomp_rollback_ring_load(target))
                 endSession("rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
@@ -570,7 +586,7 @@ static void onRollbackFrame(std::uint32_t swap)
                 *recomp_memory(0x0087ae54u, 1u) ^= 1u; // fighter 1's life, which persists
                 std::fprintf(stderr, "recomp rollback: test flip of guest RAM at frame %u\n", s.frame);
             }
-            saved = recomp_rollback_ring_save();
+            saved = saveFrame();
             if (rollback.mode == RollbackMode::Udp) {
                 rollback.advantage = static_cast<std::int32_t>(s.frame - rollback.net.peer_frame);
                 recomp_netplay_send(&rollback.net, &s, rollback.advantage);
@@ -580,7 +596,7 @@ static void onRollbackFrame(std::uint32_t swap)
             }
         }
     } else {
-        saved = recomp_rollback_ring_save();
+        saved = saveFrame();
     }
     if (!saved) recomp_stop(4, "rollback:save");
     hashCheckFrame();
