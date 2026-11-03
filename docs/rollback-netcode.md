@@ -105,6 +105,9 @@ SyncTest.
   fyl2x, fyl2xp1 and f2xm1 call one copy of musl's code (`musl_math/`).
   `portable_math_test.c` pins a hash of 160,000 results; MSVC, GCC and Clang
   on x86-64 and arm64 Linux all match it.
+  `RCPSS` and `RSQRTSS` are table approximations whose bits differ between
+  Intel, AMD and the Xbox's CPU, so the runner computes the exact reciprocal
+  on every host, within Intel's documented 1.5 * 2^-12 error.
 
 ## Rollback session
 
