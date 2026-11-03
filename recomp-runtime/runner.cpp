@@ -99,7 +99,8 @@ static RecompInputGamepad backPad;
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     // Both runners must see the same controllers: the session's two ports, once it runs.
-    if (rollback.lobby && (port >= 2u || !rollback.active)) return false;
+    // A host pad unplugged or plugged in mid-session never reaches the guest.
+    if (rollback.active ? port >= 2u : rollback.lobby) return false;
     if (rollback.active && port < 2u) {
         // Loopback has no local player, so its port stays empty.
         if (rollback.mode == RollbackMode::Loopback && port == rollback.player) return false;
@@ -594,13 +595,27 @@ static void sayGoodbye()
 
 /* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
    the deepest rewind of the last second and how many frames this side runs
-   ahead of the other. */
+   ahead of the other. Over it, a notice while this player's pad is missing. */
 static int networkDisplay;
 static std::uint32_t rewindDepth;
 static std::chrono::steady_clock::time_point rewoundAt;
 
-static void drawNetworkStats(const RecompD3dPresenterTarget *target)
+static void drawSessionOverlay(const RecompD3dPresenterTarget *target)
 {
+    // Only this side sees its pad go missing; both guests keep the session's two pads.
+    static bool padSeen;
+    const bool connected = recomp_input_host_pad_connected(0u);
+    padSeen = padSeen || connected;
+    if (padSeen && !connected) {
+        const char *notice = "CONTROLLER DISCONNECTED";
+        const float width = recomp_overlay_text_width(notice, 2.0f);
+        recomp_overlay_rect(320.0f - width / 2.0f - 6.0f, 410.0f, width + 12.0f, 24.0f, 0xa0000000u);
+        recomp_overlay_text(320.0f - width / 2.0f, 415.0f, 2.0f, 0xffff5050u, notice);
+    }
+    if (networkDisplay == 0) {
+        recomp_overlay_submit(target, recomp_overlay_display_aspect());
+        return;
+    }
     const RecompNetplay &net = rollback.net;
     std::string text = "PING " + (net.rtt_known ? std::to_string(net.rtt_ms) + " MS" : std::string("--"));
     if (networkDisplay == 2) {
@@ -1360,7 +1375,7 @@ static void bootGuest()
     recomp_dsound_buffer_set_output_suppressed(landOnVersus || backToVersus);
     if (rollback.lobby) {
         networkDisplay = recomp_netplay_menu_display(storage);
-        recomp_d3d_overlay_hook = networkDisplay != 0 ? drawNetworkStats : nullptr;
+        recomp_d3d_overlay_hook = drawSessionOverlay;
     } else if (!rollbackEnabled && !recomp_synctest_enabled()) {
         recomp_netplay_menu_install(storage, runnerDigest(), [storage] { return ownProfileName(storage / "partition1"); });
     }
