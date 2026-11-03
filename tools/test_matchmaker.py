@@ -123,6 +123,19 @@ class MatchmakerTest(unittest.TestCase):
         for packet in (b"", b"D2MM", mm.header(mm.HOST) + b"short", b"XXXX" + bytes((1, mm.LIST)) + bytes(506)):
             self.assertEqual(self.send(packet, JOINER_AT, 0.0), [])
 
+    def test_status_counts_without_addresses_and_restarts(self):
+        room_id, _ = self.host()
+        self.send(joining(room_id), JOINER_AT, 1.0)
+        self.send(joining(room_id), JOINER_AT, 1.5)  # a repeat is the same join
+        game = mm.header(mm.RELAY) + b"pads"
+        for _ in range(mm.RELAY_PER_SECOND + 2):
+            self.send(game, JOINER_AT, 2.0)
+        line = self.server.status(3.0)
+        self.assertEqual(line, "matchmaker: rooms 1, open 1, pairs 1, joins 1, relayed 250 (2 KiB), over the relay cap 2")
+        self.assertNotIn(HOST_AT[0], line)
+        self.assertNotIn(JOINER_AT[0], line)
+        self.assertTrue(self.server.status(4.0).endswith("joins 0, relayed 0 (0 KiB), over the relay cap 0"))
+
 
 if __name__ == "__main__":
     unittest.main()

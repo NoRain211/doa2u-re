@@ -64,6 +64,7 @@ class Matchmaker:
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
         self.swept = 0.0
+        self.joins = self.relayed = self.relayed_bytes = self.over_cap = 0  # since the last status line
 
     def handle(self, data, sender, now):
         """Returns the (packet, endpoint) answers to one packet from sender."""
@@ -121,6 +122,7 @@ class Matchmaker:
             return [(header(GONE) + struct.pack(">I", room_id), sender)]
         if room.claimer != sender or room.claimed_until <= now:
             room.claimed_until, room.claimer = now + CLAIM_SECONDS, sender
+            self.joins += 1
         self.pairs[sender] = Pair(room.host, now)
         self.pairs[room.host] = Pair(sender, now)
         if self.relay_only:
@@ -137,8 +139,11 @@ class Matchmaker:
             pair.second, pair.count = int(now), 0
         pair.count += 1
         if pair.count > RELAY_PER_SECOND:
+            self.over_cap += 1
             return []
         pair.used = back.used = now
+        self.relayed += 1
+        self.relayed_bytes += 6 + len(body)
         return [(header(RELAY) + body, pair.other)]
 
     def remove(self, room):
@@ -152,6 +157,15 @@ class Matchmaker:
             self.remove(room)
         for key in [key for key, pair in self.pairs.items() if now - pair.used > PAIR_SECONDS]:
             del self.pairs[key]
+
+    def status(self, now):
+        """One log line of counts, without addresses; the join and relay counts restart after it."""
+        self.sweep(now)
+        line = (f"matchmaker: rooms {len(self.rooms)}, open {sum(room.open for room in self.rooms.values())}, "
+                f"pairs {len(self.pairs) // 2}, joins {self.joins}, relayed {self.relayed} "
+                f"({self.relayed_bytes // 1024} KiB), over the relay cap {self.over_cap}")
+        self.joins = self.relayed = self.relayed_bytes = self.over_cap = 0
+        return line
 
 
 class Server(asyncio.DatagramProtocol):
@@ -167,11 +181,16 @@ class Server(asyncio.DatagramProtocol):
             self.transport.sendto(packet, target)
 
 
-async def serve(address, port, relay_only):
+async def serve(address, port, relay_only, status_seconds):
     loop = asyncio.get_running_loop()
-    await loop.create_datagram_endpoint(lambda: Server(Matchmaker(relay_only=relay_only)), local_addr=(address, port))
+    matchmaker = Matchmaker(relay_only=relay_only)
+    await loop.create_datagram_endpoint(lambda: Server(matchmaker), local_addr=(address, port))
     print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}", flush=True)
-    await asyncio.Event().wait()
+    if status_seconds <= 0:
+        await asyncio.Event().wait()
+    while True:
+        await asyncio.sleep(status_seconds)
+        print(matchmaker.status(loop.time()), flush=True)
 
 
 def main():
@@ -179,8 +198,9 @@ def main():
     parser.add_argument("--address", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=47700)
     parser.add_argument("--relay-only", action="store_true", help="relay every pair, so no player learns another's address")
+    parser.add_argument("--status", type=float, default=60.0, help="seconds between status lines, 0 for none")
     arguments = parser.parse_args()
-    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only))
+    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status))
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@
     "tools/extract_iso.py",
     "tools/test_extract_iso.py",
     "tools/matchmaker.py",
+    "tools/matchmaker.service",
     "tools/test_matchmaker.py",
     "tools/public_export.py",
     "tools/xbe_info.py",

@@ -24,14 +24,19 @@ default) and Python 3.10 or later. It needs no other packages:
 `--relay-only` relays every pair and sends no endpoints, so no player
 learns another's address.
 
-It is not deployed. The relay costs bandwidth: a session sends about 60
-packets of about 100 bytes a second each way, which is about 45 MB an hour
-for a relayed match. A relay in one place adds the detour to players far
-from it.
+`--status` sets the seconds between status lines, 60 by default and 0 for
+none. Each line counts rooms, open rooms and pairs, and the joins, relayed
+packets and KiB, and packets over the relay cap since the line before. It
+holds no addresses or names.
+
+It is not deployed yet; [Deploying](#deploying) has the plan. The relay
+costs bandwidth: a session sends about 60 packets of about 100 bytes a
+second each way, which is about 45 MB an hour for a relayed match. A relay
+in one place adds the detour to players far from it.
 
 ## What it stores
 
-Only in memory, and nothing is logged:
+Only in memory, and the log holds only the status counts:
 
 - Each room: a random id, the host's public endpoint as the server sees it,
   the host's LAN endpoint, the build digest, name, input delay, whether
@@ -43,6 +48,44 @@ Only in memory, and nothing is logged:
 
 The room list shows ids, names, ages and delays. Endpoints go only to the
 two players of a join.
+
+## Deploying
+
+The plan is an Oracle Cloud Always Free VM in a US region, named through
+Cloudflare DNS, in the normal mode: punching first, relay when it fails.
+
+1. Sign up with a US home region. Always Free resources live only in the
+   home region, which cannot change later.
+2. Create an instance from the Canonical Ubuntu 24.04 image on an Always
+   Free shape (VM.Standard.E2.1.Micro, or a small VM.Standard.A1.Flex),
+   with a public IPv4 address and SSH keys only. Ubuntu 24.04 has Python
+   3.12; Oracle Linux 9's Python 3.9 is too old.
+3. In the subnet's security list, add an ingress rule: source 0.0.0.0/0,
+   UDP, destination port 47700.
+4. On the VM, from a copy of this repository's `tools` folder, once:
+
+       sudo install -D -m 0644 matchmaker.py /opt/doa2u-matchmaker/matchmaker.py
+       sudo install -m 0644 matchmaker.service /etc/systemd/system/doa2u-matchmaker.service
+       sudo iptables -I INPUT 1 -p udp --dport 47700 -j ACCEPT
+       sudo netfilter-persistent save
+       sudo systemctl daemon-reload
+       sudo systemctl enable --now doa2u-matchmaker
+
+   Oracle's Ubuntu images end the INPUT chain with a REJECT, so the port
+   is opened there as well as in the security list. To update the server,
+   copy `matchmaker.py` again and run
+   `sudo systemctl restart doa2u-matchmaker`.
+5. `journalctl -u doa2u-matchmaker -f` shows a status line every minute.
+6. In Cloudflare DNS, add an A record such as `mm` with the VM's public
+   address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
+   proxied name would not reach a UDP server.
+7. Set MATCHMAKER to `mm.<domain>:47700` on two machines on different
+   home networks. HOST ONLINE should say LISTED ON FIND MATCH and the
+   other should quick-match it, which is also the first test of punching
+   through real routers.
+
+Oracle stops Always Free VMs that look idle for 7 days: CPU and network,
+and memory on A1 shapes, all under 20%. The matchmaker always looks idle.
 
 ## Packets
 
@@ -119,6 +162,8 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 ## Not done yet
 
 - The game has no default server.
+- Check how to keep Oracle from reclaiming the idle VM, such as a Pay As
+  You Go account, before relying on it.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
