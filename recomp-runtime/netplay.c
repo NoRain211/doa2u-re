@@ -763,6 +763,13 @@ void recomp_netplay_match_poll(RecompNetplay *net)
     }
 }
 
+uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms)
+{
+    if (rtt_ms <= 20u) return 0u;
+    const uint32_t frames = rtt_ms / 33u + (rtt_ms % 33u != 0u);
+    return frames < RECOMP_ROLLBACK_WINDOW ? frames : RECOMP_ROLLBACK_WINDOW;
+}
+
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
 {
     fd_set readable;

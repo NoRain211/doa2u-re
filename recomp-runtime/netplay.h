@@ -173,6 +173,9 @@ void recomp_netplay_match_leave(RecompNetplay *net);
 /* Drains the socket outside a room, keeping only the matchmaker's answers
    and the listed rooms' pings. */
 void recomp_netplay_match_poll(RecompNetplay *net);
+/* The input delay to suggest for a round trip: none up to 20 ms, then a
+   frame per 33 ms rounded up, at most RECOMP_ROLLBACK_WINDOW. */
+uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another

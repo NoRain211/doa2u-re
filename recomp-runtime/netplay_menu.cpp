@@ -570,6 +570,8 @@ bool updateRoom(std::uint16_t keys)
         return false;
     }
     if ((keys & (Left | Right)) && menu.hosting && !room.joined && !menu.starting) setListed(!menu.listing);
+    if ((keys & Y) && menu.hosting && room.pinged && !menu.starting)
+        menu.delay = recomp_netplay_suggested_delay(room.ping_ms);
     if (!peerAllowed) menu.ready = false;
     else if ((keys & A) && !menu.starting) menu.ready = !menu.ready;
     if ((keys & X) && menu.hosting) {
@@ -812,7 +814,12 @@ void drawRoom()
     } else if (menu.hosting) {
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
-        recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, ("INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES").c_str());
+        std::string delay = "INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES";
+        if (room.pinged) {
+            const std::uint32_t suggested = recomp_netplay_suggested_delay(room.ping_ms);
+            delay += suggested == menu.delay ? "  SUGGESTED" : "  Y SUGGESTED " + std::to_string(suggested);
+        }
+        recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, delay.c_str());
         const char *const kinds[2] = {"PUBLIC", "PRIVATE"};
         const std::string kind = kinds[menu.listing ? 0 : 1];
         recomp_overlay_text(40.0f, 374.0f, 2.0f, Gray, ("ROOM  " + (peer ? kind : "< " + kind + " >")).c_str());

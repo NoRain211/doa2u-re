@@ -139,6 +139,11 @@ int main(void)
     longName[sizeof longName - 1u] = 0;
     check("too long to check", recomp_netplay_name_banned(longName));
 
+    static const uint32_t rtts[] = {0u, 20u, 21u, 33u, 34u, 66u, 100u, 264u, 1000u, 0xffffffffu};
+    static const uint32_t delays[] = {0u, 0u, 1u, 1u, 2u, 2u, 4u, 8u, 8u, 8u};
+    for (size_t i = 0u; i < sizeof rtts / sizeof *rtts; ++i)
+        check("suggested delay", recomp_netplay_suggested_delay(rtts[i]) == delays[i]);
+
     if (failures != 0) return 1;
     puts("PASS netplay carries pads, acks, advantage and goodbyes over UDP and screens names");
     return 0;
