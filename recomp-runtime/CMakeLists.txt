@@ -303,6 +303,9 @@ endif()
 add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
 add_executable(recomp_netplay_settings_test netplay_settings.cpp netplay_settings_test.cpp)
 add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_test)
+add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
+target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -502,7 +505,7 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_settings.cpp overlay.c
+        netplay_settings.cpp netplay_profile.cpp overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)
