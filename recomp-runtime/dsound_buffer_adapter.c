@@ -13,6 +13,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -53,21 +54,21 @@ void recomp_dsound_output_lock(void) {}
 void recomp_dsound_output_unlock(void) {}
 #elif defined(_WIN32)
 static SRWLOCK output_lock = SRWLOCK_INIT;
-static volatile DWORD output_owner;
-static bool output_lock_held(void) { return output_owner == GetCurrentThreadId(); }
-void recomp_dsound_output_lock(void) { AcquireSRWLockExclusive(&output_lock); output_owner = GetCurrentThreadId(); }
-void recomp_dsound_output_unlock(void) { output_owner = 0u; ReleaseSRWLockExclusive(&output_lock); }
+static _Thread_local bool output_held;
+static bool output_lock_held(void) { return output_held; }
+void recomp_dsound_output_lock(void) { AcquireSRWLockExclusive(&output_lock); output_held = true; }
+void recomp_dsound_output_unlock(void) { output_held = false; ReleaseSRWLockExclusive(&output_lock); }
 #else
 static pthread_mutex_t output_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t output_owner;
-static volatile int output_locked;
-static bool output_lock_held(void) { return output_locked && pthread_equal(output_owner, pthread_self()); }
-void recomp_dsound_output_lock(void) { pthread_mutex_lock(&output_lock); output_owner = pthread_self(); output_locked = 1; }
-void recomp_dsound_output_unlock(void) { output_locked = 0; pthread_mutex_unlock(&output_lock); }
+static _Thread_local bool output_held;
+static bool output_lock_held(void) { return output_held; }
+void recomp_dsound_output_lock(void) { pthread_mutex_lock(&output_lock); output_held = true; }
+void recomp_dsound_output_unlock(void) { output_held = false; pthread_mutex_unlock(&output_lock); }
 #endif
-static volatile int pump_stopping;
+/* Both are read and written only under the output lock. */
+static bool pump_stopping;
 /* A failure seen by the pump thread, raised on the game thread's next DoWork. */
-static const char *volatile pump_failure;
+static const char *pump_failure;
 
 static uint32_t canonical(uint32_t address)
 {
@@ -389,21 +390,24 @@ void recomp_dsound_buffers_pump(void)
 }
 
 #ifndef RECOMP_DSOUND_TEST_CLOCK
-static void pump_pass(void)
+/* Returns false once reset has stopped the pump. */
+static bool pump_pass(void)
 {
     recomp_dsound_output_lock();
-    if (!pump_stopping) {
+    const bool running = !pump_stopping;
+    if (running) {
         const uint64_t now = now_ms();
         for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
     }
     recomp_dsound_output_unlock();
+    return running;
 }
 
 #ifdef _WIN32
 static DWORD WINAPI pump_thread(LPVOID unused)
 {
     (void)unused;
-    while (!pump_stopping) { Sleep(5u); pump_pass(); }
+    do Sleep(5u); while (pump_pass());
     return 0u;
 }
 #else
@@ -411,7 +415,7 @@ static void *pump_thread(void *unused)
 {
     (void)unused;
     const struct timespec period = {0, 5000000};
-    while (!pump_stopping) { nanosleep(&period, NULL); pump_pass(); }
+    do nanosleep(&period, NULL); while (pump_pass());
     return NULL;
 }
 #endif
@@ -423,16 +427,18 @@ static void *pump_thread(void *unused)
 static void start_pump(void)
 {
 #ifndef RECOMP_DSOUND_TEST_CLOCK
-    static bool pump_started;
+    static bool pump_started; /* a failed start retries at the next buffer */
     if (pump_started || !recomp_audio_output_enabled()) return;
-    pump_started = true;
 #ifdef _WIN32
     HANDLE thread = CreateThread(NULL, 0u, pump_thread, NULL, 0u, NULL);
+    pump_started = thread != NULL;
     if (thread) { SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL); CloseHandle(thread); }
 #else
     pthread_t thread;
-    if (pthread_create(&thread, NULL, pump_thread, NULL) == 0) pthread_detach(thread);
+    pump_started = pthread_create(&thread, NULL, pump_thread, NULL) == 0;
+    if (pump_started) pthread_detach(thread);
 #endif
+    if (!pump_started) fprintf(stderr, "recomp dsound: output pump thread failed to start\n");
 #endif
 }
 
@@ -447,10 +453,10 @@ static void dispose(Buffer *buffer)
 
 void recomp_dsound_buffers_reset(void)
 {
-    pump_stopping = 1;
     /* A stop raised under the lock exits through here; the process ends anyway. */
-    if (output_lock_held()) return;
+    if (output_lock_held()) { pump_stopping = true; return; }
     recomp_dsound_output_lock();
+    pump_stopping = true;
     for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) {
         dispose(&buffers[i]);
         recomp_dsound_device_release_owner();

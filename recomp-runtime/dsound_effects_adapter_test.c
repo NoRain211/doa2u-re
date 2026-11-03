@@ -24,7 +24,7 @@ uint8_t *recomp_fast_ram;
 static uint32_t memory[RECOMP_XBOX_RAM_SIZE / 4u];
 static struct Allocation { uint32_t base, bytes; bool live; } allocations[64];
 static uint32_t cursor = 0x01000000u, allocated, freed, refreshes, reverb_calls;
-static int fail_after = -1, reverb_ready = 1, backend_ready = 1;
+static int fail_after = -1, reverb_ready = 1, backend_ready = 1, output_locked;
 static RecompAudioReverb reverb_applied;
 static jmp_buf stopped;
 static int stop_armed;
@@ -61,13 +61,15 @@ void recomp_dsound_require_device(uint32_t handle)
 {
     if (handle != DEVICE) recomp_stop(2, "dsound:invalid-device");
 }
-void recomp_dsound_buffers_refresh_routing(void) { ++refreshes; }
-void recomp_dsound_output_lock(void) {}
-void recomp_dsound_output_unlock(void) {}
+/* The real routing refresh takes the non-recursive output lock itself. */
+void recomp_dsound_buffers_refresh_routing(void) { CHECK(!output_locked); ++refreshes; }
+void recomp_dsound_output_lock(void) { CHECK(!output_locked); output_locked = 1; }
+void recomp_dsound_output_unlock(void) { CHECK(output_locked); output_locked = 0; }
 int recomp_audio_output_ready(void) { return backend_ready; }
 int recomp_audio_output_set_reverb(const RecompAudioReverb *parameters)
 {
     CHECK(parameters != NULL);
+    CHECK(output_locked);
     ++reverb_calls;
     if (!reverb_ready || !backend_ready) return 0;
     reverb_applied = *parameters;
@@ -334,5 +336,6 @@ int main(void)
     CHECK(CALL(0x36604au, DEVICE, LISTENER, 0u) == INVALID_EFFECT);
     recomp_dsound_effects_reset();
     CHECK(allocated == freed);
+    CHECK(!output_locked);
     return 0;
 }
