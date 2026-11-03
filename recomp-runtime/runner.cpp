@@ -1016,10 +1016,15 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
     };
     std::fprintf(stderr, "recomp netplay: connected as player %u (%s) against %s with %u frames of input delay\n",
         rollback.player + 1u, shown(ownNames).c_str(), shown(peerNames).c_str(), rollback.delay);
-    const std::string ownName = ownNames.empty() ? "" : ownNames.front();
-    const std::string peerName = peerNames.empty() ? "" : peerNames.front();
-    recomp_program_set_fight_names(hosting ? ownName.c_str() : peerName.c_str(),
-        hosting ? peerName.c_str() : ownName.c_str(), rollback.player);
+    // No profile shows the side; two default profiles with one name get the side in front.
+    std::string names[2] = {hosting ? shown(ownNames) : shown(peerNames), hosting ? shown(peerNames) : shown(ownNames)};
+    const bool same = names[0] == names[1];
+    for (unsigned side = 0u; side < 2u; ++side) {
+        const std::string tag = side == 0u ? "P1" : "P2";
+        if (names[side] == "no profile") names[side] = tag;
+        else if (same) names[side] = tag + " " + names[side];
+    }
+    recomp_program_set_fight_names(names[0].c_str(), names[1].c_str(), rollback.player);
     return true;
 }
 
