@@ -297,6 +297,25 @@ void host(bool bound, bool listed)
     enterRoom(true);
 }
 
+// Switches a hosting room between public and private in place, and keeps the choice for HOST ONLINE.
+// A private room drops the matchmaker; if its LEAVE is lost, the server drops the room after 20 s.
+void setListed(bool listed)
+{
+    menu.listing = listed;
+    menu.privateRoom = !listed;
+    saveSettings();
+    menu.checkedIn = Clock::time_point{};
+    if (listed) {
+        lookUpMatchmaker();
+        return;
+    }
+    recomp_netplay_match_leave(&menu.net);
+    menu.lookup.reset();
+    RecompNetplayMatch &match = menu.net.match;
+    match.server_port = 0u;
+    match.relay = match.punching = false;
+}
+
 void join(bool bound = false)
 {
     const std::size_t colon = menu.address.rfind(':');
@@ -541,6 +560,7 @@ bool updateRoom(std::uint16_t keys)
         leaveRoom();
         return false;
     }
+    if ((keys & (Left | Right)) && menu.hosting && !room.joined && !menu.starting) setListed(!menu.listing);
     if (!peerAllowed) menu.ready = false;
     else if ((keys & A) && !menu.starting) menu.ready = !menu.ready;
     if ((keys & X) && menu.hosting) {
@@ -784,6 +804,9 @@ void drawRoom()
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
         recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, ("INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES").c_str());
+        const char *const kinds[2] = {"PUBLIC", "PRIVATE"};
+        const std::string kind = kinds[menu.listing ? 0 : 1];
+        recomp_overlay_text(40.0f, 374.0f, 2.0f, Gray, ("ROOM  " + (peer ? kind : "< " + kind + " >")).c_str());
     } else {
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("HOST  " + menu.peerAddress).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, "INPUT DELAY  SET BY THE HOST");
@@ -807,6 +830,7 @@ void drawRoom()
     }
     footer(menu.typing ? "ENTER SEND   ESC CANCEL"
         : peer && !room.mismatch ? "A READY   B LEAVE   ENTER CHAT"
+        : menu.hosting && !peer ? "A READY  B LEAVE  X COPY  LEFT/RIGHT ROOM"
         : menu.hosting ? "A READY   B LEAVE   X COPY ADDRESS" : "A READY   B LEAVE");
 }
 
