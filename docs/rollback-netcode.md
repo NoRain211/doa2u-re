@@ -268,7 +268,8 @@ states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
 Once the host's room has a round trip, INPUT DELAY suggests one frame per
 33 ms of it, rounded up, none up to 20 ms, at most the rollback window;
-Y sets the delay to it. The joiner still takes whatever the host chose.
+once the other player is in, the host's left/right steps the delay. The
+joiner still takes whatever the host chose.
 
 Once the other player is in, Enter opens a chat line from the keyboard;
 Enter sends it and Esc drops it. While a line is open, the room ignores the
@@ -281,6 +282,20 @@ drops anything else. The last four lines replace the address lines. Two
 scripted runners typed into each other's rooms, and real keystrokes for X
 and Z went into the line without leaving the room or toggling ready. A
 session never shows chat, since its room is closed.
+
+Each install keeps a random 64-bit player ID in `netplay.txt`, made on the
+first run, and every room message carries it after the chat line. Y mutes
+the other player: their lines leave the chat, new ones are dropped, and
+their plate says CHAT MUTED until Y again or until they leave. X asks to
+block the other player and a second X within 3 s blocks them: their ID and
+name go into `netplay.txt` as a `block` line, a host drops them and keeps
+its room open, and a joiner leaves. From then on the room drops every
+message from a blocked ID before taking its sender as the peer, so a host
+never answers a blocked joiner and stops punching to one the matchmaker
+paired, and a joiner that reaches a blocked host leaves with a message.
+FIND MATCH hides a room whose host this runner blocked or was refused by,
+for the rest of the run; the matchmaker never learns IDs or blocks. UNBLOCK
+ALL under NETPLAY SETTINGS empties the list.
 
 When both are
 ready the host says start for 600 ms. Each runner closes the room, shows
