@@ -36,6 +36,12 @@ static bool joinerWelcomed()
     return welcomed->delay != 0xffu; // the host's welcome overwrites the joiner's marker
 }
 
+static std::uint64_t blockedPlayer;
+static bool isBlocked(std::uint64_t id)
+{
+    return id == blockedPlayer;
+}
+
 static void check(const char *name, bool passed)
 {
     if (!passed) {
@@ -267,6 +273,8 @@ int main()
     std::memset(otherDigest, 'b', sizeof otherDigest);
     RecompNetplayRoom hostRoom{}, joinerRoom{};
     hostRoom.hosting = true;
+    hostRoom.id = 0x1111222233334444ull;
+    joinerRoom.id = 0x5555666677778888ull;
     check("room opens", recomp_netplay_listen(&host, 47615u) &&
         recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47615u));
     for (int i = 0; i < 100 && !(joinerRoom.start && hostRoom.pinged && joinerRoom.pinged); ++i) {
@@ -279,6 +287,7 @@ int main()
     check("room ping", hostRoom.pinged && joinerRoom.pinged && hostRoom.ping_ms < 1000u &&
         joinerRoom.ping_ms < 1000u);
     check("room same build", hostRoom.joined && joinerRoom.joined && !hostRoom.mismatch && !joinerRoom.mismatch);
+    check("room ids", hostRoom.peer_id == joinerRoom.id && joinerRoom.peer_id == hostRoom.id);
 
     // A chat line arrives once, and one that is not printable ASCII never does.
     recomp_netplay_room_say(&joinerRoom, "gg, one more?");
@@ -296,6 +305,45 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     check("chat once, printable only", !hostRoom.heard_new);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+
+    // A host never answers a joiner it blocked, takes the same joiner once unblocked,
+    // and a joiner that blocked the host stops calling it.
+    hostRoom = RecompNetplayRoom{};
+    joinerRoom = RecompNetplayRoom{};
+    hostRoom.hosting = true;
+    hostRoom.id = 1u;
+    joinerRoom.id = 2u;
+    hostRoom.blocked = isBlocked;
+    blockedPlayer = 2u;
+    check("block room opens", recomp_netplay_listen(&host, 47624u) &&
+        recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47624u));
+    for (int i = 0; i < 25; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("host refuses a blocked joiner", hostRoom.refused && !hostRoom.joined && !joinerRoom.joined &&
+        host.peer_port == 0u);
+    blockedPlayer = 0u;
+    for (int i = 0; i < 50 && !(hostRoom.joined && joinerRoom.joined); ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("unblocked joiner gets in", hostRoom.joined && joinerRoom.joined && hostRoom.peer_id == 2u);
+    recomp_netplay_room_drop(&host, &hostRoom);
+    check("host drops the joiner", !hostRoom.joined && host.peer_port == 0u);
+    joinerRoom.blocked = isBlocked;
+    blockedPlayer = 1u;
+    joinerRoom.joined = false;
+    for (int i = 0; i < 50 && !joinerRoom.refused; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("joiner refuses a blocked host", joinerRoom.refused && !joinerRoom.joined && joiner.peer_port == 0u);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 

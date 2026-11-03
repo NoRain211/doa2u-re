@@ -119,6 +119,12 @@ bool recomp_netplay_listen(RecompNetplay *net, uint16_t port);
    times a second; the host also says when to start. */
 typedef struct RecompNetplayRoom {
     bool hosting;  /* set before the first tick; a host takes the first player who talks */
+    uint64_t id;   /* this install's player ID, set before the first tick */
+    /* Set before the first tick, or null: true for a player ID this player
+       blocked. Their messages are dropped and set refused; a side that was
+       calling or punching to them stops. */
+    bool (*blocked)(uint64_t id);
+    bool refused;  /* a blocked player spoke; the caller clears it */
     bool joined;   /* the other player spoke in the last 3 s */
     bool mismatch; /* the other player runs another build */
     bool ready;
@@ -126,6 +132,7 @@ typedef struct RecompNetplayRoom {
     bool pinged;
     uint32_t ping_ms;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    uint64_t peer_id; /* the other player's install ID */
     /* The other player's newest chat line, already checked; heard_new is set
        when one arrives, for the caller to clear. */
     char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
@@ -150,6 +157,9 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    side drops a line that is not printable ASCII or that
    recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
+/* Forgets the other player as if they went quiet; a host stops answering
+   them and lets another player in. */
+void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room);
 
 /* Matchmaking, all from the room's own socket so the server sees the
    endpoint the room uses. False when host does not resolve. */
