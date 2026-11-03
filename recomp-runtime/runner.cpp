@@ -87,6 +87,12 @@ struct RollbackRun {
     std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
     const char *dump = nullptr;
+    // Desync checks: the newest check frame hashed but not yet confirmed (0 for none) and its hash,
+    // the last frame compared, matches since the last log line and their slowest hash.
+    std::uint32_t checkFrame = 0u, compared = 0u, matched = 0u;
+    std::uint64_t checkHash = 0u;
+    double slowestHashMs = 0.0;
+    std::uint32_t flip = 0u; // RECOMP_ROLLBACK_FLIP: a test frame where this side alone changes guest RAM
     RecompRollbackSession session;
     RecompNetplay net;
     RecompInputGamepad pads[2]{}; // the running frame's pads by guest port
@@ -372,6 +378,7 @@ static std::chrono::steady_clock::time_point noticeShown;
 static const char *noticeTitle, *noticeHint;
 static std::string noticeDetail;
 static void endSession(const char *reason);
+static void compareChecks();
 
 static void drawNotice(const RecompD3dPresenterTarget *target)
 {
@@ -431,6 +438,8 @@ static std::uint32_t awaitFrontier(bool last)
     const Clock::time_point began = Clock::now();
     for (;;) {
         receivePads();
+        // A side stalled on the other may still hear the other's desync check.
+        if (udp) compareChecks();
         // The local pad is read at the frame's start, so pacing adds no input lag.
         // Rewinds wait for it too, so one replay covers every pad that arrived.
         const bool started = Clock::now() >= rollback.next_frame;
@@ -543,6 +552,17 @@ static void closeReplay()
     std::fprintf(stderr, "recomp netplay: replay %s with %u frames\n", replayFile ? "kept" : "cut short", replayFrames);
 }
 
+// Guest RAM without SyncTest's host-scheduled ranges, to RECOMP_ROLLBACK_DUMP when set.
+static void writeDump()
+{
+    if (rollback.dump == nullptr) return;
+    std::vector<std::uint8_t> ram(guestRam, guestRam + RECOMP_XBOX_RAM_SIZE);
+    recomp_synctest_mask_ignored(ram.data(), ram.size());
+    std::ofstream out(rollback.dump, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(ram.data()), static_cast<std::streamsize>(ram.size()));
+    if (!out) recomp_stop(4, "rollback:dump");
+}
+
 static void finishRollback()
 {
     closeReplay();
@@ -551,13 +571,7 @@ static void finishRollback()
     std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
         "(%u frames run again, %u waited) in %.1f s\n",
         rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, seconds);
-    if (rollback.dump != nullptr) {
-        std::vector<std::uint8_t> ram(guestRam, guestRam + RECOMP_XBOX_RAM_SIZE);
-        recomp_synctest_mask_ignored(ram.data(), ram.size());
-        std::ofstream out(rollback.dump, std::ios::binary);
-        out.write(reinterpret_cast<const char *>(ram.data()), static_cast<std::streamsize>(ram.size()));
-        if (!out) recomp_stop(4, "rollback:dump");
-    }
+    writeDump();
     if (rollback.mode == RollbackMode::Udp) {
         // shortcut: the peer may still need our acknowledgement; repeat it briefly instead of a close handshake.
         for (int i = 0; i < 50; ++i) {
@@ -672,6 +686,72 @@ static void sayGoodbye()
         recomp_netplay_send_goodbye(&rollback.net);
 }
 
+/* Every 30th frame of a UDP session, each side hashes guest RAM as the frame
+   starts, without SyncTest's host-scheduled ranges. Once the other player's
+   pads before that frame have all arrived, no rewind reaches it again, so
+   the hash is final and rides in each packet. A different hash from the
+   other side for the same frame ends the session. */
+constexpr std::uint32_t desyncCheckFrames = 30u;
+
+static void hashCheckFrame()
+{
+    const std::uint32_t frame = rollback.session.frame;
+    if (rollback.mode != RollbackMode::Udp || frame == 0u || frame % desyncCheckFrames != 0u) return;
+    const auto began = std::chrono::steady_clock::now();
+    RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
+    std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 2u);
+    /* draw_fight_name (program_manual.c) draws the local player's name in
+       yellow and the other's in white, so the two sides' 2D draw state
+       differs in glyph colors: in the sprite queue g_ui_sprite_queue, which
+       ui_draw_lists_reset (0xae300) empties each frame and ui_draw_sprite
+       (0xb1060) fills below 0x89bed9, and in the text color g_ui_text_color. */
+    ignored[count++] = RecompRamRange{0x0088eed8u, 0x0089bed9u};
+    ignored[count++] = RecompRamRange{0x008a01c8u, 0x008a01ccu};
+    if (!recomp_rollback_ring_hash(ignored, count, &rollback.checkHash)) recomp_stop(4, "rollback:hash");
+    rollback.checkFrame = frame;
+    rollback.slowestHashMs = std::max(rollback.slowestHashMs,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+}
+
+// Only from the newest frame once its rewinds are done, so the hash already ran with every confirmed pad.
+static void confirmCheck()
+{
+    if (rollback.checkFrame != 0u && rollback.session.remote_count >= rollback.checkFrame) {
+        recomp_netplay_add_check(&rollback.net, rollback.checkFrame, rollback.checkHash);
+        rollback.checkFrame = 0u;
+    }
+}
+
+static void compareChecks()
+{
+    RecompNetplay &net = rollback.net;
+    std::uint64_t mine = 0u;
+    if (!recomp_netplay_own_check(&net, &mine) || net.peer_check_frame == rollback.compared) return;
+    rollback.compared = net.peer_check_frame;
+    if (mine == net.peer_check_hash) {
+        if (++rollback.matched % 20u == 0u) {
+            std::fprintf(stderr, "recomp netplay: guest RAM matches the other player's through frame %u "
+                "(slowest check %.2f ms)\n", rollback.compared, rollback.slowestHashMs);
+            rollback.slowestHashMs = 0.0;
+        }
+        return;
+    }
+    std::fprintf(stderr, "recomp netplay: desync at frame %u: guest RAM hash %016llx here, %016llx there\n",
+        rollback.compared, static_cast<unsigned long long>(mine),
+        static_cast<unsigned long long>(net.peer_check_hash));
+    if (rollback.dump != nullptr)
+        std::fprintf(stderr, "recomp netplay: guest RAM at frame %u goes to %s\n", rollback.session.frame,
+            rollback.dump);
+    writeDump();
+    // The other side may not have this side's hash yet; it then finds the desync too.
+    for (int i = 0; i < 3; ++i) recomp_netplay_send(&net, &rollback.session, rollback.advantage);
+    noticeTitle = "DESYNC DETECTED";
+    noticeDetail = "ENDING THE SESSION";
+    recomp_d3d8_present_overlay(drawNotice);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    endSession("rollback:desync");
+}
+
 /* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
    the deepest rewind of the last second and how many frames this side runs
    ahead of the other. Over it, a notice while this player's pad is missing. */
@@ -720,6 +800,8 @@ static void onRollbackFrame(std::uint32_t swap)
         if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
         rollback.active = true;
         rollback.started = std::chrono::steady_clock::now();
+        if (const char *flip = std::getenv("RECOMP_ROLLBACK_FLIP"); flip != nullptr)
+            rollback.flip = static_cast<std::uint32_t>(std::strtoul(flip, nullptr, 10));
         std::fprintf(stderr, "recomp rollback: session starts at swap %u as player %u\n",
             swap, rollback.player);
         if (rollback.lobby && rollback.mode == RollbackMode::Udp) startReplay(swap);
@@ -748,6 +830,14 @@ static void onRollbackFrame(std::uint32_t swap)
             finishRollback();
             return;
         } else {
+            if (rollback.mode == RollbackMode::Udp) {
+                confirmCheck();
+                compareChecks();
+            }
+            if (rollback.flip != 0u && s.frame == rollback.flip) {
+                *recomp_memory(0x0087ae54u, 1u) ^= 1u; // fighter 1's life, which persists
+                std::fprintf(stderr, "recomp rollback: test flip of guest RAM at frame %u\n", s.frame);
+            }
             saved = recomp_rollback_ring_save();
             if (rollback.mode == RollbackMode::Udp) {
                 rollback.advantage = static_cast<std::int32_t>(s.frame - rollback.net.peer_frame);
@@ -761,6 +851,7 @@ static void onRollbackFrame(std::uint32_t swap)
         saved = recomp_rollback_ring_save();
     }
     if (!saved) recomp_stop(4, "rollback:save");
+    hashCheckFrame();
     // Frames run again were already shown and heard with the predicted pads; the walk to Versus stays unseen.
     rollback.hidden = s.frame < rollback.frontier;
     recomp_d3d8_set_present_suppressed(rollback.hidden || landOnVersus);

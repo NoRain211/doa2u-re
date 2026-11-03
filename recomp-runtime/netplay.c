@@ -90,7 +90,8 @@ static void get_pad(const uint8_t *in, RecompInputGamepad *pad)
 }
 
 /* Layout: magic, sender's next frame, pads it holds from us, its advantage,
-   first pad's frame, pad count, pads. */
+   first pad's frame, pad count, its newest desync check's frame and hash,
+   pads. */
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *s,
     int32_t advantage, uint8_t *packet)
 {
@@ -106,6 +107,11 @@ size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSessi
     put32(packet + 12, (uint32_t)advantage);
     put32(packet + 16, first);
     packet[20] = (uint8_t)count;
+    const uint32_t newest = (net->check_count + RECOMP_NETPLAY_CHECKS - 1u) % RECOMP_NETPLAY_CHECKS;
+    const bool checked = net->check_count != 0u;
+    put32(packet + 21, checked ? net->check_frames[newest] : 0u);
+    put32(packet + 25, checked ? (uint32_t)net->check_hashes[newest] : 0u);
+    put32(packet + 29, checked ? (uint32_t)(net->check_hashes[newest] >> 32) : 0u);
     for (uint32_t i = 0u; i < count; ++i)
         put_pad(packet + RECOMP_NETPLAY_HEADER_BYTES + i * RECOMP_NETPLAY_PAD_BYTES,
             &s->local[(first + i) % RECOMP_ROLLBACK_HISTORY]);
@@ -148,6 +154,11 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
         net->peer_ack = ack;
     }
     net->peer_seen = true;
+    const uint32_t check_frame = get32(packet + 21);
+    if (check_frame > net->peer_check_frame) {
+        net->peer_check_frame = check_frame;
+        net->peer_check_hash = get32(packet + 25) | (uint64_t)get32(packet + 29) << 32;
+    }
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t frame = first + i;
         if (frame < s->remote_count) continue;
@@ -982,5 +993,22 @@ uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage)
     /* The peer needs a round trip to report the new advantage. */
     net->cooldown = RECOMP_NETPLAY_SYNC_FRAMES;
     return wait > (int32_t)RECOMP_ROLLBACK_WINDOW ? RECOMP_ROLLBACK_WINDOW : (uint32_t)wait;
+}
+
+void recomp_netplay_add_check(RecompNetplay *net, uint32_t frame, uint64_t hash)
+{
+    net->check_frames[net->check_count % RECOMP_NETPLAY_CHECKS] = frame;
+    net->check_hashes[net->check_count % RECOMP_NETPLAY_CHECKS] = hash;
+    ++net->check_count;
+}
+
+bool recomp_netplay_own_check(const RecompNetplay *net, uint64_t *mine)
+{
+    for (uint32_t i = 0u; net->peer_check_frame != 0u && i < RECOMP_NETPLAY_CHECKS; ++i) {
+        if (net->check_frames[i] != net->peer_check_frame) continue;
+        *mine = net->check_hashes[i];
+        return true;
+    }
+    return false;
 }
 

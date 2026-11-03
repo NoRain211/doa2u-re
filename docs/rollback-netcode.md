@@ -234,9 +234,63 @@ Limits of the transport:
 
 - IPv4 only. There is no close handshake: a finished side repeats its last
   packet for half a second.
-- There is no desync check between peers yet.
 - The grid assumes the 60 Hz progressive mode. With a display slower than
   60 Hz the guest would wait in the presenter queue instead; that is untested.
+
+## Desync checks
+
+Every 30th frame of a UDP session, each runner hashes guest RAM as the
+frame starts, reading SyncTest's host-scheduled ranges as zero. The hash
+belongs to the rollback ring's newest save or load
+(`recomp_snapshots_hash`, `guest_snapshot.c`): each page has its own hash,
+seeded with its index, and the ring hashes every page it saves or restores
+while the page is still in cache, so a check only adds up the changes. Once
+the other player's pads before that frame have all arrived, no rewind
+reaches it again and the hash is final. Each packet carries the sender's
+newest final frame and hash, 12 bytes, so the largest packet is 1,185
+bytes, under the matchmaker's 1,200-byte relay limit. Each side keeps its
+last eight and compares the other side's newest with its own for that frame.
+
+A mismatch logs the frame and both hashes, writes guest RAM to
+`RECOMP_ROLLBACK_DUMP` when that is set (as of the frame that found it, a
+few frames after the checked one), sends this side's hash again so the other
+side finds the desync too, shows DESYNC DETECTED for 2 s and ends the session
+(`rollback:desync`). A side stalled on the other still compares. Every 20
+matching checks the log says so, with the slowest check.
+
+The fight HUD draws the local player's name in yellow and the other's in
+white (`draw_fight_name`, `program_manual.c`), so the two sides' 2D draw
+state differs in those glyphs' colors. They sit in the sprite queue
+`g_ui_sprite_queue` (`0x88eed8`), which `ui_draw_sprite` (`0xb1060`)
+fills below `0x89bed9` and `ui_draw_lists_reset` (`0xae300`) empties each
+frame, and in the text color `g_ui_text_color` (`0x8a01c8`). The check
+reads both as zero. With them hashed, the first live round failed its first
+check after the HUD appeared, at frame 1,500, and both sides' guest RAM at
+that frame differed in 15 bytes, all of them those colors. SyncTest and the
+dumps still compare them.
+
+Two scripted runners on one machine at input delay 0 played six live rounds
+in 15,600 frames, about 10,400 of them with the rollback window open, and
+every check matched. After the first, a check took 0.01 to 0.06 ms, and
+saves spent about 0.06 ms a frame hashing the pages they copy. The first
+check hashes all 64 MB, 4 to 6 ms at frame 30, while the walk to Versus is
+hidden. A thread or fiber stack that comes or goes moves the ranges, and the
+pages it uncovers are hashed again; a page wholly inside the ranges counts
+as 0 without a pass.
+
+`RECOMP_ROLLBACK_FLIP=<frame>` is a test hook that flips the low bit of
+fighter 1's life (`0x87ae54`) on that side alone at that frame. With it on
+the joiner at frame 2,000 of a live round, both sides found the desync at
+the next check, frame 2,010, showed DESYNC DETECTED and went back to their
+rooms.
+
+Limits of the checks:
+
+- Only guest RAM is hashed; the host modules' state (D3D8, DirectSound,
+  fibers, CPU) is not, and a difference only in the ignored ranges goes
+  unseen.
+- A desync is found at the next check frame plus about a round trip, up to
+  half a second after it began.
 
 ## Lobby
 
