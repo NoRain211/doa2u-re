@@ -72,6 +72,7 @@ int main(void)
     /* SDL discards the first jump of an axis that starts at an extreme (triggers). */
     CHECK(recomp_input_host_sample(0u, &pad));
     CHECK(!recomp_input_host_sample(1u, &pad));
+    CHECK(recomp_input_host_pad_connected(0u) && !recomp_input_host_pad_connected(1u));
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_SOUTH, true);
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_NORTH, true);
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, true);
@@ -128,11 +129,14 @@ int main(void)
     recomp_input_host_stop_vibration();
     CHECK(rumbled[1] == 0u);
 
-    /* Removing port 0's pad leaves port 1 in place. */
+    /* Removing port 0's pad leaves port 1 in place. Port 0 still answers, neutral,
+       so the keyboard keeps working and a netplay session keeps sending a pad. */
     SDL_CloseJoystick(first);
     CHECK(SDL_DetachVirtualJoystick(first_id));
     CHECK(recomp_input_host_sample(0u, &pad));
     CHECK(pad.buttons == 0u && pad.analog_buttons[RECOMP_INPUT_ANALOG_A] == 0u);
+    CHECK(pad.thumb_ly == 0 && pad.analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] == 0u);
+    CHECK(!recomp_input_host_pad_connected(0u) && recomp_input_host_pad_connected(1u));
     CHECK(recomp_input_host_sample(1u, &pad) && pad.buttons == 0x00a0u);
 
     SDL_CloseJoystick(second);
