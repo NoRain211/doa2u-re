@@ -80,7 +80,7 @@
     {
       "path": "tools/xboxrecomp",
       "url": "https://github.com/NoRain211/xboxrecomp.git",
-      "commit": "653782777dee86b70030622a64efb53d6d06cc0b"
+      "commit": "f122d6dc5f98d70737383e6b5363c2a3941a8678"
     }
   ],
   "forbidden_extensions": [

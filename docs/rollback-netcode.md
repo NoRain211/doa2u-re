@@ -97,9 +97,14 @@ SyncTest.
   clock never sleeps there; without it hidden frames diverged.
 - Frames that write saves or present from the display mode change cannot be
   rewound. A rollback window must not reach back past one.
-- Both peers must produce identical floating-point results. The same build
-  on x86-64 is the safe case; macOS arm64 and host libm differences are
-  unverified.
+- Both peers must produce identical floating-point results. Basic float
+  operations are IEEE-exact on every host once GCC and Clang stop fusing
+  multiply-adds (`-ffp-contract=off`). The x87 transcendentals are not: each
+  host's libm differs in the last bit for a few percent of inputs. The runner
+  defines `RECOMP_PORTABLE_MATH`, so generated fsin, fcos, fptan, fpatan,
+  fyl2x, fyl2xp1 and f2xm1 call one copy of musl's code (`musl_math/`).
+  `portable_math_test.c` pins a hash of 160,000 results; MSVC, GCC and Clang
+  on x86-64 and arm64 Linux all match it.
 
 ## Rollback session
 
@@ -412,8 +417,9 @@ joiner to frame 3,000 with matching guest RAM.
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the SHA-256 of the joiner's runner executable, and the
-host refuses any other build. That also refuses a Windows and Linux pair,
-whose floating point is unverified. The host answers with its input delay
+host refuses any other build. That also refuses a Windows and Linux pair;
+their transcendentals now match, but no cross-host fight has been tested
+yet. The host answers with its input delay
 (`--netplay-delay`, default 2) and the options that change the simulation
 (`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
 messages carry the size of the sender's profile.

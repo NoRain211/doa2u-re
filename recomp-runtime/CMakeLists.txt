@@ -306,6 +306,18 @@ add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_te
 add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
 target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+# One x87 transcendental implementation for every host (portable_math.h).
+add_library(recomp_portable_math STATIC
+    musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
+    musl_math/__rem_pio2.c musl_math/__rem_pio2_large.c musl_math/atan.c musl_math/atan2.c
+    musl_math/log2.c musl_math/log1p.c musl_math/expm1.c)
+target_include_directories(recomp_portable_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT WIN32)
+    target_link_libraries(recomp_portable_math PUBLIC m)
+endif()
+add_executable(recomp_portable_math_test portable_math_test.c)
+target_link_libraries(recomp_portable_math_test PRIVATE recomp_portable_math)
+add_test(NAME recomp-runtime-portable-math COMMAND recomp_portable_math_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -507,7 +519,8 @@ if(RECOMP_PROGRAM_DIR)
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
-    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
+    # RECOMP_PORTABLE_MATH sends the generated x87 transcendentals to musl_math.
+    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
     if(MSVC)
         # /MP compiles the large generated chunks side by side inside this one project.
         target_compile_options(recomp_program_runner PRIVATE /we4013 /MP)
@@ -517,7 +530,7 @@ if(RECOMP_PROGRAM_DIR)
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
     target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
-        libminiupnpc-static)
+        recomp_portable_math libminiupnpc-static)
     if(WIN32)
         target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
     endif()
