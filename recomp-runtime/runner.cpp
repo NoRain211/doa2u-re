@@ -13,7 +13,6 @@
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
-#include "sha.h"
 #include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
@@ -46,8 +45,6 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
 #endif
 
 static RecompInputPulseSource inputPulses;
@@ -243,30 +240,6 @@ static void onFrameBoundary(std::uint32_t frame)
     if (result == RECOMP_SYNCTEST_SKIP) recomp_stop(3, "synctest:skip");
     if (result == RECOMP_SYNCTEST_MATCH && !recomp_synctest_loop())
         recomp_stop(0, "synctest:match");
-}
-
-// SHA-256 of this runner's executable, so both sides of a lobby run one build.
-static std::string runnerDigest()
-{
-    std::filesystem::path path;
-#ifdef _WIN32
-    std::wstring buffer(32768u, L'\0');
-    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (length != 0u && length < buffer.size()) path = buffer.substr(0u, length);
-#elif defined(__APPLE__)
-    char buffer[4096];
-    std::uint32_t size = sizeof buffer;
-    if (_NSGetExecutablePath(buffer, &size) == 0) path = buffer;
-#else
-    std::error_code error;
-    path = std::filesystem::read_symlink("/proc/self/exe", error);
-#endif
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (path.empty() || !file) return {};
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(file.tellg()));
-    file.seekg(0);
-    if (!file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return {};
-    return doaxbv::sha256Hex(bytes);
 }
 
 static const doaxbv::XbeParseResult *xbe;
@@ -482,7 +455,7 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
-    recomp_netplay_session_init({discPath, runnerDigest(), &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
+    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
     if ((launch.hostPort != 0u || !launch.join.empty()) && !recomp_netplay_session_connect(launch)) return 1;
     if (!replayPath.empty() && !recomp_netplay_session_load_replay(replayPath)) return 1;
     bootGuest();

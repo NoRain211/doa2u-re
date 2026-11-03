@@ -519,8 +519,26 @@ if(RECOMP_PROGRAM_DIR)
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
-    # RECOMP_PORTABLE_MATH sends the generated x87 transcendentals to musl_math.
+    # Netplay pairs runners of one release (VERSION) or commit and one program,
+    # whatever the host; a runner's own bytes differ by platform and compiler.
+    set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
+    set(_netplay_version "${RECOMP_NETPLAY_VERSION}")
+    if(NOT _netplay_version AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" _netplay_version LIMIT_COUNT 1)
+    elseif(NOT _netplay_version)
+        # shortcut: read at configure time; build_game.py configures every build, a bare cmake --build may lag a commit.
+        execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _netplay_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(NOT _netplay_version)
+        message(FATAL_ERROR "Netplay needs a VERSION file, a Git checkout or RECOMP_NETPLAY_VERSION")
+    endif()
+    string(SHA256 _netplay_build "${_netplay_version}\n${_manifest_sha256}\n${_xbe_sha256}\n")
+    message(STATUS "Netplay build ${_netplay_build} (${_netplay_version})")
+    # RECOMP_PORTABLE_MATH gives every host the same transcendentals and RCPSS/RSQRTSS.
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
+    # Only runner.cpp reads it, so a new commit does not recompile the generated program.
+    set_source_files_properties(runner.cpp PROPERTIES COMPILE_DEFINITIONS RECOMP_NETPLAY_BUILD="${_netplay_build}")
     if(MSVC)
         # /MP compiles the large generated chunks side by side inside this one project.
         target_compile_options(recomp_program_runner PRIVATE /we4013 /MP)

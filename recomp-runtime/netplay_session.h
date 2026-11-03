@@ -17,7 +17,7 @@
 // What a session borrows from the runner.
 struct RecompNetplaySessionHost {
     std::filesystem::path disc;          // the play folder
-    std::string digest;                  // the runner's SHA-256, so both sides run one build
+    std::string digest;                  // RECOMP_NETPLAY_BUILD, so both sides simulate alike
     RecompInputPulseSource *pulses;      // the input script a scripted lobby plays
     bool scriptedInput;                  // --input-script-only
     std::uint8_t *guestRam;              // for RECOMP_ROLLBACK_DUMP

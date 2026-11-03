@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /* A match replay (.dr2r): what a netplay session needs to run again on the
-   same build. Little endian: "DR2R", a 2-byte version, the runner digest, the
+   same build. Little endian: "DR2R", a 2-byte version, the netplay build, the
    local player, input delay and lobby flags, the swap the session started
    at, then the host's and the joiner's profile blobs, each after a 4-byte
    size. Frames follow with both guest ports' pads: a 0 byte and two 18-byte

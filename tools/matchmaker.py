@@ -17,7 +17,7 @@ import time
 MAGIC = b"D2MM"
 VERSION = 1
 HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY = range(1, 10)
-DIGEST = 64  # the runner build's hex SHA-256; rooms only meet the same build
+DIGEST = 64  # the netplay build's hex SHA-256; rooms only meet the same build
 NAME = 32
 LIST_BYTES = 512  # a list request is padded to this, so no answer outgrows its ask
 ROOM_SECONDS = 20.0  # a host says HOST every 5 s

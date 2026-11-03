@@ -425,10 +425,12 @@ joiner to frame 3,000 with matching guest RAM.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
-The hello carries the SHA-256 of the joiner's runner executable, and the
-host refuses any other build. That also refuses a Windows and Linux pair;
-their transcendentals now match, but no cross-host fight has been tested
-yet. The host answers with its input delay
+The hello carries the joiner's netplay build, and the host refuses any
+other. It is a SHA-256 of the release in `VERSION` (the Git commit in a
+checkout), the generated program's manifest and the executable's SHA-256,
+so Windows, macOS and Linux runners of one release play each other; the
+runners' own bytes differ by platform and compiler. The host answers with
+its input delay
 (`--netplay-delay`, default 2) and the options that change the simulation
 (`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
 messages carry the size of the sender's profile.
@@ -555,7 +557,7 @@ records a replay into the player's own play folder as
 `.recomp-storage/replays/<local time>.dr2r` (`replay.c`). The file stays
 on that computer and is never sent: it holds the other player's profile.
 It carries what the session needs to run again on the same build: the
-SHA-256 of the runner, the local player, the input delay and the host's
+netplay build, the local player, the input delay and the host's
 options, the swap the session started at, both profile blobs as the lobby
 swapped them, and both guest ports' pads for every frame. A frame goes in
 once it has run and both its pads have arrived, so the file holds only
