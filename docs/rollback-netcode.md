@@ -279,6 +279,20 @@ scripted runners typed into each other's rooms, and real keystrokes for X
 and Z went into the line without leaving the room or toggling ready. A
 session never shows chat, since its room is closed.
 
+Each install keeps a random 64-bit player ID in `netplay.txt`, made on the
+first run, and every room message carries it after the chat line. Y mutes
+the other player: their lines leave the chat, new ones are dropped, and
+their plate says CHAT MUTED until Y again or until they leave. X asks to
+block the other player and a second X within 3 s blocks them: their ID and
+name go into `netplay.txt` as a `block` line, a host drops them and keeps
+its room open, and a joiner leaves. From then on the room drops every
+message from a blocked ID before taking its sender as the peer, so a host
+never answers a blocked joiner and stops punching to one the matchmaker
+paired, and a joiner that reaches a blocked host leaves with a message.
+FIND MATCH hides a room whose host this runner blocked or was refused by,
+for the rest of the run; the matchmaker never learns IDs or blocks. UNBLOCK
+ALL under NETPLAY SETTINGS empties the list.
+
 When both are
 ready the host says start for 600 ms. Each runner closes the room, shows
 STARTING MATCH over its last frame, and runs the session lobby below as if
