@@ -17,17 +17,19 @@ def hosting(name=b"KASUMI", is_open=1, build=BUILD):
     return mm.header(mm.HOST) + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, LAN)
 
 
-def listing(build=BUILD, size=mm.LIST_BYTES):
-    return (mm.header(mm.LIST) + build).ljust(size, b"\0")
+def listing(build=BUILD, size=mm.LIST_BYTES, endpoints=False):
+    flag = bytes((mm.WITH_ENDPOINTS,)) if endpoints else b""
+    return (mm.header(mm.LIST) + build + flag).ljust(size, b"\0")
 
 
 def joining(room_id, name=b"AYANE", build=BUILD):
     return mm.header(mm.JOIN) + mm.JOIN_BODY.pack(room_id, build, len(name), name, LAN)
 
 
-def rooms(answer):
+def rooms(answer, entry=mm.ENTRY):
     count = answer[6]
-    return [mm.ENTRY.unpack_from(answer, 7 + i * mm.ENTRY.size) for i in range(count)]
+    assert len(answer) == 7 + count * entry.size
+    return [entry.unpack_from(answer, 7 + i * entry.size) for i in range(count)]
 
 
 class MatchmakerTest(unittest.TestCase):
@@ -64,6 +66,21 @@ class MatchmakerTest(unittest.TestCase):
                          [(first, 3, b"KASUMI"), (first + 1, 2, b"HAYATE")])
         self.assertEqual(self.send(listing(size=100), JOINER_AT, 3.0), [])
 
+    def test_a_list_that_asks_carries_each_hosts_public_endpoint(self):
+        first, _ = self.host(now=0.0)
+        self.host(now=1.0, sender=("203.0.113.8", 47702), name=b"HAYATE")
+        [(answer, _)] = self.send(listing(endpoints=True), JOINER_AT, 3.0)
+        self.assertEqual([(entry[0], entry[4][:entry[3]], entry[5]) for entry in rooms(answer, mm.ENTRY_AT)],
+                         [(first, b"KASUMI", mm.endpoint(HOST_AT)),
+                          (first + 1, b"HAYATE", mm.endpoint(("203.0.113.8", 47702)))])
+
+    def test_a_full_list_stays_within_its_ask_in_either_form(self):
+        for i in range(12):
+            self.host(now=0.0, sender=(f"203.0.113.{i + 1}", 47701))
+        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), 12)
+        self.assertEqual(len(rooms(self.send(listing(endpoints=True), JOINER_AT, 1.0)[0][0], mm.ENTRY_AT)),
+                         (mm.LIST_BYTES - 7) // mm.ENTRY_AT.size)
+
     def test_join_sends_each_side_the_others_endpoints(self):
         room_id, _ = self.host()
         answers = dict((to, packet) for packet, to in self.send(joining(room_id), JOINER_AT, 1.0))
@@ -94,6 +111,8 @@ class MatchmakerTest(unittest.TestCase):
     def test_relay_only_hides_endpoints(self):
         self.server.relay_only = True
         room_id, _ = self.host()
+        [(answer, _)] = self.send(listing(endpoints=True), JOINER_AT, 0.5)
+        self.assertEqual(rooms(answer, mm.ENTRY_AT)[0][5], bytes(6))
         for packet, _ in self.send(joining(room_id), JOINER_AT, 1.0):
             self.assertEqual(packet[6:18], bytes(12))
         game = mm.header(mm.RELAY) + b"pads"
