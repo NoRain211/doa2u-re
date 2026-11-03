@@ -85,6 +85,19 @@ class MatchmakerTest(unittest.TestCase):
         self.send(joining(room_id), JOINER_AT, 1.0)
         self.assertEqual(self.send(joining(room_id), ("192.0.2.1", 1), 2.0)[0][0][5], mm.GONE)
 
+    def test_a_repeated_join_answers_again(self):
+        room_id, _ = self.host()
+        first = self.send(joining(room_id), JOINER_AT, 1.0)
+        self.assertEqual(self.send(joining(room_id), JOINER_AT, 1.5), first)
+
+    def test_relay_only_hides_endpoints(self):
+        self.server.relay_only = True
+        room_id, _ = self.host()
+        for packet, _ in self.send(joining(room_id), JOINER_AT, 1.0):
+            self.assertEqual(packet[6:18], bytes(12))
+        game = mm.header(mm.RELAY) + b"pads"
+        self.assertEqual(self.send(game, JOINER_AT, 2.0), [(game, HOST_AT)])
+
     def test_relay_forwards_only_within_a_pair_and_caps_the_rate(self):
         room_id, _ = self.host()
         self.send(joining(room_id), JOINER_AT, 1.0)

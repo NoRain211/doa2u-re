@@ -23,7 +23,7 @@ CLAIM_SECONDS = 10.0  # a joined room stays off the list while the two connect
 PAIR_SECONDS = 600.0  # a pair's relay lasts this long after its last packet
 MAX_ROOMS = 4096
 ROOMS_PER_ADDRESS = 4
-RELAY_PER_SECOND = 120  # per direction; a session sends 60
+RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while waiting for the other player
 MAX_RELAY = 1200
 
 HOST_BODY = struct.Struct(">64sBBB32s6s")  # digest, delay, open, name length, name, LAN endpoint
@@ -47,7 +47,7 @@ def peer(public, lan, name):
 class Room:
     def __init__(self, room_id, host, now):
         self.id, self.host, self.born = room_id, host, now
-        self.claimed_until = 0.0
+        self.claimed_until, self.claimer = 0.0, None
 
 
 class Pair:
@@ -57,11 +57,12 @@ class Pair:
 
 
 class Matchmaker:
-    def __init__(self, random_id=lambda: int.from_bytes(os.urandom(4), "big")):
+    def __init__(self, random_id=lambda: int.from_bytes(os.urandom(4), "big"), relay_only=False):
         self.rooms = {}  # by the host's public endpoint
         self.by_id = {}
         self.pairs = {}  # by endpoint, both ways
         self.random_id = random_id
+        self.relay_only = relay_only  # players never learn each other's address
         self.swept = 0.0
 
     def handle(self, data, sender, now):
@@ -114,11 +115,17 @@ class Matchmaker:
     def join(self, body, sender, now):
         room_id, digest, length, name, lan = JOIN_BODY.unpack(body)
         room = self.by_id.get(room_id)
-        if length > NAME or room is None or room.digest != digest or not room.open or room.claimed_until > now:
+        # A joiner asks again until it hears; its own claim answers again.
+        claimed = room is not None and room.claimed_until > now and room.claimer != sender
+        if length > NAME or room is None or room.digest != digest or not room.open or claimed:
             return [(header(GONE) + struct.pack(">I", room_id), sender)]
-        room.claimed_until = now + CLAIM_SECONDS
+        if room.claimer != sender or room.claimed_until <= now:
+            room.claimed_until, room.claimer = now + CLAIM_SECONDS, sender
         self.pairs[sender] = Pair(room.host, now)
         self.pairs[room.host] = Pair(sender, now)
+        if self.relay_only:
+            nowhere = ("0.0.0.0", 0)
+            return [(peer(nowhere, bytes(6), name[:length]), room.host), (peer(nowhere, bytes(6), room.name), sender)]
         return [(peer(sender, lan, name[:length]), room.host), (peer(room.host, room.lan, room.name), sender)]
 
     def relay(self, body, sender, now):
@@ -160,10 +167,10 @@ class Server(asyncio.DatagramProtocol):
             self.transport.sendto(packet, target)
 
 
-async def serve(address, port):
+async def serve(address, port, relay_only):
     loop = asyncio.get_running_loop()
-    await loop.create_datagram_endpoint(lambda: Server(Matchmaker()), local_addr=(address, port))
-    print(f"matchmaker: UDP {address}:{port}", flush=True)
+    await loop.create_datagram_endpoint(lambda: Server(Matchmaker(relay_only=relay_only)), local_addr=(address, port))
+    print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}", flush=True)
     await asyncio.Event().wait()
 
 
@@ -171,8 +178,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--address", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=47700)
+    parser.add_argument("--relay-only", action="store_true", help="relay every pair, so no player learns another's address")
     arguments = parser.parse_args()
-    asyncio.run(serve(arguments.address, arguments.port))
+    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only))
 
 
 if __name__ == "__main__":
