@@ -417,6 +417,7 @@ LRESULT CALLBACK presenterWindowProc(
 {
     if (message == WM_KEYDOWN || message == WM_KEYUP)
         recomp_input_keyboard_event(static_cast<uint32_t>(wparam), message == WM_KEYDOWN);
+    if (message == WM_CHAR) recomp_input_keyboard_char(static_cast<uint32_t>(wparam));
     if (message == WM_KILLFOCUS || message == WM_DESTROY)
         recomp_input_keyboard_reset();
     if (message == WM_NCCREATE) {

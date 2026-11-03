@@ -26,6 +26,8 @@ enum {
     RECOMP_NETPLAY_MAX_PROFILE = 1024u * 1024u,
     /* The longest profile name a room passes on, in UTF-8 bytes. */
     RECOMP_NETPLAY_NAME_BYTES = 32u,
+    /* The longest room chat line, in printable ASCII. */
+    RECOMP_NETPLAY_CHAT_BYTES = 40u,
 };
 
 /* What the lobby agrees on before either runner boots. */
@@ -93,9 +95,16 @@ typedef struct RecompNetplayRoom {
     bool pinged;
     uint32_t ping_ms;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    /* The other player's newest chat line, already checked; heard_new is set
+       when one arrives, for the caller to clear. */
+    char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+    bool heard_new;
     /* Kept between ticks. */
     uint64_t heard_ms, sent_ms, echo_at_ms;
     uint32_t echo;
+    char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+    uint32_t say_id, heard_id;
+    uint64_t said_ms;
 } RecompNetplayRoom;
 
 /* Reads what the other player said and, every 100 ms or every call while
@@ -105,6 +114,11 @@ typedef struct RecompNetplayRoom {
    calling its last match with a goodbye. */
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
     const char *name, bool ready, bool start);
+/* Sends a chat line, cut to RECOMP_NETPLAY_CHAT_BYTES, with the next ticks:
+   each tick for 2 s repeats it, and the other side shows it once. The other
+   side drops a line that is not printable ASCII or that
+   recomp_netplay_name_banned refuses. */
+void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another
    digest ends the wait with MISMATCH. Returns once both sides hold both

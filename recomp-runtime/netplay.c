@@ -25,14 +25,15 @@ enum {
     MAGIC = 0x42523244u,       /* "D2RB" */
     GOODBYE_MAGIC = 0x59423244u, /* "D2BY", the whole packet */
     LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
-    LOBBY_VERSION = 3u,
+    LOBBY_VERSION = 4u,
     LOBBY_HELLO = 1u,
     LOBBY_WELCOME = 2u,
     LOBBY_REQUEST = 3u, /* send your chunks from this index; past your last, I hold them all */
     LOBBY_CHUNK = 4u,   /* one chunk of the sender's profile */
     LOBBY_ROOM = 5u,    /* a room member's state */
     LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
-    ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u,
+    ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u + 5u +
+        RECOMP_NETPLAY_CHAT_BYTES,
     ROOM_READY = 1u,
     ROOM_START = 2u,
     ROOM_SILENCE_MS = 3000u,
@@ -349,7 +350,8 @@ static uint64_t now_ms(void)
 }
 
 /* Layout: magic, version, kind, digest, flags, name length, name, the
-   sender's clock, the last clock it heard and how long ago, for the ping. */
+   sender's clock, the last clock it heard and how long ago, for the ping,
+   then a chat line's id, length and text. */
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
     const char *name, bool ready, bool start)
 {
@@ -392,6 +394,21 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             room->ping_ms = (uint32_t)now - echo - age;
             room->pinged = true;
         }
+        at += 10u;
+        const uint32_t id = get32(at);
+        const size_t said = at[4];
+        if (id != room->heard_id && said != 0u && said <= RECOMP_NETPLAY_CHAT_BYTES) {
+            room->heard_id = id;
+            char line[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+            bool printable = true;
+            for (size_t i = 0u; i < said; ++i) printable = printable && at[5u + i] >= 0x20u && at[5u + i] < 0x7fu;
+            memcpy(line, at + 5u, said);
+            line[said] = '\0';
+            if (printable && !recomp_netplay_name_banned(line)) {
+                memcpy(room->heard, line, said + 1u);
+                room->heard_new = true;
+            }
+        }
     }
     if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) {
         room->joined = room->ready = room->start = room->pinged = false;
@@ -415,7 +432,27 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     put32(at + 4u, room->echo);
     const uint64_t age = now - room->echo_at_ms;
     put16(at + 8u, (uint16_t)(room->echo == 0u ? 0u : age > 65535u ? 65535u : age));
+    at += 10u;
+    if (now - room->said_ms < 2000u) {
+        put32(at, room->say_id);
+        at[4] = (uint8_t)strlen(room->say);
+        memcpy(at + 5u, room->say, at[4]);
+    }
     send_to(net, net->peer_address, net->peer_port, packet, ROOM_BYTES);
+}
+
+void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text)
+{
+    const uint64_t now = now_ms();
+    const size_t length = strlen(text);
+    const size_t kept = length < RECOMP_NETPLAY_CHAT_BYTES ? length : RECOMP_NETPLAY_CHAT_BYTES;
+    memcpy(room->say, text, kept);
+    room->say[kept] = '\0';
+    /* The clock makes each line's id differ from those of earlier rooms, too. */
+    const uint32_t id = (uint32_t)now | 1u;
+    room->say_id = id == room->say_id ? id + 2u : id;
+    room->said_ms = now;
+    room->sent_ms = 0u; /* on the next tick */
 }
 
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)

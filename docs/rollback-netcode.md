@@ -262,7 +262,21 @@ thread and shows the address to send. JOIN ONLINE takes an address from
 the d-pad or the clipboard. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
-and a different build shows on the other player's plate. When both are
+and a different build shows on the other player's plate.
+
+Once the other player is in, Enter opens a chat line from the keyboard;
+Enter sends it and Esc drops it. While a line is open, the room ignores the
+pad buttons that letters also press. A line holds up to 40 printable ASCII
+characters. Each player can send one line a second, and a line that fails
+the name check is refused. The newest line rides in each room message for
+2 s under an id taken from the sender's clock, so a lost packet costs
+nothing and the other side shows it once. The receiver checks it again and
+drops anything else. The last four lines replace the address lines. Two
+scripted runners typed into each other's rooms, and real keystrokes for X
+and Z went into the line without leaving the room or toggling ready. A
+session never shows chat, since its room is closed.
+
+When both are
 ready the host says start for 600 ms. Each runner closes the room, shows
 STARTING MATCH over its last frame, and runs the session lobby below as if
 started with `--netplay-host` or `--netplay-join`, with the intro skipped.
@@ -424,7 +438,8 @@ Limits of the lobby:
 - A joiner that cancels before the host has heard its hello, in practice
   during the host's 600 ms of saying start, goes unheard; that host waits
   on STARTING MATCH until it cancels too.
-- The room has no chat. The clipboard works only on Windows.
+- Chat typing and the clipboard work only on Windows; the SDL presenter
+  has no text input yet. A pad cannot type.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the

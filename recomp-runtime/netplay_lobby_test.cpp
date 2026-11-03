@@ -180,6 +180,23 @@ int main()
     check("room ping", hostRoom.pinged && joinerRoom.pinged && hostRoom.ping_ms < 1000u &&
         joinerRoom.ping_ms < 1000u);
     check("room same build", hostRoom.joined && joinerRoom.joined && !hostRoom.mismatch && !joinerRoom.mismatch);
+
+    // A chat line arrives once, and one that is not printable ASCII never does.
+    recomp_netplay_room_say(&joinerRoom, "gg, one more?");
+    for (int i = 0; i < 50 && !hostRoom.heard_new; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", true, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("chat arrives", hostRoom.heard_new && std::strcmp(hostRoom.heard, "gg, one more?") == 0);
+    hostRoom.heard_new = false;
+    recomp_netplay_room_say(&joinerRoom, "bell\a");
+    for (int i = 0; i < 25; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", true, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("chat once, printable only", !hostRoom.heard_new);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 

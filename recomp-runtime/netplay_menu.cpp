@@ -2,6 +2,7 @@
 #include "netplay_menu.h"
 
 #include "d3d8_adapter.h"
+#include "input_keyboard_win32.h"
 #include "input_pulse_source.h"
 #include "netplay.h"
 #include "overlay.h"
@@ -16,6 +17,8 @@
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -66,7 +69,11 @@ struct Menu {
     std::string name, peerAddress;
     RecompNetplay net{};
     RecompNetplayRoom room{};
-    Clock::time_point opened, startAt;
+    Clock::time_point opened, startAt, saidAt;
+    // Room chat: the last few lines as name and text, and the line being typed.
+    std::vector<std::pair<std::string, std::string>> chat;
+    bool typing = false;
+    std::string draft;
 };
 Menu menu;
 
@@ -197,6 +204,10 @@ void enterRoom(bool hosting)
     menu.room.hosting = hosting;
     menu.opened = Clock::now();
     menu.message.clear();
+    menu.chat.clear();
+    menu.typing = false;
+    char stale[64]; // typed before the room opened, such as a game's Enter
+    (void)recomp_input_keyboard_take_text(stale, sizeof stale);
     menu.screen = Screen::Room;
 }
 
@@ -260,12 +271,68 @@ std::string routerStatus()
     }
 }
 
+void addChat(const std::string &name, const std::string &text)
+{
+    menu.chat.emplace_back(name.substr(0u, 12u), text);
+    if (menu.chat.size() > 4u) menu.chat.erase(menu.chat.begin());
+}
+
+// One line a second, checked as names are.
+void say()
+{
+    const auto now = Clock::now();
+    if (menu.draft.empty()) {
+        menu.typing = false;
+    } else if (recomp_netplay_name_banned(menu.draft.c_str())) {
+        menu.message = "THAT MESSAGE IS NOT ALLOWED.";
+    } else if (now - menu.saidAt < std::chrono::seconds(1)) {
+        menu.message = "WAIT A MOMENT BEFORE THE NEXT LINE.";
+    } else {
+        recomp_netplay_room_say(&menu.room, menu.draft.c_str());
+        addChat(menu.name, menu.draft);
+        menu.saidAt = now;
+        menu.typing = false;
+        menu.message.clear();
+    }
+}
+
+// Enter opens a line and sends it, Esc drops it; printable ASCII only.
+void typeChat(bool peerAllowed)
+{
+    char typed[64];
+    const std::size_t count = recomp_input_keyboard_take_text(typed, sizeof typed);
+    for (std::size_t i = 0u; i < count; ++i) {
+        const char c = typed[i];
+        if (!menu.typing) {
+            if (c == '\r' && peerAllowed) {
+                menu.typing = true;
+                menu.draft.clear();
+            }
+        } else if (c == 0x1b) {
+            menu.typing = false;
+            menu.message.clear();
+        } else if (c == '\b') {
+            if (!menu.draft.empty()) menu.draft.pop_back();
+        } else if (c == '\r') {
+            say();
+        } else if (c >= 0x20 && c < 0x7f && menu.draft.size() < RECOMP_NETPLAY_CHAT_BYTES) {
+            menu.draft.push_back(c);
+        }
+    }
+}
+
 // Returns true when the runner should restart into the session.
 bool updateRoom(std::uint16_t keys)
 {
     RecompNetplayRoom &room = menu.room;
     recomp_netplay_room_tick(&menu.net, &room, menu.digest.data(), menu.name.c_str(), menu.ready, menu.starting);
     const bool peerAllowed = room.joined && !room.mismatch && !recomp_netplay_name_banned(room.name);
+    if (room.heard_new) {
+        room.heard_new = false;
+        if (peerAllowed) addChat(room.name, room.heard);
+    }
+    typeChat(peerAllowed);
+    if (menu.typing) keys = 0u; // typed letters are pad buttons too
     if (keys & ~X) menu.message.clear();
     if (keys & B) {
         leaveRoom();
@@ -427,7 +494,18 @@ void drawRoom()
         plate(350.0f, "P2", menu.name, true, "YOU", menu.ready);
     }
     recomp_overlay_text(304.0f, 180.0f, 3.0f, Red, "VS");
-    if (menu.hosting) {
+    if (!menu.chat.empty() || menu.typing) {
+        // Chat takes the address lines' place once it starts.
+        for (std::size_t i = 0u; i < menu.chat.size(); ++i) {
+            const float y = 290.0f + 20.0f * static_cast<float>(i);
+            const float x = 40.0f + recomp_overlay_text(40.0f, y, 1.5f, Gray, (menu.chat[i].first + ":").c_str());
+            recomp_overlay_text(x + 9.0f, y, 1.5f, White, menu.chat[i].second.c_str());
+        }
+        if (menu.typing) {
+            const std::string line = "> " + menu.draft + ((menu.frame / 20u) % 2u == 0u ? "_" : "");
+            recomp_overlay_text(40.0f, 372.0f, 2.0f, White, line.c_str());
+        }
+    } else if (menu.hosting) {
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
         recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, ("INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES").c_str());
@@ -447,7 +525,9 @@ void drawRoom()
         else if (Clock::now() - menu.opened > std::chrono::seconds(5)) status = "NO ANSWER YET. CHECK THE ADDRESS.";
         if (status != nullptr) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, status);
     }
-    footer(menu.hosting ? "A READY   B LEAVE   X COPY ADDRESS" : "A READY   B LEAVE");
+    footer(menu.typing ? "ENTER SEND   ESC CANCEL"
+        : peer && !room.mismatch ? "A READY   B LEAVE   ENTER CHAT"
+        : menu.hosting ? "A READY   B LEAVE   X COPY ADDRESS" : "A READY   B LEAVE");
 }
 
 void draw()
