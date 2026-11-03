@@ -428,8 +428,10 @@ joiner to frame 3,000 with matching guest RAM.
 The hello carries the joiner's netplay build, and the host refuses any
 other. It is a SHA-256 of the release in `VERSION` (the Git commit in a
 checkout), the generated program's manifest and the executable's SHA-256,
-so Windows, macOS and Linux runners of one release play each other; the
-runners' own bytes differ by platform and compiler. The host answers with
+so runners of one release on Windows, macOS and Linux may pair; the
+runners' own bytes differ by platform and compiler. A Windows runner and a
+Linux runner built with GCC from one commit compute the same ID, but no
+fight between two different hosts has run yet. The host answers with
 its input delay
 (`--netplay-delay`, default 2) and the options that change the simulation
 (`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
