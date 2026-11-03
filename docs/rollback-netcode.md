@@ -7,7 +7,8 @@ back; two scripted runners have played offline Versus this way. A frame-locked c
 and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
 compare whole frames, with guest RAM in page snapshots
 (`guest_snapshot.c`). Players meet in a lobby room from the game's
-Versus menu.
+Versus menu. Each session records a replay that plays back to the same
+guest RAM; spectating is designed but not built.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -458,4 +459,84 @@ Limits of the lobby:
   save site seen so far comes within the 8-frame window of a live round.
 - The condition reads two fighters; Tag matches and rounds without a time
   limit are unverified.
+
+## Replays
+
+Each lobby session, from a room or `--netplay-host` and `--netplay-join`,
+records a replay into the player's own play folder as
+`.recomp-storage/replays/<local time>.dr2r` (`replay.c`). The file stays
+on that computer and is never sent: it holds the other player's profile.
+It carries what the session needs to run again on the same build: the
+SHA-256 of the runner, the local player, the input delay and the host's
+options, the swap the session started at, both profile blobs as the lobby
+swapped them, and both guest ports' pads for every frame. A frame goes in
+once it has run and both its pads have arrived, so the file holds only
+confirmed input and never a prediction. Repeated pads are stored as a count.
+The runner flushes the file about once a second and when the session ends,
+so a crash loses at most the last second; a frame cut short is dropped on
+playback.
+
+`--replay <file>` plays one back. It refuses a file from another build,
+unpacks the two blobs into `.recomp-storage/netplay` as a session does,
+adopts the recorded options and boots. From the same first frame it feeds
+the recorded pads with rollback off, including the walk to Versus, and
+plays as the recording player, so the fight HUD names the same side in
+yellow (`draw_fight_name`). It stops with exit code 0 at the end of the
+file (`replay:end`), or with 4 when the session does not start at the
+recorded swap (`replay:start-mismatch`). `RECOMP_ROLLBACK_FRAMES` and
+`RECOMP_ROLLBACK_DUMP` stop it and write guest RAM as for a session.
+
+Two scripted runners played room sessions through a local matchmaker at
+input delay 0 and stopped at a set frame with guest RAM dumps. Each side's
+replay then ran in that side's play folder to the same frame:
+
+| Frames | Live rounds | Rollbacks (host) | Replay against its live side |
+|---|---|---|---|
+| 5,000 | rollback from 1,401 to 3,932 and from 4,667 | 319 (359 frames run again) | both sides identical |
+| 7,000 | rollback from 1,455 to 3,495, 4,137 to 5,475 and from 6,253 | 1,138 (1,147 frames run again) | both sides identical |
+
+None of the comparisons masked a byte beyond SyncTest's host-scheduled
+ranges. The two live sides differ from each other in two pages, the
+per-player HUD bytes. The 5,000-frame file is 278 KB: 93 and 78 KB of
+profiles and 107 KB of frames, where the scripted joiner pressed a new pad
+every frame of a live round.
+
+Limits of replays:
+
+- There is no menu entry; replays play from the command line.
+- Files are never pruned.
+- Playback replaces the netplay save folder, as each session does.
+- A replay needs the same runner build and the same cached archives.
+- There is no pause, seek or speed control.
+
+## Spectating (design)
+
+Not built. A spectator would watch a running match as a streamed replay:
+the host already writes the bytes a spectator needs, and the replay reader
+already plays them. What it would take:
+
+- Transport: the session socket accepts only its peer. The host would also
+  accept a spectator's address there, with its own messages kept out of the
+  session decode: a hello with the spectator's build, then requests for the
+  replay's bytes from an offset, answered in 1 KiB chunks and asked again
+  after a burst or 100 ms, as the profile swap does. A spectator sends no
+  pads, so frame sync and acknowledgements ignore it. The stream costs the
+  two profiles once (at most 2 MiB) and then 1 to 37 bytes a frame.
+- Host: keep the replay's bytes in memory beside the file, answer requests
+  from the frame boundary and the stall loop, and cap the spectators and
+  the bytes sent per frame so watching never slows the match. Relayed
+  sessions would refuse spectators to spare the matchmaker's bandwidth.
+- Matchmaker: a matched room leaves the list. Running rooms would need to
+  stay listed as watchable, and the server would pair a spectator with the
+  host for hole punching. That is a server change and a redeploy.
+- Menu and runner: a WATCH entry for running rooms on FIND MATCH; the
+  spectator reboots into a replay session whose reader grows as chunks
+  arrive, starts once about two seconds of frames are buffered, shows
+  WAITING FOR THE MATCH when the stream runs dry, and goes back to the room
+  list when the host says goodbye or the stream ends.
+- Joining late: a replay can only start from session frame 0, so a late
+  spectator would run every frame so far hidden and unpaced first, about
+  40 s for a three-minute match at the measured 3.7 ms per hidden frame.
+  Letting spectators join only between matches avoids that.
+- Testing needs a third play folder.
 
