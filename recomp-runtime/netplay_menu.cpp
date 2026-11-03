@@ -67,6 +67,7 @@ struct Menu {
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
+    bool keyboard = false; // a key was typed in this editor, so its pad aliases are ignored
     bool hosting = false, ready = false, starting = false, launched = false, covering = false;
     std::string name, peerAddress;
     RecompNetplay net{};
@@ -501,11 +502,54 @@ bool updateRoom(std::uint16_t keys)
     return !menu.hosting && room.start && menu.ready && peerAllowed;
 }
 
-// The pad editor for an address: up/down change the character at the caret,
-// left/right move it, Y deletes and X pastes.
-void editText(std::string &text, const std::string &characters, std::size_t max, std::uint16_t keys)
+void openEditor(Screen screen, const std::string &text)
 {
-    if (keys) menu.message.clear();
+    char stale[64]; // typed before the editor opened, such as the Z that pressed A
+    (void)recomp_input_keyboard_take_text(stale, sizeof stale);
+    menu.keyboard = false;
+    menu.caret = text.size();
+    menu.screen = screen;
+}
+
+void pasteInto(std::string &text, const std::string &characters, std::size_t max)
+{
+    std::string pasted;
+    for (char c : pasteText()) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (characters.find(c) != std::string::npos && pasted.size() < max) pasted.push_back(c);
+    }
+    if (pasted.empty()) menu.message = "THE CLIPBOARD HAS NO ADDRESS.";
+    else {
+        text = pasted;
+        menu.caret = text.size();
+    }
+}
+
+// The editor for an address: typed keys insert at the caret, Backspace deletes,
+// Ctrl+V pastes, Enter is A and Esc is B. On the pad, up/down change the
+// character at the caret, left/right move it, Y deletes and X pastes.
+// Returns the keys left for the screen.
+std::uint16_t editText(std::string &text, const std::string &characters, std::size_t max, std::uint16_t keys)
+{
+    char typed[64];
+    const std::size_t typedCount = recomp_input_keyboard_take_text(typed, sizeof typed);
+    if (keys || typedCount) menu.message.clear();
+    std::uint16_t typedKeys = 0u;
+    for (std::size_t i = 0u; i < typedCount; ++i) {
+        char c = typed[i];
+        menu.keyboard = true;
+        if (c == '\r') typedKeys |= A;
+        else if (c == 0x1b) typedKeys |= B;
+        else if (c == 0x16) pasteInto(text, characters, max);
+        else if (c == '\b') {
+            if (menu.caret > 0u) text.erase(--menu.caret, 1u);
+        } else {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            if (characters.find(c) != std::string::npos && text.size() < max) text.insert(menu.caret++, 1u, c);
+        }
+    }
+    if (menu.keyboard) keys &= Up | Down | Left | Right; // Z, X, A, S and Backspace are pad buttons too
+    keys |= typedKeys;
     if ((keys & Left) && menu.caret > 0u) --menu.caret;
     if ((keys & Right) && menu.caret < text.size()) ++menu.caret;
     if (keys & (Up | Down)) {
@@ -521,18 +565,8 @@ void editText(std::string &text, const std::string &characters, std::size_t max,
         if (menu.caret == text.size()) --menu.caret;
         text.erase(menu.caret, 1u);
     }
-    if (keys & X) {
-        std::string pasted;
-        for (char c : pasteText()) {
-            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-            if (characters.find(c) != std::string::npos && pasted.size() < max) pasted.push_back(c);
-        }
-        if (pasted.empty()) menu.message = "THE CLIPBOARD HAS NO ADDRESS.";
-        else {
-            text = pasted;
-            menu.caret = text.size();
-        }
-    }
+    if (keys & X) pasteInto(text, characters, max);
+    return keys;
 }
 
 void update(std::uint16_t keys, bool &launch)
@@ -550,8 +584,7 @@ void update(std::uint16_t keys, bool &launch)
             else if (menu.cursor == 1) host();
             else if (menu.cursor == 2) {
                 menu.address = menu.recent;
-                menu.caret = menu.address.size();
-                menu.screen = Screen::Join;
+                openEditor(Screen::Join, menu.address);
             } else if (menu.cursor == 3) {
                 find();
             } else {
@@ -576,8 +609,7 @@ void update(std::uint16_t keys, bool &launch)
             }
         }
         if ((keys & A) && menu.cursor == 3) {
-            menu.caret = menu.matchmaker.size();
-            menu.screen = Screen::Matchmaker;
+            openEditor(Screen::Matchmaker, menu.matchmaker);
         } else if (keys & (A | B)) {
             saveSettings();
             menu.cursor = 4;
@@ -585,7 +617,7 @@ void update(std::uint16_t keys, bool &launch)
         }
         return;
     case Screen::Join:
-        editText(menu.address, AddressCharacters, MaxAddress, keys);
+        keys = editText(menu.address, AddressCharacters, MaxAddress, keys);
         if (keys & B) {
             menu.cursor = 2;
             menu.screen = Screen::Versus;
@@ -594,7 +626,7 @@ void update(std::uint16_t keys, bool &launch)
         }
         return;
     case Screen::Matchmaker:
-        editText(menu.matchmaker, HostCharacters, MaxMatchmaker, keys);
+        keys = editText(menu.matchmaker, HostCharacters, MaxMatchmaker, keys);
         if (keys & (A | B)) {
             saveSettings();
             menu.screen = Screen::Settings;
@@ -623,6 +655,21 @@ void footer(const char *text)
     if (!menu.message.empty()) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, menu.message.c_str());
     recomp_overlay_rect(40.0f, 428.0f, 560.0f, 2.0f, Dim);
     recomp_overlay_text(40.0f, 442.0f, 2.0f, Gray, text);
+}
+
+// An address editor's controls, for the keyboard once a key has been typed.
+void editorHints(const char *padFooter, const char *keyFooter)
+{
+    if (menu.keyboard) {
+        recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "TYPE   LEFT/RIGHT MOVE");
+        recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "BACKSPACE DELETE   CTRL+V PASTE");
+        footer(keyFooter);
+        return;
+    }
+    recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "UP/DOWN CHANGE   LEFT/RIGHT MOVE");
+    recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "Y DELETE   X PASTE FROM CLIPBOARD");
+    recomp_overlay_text(60.0f, 270.0f, 2.0f, Gray, "OR TYPE IT ON THE KEYBOARD.");
+    footer(padFooter);
 }
 
 void item(float y, bool selected, const char *text)
@@ -755,11 +802,9 @@ void draw()
         recomp_overlay_text(68.0f, 165.0f, 3.0f, White, menu.address.c_str());
         if ((menu.frame / 20u) % 2u == 0u)
             recomp_overlay_rect(68.0f + 18.0f * static_cast<float>(menu.caret), 189.0f, 15.0f, 3.0f, Red);
-        recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "UP/DOWN CHANGE   LEFT/RIGHT MOVE");
-        recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "Y DELETE   X PASTE FROM CLIPBOARD");
         if (!menu.recent.empty())
             recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, ("LAST HOST  " + menu.recent).c_str());
-        footer("A CONNECT   B BACK");
+        editorHints("A CONNECT   B BACK", "ENTER CONNECT   ESC BACK");
         return;
     }
     case Screen::Matchmaker: {
@@ -769,10 +814,8 @@ void draw()
         recomp_overlay_text(68.0f, 169.0f, 2.0f, White, menu.matchmaker.c_str());
         if ((menu.frame / 20u) % 2u == 0u)
             recomp_overlay_rect(68.0f + 12.0f * static_cast<float>(menu.caret), 186.0f, 10.0f, 2.0f, Red);
-        recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "UP/DOWN CHANGE   LEFT/RIGHT MOVE");
-        recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "Y DELETE   X PASTE FROM CLIPBOARD");
         recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, "LEAVE IT EMPTY FOR NO MATCHMAKER.");
-        footer("A/B DONE");
+        editorHints("A/B DONE", "ENTER/ESC DONE");
         return;
     }
     case Screen::Find: {

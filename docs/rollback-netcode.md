@@ -261,7 +261,7 @@ host joined are kept in `.recomp-storage/netplay.txt`, with the
 
 HOST ONLINE binds the port, asks the router for a forward on a background
 thread and shows the address to send. JOIN ONLINE takes an address from
-the d-pad or the clipboard. In the room each side says its build, profile
+the keyboard, the d-pad or the clipboard. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
