@@ -1016,6 +1016,10 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
     };
     std::fprintf(stderr, "recomp netplay: connected as player %u (%s) against %s with %u frames of input delay\n",
         rollback.player + 1u, shown(ownNames).c_str(), shown(peerNames).c_str(), rollback.delay);
+    const std::string ownName = ownNames.empty() ? "" : ownNames.front();
+    const std::string peerName = peerNames.empty() ? "" : peerNames.front();
+    recomp_program_set_fight_names(hosting ? ownName.c_str() : peerName.c_str(),
+        hosting ? peerName.c_str() : ownName.c_str(), rollback.player);
     return true;
 }
 
@@ -1117,6 +1121,7 @@ static void endSession(const char *reason)
     netplayHostPort = 0u;
     netplayJoin.clear();
     recomp_save_session = nullptr;
+    recomp_program_set_fight_names(nullptr, nullptr, 0u);
     unlockAll = ownUnlockAll;
     landOnVersus = false;
     backToVersus = true;
