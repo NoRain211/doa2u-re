@@ -6,6 +6,8 @@ RecompFunction recomp_dsound_effects_lookup_manual(uint32_t address);
 size_t recomp_dsound_effects_state_size(void);
 void recomp_dsound_effects_state_save(void *state);
 void recomp_dsound_effects_state_restore(const void *state);
+/* False when the effects image was replaced or released since the save. */
+bool recomp_dsound_effects_state_restorable(const void *state);
 void recomp_dsound_effects_reset(void);
 uint32_t recomp_dsound_effects_headroom(uint32_t bin);
 /* Listener position then velocity, as last set (committed or deferred). */

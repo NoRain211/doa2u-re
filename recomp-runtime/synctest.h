@@ -33,6 +33,7 @@ typedef enum RecompSyncTestResult {
     RECOMP_SYNCTEST_SKIP,
 } RecompSyncTestResult;
 
+/* More than 16 modules is fatal. */
 void recomp_synctest_set_modules(const RecompSyncTestModule *modules, size_t count);
 /* The runtime's real state table; defined beside the runtime, not the core. */
 void recomp_synctest_install_default_modules(void);
@@ -71,7 +72,7 @@ bool recomp_rollback_ring_load(uint32_t frame);
 bool recomp_rollback_ring_hash(const RecompRamRange *ignored, size_t count, uint64_t *hash);
 /* Zeroes the guest RAM ranges SyncTest ignores (host-scheduled state). */
 void recomp_synctest_mask_ignored(uint8_t *ram, size_t size);
-/* Those ranges, sorted; fewer than capacity. */
+/* Those ranges, sorted, or SIZE_MAX when they do not all fit in capacity. */
 size_t recomp_synctest_ignored_ranges(RecompRamRange *ranges, size_t capacity);
 
 #ifdef __cplusplus

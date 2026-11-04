@@ -47,6 +47,28 @@ static void askToJoin(std::uint32_t id, Clock::time_point now)
     recomp_netplay_match_join(&menu.net, id, menu.digest.data(), menu.name.c_str());
 }
 
+// A late PEER for a stopped join would still pair this socket, and PEER names no room, so the
+// join is dropped with the socket. Returns false when no new socket opens.
+static bool forgetJoin()
+{
+    menu.find.joining = 0u;
+    const RecompNetplayMatch server = menu.net.match;
+    recomp_netplay_close(&menu.net);
+    if (!recomp_netplay_listen(&menu.net, 0u)) {
+        recomp_netplay_close(&menu.net);
+        menu.lookup.reset();
+        menu.screen = Screen::Versus;
+        menu.cursor = VersusFind;
+        menu.message = "NO UDP PORT IS FREE.";
+        return false;
+    }
+    menu.net.match.server_address = server.server_address;
+    menu.net.match.server_port = server.server_port;
+    menu.find.listOk = false; // the new socket has no list yet
+    menu.find.listedAt = Clock::time_point{};
+    return true;
+}
+
 void updateFind(std::uint16_t keys)
 {
     RecompNetplayMatch &match = menu.net.match;
@@ -84,7 +106,7 @@ void updateFind(std::uint16_t keys)
         match.listed = false;
         menu.find.listOk = true;
         recomp_netplay_match_probe(&menu.net);
-        if (menu.find.probedAt == Clock::time_point{}) menu.find.probedAt = now;
+        menu.find.probedAt = now; // newly listed rooms get their own second to answer
     }
     if (keys & B) {
         if (menu.find.joining == 0u) {
@@ -92,16 +114,16 @@ void updateFind(std::uint16_t keys)
             menu.lookup.reset();
             menu.screen = Screen::Versus;
             menu.cursor = VersusFind;
+        } else {
+            (void)forgetJoin();
         }
-        menu.find.joining = 0u;
         menu.find.quick = false;
         return;
     }
     if (menu.find.joining != 0u) {
         // The server answers a repeated join again, so a lost answer costs one retry.
         if (now - menu.find.joinStarted > std::chrono::seconds(3)) {
-            menu.find.joining = 0u;
-            menu.message = "NO ANSWER FROM THE MATCHMAKER.";
+            if (forgetJoin()) menu.message = "NO ANSWER FROM THE MATCHMAKER.";
         } else if (now - menu.find.askedAt >= std::chrono::milliseconds(500)) {
             menu.find.askedAt = now;
             recomp_netplay_match_join(&menu.net, menu.find.joining, menu.digest.data(), menu.name.c_str());

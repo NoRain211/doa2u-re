@@ -81,9 +81,12 @@ SyncTest.
   straight into guest RAM. Other hosts compare every page with a shadow
   copy. Saves and loads must run while no host thread writes guest RAM, so
   netplay makes file reads synchronous as SyncTest does.
-- Each XAPI fiber keeps its C continuation on a native host stack. Parked
-  fibers are saved with their captured context and live stack, so a rewind
-  restores the C frames as well as the guest registers.
+- Each XAPI fiber keeps its C continuation on a native host stack. On
+  Windows, parked fibers are saved with their captured context and live
+  stack (up to 64 KiB), so a rewind restores the C frames as well as the
+  guest registers. POSIX hosts do not capture them yet: a save with a
+  parked fiber that owns its stack reports itself unrestorable there, and
+  rollback on Linux and macOS is unverified.
 - The other host modules (heap, allocations, threads, files, input, D3D8,
   DirectSound) save and restore their own state.
 - `frame_time_update` (`0xfefc0`) feeds QueryPerformanceCounter time into
@@ -236,7 +239,7 @@ frame's budget, so both sides fall below 60 Hz together.
 In every pair the two sides' guest RAM matched except for one save file's
 times, which the game lists at boot and the host reports from each play
 folder. Players' profiles and save metadata will differ the same way, so
-the lobby must start both sides from the same profile.
+the lobby must start both sides from the same combined profile and save tree.
 
 A temporary hook slept player 1 for 250 ms at frame 300 on localhost with
 input delay 2. Before the grid, player 0 settled a frame ahead (advantages
@@ -303,8 +306,8 @@ Limits of the checks:
 - Only guest RAM is hashed; the host modules' state (D3D8, DirectSound,
   fibers, CPU) is not, and a difference only in the ignored ranges goes
   unseen.
-- A desync is found at the next check frame plus about a round trip, up to
-  half a second after it began.
+- A desync is found at the next check frame plus about a round trip: up to
+  half a second plus a round trip after it began.
 
 ## Lobby
 
@@ -331,7 +334,7 @@ host joined are kept in `.recomp-storage/netplay.txt`, with the
 HOST ONLINE binds the port, asks the router for a forward on a background
 thread and shows the address to send; a PRIVATE room is never listed on
 FIND MATCH. JOIN ONLINE takes an address from
-the keyboard, the d-pad or the clipboard. In the room each side says its build, profile
+the d-pad; on Windows it also takes the keyboard or the clipboard. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
@@ -346,11 +349,12 @@ pad buttons that letters also press. A line holds up to 40 printable ASCII
 characters. Each player can send one line a second, and a line that fails
 the name check is refused. The newest line rides in each room message for
 2 s under an id taken from the sender's clock, so a lost packet costs
-nothing and the other side shows it once. The receiver checks it again and
-drops anything else. The last four lines replace the address lines. Two
-scripted runners typed into each other's rooms, and real keystrokes for X
-and Z went into the line without leaving the room or toggling ready. A
-session never shows chat, since its room is closed.
+nothing and the other side shows it once. The receiver checks it again,
+drops anything else and takes at most one line a second, so a line held
+back shows from a later repeat. The last four lines replace the address
+lines. Two scripted runners typed into each other's rooms, and real
+keystrokes for X and Z went into the line without leaving the room or
+toggling ready. A session never shows chat, since its room is closed.
 
 Each install keeps a random 64-bit player ID in `netplay.txt`, made on the
 first run, and every room message carries it after the chat line. Y mutes
@@ -426,7 +430,7 @@ joiner to frame 3,000 with matching guest RAM.
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the joiner's netplay build, and the host refuses any
-other. It is a SHA-256 of the release in `VERSION` (the Git commit in a
+other and keeps waiting. It is a SHA-256 of the release in `VERSION` (the Git commit in a
 checkout), the generated program's manifest and the game XBE's SHA-256
 (`RECOMP_XBE_SHA256`), so runners of one release on Windows, macOS and Linux may pair; the
 runners' own bytes differ by platform and compiler. A Windows runner and a

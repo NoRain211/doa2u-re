@@ -44,7 +44,8 @@ typedef struct RecompReplayReader {
     uint32_t repeat; /* frames of the last pads not yet returned */
 } RecompReplayReader;
 
-/* Writes RECOMP_REPLAY_HEADER_BYTES and both blobs to out and starts writer. */
+/* Writes RECOMP_REPLAY_HEADER_BYTES + blob_size[0] + blob_size[1] bytes to out and starts writer. Each blob
+   must hold its blob_size, at most RECOMP_NETPLAY_MAX_PROFILE; recomp_replay_open refuses larger. */
 size_t recomp_replay_header(RecompReplayWriter *writer, const RecompReplayInfo *info,
     const uint8_t *host_blob, const uint8_t *joiner_blob, uint8_t *out);
 /* Each returns the bytes written to out, at most RECOMP_REPLAY_FRAME_BYTES. */

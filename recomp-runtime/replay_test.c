@@ -13,6 +13,19 @@ static void check(const char *name, bool passed)
     }
 }
 
+/* Opens file with one header byte changed, then puts the byte back. */
+static bool opens_with(uint8_t *file, size_t size, size_t at, uint8_t value)
+{
+    RecompReplayReader reader;
+    RecompReplayInfo info;
+    const uint8_t *host_blob = NULL, *joiner_blob = NULL;
+    const uint8_t old = file[at];
+    file[at] = value;
+    const bool opened = recomp_replay_open(&reader, file, size, &info, &host_blob, &joiner_blob);
+    file[at] = old;
+    return opened;
+}
+
 static RecompInputGamepad pad(uint16_t buttons)
 {
     RecompInputGamepad value;
@@ -46,7 +59,9 @@ int main(void)
     RecompReplayWriter writer;
     size_t size = recomp_replay_header(&writer, &info, host, joiner, file);
     check("header size", size == RECOMP_REPLAY_HEADER_BYTES + sizeof host + sizeof joiner);
-    enum { FRAMES = 700u };
+    /* NEW_PADS: frame 300 and 600..699 change the pads. RUN_BYTES: the run-length counts
+       of the idle stretches, which the 255-frame cap and the frame-400 flush split. */
+    enum { FRAMES = 700u, NEW_PADS = 101u, RUN_BYTES = 4u };
     for (unsigned i = 0u; i < FRAMES; ++i) {
         RecompInputGamepad pads[2];
         frame_pads(i, pads);
@@ -56,7 +71,8 @@ int main(void)
         if (i == 400u) size += recomp_replay_flush(&writer, file + size); // a periodic flush splits a run
     }
     size += recomp_replay_flush(&writer, file + size);
-    check("idle frames are small", size < 200u + 100u * (1u + 2u * RECOMP_NETPLAY_PAD_BYTES));
+    check("idle frames are small", size == RECOMP_REPLAY_HEADER_BYTES + sizeof host + sizeof joiner +
+        NEW_PADS * (1u + 2u * RECOMP_NETPLAY_PAD_BYTES) + RUN_BYTES);
 
     RecompReplayReader reader;
     RecompReplayInfo read;
@@ -82,6 +98,13 @@ int main(void)
     check("cut frame dropped", frames == FRAMES - 1u);
 
     check("cut header refused", !recomp_replay_open(&reader, file, RECOMP_REPLAY_HEADER_BYTES, &read, &host_blob, &joiner_blob));
+    const size_t player_at = 6u + RECOMP_NETPLAY_DIGEST_BYTES, host_size_at = player_at + 7u;
+    check("unchanged byte opens", opens_with(file, size, player_at, 1u));
+    check("player 2 refused", !opens_with(file, size, player_at, 2u));
+    check("long delay refused", !opens_with(file, size, player_at + 1u, RECOMP_ROLLBACK_WINDOW + 1u));
+    check("oversized blob refused", !opens_with(file, size, host_size_at + 3u, 0x80u));
+    check("cut blob refused", !recomp_replay_open(&reader, file, RECOMP_REPLAY_HEADER_BYTES + sizeof host,
+        &read, &host_blob, &joiner_blob));
     file[4] = 2u;
     check("other version refused", !recomp_replay_open(&reader, file, size, &read, &host_blob, &joiner_blob));
 
