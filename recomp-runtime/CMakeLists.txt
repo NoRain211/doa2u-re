@@ -158,7 +158,7 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
 
-add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c
+add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)
 
@@ -283,6 +283,41 @@ else()
 endif()
 add_executable(recomp_d3d_vblank_test d3d_vblank.cpp xapi_clock.cpp d3d_vblank_test.cpp)
 add_test(NAME recomp-runtime-d3d-vblank COMMAND recomp_d3d_vblank_test)
+add_executable(recomp_xapi_clock_test xapi_clock.cpp xapi_clock_test.cpp)
+add_test(NAME recomp-runtime-xapi-clock COMMAND recomp_xapi_clock_test)
+add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
+add_test(NAME recomp-runtime-synctest COMMAND recomp_synctest_test)
+add_executable(recomp_rollback_test rollback.c rollback_test.c)
+add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
+add_executable(recomp_replay_test replay.c replay_test.c)
+add_test(NAME recomp-runtime-replay COMMAND recomp_replay_test)
+add_executable(recomp_netplay_test netplay.c netplay_names.c rollback.c netplay_test.c)
+if(WIN32)
+    target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
+add_executable(recomp_netplay_lobby_test netplay.c netplay_names.c rollback.c netplay_lobby_test.cpp)
+if(WIN32)
+    target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
+add_executable(recomp_netplay_settings_test netplay_settings.cpp netplay_settings_test.cpp)
+add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_test)
+add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
+target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+# One x87 transcendental implementation for every host (portable_math.h).
+add_library(recomp_portable_math STATIC
+    musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
+    musl_math/__rem_pio2.c musl_math/__rem_pio2_large.c musl_math/atan.c musl_math/atan2.c
+    musl_math/log2.c musl_math/log1p.c musl_math/expm1.c)
+target_include_directories(recomp_portable_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT WIN32)
+    target_link_libraries(recomp_portable_math PUBLIC m)
+endif()
+add_executable(recomp_portable_math_test portable_math_test.c)
+target_link_libraries(recomp_portable_math_test PRIVATE recomp_portable_math)
+add_test(NAME recomp-runtime-portable-math COMMAND recomp_portable_math_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -322,6 +357,8 @@ add_test(NAME recomp-runtime-program-abi-call COMMAND recomp_program_abi_call_te
 
 add_executable(recomp_guest_heap_test guest_heap.c guest_heap_test.c)
 add_test(NAME recomp-runtime-guest-heap COMMAND recomp_guest_heap_test)
+add_executable(recomp_guest_snapshot_test guest_snapshot.c guest_snapshot_test.c)
+add_test(NAME recomp-runtime-guest-snapshot COMMAND recomp_guest_snapshot_test)
 
 add_library(recomp_xbe STATIC ../xbe/sha.cpp ../xbe/xbe_parser.cpp runner_load.cpp)
 target_include_directories(recomp_xbe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../xbe" "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -340,7 +377,7 @@ else()
 endif()
 
     add_library(recomp_kernel STATIC
-        runtime.c stop_report.c guest_heap.c xapi_clock.cpp native_fiber.c
+        runtime.c stop_report.c guest_heap.c guest_snapshot.c xapi_clock.cpp native_fiber.c
         fiber_model.c fiber_adapter.c
         kernel_config.c kernel_crypto.c kernel_debug.c kernel_device.c
         kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c
@@ -461,6 +498,16 @@ if(RECOMP_PROGRAM_DIR)
         endif()
     endforeach()
     message(STATUS "Generated ${_missing_count} fail-loud stubs for absent snapshot bodies")
+    # The netplay host forwards its UDP port through the router with UPnP.
+    set(UPNPC_BUILD_SHARED OFF CACHE INTERNAL "")
+    set(UPNPC_BUILD_TESTS OFF CACHE INTERNAL "")
+    set(UPNPC_BUILD_SAMPLE OFF CACHE INTERNAL "")
+    set(UPNPC_NO_INSTALL ON CACHE INTERNAL "")
+    FetchContent_Declare(miniupnpc
+        URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_2_3_3.tar.gz
+        URL_HASH SHA256=8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222
+        SOURCE_SUBDIR miniupnpc)
+    FetchContent_MakeAvailable(miniupnpc)
     add_executable(recomp_program_runner runner.cpp program_adapters.c program_manual.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
@@ -469,8 +516,30 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
+        synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
+        netplay_menu_room.cpp netplay_menu_find.cpp
+        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
-    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
+    # Netplay pairs runners of one release (VERSION) or commit and one program,
+    # whatever the host; a runner's own bytes differ by platform and compiler.
+    set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
+    set(_netplay_version "${RECOMP_NETPLAY_VERSION}")
+    if(NOT _netplay_version AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" _netplay_version LIMIT_COUNT 1)
+    elseif(NOT _netplay_version)
+        # shortcut: read at configure time; build_game.py configures every build, a bare cmake --build may lag a commit.
+        execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _netplay_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(NOT _netplay_version)
+        message(FATAL_ERROR "Netplay needs a VERSION file, a Git checkout or RECOMP_NETPLAY_VERSION")
+    endif()
+    string(SHA256 _netplay_build "${_netplay_version}\n${_manifest_sha256}\n${_xbe_sha256}\n")
+    message(STATUS "Netplay build ${_netplay_build} (${_netplay_version})")
+    # RECOMP_PORTABLE_MATH gives every host the same transcendentals and RCPSS/RSQRTSS.
+    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
+    # Only runner.cpp reads it, so a new commit does not recompile the generated program.
+    set_source_files_properties(runner.cpp PROPERTIES COMPILE_DEFINITIONS RECOMP_NETPLAY_BUILD="${_netplay_build}")
     if(MSVC)
         # /MP compiles the large generated chunks side by side inside this one project.
         target_compile_options(recomp_program_runner PRIVATE /we4013 /MP)
@@ -479,9 +548,10 @@ if(RECOMP_PROGRAM_DIR)
         # The lifter writes conditions as if ((a == b)); clang would warn on every one.
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
-    target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio)
+    target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
+        recomp_portable_math libminiupnpc-static)
     if(WIN32)
-        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32)
+        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
     endif()
     recomp_use_sdl3(recomp_program_runner)
     target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")

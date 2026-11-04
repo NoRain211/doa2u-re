@@ -9,6 +9,12 @@ static uint32_t heap_base;
 static uint32_t heap_cursor;
 static uint32_t contiguous_cursor = XBOX_GUEST_ALLOC_LIMIT;
 
+void xbox_HeapReset(void)
+{
+    heap_base = heap_cursor = 0u;
+    contiguous_cursor = XBOX_GUEST_ALLOC_LIMIT;
+}
+
 bool xbox_HeapSetImageEnd(uint32_t image_end)
 {
     uint64_t aligned = ((uint64_t)image_end + XBOX_PAGE_SIZE - 1u) &
@@ -64,6 +70,20 @@ XboxHeapSnapshot xbox_HeapSnapshot(void)
     uint32_t last_page = contiguous_cursor / XBOX_PAGE_SIZE;
     return (XboxHeapSnapshot){heap_base,
         heap_base != 0u && last_page > first_page ? last_page - first_page : 0u};
+}
+
+void xbox_HeapStateSave(XboxHeapState *state)
+{
+    state->base = heap_base;
+    state->cursor = heap_cursor;
+    state->contiguous_cursor = contiguous_cursor;
+}
+
+void xbox_HeapStateRestore(const XboxHeapState *state)
+{
+    heap_base = state->base;
+    heap_cursor = state->cursor;
+    contiguous_cursor = state->contiguous_cursor;
 }
 
 uint32_t xbox_ContiguousAlloc(

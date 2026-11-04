@@ -8,6 +8,19 @@
 
 #include <math.h>
 #include <string.h>
+/* Generated x87 transcendentals. Netplay compares guest state across hosts, so
+   the runner links musl_math for identical bits; tests may use the host libm. */
+#ifdef RECOMP_PORTABLE_MATH
+#include "portable_math.h"
+#else
+static inline double recomp_sin(double x) { return sin(x); }
+static inline double recomp_cos(double x) { return cos(x); }
+static inline double recomp_tan(double x) { return tan(x); }
+static inline double recomp_atan2(double y, double x) { return atan2(y, x); }
+static inline double recomp_log2(double x) { return log2(x); }
+static inline double recomp_log1p(double x) { return log1p(x); }
+static inline double recomp_expm1(double x) { return expm1(x); }
+#endif
 /* Tests define RECOMP_HOST_X86=0 on x86 to check the portable lane code. */
 #ifndef RECOMP_HOST_X86
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -688,8 +701,9 @@ static inline uint32_t XMM_MOVEMASK(RecompXmm a)
 }
 
 #if RECOMP_HOST_X86
+#ifndef RECOMP_PORTABLE_MATH
 /* RCPSS/RSQRTSS are table approximations; the host instruction gives the
-   guest's bits on Intel, where exact division would not. */
+   guest's bits on Intel, where exact division would not. AMD's table differs. */
 static inline float recomp_rcpss(float x)
 {
     return _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(x)));
@@ -699,6 +713,7 @@ static inline float recomp_rsqrtss(float x)
 {
     return _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(x)));
 }
+#endif
 
 /* CVTSS2SI rounds under MXCSR (host default: nearest); CVTTSS2SI chops.
    Out of range and NaN give the integer indefinite 0x80000000. */
@@ -708,8 +723,19 @@ static inline int32_t MMX_CVT_F2I(float v, int truncate)
                     : _mm_cvtss_si32(_mm_set_ss(v));
 }
 #else
-/* ponytail: non-x86 hosts have no RCPSS/RSQRTSS table; the exact quotient
-   is within Intel's documented 1.5 * 2^-12 error but not bit-identical. */
+static inline int32_t MMX_CVT_F2I(float v, int truncate)
+{
+    /* The default MXCSR rounds to nearest even, as lrintf does under the
+       host default rounding mode. */
+    if (!(v >= -2147483648.0f && v < 2147483648.0f)) return INT32_MIN;
+    return truncate ? (int32_t)v : (int32_t)lrintf(v);
+}
+#endif
+
+#if !RECOMP_HOST_X86 || defined(RECOMP_PORTABLE_MATH)
+/* No host table matches the Xbox's, and Intel and AMD tables differ, so
+   non-x86 hosts and netplay builds use the exact quotient, within Intel's
+   documented 1.5 * 2^-12 error, the same on every host. */
 static inline float recomp_rcpss(float x)
 {
     return 1.0f / x;
@@ -718,14 +744,6 @@ static inline float recomp_rcpss(float x)
 static inline float recomp_rsqrtss(float x)
 {
     return 1.0f / sqrtf(x);
-}
-
-static inline int32_t MMX_CVT_F2I(float v, int truncate)
-{
-    /* The default MXCSR rounds to nearest even, as lrintf does under the
-       host default rounding mode. */
-    if (!(v >= -2147483648.0f && v < 2147483648.0f)) return INT32_MIN;
-    return truncate ? (int32_t)v : (int32_t)lrintf(v);
 }
 #endif
 

@@ -26,6 +26,12 @@ overwrite PCR. Heap and contiguous allocations grow toward each other and
 reject overlap. The loader checks sections, source digests, stack/TLS bounds
 and reserved ranges before running code.
 
+The loader fills a scratch image that the runner then copies into the 64 MB
+guest block. On Windows that block is allocated with `MEM_WRITE_WATCH`, which
+cannot be added later, so rollback snapshots (`guest_snapshot.c`,
+`docs/rollback-netcode.md`) can copy only the pages written since the last
+save.
+
 Memory statistics report the arena's available pages and reusable allocation
 capacity, with image, pool, stack and virtual reservations accounted for.
 Raw runtime allocations and alignment gaps stay consumed. Cache pages are
@@ -862,6 +868,64 @@ The 5849 GetTickCount boundary reads shared monotonic time and offers bounded
 cooperative scheduler polling. D3D BlockUntilVerticalBlank and its two CRI
 tail aliases use the native shared-vblank service. These platform seams let
 the existing worker modules run; they do not force middleware load status.
+
+## Determinism checks
+
+Rollback replays frames, so a replayed frame must reproduce the first pass
+exactly. `RECOMP_FRAME_CLOCK=1` replaces the host clock with a frame-locked
+guest clock: every read inside a frame returns the frame's end, plus a 1 us
+tick per read (`RECOMP_FRAME_CLOCK_TICK_NS`) so loops that poll the counter
+reach their deadline. Each Swap advances exactly 1/60 s. A skipped wait (a
+vblank wait, or the scheduler idling until the next timer) jumps the counter
+to its deadline; a wait that ends by the next frame's end moves time inside
+the current frame only. A refresh at the current time counts as reached, or
+every frame that waited for vblank would span two. The scheduler slice a
+clock read offers is gated on guest time, so a replay preempts at the same
+points.
+
+`RECOMP_SYNCTEST=1` saves state at `RECOMP_SYNCTEST_START`, replays
+`RECOMP_SYNCTEST_FRAMES` frames (default 1) and compares; `loop` keeps
+checking. It implies the frame clock unless that is set to `0`, exits 0 on a
+match, 2 on a mismatch and 3 when the saved state cannot be rewound, and in
+`loop` waits 60 frames after such a skip. `RECOMP_SYNCTEST_VERBOSE=1` dumps
+the first differing bytes.
+
+The state is a table of modules (`synctest_modules.c`): CPU and FPU, clock
+and vblank marks, XAPI fibers, guest threads, file positions and the handle
+table, kernel allocations, the guest heap cursors, input, the D3D8 device,
+frame and render-state models with completed visibility counts, and the
+DirectSound device, buffers and effects. Guest RAM rewinds through
+`guest_snapshot.c`. The compare skips host-scheduled ranges: audio worker
+counters, QPC bookkeeping, XAPI fiber and guest thread stacks, and the kernel
+and PCR page.
+
+Fibers are saved as plain data: each parked fiber's captured CONTEXT and the
+live part of its native stack, up to 64 KiB. The running fiber (its stack is
+the caller's), a converted thread's fiber and a fiber whose stack does not
+fit are not rewound. Deleted fibers stay parked and native fiber objects
+restart in place, so a saved state that still names one stays valid.
+
+Some frames cannot be rewound and are skipped rather than reported:
+
+- A Present from the display mode change (`0x28284f`) instead of the frame
+  loop (`0x282947`): the rewind resumes the host in the frame loop's native
+  continuation.
+- A frame that opened a save file for writing, creating or deleting, or that
+  ends inside a save transaction: save storage is host disk, outside the
+  snapshot.
+- A frame boundary with a guest thread waiting on a host read: the worker may
+  still be writing guest RAM. SyncTest makes reads synchronous, so this
+  does not happen while it runs.
+
+On this branch a loop run from frame 600 through the scripted Story fight
+and back to the menus matched 6,295 frames with no mismatch. It skipped three
+display mode changes and one save. With asynchronous reads, 102 more frames
+were skipped.
+
+`RECOMP_ROLLBACK=loopback` keeps the same state in a ring of saves
+and rewinds it on mispredicted input; `docs/rollback-netcode.md` describes
+the run. It uses the frame clock and synchronous reads as SyncTest does.
+
 
 ## Remaining work
 

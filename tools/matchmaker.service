@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The matchmaker as a systemd service; docs/matchmaking.md has the install steps.
+[Unit]
+Description=DOA2U netplay matchmaker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/doa2u-matchmaker/matchmaker.py --port 47700
+Restart=always
+RestartSec=2
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# AF_UNIX for asyncio's internal socket pair.
+RestrictAddressFamilies=AF_INET AF_UNIX
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

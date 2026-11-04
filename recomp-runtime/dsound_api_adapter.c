@@ -15,6 +15,27 @@ enum { DS_SINGLETON = 0x00380cc8u, DS_ROOT_SIZE = 0x2cu, DS_SETTINGS_SIZE = 0xb4
 static RecompDsoundDeviceModel device;
 static uint32_t root, settings;
 
+typedef struct DsoundApiState {
+    RecompDsoundDeviceModel device;
+    uint32_t root, settings;
+} DsoundApiState;
+
+size_t recomp_dsound_api_state_size(void) { return sizeof(DsoundApiState); }
+void recomp_dsound_api_state_save(void *state)
+{
+    DsoundApiState *out = state;
+    out->device = device;
+    out->root = root;
+    out->settings = settings;
+}
+void recomp_dsound_api_state_restore(const void *state)
+{
+    const DsoundApiState *in = state;
+    device = in->device;
+    root = in->root;
+    settings = in->settings;
+}
+
 uint32_t recomp_dsound_current_device(void) { return device.handle; }
 
 void recomp_dsound_require_device(uint32_t handle)
@@ -196,6 +217,14 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     }
 }
 
+void recomp_dsound_api_reset(void)
+{
+    recomp_dsound_buffers_reset();
+    recomp_dsound_effects_reset();
+    recomp_dsound_device_reset(&device);
+    root = settings = 0u;
+}
+
 void recomp_dsound_api_shutdown(void)
 {
     if (!recomp_audio_output_on_owner_thread()) {
@@ -203,9 +232,6 @@ void recomp_dsound_api_shutdown(void)
         fprintf(stderr, "recomp dsound: shutdown deferred to process cleanup on non-owner thread\n");
         return;
     }
-    recomp_dsound_buffers_reset();
-    recomp_dsound_effects_reset();
+    recomp_dsound_api_reset();
     recomp_audio_output_shutdown();
-    recomp_dsound_device_reset(&device);
-    root = settings = 0u;
 }
