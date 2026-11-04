@@ -163,7 +163,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             logs = list((root / "private/play-logs").glob("*.log"))
             self.assertEqual(len(logs), 9)
             self.assertIn("runner_sha256=hash", logs[0].read_text())
-            self.assertIn(f"open ~{os.sep}doa2u", logs[0].read_text())
+            # glob's order is the file system's; the relaunch runs print nothing.
+            self.assertTrue(any(f"open ~{os.sep}doa2u" in log.read_text() for log in logs))
 
     def test_isolated_probe_uses_separate_saves_and_scripted_input(self):
         with tempfile.TemporaryDirectory() as folder:
