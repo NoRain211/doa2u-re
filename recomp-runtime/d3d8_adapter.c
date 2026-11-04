@@ -713,7 +713,7 @@ void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t h
     command = (RecompD3dPresenterCommand){.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     command.data.present.effective_flags = 5u;
     command.data.present.swap_counter = frame_state.swap_counter;
-    command.data.present.widescreen = content_widescreen;
+    command.data.present.widescreen = display_aspect > 1.5f; /* the card is drawn for this aspect */
     recomp_d3d8_submit(&command);
     back_buffer_displayed = true;
     back_buffer_saved = false;

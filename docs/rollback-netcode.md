@@ -116,7 +116,8 @@ SyncTest.
   desynced on frame 1. The lobby sends the host's, and the kernel gives
   them to the game for the session. Each player keeps their own window and
   speakers. The presenter fits the game's 4:3 or 16:9 picture into the
-  window with black bars, and the 5.1 mix folds to stereo. Fights to frame
+  window with black bars, and a player on stereo speakers hears the 5.1
+  mix folded to stereo. Fights to frame
   1,800 with the two settings crossed both ways, and with 4x MSAA on one
   side, kept guest RAM equal.
 
