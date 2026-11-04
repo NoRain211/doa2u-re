@@ -457,7 +457,8 @@ static std::uint32_t awaitFrontier(bool last)
         }
         if (!udp) recomp_stop(4, "rollback:stalled");
         const Clock::time_point now = Clock::now();
-        if (now - sent >= std::chrono::milliseconds(4)) {
+        // Each repeat through the matchmaker's relay costs its bandwidth, so a relayed wait repeats less.
+        if (now - sent >= std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) {
             recomp_netplay_send(&rollback.net, &s, rollback.advantage);
             sent = now;
         }
@@ -963,10 +964,13 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
     return !error;
 }
 
+static bool roomSession, ownUnlockAll;
+
 /* Connects the two runners before either boots. The host's input delay and
    options win. Each player sends the profile they saved last, and both
    sides play from fresh copies of the two, with the host's title saves, so
-   they start alike and neither player's own profile changes. */
+   they start alike and neither player's own profile changes. A room session
+   runs on the socket its room handed over, so the router's path stays. */
 static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)() = nullptr)
 {
     if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
@@ -1004,19 +1008,25 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
         // A room's host already asked for the forward on the menu's thread; it stays for the session.
         if (!roomSession && recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
+        result = !roomSession && !recomp_netplay_listen(&rollback.net, port)
+            ? RECOMP_NETPLAY_LOBBY_SOCKET
+            : recomp_netplay_host(&rollback.net, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const char *end = netplayJoin.data() + netplayJoin.size();
         std::uint32_t port = 0u;
-        if (colon == std::string::npos || colon == 0u ||
-            std::from_chars(netplayJoin.data() + colon + 1u, end, port).ptr != end || port == 0u || port > 65535u) {
+        const bool parsed = colon != std::string::npos && colon != 0u &&
+            std::from_chars(netplayJoin.data() + colon + 1u, end, port).ptr == end && port != 0u && port <= 65535u;
+        // A room's joiner, matched through the relay, may have no address; its socket is handed over.
+        if (!roomSession && !parsed) {
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
         std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
-        result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
-            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u, cancelled);
+        result = !roomSession && !recomp_netplay_open(&rollback.net, 0u, netplayJoin.substr(0u, colon).c_str(),
+                                     static_cast<std::uint16_t>(port))
+            ? RECOMP_NETPLAY_LOBBY_SOCKET
+            : recomp_netplay_join(&rollback.net, &lobby, &profiles, 2u * 60u * 1000u, cancelled);
     }
     if (result != RECOMP_NETPLAY_LOBBY_OK) {
         std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_CANCELLED
@@ -1128,7 +1138,9 @@ static void startRoomSession()
 {
     std::uint32_t port = 0u, delay = 0u;
     std::string join;
-    if (!recomp_netplay_menu_take_launch(port, delay, join)) return;
+    RecompNetplay socket;
+    if (!recomp_netplay_menu_take_launch(port, delay, join, socket)) return;
+    rollback.net = socket;
     netplayHostPort = port;
     netplayDelay = delay;
     netplayJoin = join;
@@ -1160,7 +1172,7 @@ static void endSession(const char *reason)
     if (!roomSession) recomp_stop(4, "%s", reason);
     std::fprintf(stderr, "recomp netplay: session ended (%s); back to the room\n", reason);
     sayGoodbye();
-    recomp_netplay_close(&rollback.net);
+    const RecompNetplay socket = rollback.net; // back to the room, so the router's path stays
     rollback = RollbackRun{};
     roomSession = false;
     netplayHostPort = 0u;
@@ -1176,7 +1188,7 @@ static void endSession(const char *reason)
     recomp_kernel_file_set_synchronous_reads(false);
     recomp_dsound_buffer_set_game_thread_pump(false);
     recomp_dsound_buffer_set_output_suppressed(false);
-    recomp_netplay_menu_return_to_room();
+    recomp_netplay_menu_return_to_room(socket);
     reboot();
 }
 

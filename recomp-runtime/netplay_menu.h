@@ -2,6 +2,7 @@
 #define DOA2U_RECOMP_NETPLAY_MENU_H
 
 #include "input_model.h"
+#include "netplay.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -20,12 +21,14 @@ void recomp_netplay_menu_install(const std::filesystem::path &storage, const std
 /* Sees each sampled pad first; while the menu is open the game gets an idle pad. */
 void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad);
 /* Takes a room's launch, once: hostPort and delay for the host, or join as
-   host:port for the joiner. */
-bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join);
+   host:port for the joiner, and the room's open socket, which the caller
+   now owns. */
+bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join,
+    RecompNetplay &socket);
 /* The session's network display from NETPLAY SETTINGS: 0 off, 1 ping, 2 full. */
 int recomp_netplay_menu_display(const std::filesystem::path &storage);
-/* Opens the room a session came from again: the host listens on its port,
-   the joiner calls the host's address. */
-void recomp_netplay_menu_return_to_room();
+/* Opens the room a session came from again on the session's socket, which
+   the menu takes back: the host listens, the joiner calls the host. */
+void recomp_netplay_menu_return_to_room(const RecompNetplay &socket);
 
 #endif

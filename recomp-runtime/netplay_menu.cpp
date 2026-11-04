@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -35,14 +36,22 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 enum Key : std::uint16_t { Up = 1u, Down = 2u, Left = 4u, Right = 8u, A = 0x10u, B = 0x20u, X = 0x40u, Y = 0x80u };
-enum class Screen { Closed, Versus, Settings, Join, Room };
+enum class Screen { Closed, Versus, Settings, Join, Matchmaker, Find, Room };
 
 constexpr std::uint32_t White = 0xffffffffu, Gray = 0xffa8a8b0u, Dim = 0xff686870u, Red = 0xffd8283cu,
     Green = 0xff48d070u, Yellow = 0xffffd040u, Panel = 0xe8181820u, Backdrop = 0xd8000000u;
 constexpr std::uint32_t DefaultPort = 47701u;
 constexpr std::size_t MaxAddress = 21u; // 255.255.255.255:65535
 const std::string AddressCharacters = "0123456789.:";
+constexpr std::size_t MaxMatchmaker = 40u; // what the editor's panel shows
+const std::string HostCharacters = "0123456789.:-abcdefghijklmnopqrstuvwxyz";
 const char *const DisplayNames[3] = {"off", "ping", "full"};
+
+// A matchmaker lookup on its own thread, so a slow DNS answer never holds the menu.
+struct Lookup {
+    std::atomic<int> state{1}; // 1 looking, 2 found, 3 not found
+    RecompNetplay found{};     // only its matchmaker address and port are set
+};
 
 struct Menu {
     bool installed = false;
@@ -54,6 +63,7 @@ struct Menu {
     Screen screen = Screen::Closed;
     std::uint16_t held[RECOMP_INPUT_PORT_COUNT]{};
     std::uint16_t pressed = 0u;
+    std::uint16_t aliased = 0u; // the pressed face buttons that came from the keyboard's Z, X, A, S and Backspace
     unsigned repeat = 0u, frame = 0u;
     bool swallow = false; // after closing, the game waits until every button is up
     int injectA = 0;      // polls of A the game still gets, so LOCAL enters Versus
@@ -65,15 +75,26 @@ struct Menu {
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
+    bool keyboard = false; // a key was typed in this editor, so the keyboard's pad aliases are ignored
     bool hosting = false, ready = false, starting = false, launched = false, covering = false;
     std::string name, peerAddress;
     RecompNetplay net{};
     RecompNetplayRoom room{};
-    Clock::time_point opened, startAt, saidAt;
+    Clock::time_point opened, startAt, saidAt, checkedIn;
     // Room chat: the last few lines as name and text, and the line being typed.
     std::vector<std::pair<std::string, std::string>> chat;
     bool typing = false;
     std::string draft;
+    // FIND MATCH: the matchmaker's host:port from NETPLAY SETTINGS, the listed rooms and a join being asked.
+    std::string matchmaker;
+    std::shared_ptr<Lookup> lookup;
+    bool privateRoom = false; // HOST ONLINE's choice, kept in netplay.txt
+    bool listing = false;     // this host asked to be listed
+    bool found = false; // this joiner's room came from FIND MATCH
+    bool listOk = false, quick = false;
+    int choice = 0;
+    std::uint32_t joining = 0u;
+    Clock::time_point listedAt, joinStarted, askedAt;
 };
 Menu menu;
 
@@ -148,6 +169,8 @@ void loadSettings()
         if (key == "delay" && number <= RECOMP_ROLLBACK_WINDOW) menu.delay = static_cast<std::uint32_t>(number);
         else if (key == "port" && number >= 1024u && number <= 65535u) menu.port = static_cast<std::uint32_t>(number);
         else if (key == "recent" && value.size() <= MaxAddress) menu.recent = value;
+        else if (key == "matchmaker" && value.size() <= MaxMatchmaker) menu.matchmaker = value;
+        else if (key == "room") menu.privateRoom = value == "private";
         else if (key == "display")
             for (int i = 0; i < 3; ++i)
                 if (value == DisplayNames[i]) menu.display = i;
@@ -159,6 +182,8 @@ void saveSettings()
     std::ofstream file(menu.storage / "netplay.txt", std::ios::trunc);
     file << "delay " << menu.delay << "\nport " << menu.port << "\ndisplay " << DisplayNames[menu.display] << '\n';
     if (!menu.recent.empty()) file << "recent " << menu.recent << '\n';
+    if (!menu.matchmaker.empty()) file << "matchmaker " << menu.matchmaker << '\n';
+    file << "room " << (menu.privateRoom ? "private" : "public") << '\n';
 }
 
 void close(bool local)
@@ -211,24 +236,115 @@ void enterRoom(bool hosting)
     menu.message.clear();
     menu.chat.clear();
     menu.typing = false;
+    menu.checkedIn = Clock::time_point{}; // a host lists its room on the first tick
     char stale[64]; // typed before the room opened, such as a game's Enter
     (void)recomp_input_keyboard_take_text(stale, sizeof stale);
     menu.screen = Screen::Room;
 }
 
-void host()
+// The default matchmaker's host:port, XORed with 0x5a so it is not plain text in the source or the binary.
+// shortcut: this only keeps the name out of a casual search; DNS lookups still show it.
+std::string defaultMatchmaker()
+{
+    static const unsigned char coded[] = {0x37, 0x37, 0x74, 0x34, 0x3f, 0x3c, 0x3c, 0x39, 0x35, 0x28, 0x3e,
+        0x74, 0x39, 0x35, 0x37, 0x60, 0x6e, 0x6d, 0x6d, 0x6a, 0x6a};
+    std::string server;
+    for (const unsigned char c : coded) server.push_back(static_cast<char>(c ^ 0x5au));
+    return server;
+}
+
+// Looks up the matchmaker from NETPLAY SETTINGS, or the default when none is set. Call after a socket
+// opened, which starts Windows sockets.
+void lookUpMatchmaker()
+{
+    const std::string server = menu.matchmaker.empty() ? defaultMatchmaker() : menu.matchmaker;
+    auto job = std::make_shared<Lookup>();
+    menu.lookup = job;
+    std::thread([job, server] {
+        const std::size_t colon = server.rfind(':');
+        const unsigned long port =
+            colon == std::string::npos ? 0u : std::strtoul(server.c_str() + colon + 1u, nullptr, 10);
+        const bool found = port != 0u && port <= 65535u &&
+            recomp_netplay_match_server(&job->found, server.substr(0u, colon).c_str(), static_cast<std::uint16_t>(port));
+        job->state.store(found ? 2 : 3);
+    }).detach();
+}
+
+// Points the socket at the matchmaker once its lookup is done. Returns 0 when none was asked, 1 while it
+// runs, 2 found, 3 not found.
+int takeLookup()
+{
+    if (!menu.lookup) return 0;
+    const int state = menu.lookup->state.load();
+    if (state == 1) return 1;
+    if (state == 2) {
+        menu.net.match.server_address = menu.lookup->found.match.server_address;
+        menu.net.match.server_port = menu.lookup->found.match.server_port;
+    }
+    menu.lookup.reset();
+    return state;
+}
+
+// A late PEER for a stopped join would still pair this socket, and PEER names no room, so the
+// join is dropped with the socket. Returns false when no new socket opens.
+bool forgetJoin()
+{
+    menu.joining = 0u;
+    const RecompNetplayMatch server = menu.net.match;
+    recomp_netplay_close(&menu.net);
+    if (!recomp_netplay_listen(&menu.net, 0u)) {
+        recomp_netplay_close(&menu.net);
+        menu.lookup.reset();
+        menu.screen = Screen::Versus;
+        menu.cursor = 3;
+        menu.message = "NO UDP PORT IS FREE.";
+        return false;
+    }
+    menu.net.match.server_address = server.server_address;
+    menu.net.match.server_port = server.server_port;
+    menu.listOk = false; // the new socket has no list yet
+    menu.listedAt = Clock::time_point{};
+    return true;
+}
+
+// bound: the socket is already listening, handed back by a session. listed: ask the matchmaker to list it.
+void host(bool bound, bool listed)
 {
     if (!nameAllowed()) return;
-    if (!recomp_netplay_listen(&menu.net, static_cast<std::uint16_t>(menu.port))) {
+    if (!bound && !recomp_netplay_listen(&menu.net, static_cast<std::uint16_t>(menu.port))) {
         recomp_netplay_close(&menu.net);
         menu.message = "UDP PORT " + std::to_string(menu.port) + " IS IN USE.";
         return;
     }
+    if (!bound) {
+        menu.listing = listed;
+        if (listed) lookUpMatchmaker();
+    }
     openRouterPort(static_cast<std::uint16_t>(menu.port));
+    menu.found = false;
     enterRoom(true);
 }
 
-void join()
+// Switches a hosting room between public and private in place, and keeps the choice for HOST ONLINE.
+// A private room drops the matchmaker; if its LEAVE is lost, the server drops the room after 20 s.
+void setListed(bool listed)
+{
+    menu.listing = listed;
+    menu.privateRoom = !listed;
+    saveSettings();
+    menu.checkedIn = Clock::time_point{};
+    if (listed) {
+        lookUpMatchmaker();
+        return;
+    }
+    recomp_netplay_match_leave(&menu.net);
+    menu.lookup.reset();
+    RecompNetplayMatch &match = menu.net.match;
+    match.server_port = 0u;
+    match.relay = match.punching = false;
+}
+
+void join(bool bound = false)
 {
     const std::size_t colon = menu.address.rfind(':');
     const std::string address = menu.address.substr(0u, colon);
@@ -239,7 +355,7 @@ void join()
         return;
     }
     if (!nameAllowed()) return;
-    if (!recomp_netplay_open(&menu.net, 0u, address.c_str(), static_cast<std::uint16_t>(port))) {
+    if (!bound && !recomp_netplay_open(&menu.net, 0u, address.c_str(), static_cast<std::uint16_t>(port))) {
         recomp_netplay_close(&menu.net);
         menu.message = "THAT ADDRESS CANNOT BE USED.";
         return;
@@ -247,18 +363,141 @@ void join()
     menu.peerAddress = address + ':' + std::to_string(port);
     menu.recent = menu.peerAddress;
     saveSettings();
+    menu.found = false;
     enterRoom(false);
+}
+
+// FIND MATCH asks from a socket that becomes this joiner's room socket, so the
+// endpoint the matchmaker sees is the one the host punches to.
+void find()
+{
+    if (!nameAllowed()) return;
+    if (!recomp_netplay_listen(&menu.net, 0u)) {
+        recomp_netplay_close(&menu.net);
+        menu.message = "NO UDP PORT IS FREE.";
+        return;
+    }
+    lookUpMatchmaker();
+    menu.listOk = menu.quick = false;
+    menu.choice = 0;
+    menu.joining = 0u;
+    menu.listedAt = Clock::time_point{};
+    menu.message.clear();
+    menu.screen = Screen::Find;
+}
+
+// The listed rooms whose names pass the name check, oldest first, as many as fit.
+std::vector<const RecompNetplayListedRoom *> shownRooms()
+{
+    std::vector<const RecompNetplayListedRoom *> rooms;
+    const RecompNetplayMatch &match = menu.net.match;
+    for (std::uint32_t i = 0u; i < match.room_count && rooms.size() < 6u; ++i)
+        if (!recomp_netplay_name_banned(match.rooms[i].name)) rooms.push_back(&match.rooms[i]);
+    return rooms;
+}
+
+void askToJoin(std::uint32_t id, Clock::time_point now)
+{
+    menu.joining = id;
+    menu.joinStarted = menu.askedAt = now;
+    recomp_netplay_match_join(&menu.net, id, menu.digest.data(), menu.name.c_str());
+}
+
+void updateFind(std::uint16_t keys)
+{
+    RecompNetplayMatch &match = menu.net.match;
+    if (takeLookup() == 3) {
+        recomp_netplay_close(&menu.net);
+        menu.screen = Screen::Versus;
+        menu.cursor = 3;
+        menu.message = "THE MATCHMAKER CANNOT BE FOUND.";
+        return;
+    }
+    recomp_netplay_match_poll(&menu.net);
+    const auto now = Clock::now();
+    if (keys) menu.message.clear();
+    if (match.met) {
+        match.met = false;
+        char text[64] = "RELAY";
+        if (match.candidate_port[0] != 0u) {
+            const std::uint8_t *at = reinterpret_cast<const std::uint8_t *>(&match.candidate_address[0]);
+            const std::uint8_t *port = reinterpret_cast<const std::uint8_t *>(&match.candidate_port[0]);
+            std::snprintf(text, sizeof text, "%u.%u.%u.%u:%u", at[0], at[1], at[2], at[3], port[0] << 8 | port[1]);
+        }
+        menu.peerAddress = text;
+        menu.found = true;
+        enterRoom(false);
+        return;
+    }
+    if (match.gone) {
+        match.gone = false;
+        menu.joining = 0u;
+        menu.quick = false;
+        menu.message = "THAT ROOM IS GONE.";
+        menu.listedAt = Clock::time_point{};
+    }
+    if (match.listed) {
+        match.listed = false;
+        menu.listOk = true;
+    }
+    if (keys & B) {
+        if (menu.joining == 0u) {
+            recomp_netplay_close(&menu.net);
+            menu.lookup.reset();
+            menu.screen = Screen::Versus;
+            menu.cursor = 3;
+        } else {
+            (void)forgetJoin();
+        }
+        menu.quick = false;
+        return;
+    }
+    if (menu.joining != 0u) {
+        // The server answers a repeated join again, so a lost answer costs one retry.
+        if (now - menu.joinStarted > std::chrono::seconds(3)) {
+            if (forgetJoin()) menu.message = "NO ANSWER FROM THE MATCHMAKER.";
+        } else if (now - menu.askedAt >= std::chrono::milliseconds(500)) {
+            menu.askedAt = now;
+            recomp_netplay_match_join(&menu.net, menu.joining, menu.digest.data(), menu.name.c_str());
+        }
+        return;
+    }
+    if (match.server_port != 0u && now - menu.listedAt >= std::chrono::seconds(2)) {
+        menu.listedAt = now;
+        recomp_netplay_match_list(&menu.net, menu.digest.data());
+    }
+    const auto rooms = shownRooms();
+    const int count = static_cast<int>(rooms.size());
+    if (menu.choice >= count) menu.choice = count > 0 ? count - 1 : 0;
+    if ((keys & Up) && count > 0) menu.choice = (menu.choice + count - 1) % count;
+    if ((keys & Down) && count > 0) menu.choice = (menu.choice + 1) % count;
+    if ((keys & A) && count > 0) askToJoin(rooms[static_cast<std::size_t>(menu.choice)]->id, now);
+    if (keys & Y) menu.quick = true;
+    // Quick match takes the oldest open room once a list is in, or hosts one.
+    if (menu.quick && menu.listOk) {
+        menu.quick = false;
+        if (count > 0) {
+            askToJoin(rooms.front()->id, now);
+        } else {
+            recomp_netplay_close(&menu.net);
+            menu.screen = Screen::Versus; // where a failed host leaves its message
+            menu.cursor = 3;
+            host(false, true);
+        }
+    }
 }
 
 void leaveRoom()
 {
+    if (menu.hosting) recomp_netplay_match_leave(&menu.net);
     recomp_netplay_close(&menu.net);
+    menu.lookup.reset();
     int forwarded = 2, asking = 1;
     if (menu.hosting && upnpState.compare_exchange_strong(forwarded, 0)) recomp_netplay_close_router_port();
     else if (menu.hosting) upnpState.compare_exchange_strong(asking, 4); // the asking thread closes it
     if (upnpState.load() == 3) upnpState.store(0);
     menu.screen = Screen::Versus;
-    menu.cursor = menu.hosting ? 1 : 2;
+    menu.cursor = menu.hosting ? 1 : menu.found ? 3 : 2;
 }
 
 std::string shownAddress()
@@ -333,6 +572,12 @@ bool updateRoom(std::uint16_t keys)
     RecompNetplayRoom &room = menu.room;
     recomp_netplay_room_tick(&menu.net, &room, menu.digest.data(), menu.name.c_str(), menu.ready, menu.starting);
     const bool peerAllowed = room.joined && !room.mismatch && !recomp_netplay_name_banned(room.name);
+    if (menu.hosting) (void)takeLookup();
+    if (menu.hosting && menu.net.match.server_port != 0u && Clock::now() - menu.checkedIn >= std::chrono::seconds(5)) {
+        menu.checkedIn = Clock::now();
+        recomp_netplay_match_host(&menu.net, menu.digest.data(), static_cast<std::uint8_t>(menu.delay),
+            !room.joined && !menu.starting, menu.name.c_str());
+    }
     if (room.heard_new) {
         room.heard_new = false;
         if (peerAllowed) addChat(room.name, room.heard);
@@ -344,6 +589,7 @@ bool updateRoom(std::uint16_t keys)
         leaveRoom();
         return false;
     }
+    if ((keys & (Left | Right)) && menu.hosting && !room.joined && !menu.starting) setListed(!menu.listing);
     if (!peerAllowed) menu.ready = false;
     else if ((keys & A) && !menu.starting) menu.ready = !menu.ready;
     if ((keys & X) && menu.hosting) {
@@ -360,6 +606,73 @@ bool updateRoom(std::uint16_t keys)
     return !menu.hosting && room.start && menu.ready && peerAllowed;
 }
 
+void openEditor(Screen screen, const std::string &text)
+{
+    char stale[64]; // typed before the editor opened, such as the Z that pressed A
+    (void)recomp_input_keyboard_take_text(stale, sizeof stale);
+    menu.keyboard = false;
+    menu.caret = text.size();
+    menu.screen = screen;
+}
+
+void pasteInto(std::string &text, const std::string &characters, std::size_t max)
+{
+    std::string pasted;
+    for (char c : pasteText()) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (characters.find(c) != std::string::npos && pasted.size() < max) pasted.push_back(c);
+    }
+    if (pasted.empty()) menu.message = "THE CLIPBOARD HAS NO ADDRESS.";
+    else {
+        text = pasted;
+        menu.caret = text.size();
+    }
+}
+
+// The editor for an address: typed keys insert at the caret, Backspace deletes,
+// Ctrl+V pastes, Enter is A and Esc is B. On the pad, up/down change the
+// character at the caret, left/right move it, Y deletes and X pastes.
+// Returns the keys left for the screen.
+std::uint16_t editText(std::string &text, const std::string &characters, std::size_t max, std::uint16_t keys)
+{
+    char typed[64];
+    const std::size_t typedCount = recomp_input_keyboard_take_text(typed, sizeof typed);
+    if (keys || typedCount) menu.message.clear();
+    std::uint16_t typedKeys = 0u;
+    for (std::size_t i = 0u; i < typedCount; ++i) {
+        char c = typed[i];
+        menu.keyboard = true;
+        if (c == '\r') typedKeys |= A;
+        else if (c == 0x1b) typedKeys |= B;
+        else if (c == 0x16) pasteInto(text, characters, max);
+        else if (c == '\b') {
+            if (menu.caret > 0u) text.erase(--menu.caret, 1u);
+        } else {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            if (characters.find(c) != std::string::npos && text.size() < max) text.insert(menu.caret++, 1u, c);
+        }
+    }
+    if (menu.keyboard) keys &= ~menu.aliased; // Z, X, A, S and Backspace are pad buttons too
+    keys |= typedKeys;
+    if ((keys & Left) && menu.caret > 0u) --menu.caret;
+    if ((keys & Right) && menu.caret < text.size()) ++menu.caret;
+    if (keys & (Up | Down)) {
+        const std::size_t count = characters.size();
+        if (menu.caret == text.size() && text.size() < max)
+            text.push_back((keys & Up) ? characters.front() : characters.back());
+        else if (menu.caret < text.size()) {
+            const std::size_t at = characters.find(text[menu.caret]);
+            text[menu.caret] = characters[(at + ((keys & Up) ? 1u : count - 1u)) % count];
+        }
+    }
+    if ((keys & Y) && !text.empty()) {
+        if (menu.caret == text.size()) --menu.caret;
+        text.erase(menu.caret, 1u);
+    }
+    if (keys & X) pasteInto(text, characters, max);
+    return keys;
+}
+
 void update(std::uint16_t keys, bool &launch)
 {
     switch (menu.screen) {
@@ -367,16 +680,21 @@ void update(std::uint16_t keys, bool &launch)
         return;
     case Screen::Versus:
         if (keys) menu.message.clear();
-        if (keys & Up) menu.cursor = (menu.cursor + 3) % 4;
-        if (keys & Down) menu.cursor = (menu.cursor + 1) % 4;
+        if (keys & Up) menu.cursor = (menu.cursor + 4) % 5;
+        if (keys & Down) menu.cursor = (menu.cursor + 1) % 5;
+        if ((keys & (Left | Right)) && menu.cursor == 1) {
+            menu.privateRoom = !menu.privateRoom;
+            saveSettings();
+        }
         if (keys & B) close(false);
         else if (keys & A) {
             if (menu.cursor == 0) close(true);
-            else if (menu.cursor == 1) host();
+            else if (menu.cursor == 1) host(false, !menu.privateRoom);
             else if (menu.cursor == 2) {
                 menu.address = menu.recent;
-                menu.caret = menu.address.size();
-                menu.screen = Screen::Join;
+                openEditor(Screen::Join, menu.address);
+            } else if (menu.cursor == 3) {
+                find();
             } else {
                 menu.cursor = 0;
                 menu.screen = Screen::Settings;
@@ -384,8 +702,8 @@ void update(std::uint16_t keys, bool &launch)
         }
         return;
     case Screen::Settings:
-        if (keys & Up) menu.cursor = (menu.cursor + 2) % 3;
-        if (keys & Down) menu.cursor = (menu.cursor + 1) % 3;
+        if (keys & Up) menu.cursor = (menu.cursor + 3) % 4;
+        if (keys & Down) menu.cursor = (menu.cursor + 1) % 4;
         if (keys & (Left | Right)) {
             const int step = (keys & Right) ? 1 : -1;
             if (menu.cursor == 0) {
@@ -394,44 +712,20 @@ void update(std::uint16_t keys, bool &launch)
             } else if (menu.cursor == 1) {
                 const int port = static_cast<int>(menu.port) + step;
                 if (port >= 1024 && port <= 65535) menu.port = static_cast<std::uint32_t>(port);
-            } else {
+            } else if (menu.cursor == 2) {
                 menu.display = (menu.display + 3 + step) % 3;
             }
         }
-        if (keys & (A | B)) {
+        if ((keys & A) && menu.cursor == 3) {
+            openEditor(Screen::Matchmaker, menu.matchmaker);
+        } else if (keys & (A | B)) {
             saveSettings();
-            menu.cursor = 3;
+            menu.cursor = 4;
             menu.screen = Screen::Versus;
         }
         return;
-    case Screen::Join: {
-        std::string &address = menu.address;
-        if (keys) menu.message.clear();
-        if ((keys & Left) && menu.caret > 0u) --menu.caret;
-        if ((keys & Right) && menu.caret < address.size()) ++menu.caret;
-        if (keys & (Up | Down)) {
-            const std::size_t count = AddressCharacters.size();
-            if (menu.caret == address.size() && address.size() < MaxAddress)
-                address.push_back((keys & Up) ? AddressCharacters.front() : AddressCharacters.back());
-            else if (menu.caret < address.size()) {
-                const std::size_t at = AddressCharacters.find(address[menu.caret]);
-                address[menu.caret] = AddressCharacters[(at + ((keys & Up) ? 1u : count - 1u)) % count];
-            }
-        }
-        if ((keys & Y) && !address.empty()) {
-            if (menu.caret == address.size()) --menu.caret;
-            address.erase(menu.caret, 1u);
-        }
-        if (keys & X) {
-            std::string pasted;
-            for (const char c : pasteText())
-                if (AddressCharacters.find(c) != std::string::npos && pasted.size() < MaxAddress) pasted.push_back(c);
-            if (pasted.empty()) menu.message = "THE CLIPBOARD HAS NO ADDRESS.";
-            else {
-                address = pasted;
-                menu.caret = address.size();
-            }
-        }
+    case Screen::Join:
+        keys = editText(menu.address, AddressCharacters, MaxAddress, keys);
         if (keys & B) {
             menu.cursor = 2;
             menu.screen = Screen::Versus;
@@ -439,7 +733,16 @@ void update(std::uint16_t keys, bool &launch)
             join();
         }
         return;
-    }
+    case Screen::Matchmaker:
+        keys = editText(menu.matchmaker, HostCharacters, MaxMatchmaker, keys);
+        if (keys & (A | B)) {
+            saveSettings();
+            menu.screen = Screen::Settings;
+        }
+        return;
+    case Screen::Find:
+        updateFind(keys);
+        return;
     case Screen::Room:
         launch = updateRoom(keys);
         return;
@@ -460,6 +763,21 @@ void footer(const char *text)
     if (!menu.message.empty()) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, menu.message.c_str());
     recomp_overlay_rect(40.0f, 428.0f, 560.0f, 2.0f, Dim);
     recomp_overlay_text(40.0f, 442.0f, 2.0f, Gray, text);
+}
+
+// An address editor's controls, for the keyboard once a key has been typed.
+void editorHints(const char *padFooter, const char *keyFooter)
+{
+    if (menu.keyboard) {
+        recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "TYPE   LEFT/RIGHT MOVE");
+        recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "BACKSPACE DELETE   CTRL+V PASTE");
+        footer(keyFooter);
+        return;
+    }
+    recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "UP/DOWN CHANGE   LEFT/RIGHT MOVE");
+    recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "Y DELETE   X PASTE FROM CLIPBOARD");
+    recomp_overlay_text(60.0f, 270.0f, 2.0f, Gray, "OR TYPE IT ON THE KEYBOARD.");
+    footer(padFooter);
 }
 
 void item(float y, bool selected, const char *text)
@@ -489,7 +807,7 @@ void drawRoom()
 {
     const RecompNetplayRoom &room = menu.room;
     title("ONLINE LOBBY ROOM");
-    const std::string ping = room.pinged ? std::to_string(room.ping_ms) + " MS" : "";
+    const std::string ping = room.pinged ? std::to_string(room.ping_ms) + " MS" + (menu.net.match.relay ? "  RELAY" : "") : "";
     const bool peer = room.joined;
     const std::string peerName = room.mismatch ? "OTHER BUILD"
         : recomp_netplay_name_banned(room.name) ? "HIDDEN NAME" : room.name;
@@ -516,6 +834,9 @@ void drawRoom()
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
         recomp_overlay_text(40.0f, 348.0f, 2.0f, Gray, ("INPUT DELAY  " + std::to_string(menu.delay) + " FRAMES").c_str());
+        const char *const kinds[2] = {"PUBLIC", "PRIVATE"};
+        const std::string kind = kinds[menu.listing ? 0 : 1];
+        recomp_overlay_text(40.0f, 374.0f, 2.0f, Gray, ("ROOM  " + (peer ? kind : "< " + kind + " >")).c_str());
     } else {
         recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("HOST  " + menu.peerAddress).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, "INPUT DELAY  SET BY THE HOST");
@@ -528,32 +849,44 @@ void drawRoom()
         else if (menu.starting || (room.start && menu.ready)) status = "BOTH READY: STARTING THE SESSION...";
         else if (peer && !menu.ready) status = "PRESS A WHEN YOU ARE READY.";
         else if (peer) status = (waiting = "WAITING FOR " + std::string(room.name) + " TO READY UP.").c_str();
+        else if (menu.hosting && menu.net.match.room_id != 0u) status = "LISTED ON FIND MATCH. OR SEND YOUR ADDRESS.";
+        else if (menu.hosting && menu.listing && (menu.lookup || menu.net.match.server_port != 0u))
+            status = "LISTING ON FIND MATCH...";
+        else if (menu.hosting && !menu.listing) status = "PRIVATE: SEND YOUR ADDRESS TO A FRIEND.";
         else if (menu.hosting) status = "SEND YOUR ADDRESS TO THE OTHER PLAYER.";
-        else if (Clock::now() - menu.opened > std::chrono::seconds(5)) status = "NO ANSWER YET. CHECK THE ADDRESS.";
+        else if (Clock::now() - menu.opened > std::chrono::seconds(menu.found ? 8 : 5))
+            status = menu.found ? "NO ANSWER YET." : "NO ANSWER YET. CHECK THE ADDRESS.";
         if (status != nullptr) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, status);
     }
     footer(menu.typing ? "ENTER SEND   ESC CANCEL"
         : peer && !room.mismatch ? "A READY   B LEAVE   ENTER CHAT"
+        : menu.hosting && !peer ? "A READY  B LEAVE  X COPY  LEFT/RIGHT ROOM"
         : menu.hosting ? "A READY   B LEAVE   X COPY ADDRESS" : "A READY   B LEAVE");
 }
 
 void draw()
 {
-    static const char *const items[4] = {"LOCAL", "HOST ONLINE", "JOIN ONLINE", "NETPLAY SETTINGS"};
-    static const char *const details[4] = {
+    static const char *const items[5] = {"LOCAL", "HOST ONLINE", "JOIN ONLINE", "FIND MATCH", "NETPLAY SETTINGS"};
+    static const char *const details[5] = {
         "TWO CONTROLLERS ON THIS MACHINE.",
-        "WAIT HERE FOR A PLAYER TO JOIN YOUR GAME.",
+        "WAIT FOR A PLAYER. FIND MATCH LISTS THE ROOM.",
         "CONNECT TO A PLAYER WHO IS HOSTING.",
-        "INPUT DELAY AND THE PORT YOU HOST ON.",
+        "PICK AN OPEN ROOM, OR QUICK MATCH.",
+        "DELAY, PORT, DISPLAY AND MATCHMAKER.",
     };
     switch (menu.screen) {
     case Screen::Closed:
         return;
     case Screen::Versus:
         title("VERSUS");
-        for (int i = 0; i < 4; ++i) item(134.0f + 52.0f * static_cast<float>(i), menu.cursor == i, items[i]);
-        recomp_overlay_text(40.0f, 362.0f, 2.0f, White, details[menu.cursor]);
-        footer("A SELECT   B BACK");
+        for (int i = 0; i < 5; ++i) item(134.0f + 44.0f * static_cast<float>(i), menu.cursor == i, items[i]);
+        {
+            const char *room = menu.privateRoom ? "< PRIVATE >" : "< PUBLIC >";
+            recomp_overlay_text(600.0f - recomp_overlay_text_width(room, 2.0f), 182.0f, 2.0f, White, room);
+        }
+        recomp_overlay_text(40.0f, 362.0f, 2.0f, White,
+            menu.cursor == 1 && menu.privateRoom ? "ONLY PLAYERS WITH YOUR ADDRESS CAN JOIN." : details[menu.cursor]);
+        footer(menu.cursor == 1 ? "LEFT/RIGHT ROOM   A SELECT   B BACK" : "A SELECT   B BACK");
         return;
     case Screen::Settings: {
         title("NETPLAY SETTINGS");
@@ -567,13 +900,21 @@ void draw()
         item(238.0f, menu.cursor == 2, "NETWORK DISPLAY");
         recomp_overlay_text(600.0f - recomp_overlay_text_width(display.c_str(), 2.0f), 242.0f, 2.0f, White,
             display.c_str());
-        static const char *const details[3] = {
+        const std::string server = menu.matchmaker.empty() ? "DEFAULT" : menu.matchmaker;
+        item(290.0f, menu.cursor == 3, "MATCHMAKER");
+        // A value too wide for the 132 pixels right of the highlight goes on its own line below the row.
+        const bool fits = recomp_overlay_text_width(server.c_str(), 2.0f) <= 132.0f;
+        const float scale = fits ? 2.0f : 1.5f;
+        recomp_overlay_text(600.0f - recomp_overlay_text_width(server.c_str(), scale), fits ? 294.0f : 330.0f, scale,
+            White, server.c_str());
+        static const char *const details[4] = {
             "LOWER DELAY FEELS SHARPER, MORE ROLLBACK.",
             "THE HOST'S ROUTER MUST LET THIS PORT IN.",
             "PING, OR FULL STATS, IN A SESSION'S CORNER.",
+            "THE SERVER FIND MATCH USES, HOST:PORT.",
         };
         recomp_overlay_text(40.0f, 362.0f, 2.0f, White, details[menu.cursor]);
-        footer("LEFT/RIGHT CHANGE   B BACK");
+        footer(menu.cursor == 3 ? "A EDIT   B BACK" : "LEFT/RIGHT CHANGE   B BACK");
         return;
     }
     case Screen::Join: {
@@ -583,11 +924,40 @@ void draw()
         recomp_overlay_text(68.0f, 165.0f, 3.0f, White, menu.address.c_str());
         if ((menu.frame / 20u) % 2u == 0u)
             recomp_overlay_rect(68.0f + 18.0f * static_cast<float>(menu.caret), 189.0f, 15.0f, 3.0f, Red);
-        recomp_overlay_text(60.0f, 222.0f, 2.0f, Gray, "UP/DOWN CHANGE   LEFT/RIGHT MOVE");
-        recomp_overlay_text(60.0f, 248.0f, 2.0f, Gray, "Y DELETE   X PASTE FROM CLIPBOARD");
         if (!menu.recent.empty())
             recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, ("LAST HOST  " + menu.recent).c_str());
-        footer("A CONNECT   B BACK");
+        editorHints("A CONNECT   B BACK", "ENTER CONNECT   ESC BACK");
+        return;
+    }
+    case Screen::Matchmaker: {
+        title("MATCHMAKER");
+        recomp_overlay_text(60.0f, 132.0f, 2.0f, Gray, "SERVER  HOST:PORT");
+        recomp_overlay_rect(56.0f, 154.0f, 528.0f, 44.0f, Panel);
+        recomp_overlay_text(68.0f, 169.0f, 2.0f, White, menu.matchmaker.c_str());
+        if ((menu.frame / 20u) % 2u == 0u)
+            recomp_overlay_rect(68.0f + 12.0f * static_cast<float>(menu.caret), 186.0f, 10.0f, 2.0f, Red);
+        recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, "LEAVE IT EMPTY FOR THE DEFAULT SERVER.");
+        editorHints("A/B DONE", "ENTER/ESC DONE");
+        return;
+    }
+    case Screen::Find: {
+        title("FIND MATCH");
+        const auto rooms = shownRooms();
+        for (std::size_t i = 0u; i < rooms.size(); ++i) {
+            const float y = 134.0f + 40.0f * static_cast<float>(i);
+            const bool selected = static_cast<int>(i) == menu.choice && menu.joining == 0u;
+            if (selected) recomp_overlay_rect(40.0f, y - 10.0f, 560.0f, 37.0f, Red);
+            plateName(60.0f, y - 2.0f, rooms[i]->name, selected ? White : Gray);
+            const std::string detail = "DELAY " + std::to_string(rooms[i]->delay) + "  " +
+                std::to_string(rooms[i]->age_s / 60u) + " MIN";
+            recomp_overlay_text(588.0f - recomp_overlay_text_width(detail.c_str(), 2.0f), y + 2.0f, 2.0f,
+                selected ? White : Gray, detail.c_str());
+        }
+        const char *status = menu.joining != 0u ? "JOINING..."
+            : !menu.listOk ? "ASKING THE MATCHMAKER..."
+            : rooms.empty() ? "NO OPEN ROOMS. Y HOSTS ONE FOR OTHERS TO FIND." : nullptr;
+        if (status != nullptr && menu.message.empty()) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, status);
+        footer(menu.joining != 0u ? "B STOP" : "A JOIN   Y QUICK MATCH   B BACK");
         return;
     }
     case Screen::Room:
@@ -612,9 +982,9 @@ void onOverlay(const RecompD3dPresenterTarget *target)
         if (directions == 0u || (keys & directions) != 0u) menu.repeat = 0u;
         else if (++menu.repeat >= 18u && (menu.repeat - 18u) % 4u == 0u) keys |= directions;
         update(keys, launch);
+        menu.aliased = 0u;
         if (launch) {
-            // The session binds this port again; the host's router forward stays for it.
-            recomp_netplay_close(&menu.net);
+            // The session takes the socket (recomp_netplay_menu_take_launch); the router forward stays for it.
             menu.screen = Screen::Closed;
             menu.launched = true;
             return;
@@ -670,11 +1040,17 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
         menu.pressed = 0u;
     } else {
         menu.pressed |= edges;
+        if (port == 0u) { // the keyboard drives port 0 only
+            const auto key = [](std::uint32_t code) { return recomp_input_keyboard_sampled(code); };
+            menu.aliased |= edges & ((key('Z') ? A : 0u) | (key('X') || key(0x08u) ? B : 0u) |
+                                     (key('A') ? X : 0u) | (key('S') ? Y : 0u));
+        }
     }
     *pad = RecompInputGamepad{};
 }
 
-bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join)
+bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join,
+    RecompNetplay &socket)
 {
     std::lock_guard<std::mutex> guard(menu.lock);
     if (!menu.launched) return false;
@@ -682,6 +1058,7 @@ bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &del
     hostPort = menu.hosting ? menu.port : 0u;
     delay = menu.delay;
     join = menu.hosting ? std::string() : menu.peerAddress;
+    socket = menu.net; // the menu reopens nothing until the session hands it back
     return true;
 }
 
@@ -692,19 +1069,29 @@ int recomp_netplay_menu_display(const std::filesystem::path &storage)
     return menu.display;
 }
 
-void recomp_netplay_menu_return_to_room()
+void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
 {
     std::lock_guard<std::mutex> guard(menu.lock);
     menu.openedBy = 0u;
     menu.message.clear();
     menu.covering = true;
+    // The socket, its peer and how it reaches the peer carry over; the host's room greets the last joiner first.
+    menu.net = RecompNetplay{};
+    menu.net.socket = socket.socket;
+    menu.net.peer_address = socket.peer_address;
+    menu.net.peer_port = socket.peer_port;
+    menu.net.match = socket.match;
+    menu.net.match.punching = false;
     // A failure leaves the Versus screen up with its message.
     menu.screen = Screen::Versus;
-    menu.cursor = menu.hosting ? 1 : 2;
+    menu.cursor = menu.hosting ? 1 : menu.found ? 3 : 2;
     if (menu.hosting) {
-        host();
+        host(true, menu.listing);
+    } else if (menu.found) {
+        if (nameAllowed()) enterRoom(false); // a matched joiner has no address to call
     } else {
         menu.address = menu.peerAddress;
-        join();
+        join(true);
     }
+    if (menu.screen != Screen::Room) recomp_netplay_close(&menu.net);
 }

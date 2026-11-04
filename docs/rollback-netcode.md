@@ -250,7 +250,8 @@ game's offline modes together, the host on the first controller port and the
 joiner on the second. That avoids all of XOnline.
 
 Choosing Versus on the main menu opens the runner's own menu: LOCAL, HOST
-ONLINE, JOIN ONLINE and NETPLAY SETTINGS (`netplay_menu.cpp`). The runner
+ONLINE, JOIN ONLINE, FIND MATCH ([matchmaking](matchmaking.md)) and NETPLAY
+SETTINGS (`netplay_menu.cpp`). The runner
 draws it over the game as untextured quads with a built-in 5 x 7 font
 (`overlay.c`), sent just before each Present, and the game sees idle pads
 until it closes. The menu opens on an A press while frontend scene
@@ -259,11 +260,13 @@ until it closes. The menu opens on an A press while frontend scene
 `g_game_mode_state` at 4. LOCAL hands the game an A press once every
 button is up; B closes the menu and holds the game's pads idle until then,
 so the game never sees it. The input delay, the host's port and the last
-host joined are kept in `.recomp-storage/netplay.txt`.
+host joined are kept in `.recomp-storage/netplay.txt`, with the
+[matchmaker](matchmaking.md) set under NETPLAY SETTINGS.
 
 HOST ONLINE binds the port, asks the router for a forward on a background
-thread and shows the address to send. JOIN ONLINE takes an address from
-the d-pad or the clipboard. In the room each side says its build, profile
+thread and shows the address to send; a PRIVATE room is never listed on
+FIND MATCH. JOIN ONLINE takes an address from
+the d-pad; on Windows it also takes the keyboard or the clipboard. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
@@ -311,9 +314,14 @@ A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
 `rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
 fails to connect) goes back to its room. The runner says goodbye, drops the
 session's state, reboots the game offline the same way and reopens the
-room: the host listens on its port again and the joiner calls the host's
-address. Behind the room, the port 0 pad walks to the main menu with Versus
-chosen, so leaving the room lands where the Versus menu was opened. Both
+room: the host listens again and the joiner calls the host. Each runner
+keeps one UDP socket from its room through the session and back: the room
+hands it to the session lobby at launch, and the session hands it back, so
+a path its routers opened stays open (see [matchmaking](matchmaking.md)).
+A joiner kept one local port through two cancelled lobbies, a session and
+each return to its room. Behind the room, the port 0 pad walks to the main
+menu with Versus chosen, so leaving the room lands where the Versus menu was
+opened. Both
 players press READY again for a rematch. Until the menu has Versus chosen,
 the room's backdrop is opaque and the game's sound is off, so the title and
 menus do not show through. A host kept as one process
@@ -437,9 +445,9 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- Without UPnP the host must forward its UDP port by hand; there is no hole
-  punching or relay. A joiner types an IPv4 address; host names and room
-  codes are not supported.
+- Without UPnP or a [matchmaker](matchmaking.md) for hole punching and
+  relay, the host must forward its UDP port by hand. JOIN ONLINE takes an
+  IPv4 address.
 - The hidden walks still take their time: about 6 s on STARTING MATCH
   before character select, and about 3 s behind the room after a session.
 - A joiner that cancels before the host has heard its hello, in practice

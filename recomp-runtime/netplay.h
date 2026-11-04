@@ -53,6 +53,48 @@ typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_CANCELLED, /* by this side, or by the other when peer_left is set */
 } RecompNetplayLobbyResult;
 
+enum {
+    RECOMP_NETPLAY_LISTED_ROOMS = 12u,
+    RECOMP_NETPLAY_TOKEN_BYTES = 8u, /* a socket's nonce and the matchmaker's cookie */
+};
+
+/* One open room from the matchmaker's list. */
+typedef struct RecompNetplayListedRoom {
+    uint32_t id;
+    uint32_t age_s;
+    uint8_t delay;
+    char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+} RecompNetplayListedRoom;
+
+/* What a socket heard from the matchmaker (tools/matchmaker.py), which the
+   socket's receives record on their way, and how it reaches its peer. */
+typedef struct RecompNetplayMatch {
+    uint32_t server_address; /* network order; port 0 means none */
+    uint16_t server_port;
+    uint32_t room_id; /* this host's listing, once the server answered */
+    RecompNetplayListedRoom rooms[RECOMP_NETPLAY_LISTED_ROOMS];
+    uint32_t room_count;
+    bool listed;  /* a list arrived; the caller clears it */
+    bool gone;    /* the room asked for is no longer open; the caller clears it */
+    bool met;     /* the server paired this socket with a player; the caller clears it */
+    /* The paired player's public and LAN endpoints, network order, port 0
+       when unknown. Room ticks send to both until one answers. */
+    uint32_t candidate_address[2];
+    uint16_t candidate_port[2];
+    bool punching;
+    uint64_t punch_ms;
+    bool relay; /* packets to the peer go through the server, as do its answers */
+    bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
+    /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
+    uint8_t nonce[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* The server's proof of this socket's address, zeros until it sends one. */
+    uint8_t cookie[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* The last HOST, JOIN or LEAVE, sent once more when a new cookie answers it. */
+    uint8_t asked[160];
+    size_t asked_size;
+    uint64_t asked_ms;
+} RecompNetplayMatch;
+
 typedef struct RecompNetplay {
     uintptr_t socket;
     uint32_t peer_address; /* IPv4, network order */
@@ -74,6 +116,7 @@ typedef struct RecompNetplay {
     uint32_t rtt_ms; /* smoothed over the last few samples */
     bool rtt_known;
     bool peer_left; /* the other runner said goodbye */
+    RecompNetplayMatch match;
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are
@@ -105,6 +148,9 @@ typedef struct RecompNetplayRoom {
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
     uint64_t said_ms;
+    /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
+       packet per packet it sends until it echoes one of this side's clocks. */
+    bool doubted, owed;
 } RecompNetplayRoom;
 
 /* Reads what the other player said and, every 100 ms or every call while
@@ -119,21 +165,34 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    side takes at most one line a second and drops a line that is not
    printable ASCII or that recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
-/* Binds port and waits for a joiner's hello, answering each with the host's
+
+/* Matchmaking, all from the room's own socket so the server sees the
+   endpoint the room uses. False when host does not resolve. */
+bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t port);
+/* A host's listing and heartbeat; say it every 5 s while the room is up. */
+void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t delay, bool open,
+    const char *name);
+void recomp_netplay_match_list(RecompNetplay *net, const char *digest);
+/* Asks to join a listed room; again until met or gone. */
+void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char *digest, const char *name);
+void recomp_netplay_match_leave(RecompNetplay *net);
+/* Drains the socket outside a room, keeping only the matchmaker's answers. */
+void recomp_netplay_match_poll(RecompNetplay *net);
+/* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
+   hello, answering each with the host's
    digest and settings. The first joiner with the same digest becomes the
-   peer; one with another digest learns it from the answer and is ignored.
+   peer; one with another digest learns it from the answer and is ignored. A
+   room's socket, which already has a peer, hears only that peer.
    Returns once both sides hold both profiles. cancelled, when not null, is
    polled every 20 ms; either side cancelling sends the other a goodbye,
    which ends its wait too. */
-RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void));
-/* Says hello to the host until it answers, copies the host's delay and flags
-   into lobby, then swaps profiles as the host does. Binds an ephemeral local
-   port. */
-RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
-    bool (*cancelled)(void));
+RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void));
+/* Says hello to the peer of a socket from recomp_netplay_open, or a room's,
+   until it answers, copies the host's delay and flags into lobby, then swaps
+   profiles as the host does. */
+RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, RecompNetplayLobby *lobby,
+    RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void));
 void recomp_netplay_close(RecompNetplay *net);
 /* The local IPv4 address of the interface that reaches the internet, as
    text; it also starts Winsock on Windows. */
