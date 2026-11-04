@@ -23,6 +23,7 @@
     "docs/test-release.md",
     "docs/test-release-macos.md",
     "docs/test-release-linux.md",
+    "docs/rollback-netcode.md",
     "private/README.md",
     "recomp-runtime/**",
     "tools/extract_iso.py",

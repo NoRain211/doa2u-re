@@ -626,6 +626,42 @@ static void bridge_xe_unload_section(void)
     kernel_return(1u, status);
 }
 
+typedef struct KernelMemoryState {
+    Allocation allocations[MAX_ALLOCATIONS];
+} KernelMemoryState;
+
+size_t recomp_kernel_memory_state_size(void)
+{
+    return sizeof(KernelMemoryState);
+}
+
+void recomp_kernel_memory_state_save(void *state)
+{
+    KernelMemoryState *out = state;
+    memcpy(out->allocations, allocations, sizeof out->allocations);
+}
+
+void recomp_kernel_memory_state_restore(const void *state)
+{
+    const KernelMemoryState *in = state;
+    memcpy(allocations, in->allocations, sizeof allocations);
+}
+
+size_t recomp_kernel_memory_stack_ranges(RecompGuestStackRange *ranges, size_t capacity)
+{
+    size_t count = 0u;
+    for (size_t i = 0; i < MAX_ALLOCATIONS; ++i) {
+        const Allocation *allocation = &allocations[i];
+        if (!allocation->active || allocation->kind != ALLOCATION_STACK) continue;
+        if (count < capacity) {
+            ranges[count].base = allocation->base;
+            ranges[count].size = allocation->size;
+        }
+        ++count;
+    }
+    return count;
+}
+
 RecompFunction recomp_kernel_memory(uint32_t ordinal)
 {
     switch (ordinal) {

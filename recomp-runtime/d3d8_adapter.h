@@ -21,12 +21,25 @@ bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size);
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size);
 void recomp_d3d8_shutdown(void);
+/* Hidden run-ahead frames keep their device model but skip the flip. */
+void recomp_d3d8_set_present_suppressed(bool suppressed);
+/* Repeated run-ahead frames also skip draws, clears, copies and visibility tests. */
+void recomp_d3d8_set_gpu_work_suppressed(bool suppressed);
 /* Clears the main target, draws a BGRA card at level (0 black..255 full)
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
     float display_aspect, uint8_t level);
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
+/* Optional host hook at the frame boundary: guest state is final and the
+   frame-locked clock has already advanced. SyncTest snapshots here. */
+extern void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
+/* Host device and frame models that the guest's D3D8 object mirrors. */
+size_t recomp_d3d8_state_size(void);
+/* Guest return address of the last Present. */
+uint32_t recomp_d3d8_swap_caller(void);
+void recomp_d3d8_state_save(void *state);
+void recomp_d3d8_state_restore(const void *state);
 
 #ifdef __cplusplus
 }

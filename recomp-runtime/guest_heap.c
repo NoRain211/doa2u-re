@@ -66,6 +66,20 @@ XboxHeapSnapshot xbox_HeapSnapshot(void)
         heap_base != 0u && last_page > first_page ? last_page - first_page : 0u};
 }
 
+void xbox_HeapStateSave(XboxHeapState *state)
+{
+    state->base = heap_base;
+    state->cursor = heap_cursor;
+    state->contiguous_cursor = contiguous_cursor;
+}
+
+void xbox_HeapStateRestore(const XboxHeapState *state)
+{
+    heap_base = state->base;
+    heap_cursor = state->cursor;
+    contiguous_cursor = state->contiguous_cursor;
+}
+
 uint32_t xbox_ContiguousAlloc(
     uint32_t size,
     uint32_t lowest_address,

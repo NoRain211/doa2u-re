@@ -3,11 +3,15 @@
 #include "d3d8_adapter.h"
 #include "dsound_api_adapter.h"
 #include "dsound_buffer_adapter.h"
+#include "guest_snapshot.h"
+#include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
+#include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
@@ -38,9 +42,38 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 
 static RecompInputPulseSource inputPulses;
 static bool scriptedInputOnly;
+// SyncTest's RAM snapshots read this; write tracking is fixed when guest RAM is allocated.
+static bool guestRamWriteWatch;
+static std::uint8_t *guestRam;
+
+/* Rollback over a fight (docs/rollback-netcode.md). RECOMP_ROLLBACK=loopback
+   starts a session at swap RECOMP_ROLLBACK_START with a generated remote
+   player on port 0 whose pads arrive RECOMP_ROLLBACK_LAG frames late, so most
+   frames run on a wrong prediction and are rolled back. At session frame
+   RECOMP_ROLLBACK_FRAMES every pad arrives; once the last rollback has run
+   again, guest RAM goes to RECOMP_ROLLBACK_DUMP. Lag 0 never predicts, so
+   its dump is the reference. */
+struct RollbackRun {
+    bool enabled = false;
+    bool active = false;
+    std::uint32_t start = 0u, stop = 600u, lag = 4u;
+    std::uint32_t frontier = 0u; // first session frame never run
+    std::uint32_t rollbacks = 0u, replayed = 0u;
+    std::chrono::steady_clock::time_point started;
+    const char *dump = nullptr;
+    RecompRollbackSession session;
+    RecompInputGamepad remotePad{};
+};
+static RollbackRun rollback;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
+    if (rollback.active && port < 2u) {
+        // shortcut: loopback has no local player, so port 1 stays empty; netplay fills it.
+        if (port != 0u) return false;
+        *gamepad = rollback.remotePad;
+        return true;
+    }
     if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
     static bool startHeld;
@@ -202,6 +235,126 @@ static void onSwap(std::uint32_t frame)
     showCard();
 }
 
+static void saveInputPulses(void *state)
+{
+    std::memcpy(state, &inputPulses, sizeof inputPulses);
+}
+
+static void restoreInputPulses(const void *state)
+{
+    std::memcpy(&inputPulses, state, sizeof inputPulses);
+}
+
+static void onFrameBoundary(std::uint32_t frame)
+{
+    /* A snapshot from before the main fiber exists cannot be restored. */
+    if (recomp_fiber_adapter_model()->current_handle == 0u) return;
+    const RecompSyncTestResult result = recomp_synctest_frame(frame);
+    if (result == RECOMP_SYNCTEST_MISMATCH) recomp_stop(2, "synctest:mismatch");
+    if (result == RECOMP_SYNCTEST_SKIP) recomp_stop(3, "synctest:skip");
+    if (result == RECOMP_SYNCTEST_MATCH && !recomp_synctest_loop())
+        recomp_stop(0, "synctest:match");
+}
+
+// A new pad nearly every frame, so repeating the last pad mispredicts.
+static RecompInputGamepad loopbackPad(std::uint32_t frame)
+{
+    std::uint32_t x = frame * 2654435761u;
+    x ^= x >> 13;
+    RecompInputGamepad pad{};
+    pad.buttons = static_cast<std::uint16_t>(x & 0x000fu); // d-pad
+    pad.analog_buttons[(x >> 4) & 3u] = (x & 0x40u) != 0u ? 0xffu : 0u; // A, B, X or Y
+    return pad;
+}
+
+static void finishRollback()
+{
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - rollback.started).count();
+    std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
+        "(%u frames run again) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.replayed, seconds);
+    if (rollback.dump != nullptr) {
+        std::vector<std::uint8_t> ram(guestRam, guestRam + RECOMP_XBOX_RAM_SIZE);
+        recomp_synctest_mask_ignored(ram.data(), ram.size());
+        std::ofstream out(rollback.dump, std::ios::binary);
+        out.write(reinterpret_cast<const char *>(ram.data()), static_cast<std::streamsize>(ram.size()));
+        if (!out) recomp_stop(4, "rollback:dump");
+    }
+    recomp_stop(0, "rollback:done");
+}
+
+static void onRollbackFrame(std::uint32_t swap)
+{
+    RecompRollbackSession &s = rollback.session;
+    if (!rollback.active) {
+        if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
+        recomp_rollback_init(&s, 0u);
+        if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
+        rollback.active = true;
+        rollback.started = std::chrono::steady_clock::now();
+        std::fprintf(stderr, "recomp rollback: session starts at swap %u, lag %u\n", swap, rollback.lag);
+    }
+    bool saved = true;
+    if (s.frame == rollback.frontier) {
+        const std::uint32_t lag = s.frame >= rollback.stop ? 0u : rollback.lag;
+        while (s.remote_count + lag <= s.frame) {
+            const RecompInputGamepad pad = loopbackPad(s.remote_count);
+            recomp_rollback_add_remote(&s, &pad);
+        }
+        const RecompInputGamepad neutral{};
+        while (s.local_count <= s.frame) recomp_rollback_add_local(&s, &neutral);
+        const std::uint32_t target = recomp_rollback_take_rewind(&s);
+        if (target != RECOMP_ROLLBACK_NONE) {
+            // The newest save is the frame before the frontier.
+            // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
+            if (!recomp_rollback_ring_load(rollback.frontier - 1u - target))
+                recomp_stop(4, "rollback:unrestorable");
+            ++rollback.rollbacks;
+            rollback.replayed += rollback.frontier - target;
+        } else if (s.frame == rollback.stop) {
+            finishRollback();
+            return;
+        } else {
+            saved = recomp_rollback_ring_save();
+        }
+    } else {
+        saved = recomp_rollback_ring_save();
+    }
+    if (!saved) recomp_stop(4, "rollback:save");
+    // shortcut: loopback never runs out of window; netplay waits here for the peer.
+    if (!recomp_rollback_can_run(&s)) recomp_stop(4, "rollback:stalled");
+    // Frames run again were already shown and heard with the predicted pads.
+    const bool hidden = s.frame < rollback.frontier;
+    recomp_d3d8_set_present_suppressed(hidden);
+    recomp_d3d8_set_gpu_work_suppressed(hidden);
+    recomp_dsound_buffer_set_output_suppressed(hidden);
+    RecompInputGamepad local;
+    recomp_rollback_run(&s, &local, &rollback.remotePad);
+    if (s.frame > rollback.frontier) rollback.frontier = s.frame;
+}
+
+static bool readRollbackConfig()
+{
+    const char *mode = std::getenv("RECOMP_ROLLBACK");
+    if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
+    if (std::strcmp(mode, "loopback") != 0) return false;
+    rollback.enabled = true;
+    bool valid = true;
+    const auto number = [&valid](const char *name, std::uint32_t &value) {
+        const char *text = std::getenv(name);
+        if (text == nullptr || *text == '\0') return;
+        const char *end = text + std::strlen(text);
+        const auto [stop, error] = std::from_chars(text, end, value);
+        if (error != std::errc{} || stop != end) valid = false;
+    };
+    number("RECOMP_ROLLBACK_START", rollback.start);
+    number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
+    number("RECOMP_ROLLBACK_LAG", rollback.lag);
+    rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
+    return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+}
+
 int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
@@ -333,12 +486,20 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: XBE SHA-256 differs from the authenticated program target\n";
         return 1;
     }
-    std::vector<std::uint8_t> memory(RECOMP_XBOX_RAM_SIZE, 0u);
+    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
     std::string error;
-    if (!recomp_load_xbe(parsed, memory, error)) {
+    if (!recomp_load_xbe(parsed, image, error)) {
         std::cerr << "recomp runner: " << error << '\n';
         return 1;
     }
+    std::uint8_t *memory = recomp_guest_ram_allocate(RECOMP_XBOX_RAM_SIZE, &guestRamWriteWatch);
+    guestRam = memory;
+    if (memory == nullptr) {
+        std::cerr << "recomp runner: guest RAM allocation failed\n";
+        return 1;
+    }
+    std::memcpy(memory, image.data(), image.size());
+    std::vector<std::uint8_t>().swap(image);
     const auto imageEnd = static_cast<std::uint64_t>(parsed.metadata.header.baseAddress) +
         parsed.metadata.header.sizeImage;
     if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
@@ -357,9 +518,30 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         return 2;
     }
-    const RecompMemoryRegion region = {0u, memory.size(), memory.data()};
+    const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
+    if (!readRollbackConfig()) {
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with decimal "
+                  << "frame counts and a lag of at most " << RECOMP_ROLLBACK_WINDOW << " frames\n";
+        return 1;
+    }
+    if (recomp_synctest_enabled() || rollback.enabled) {
+        const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
+        if (clock == nullptr || std::strcmp(clock, "0") != 0)
+            recomp_xapi_frame_clock_set_enabled(true);
+        recomp_synctest_set_guest_ram(memory, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
+        recomp_kernel_file_set_synchronous_reads(true);
+        recomp_dsound_buffer_set_game_thread_pump(true);
+        recomp_synctest_install_default_modules();
+        if (rollback.enabled) {
+            // Rollback input lives in the session, outside the saved state.
+            recomp_d3d_frame_boundary_hook = onRollbackFrame;
+        } else {
+            recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
+            recomp_d3d_frame_boundary_hook = onFrameBoundary;
+        }
+    }
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;

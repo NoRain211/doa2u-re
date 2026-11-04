@@ -18,6 +18,60 @@ static uint32_t locations[2] = {NO_EFFECT, NO_EFFECT};
 static RecompAudioReverb pending_listener;
 static bool listener_dirty;
 static uint8_t *dirty;
+/* What the native reverb plays; restore puts the saved one back. */
+static RecompAudioReverb applied_listener;
+/* Bumped when the image and its host buffers are freed, which a saved state
+   still pointing at them cannot survive. */
+static uint32_t image_releases;
+
+typedef struct DsoundEffectsState {
+    RecompDsoundEffectsImage effects;
+    uint32_t payload, descriptor, scratch;
+    uint32_t locations[2];
+    RecompAudioReverb pending_listener;
+    RecompAudioReverb applied_listener;
+    uint32_t image_releases;
+    bool listener_dirty;
+    uint8_t *dirty;
+} DsoundEffectsState;
+
+size_t recomp_dsound_effects_state_size(void) { return sizeof(DsoundEffectsState); }
+void recomp_dsound_effects_state_save(void *state)
+{
+    DsoundEffectsState *out = state;
+    out->effects = effects;
+    out->payload = payload;
+    out->descriptor = descriptor;
+    out->scratch = scratch;
+    memcpy(out->locations, locations, sizeof out->locations);
+    out->pending_listener = pending_listener;
+    out->applied_listener = applied_listener;
+    out->image_releases = image_releases;
+    out->listener_dirty = listener_dirty;
+    out->dirty = dirty;
+}
+static int set_reverb(const RecompAudioReverb *parameters);
+void recomp_dsound_effects_state_restore(const void *state)
+{
+    const DsoundEffectsState *in = state;
+    effects = in->effects;
+    payload = in->payload;
+    descriptor = in->descriptor;
+    scratch = in->scratch;
+    memcpy(locations, in->locations, sizeof locations);
+    pending_listener = in->pending_listener;
+    listener_dirty = in->listener_dirty;
+    dirty = in->dirty;
+    if (memcmp(&applied_listener, &in->applied_listener, sizeof applied_listener) != 0)
+        (void)set_reverb(&in->applied_listener);
+}
+bool recomp_dsound_effects_state_restorable(const void *state)
+{
+    const DsoundEffectsState *in = state;
+    if (in->image_releases == image_releases) return true;
+    fprintf(stderr, "recomp dsound: effects image replaced since the save\n");
+    return false;
+}
 
 static uint8_t *span(uint32_t address, uint32_t bytes)
 {
@@ -38,6 +92,7 @@ static int set_reverb(const RecompAudioReverb *parameters)
     recomp_dsound_output_lock();
     const int applied = recomp_audio_output_set_reverb(parameters);
     recomp_dsound_output_unlock();
+    if (applied) applied_listener = *parameters;
     return applied;
 }
 
@@ -55,6 +110,7 @@ static void free_guest(uint32_t base, uint32_t bytes)
 
 void recomp_dsound_effects_reset(void)
 {
+    ++image_releases;
     free_guest(payload, effects.payload_bytes);
     free_guest(descriptor, 8u + effects.count * 32u);
     free_guest(scratch, effects.scratch_bytes);
