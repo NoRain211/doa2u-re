@@ -511,6 +511,12 @@ static void clear(void)
     recomp_runtime.registers.esp = entry + 28u;
 }
 
+static bool present_ready(void *unused)
+{
+    (void)unused;
+    return recomp_d3d_presenter_present_ready(presenter);
+}
+
 static void swap(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -521,6 +527,9 @@ static void swap(void)
     for (uint32_t i = 0; i < 2u; ++i) load(&device_state.color[i], color_header(i), sizeof device_state.color[i]);
     if (recomp_d3d_device_swap_buffers(&device_state) != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:swap-headers");
     recomp_d3d_wait_present();
+    /* A host wait for the GPU here would stall every guest thread, including
+       the vblank threads that refill CRI's audio rings (issue #69). */
+    (void)recomp_kernel_wait_host(present_ready, NULL);
     recomp_d3d8_submit(&result.command);
     back_buffer_displayed = true;
     back_buffer_saved = false;
