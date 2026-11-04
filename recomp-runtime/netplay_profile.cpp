@@ -144,6 +144,33 @@ static bool safeProfilePath(const std::string &name)
     }
 }
 
+/* A save folder holds only what the game writes there. Its loader trusts the
+   framing of ups.dat (save_blob_decrypt underflows below 0x18 bytes), so the
+   size is pinned; SaveMeta.xbx must name the save exactly once, as the game
+   takes the first Name= anywhere in the file. */
+static bool profileEntryOk(const std::string &name, bool folder, const std::uint8_t *data, std::size_t size)
+{
+    const auto depth = std::count(name.begin(), name.end(), '/');
+    if (name.rfind("UDATA/", 0u) != 0u || depth < 3) return true;
+    if (depth > 3 || folder) return false;
+    std::string file = name.substr(name.rfind('/') + 1u);
+    for (char &c : file) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (file == "UPS.DAT") return size == 0x12148u;
+    if (file == "SAVEIMAGE.XBX") return size <= 0x4000u;
+    if (file != "SAVEMETA.XBX" || size < 2u || size > 0x1000u || size % 2u != 0u || data[0] != 0xffu ||
+        data[1] != 0xfeu)
+        return false;
+    static const char key[] = "Name=";
+    unsigned keys = 0u;
+    for (std::size_t at = 2u; at + 10u <= size; at += 2u) {
+        bool match = true;
+        for (std::size_t i = 0u; i < 5u && match; ++i)
+            match = data[at + 2u * i] == static_cast<std::uint8_t>(key[i]) && data[at + 2u * i + 1u] == 0u;
+        keys += match ? 1u : 0u;
+    }
+    return keys == 1u;
+}
+
 bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root,
     bool joiner, std::vector<std::string> &names)
 {
@@ -178,10 +205,12 @@ bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, c
         }
         const fs::path path = root / fs::path(name);
         if (kind == 0u) {
+            if (!profileEntryOk(name, true, nullptr, 0u)) return false;
             fs::create_directories(path, error);
             continue;
         }
         if (!get(4u, bytes) || body.size() - at < bytes) return false;
+        if (!profileEntryOk(name, false, body.data() + at, bytes)) return false;
         fs::create_directories(path.parent_path(), error);
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
