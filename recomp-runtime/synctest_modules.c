@@ -8,6 +8,7 @@
 #include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "kernel_abi.h"
+#include "program_manual.h"
 #include "runtime.h"
 #include "save_transaction.h"
 #include "xapi_time_adapter.h"
@@ -227,4 +228,21 @@ void recomp_synctest_install_default_modules(void)
     table[count++] = (RecompSyncTestModule){"host_reads", sizeof(unsigned),
         host_reads_save, host_reads_restore, NULL, host_reads_restorable, true};
     recomp_synctest_set_modules(table, count);
+}
+
+void recomp_reset_runtime_modules(void)
+{
+    recomp_kernel_file_reset();
+    /* Before the memory reset: these free their guest pool allocations. */
+    recomp_dsound_api_reset();
+    recomp_d3d8_reset_keeping_window();
+    recomp_kernel_thread_reset();
+    recomp_fiber_adapter_reset();
+    recomp_kernel_memory_reset();
+    recomp_kernel_interrupt_reset();
+    recomp_kernel_video_reset();
+    xbox_HeapReset();
+    recomp_program_manual_reset();
+    recomp_input_adapter_reset();
+    recomp_xapi_frame_clock_reset();
 }

@@ -294,7 +294,7 @@ if(WIN32)
     target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
 endif()
 add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
-add_executable(recomp_netplay_lobby_test netplay.c rollback.c netplay_lobby_test.cpp)
+add_executable(recomp_netplay_lobby_test netplay.c netplay_names.c rollback.c netplay_lobby_test.cpp)
 if(WIN32)
     target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
 endif()
@@ -497,7 +497,7 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c netplay_upnp.c
+        synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)

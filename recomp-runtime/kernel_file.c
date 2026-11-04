@@ -81,6 +81,7 @@ typedef struct HostRead {
 } HostRead;
 
 static HostRead *reads_queued;
+static unsigned reads_running; /* taken off the queue, not yet done */
 static int read_worker_state; /* 0 not started, 1 running, -1 failed */
 #ifdef _WIN32
 static SRWLOCK read_lock = SRWLOCK_INIT;
@@ -128,6 +129,7 @@ static void *read_worker(void *unused)
         while (reads_queued == NULL) wait_reads(read_queued);
         HostRead *read = reads_queued;
         reads_queued = read->next;
+        ++reads_running;
         unlock_reads();
         DWORD bytes_read = 0u;
         BOOL ok = read_at(read->handle, read->offset, read->buffer, read->length, &bytes_read);
@@ -135,6 +137,7 @@ static void *read_worker(void *unused)
         read->bytes_read = bytes_read;
         read->ok = ok;
         read->done = 1;
+        --reads_running;
         wake_reads(read_finished);
     }
 }
@@ -296,6 +299,23 @@ static unsigned save_write_number;
    cannot be replayed. Attempts count, even rejected ones. */
 static uint32_t profile_mutation_count;
 void (*recomp_kernel_profile_mutation_hook)(void);
+
+void recomp_kernel_file_reset(void)
+{
+    /* A queued read writes guest RAM, and its request lives on a parked stack. */
+    lock_reads();
+    while (reads_queued != NULL || reads_running != 0u) wait_reads(read_finished);
+    unlock_reads();
+    for (size_t i = 0; i < MAX_FILE_HANDLES; ++i) {
+        HANDLE host = file_handles[i].host_handle;
+        if (file_handles[i].active && host != NULL && host != INVALID_HANDLE_VALUE) CloseHandle(host);
+    }
+    memset(file_handles, 0, sizeof file_handles);
+    next_guest_handle = 1u;
+    symbolic_links_initialized = 0;
+    save_write_number = 0u;
+    profile_mutation_count = 0u;
+}
 
 uint32_t recomp_kernel_profile_mutations(void)
 {

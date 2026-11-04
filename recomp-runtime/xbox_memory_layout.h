@@ -22,6 +22,8 @@ extern "C" {
 
 /* Call once before allocating, after validating the image range in 64-bit arithmetic. */
 bool xbox_HeapSetImageEnd(uint32_t image_end);
+/* Forgets the image end and every allocation, for a reboot. */
+void xbox_HeapReset(void);
 uint32_t xbox_HeapAlloc(uint32_t size, uint32_t alignment);
 void xbox_HeapFree(uint32_t guest_address);
 uint32_t xbox_HeapCheckpoint(void);

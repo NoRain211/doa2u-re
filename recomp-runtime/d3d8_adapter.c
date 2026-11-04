@@ -36,6 +36,7 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
+void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool gpu_work_suppressed;
 
@@ -271,6 +272,17 @@ void recomp_d3d8_shutdown(void)
     memset(visibility_valid, 0, sizeof visibility_valid);
 }
 
+void recomp_d3d8_reset_keeping_window(void)
+{
+    RecompD3dPresenter *kept = presenter;
+    presenter = NULL;
+    recomp_d3d8_shutdown();
+    presenter = kept;
+    swap_caller = 0u;
+    present_suppressed = gpu_work_suppressed = false;
+    recomp_d3d8_release_memory(0u, RECOMP_XBOX_RAM_SIZE);
+}
+
 static uint32_t color_header(uint32_t index)
 {
     return DEVICE + COLOR_HEADERS + index * sizeof(RecompD3dSurfaceHeader);
@@ -451,10 +463,12 @@ static void create_device(void)
     if (error != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:create-device-model:%u", (unsigned)error);
     for (uint32_t i = 0; i < 2u; ++i) validate_storage(&colors[i]);
     validate_storage(&depth);
-    const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
-    if (host_error != RECOMP_D3D_PRESENTER_OK) {
-        result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
-        goto returned;
+    if (presenter == NULL) { // a reboot keeps the window
+        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
+        if (host_error != RECOMP_D3D_PRESENTER_OK) {
+            result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
+            goto returned;
+        }
     }
     device_state = candidate;
     write_initial_device(&request.presentation);
@@ -658,6 +672,11 @@ static void swap(void)
     /* The wait also moves guest time, so a hidden frame keeps it; under the
        frame clock it never sleeps. */
     recomp_d3d_wait_present();
+    if (!present_suppressed && recomp_d3d_overlay_hook != NULL) {
+        RecompD3dPresenterTarget target;
+        resolve_target(color_header(0u), 0u, &target);
+        recomp_d3d_overlay_hook(&target);
+    }
     /* A host wait for the GPU here would stall every guest thread, including
        the vblank threads that refill CRI's audio rings (issue #69). Under the
        frame clock the guest wait is skipped: which threads run while the GPU
@@ -715,6 +734,24 @@ static void block_until_vertical_blank(void)
     recomp_d3d_note_block(*recomp_memory_u32(recomp_runtime.registers.esp));
     recomp_d3d_wait_vblank();
     recomp_runtime.registers.esp += 4u;
+}
+
+void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *target))
+{
+    recomp_d3d8_require_device();
+    RecompD3dPresenterTarget target;
+    resolve_target(color_header(0u), 0u, &target);
+    /* A rewound frame may have left GPU work off. */
+    const bool suppressed = gpu_work_suppressed;
+    gpu_work_suppressed = false;
+    draw(&target);
+    gpu_work_suppressed = suppressed;
+    RecompD3dPresenterCommand command = {.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    command.data.present.effective_flags = 5u;
+    command.data.present.swap_counter = frame_state.swap_counter;
+    recomp_d3d8_submit(&command);
+    back_buffer_displayed = true;
+    back_buffer_saved = false;
 }
 
 static void flush(bool wait)

@@ -42,6 +42,11 @@ typedef struct Allocation {
 
 static Allocation allocations[MAX_ALLOCATIONS];
 
+void recomp_kernel_memory_reset(void)
+{
+    memset(allocations, 0, sizeof allocations);
+}
+
 static uint32_t effective_size(uint32_t size)
 {
     return size == 0u ? 1u : size;

@@ -6,7 +6,8 @@ session from their first frame. Menus run in lockstep and live rounds roll
 back; two scripted runners have played offline Versus this way. A frame-locked clock
 and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
 compare whole frames, with guest RAM in page snapshots
-(`guest_snapshot.c`). The launcher has no lobby screen yet.
+(`guest_snapshot.c`). Players meet in a lobby room from the game's
+Versus menu.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -162,8 +163,30 @@ use the same delay and start swap. The local pad is the host's first
 controller, and only the local player's port in shown frames drives its
 rumble. Runs with `--input-script-only` play a generated stream for each
 player instead. While the session is outside its window, the newest frame
-waits and sends every 4 ms, for up to 120 s before first contact and 5 s
-after it.
+waits and sends every 4 ms, for up to 120 s before first contact and 15 s
+after it. After 1 s of waiting, the runner presents its last frame again
+every 100 ms with an opaque WAITING FOR OPPONENT panel and a countdown
+(CONNECTING before first contact), which also keeps the window answering.
+If pads arrive in time the session goes on where it stopped; the log names
+the frame where the other player went quiet and how long they were gone.
+A save waiting for the other player's pads shows the same panel.
+Freezing the joiner's process for 6 s in the menus held the host on the
+panel, and the session then played on into a live round with identical
+guest RAM at frame 4,400; killing the joiner ended the host's session 15 s
+later. A runner that quits, by closing its window or stopping on an error,
+sends the other a goodbye first. The other runner then shows OPPONENT LEFT
+for 2 s and ends the session (`rollback:peer-left`); closing the joiner's
+window ended the host's session 2.1 s later. Scripted runs that reach their
+last frame send none.
+
+NETPLAY SETTINGS chooses a network display for sessions, kept per player:
+off, ping, or full, which adds the input delay, the deepest rewind of the
+last second and how many frames this side runs ahead of the other. It is
+drawn in the bottom right corner of shown frames, after the game's own
+draws, so it never reaches guest state. The ping runs from a local pad's
+first send until the other player's packet says it holds that pad,
+averaged over about eight samples, so it includes up to a frame on each
+side.
 
 The presenter holds shown frames to 60 Hz, but the guest may run up to two
 frames ahead into its queue, and a sleep there only used up that slack. So
@@ -225,6 +248,90 @@ services before they reach a fight, and no System Link text appears in the
 XBE. Instead a lobby on the host connects two runners, which then play the
 game's offline modes together, the host on the first controller port and the
 joiner on the second. That avoids all of XOnline.
+
+Choosing Versus on the main menu opens the runner's own menu: LOCAL, HOST
+ONLINE, JOIN ONLINE and NETPLAY SETTINGS (`netplay_menu.cpp`). The runner
+draws it over the game as untextured quads with a built-in 5 x 7 font
+(`overlay.c`), sent just before each Present, and the game sees idle pads
+until it closes. The menu opens on an A press while frontend scene
+`g_frontend_scene_current` (`0xdf5dd8`) is 0, the main menu, with
+`g_frontend_selected_mode` (`0xdf57b4`) at 5, Versus, and
+`g_game_mode_state` at 4. LOCAL hands the game an A press once every
+button is up; B closes the menu and holds the game's pads idle until then,
+so the game never sees it. The input delay, the host's port and the last
+host joined are kept in `.recomp-storage/netplay.txt`.
+
+HOST ONLINE binds the port, asks the router for a forward on a background
+thread and shows the address to send. JOIN ONLINE takes an address from
+the d-pad or the clipboard. In the room each side says its build, profile
+name and readiness ten times a second; both plates show the names, ready
+states and the round-trip time. Names are checked as in the session lobby,
+and a different build shows on the other player's plate.
+
+Once the other player is in, Enter opens a chat line from the keyboard;
+Enter sends it and Esc drops it. While a line is open, the room ignores the
+pad buttons that letters also press. A line holds up to 40 printable ASCII
+characters. Each player can send one line a second, and a line that fails
+the name check is refused. The newest line rides in each room message for
+2 s under an id taken from the sender's clock, so a lost packet costs
+nothing and the other side shows it once. The receiver checks it again,
+drops anything else and takes at most one line a second, so a line held
+back shows from a later repeat. The last four lines replace the address
+lines. Two scripted runners typed into each other's rooms, and real
+keystrokes for X and Z went into the line without leaving the room or
+toggling ready. A session never shows chat, since its room is closed.
+
+When both are
+ready the host says start for 600 ms. Each runner closes the room, shows
+STARTING MATCH over its last frame, and runs the session lobby below as if
+started with `--netplay-host` or `--netplay-join`, with the intro skipped.
+It then reboots the game in the same process and window: on a fresh host
+fiber it puts the runtime modules back to power-on state
+(`recomp_reset_runtime_modules`, which frees the old guest stacks and
+keeps the D3D window and audio output), reloads the XBE image and enters
+it again. Its lobby
+flag tells the joiner to do the same walk to Versus character select
+(frontend scene 3): both sides replace the frame's pads with Start until
+`g_game_mode_state` is 4, Right until the main menu has Versus, then A,
+and A again for Single Battle, the first choice of the battle type menu
+(scene 2). Presses last one frame in every 16 and wait while a scene change
+is pending (`g_frontend_scene_target`, `0xdf5dda`). Both sides decide from
+the same guest state in the same frame, so they stay in step. Two scripted
+runners on one machine went from the Versus menu through the room to
+character select at session frame 334, with identical guest RAM at frame
+1,200. With the reboot, both players' guest RAM at frame 1,500 matched each
+other and a session started by restarting the runners byte for byte.
+The walk runs out of sight and earshot: each runner shows STARTING MATCH
+with LOADING VERSUS over its last frame, and turns off the game's presents
+and sound output until character select. The battle type menu's fade-out
+(frames 305 to 333) stays hidden, and the first frame shown is character
+select fading in. Game state is unchanged, so both sides still match.
+
+A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
+`rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
+fails to connect) goes back to its room. The runner says goodbye, drops the
+session's state, reboots the game offline the same way and reopens the
+room: the host listens on its port again and the joiner calls the host's
+address. Behind the room, the port 0 pad walks to the main menu with Versus
+chosen, so leaving the room lands where the Versus menu was opened. Both
+players press READY again for a rematch. Until the menu has Versus chosen,
+the room's backdrop is opaque and the game's sound is off, so the title and
+menus do not show through. A host kept as one process
+through a session, its joiner quitting, the return to the room and a
+second session with a new joiner matched that joiner's guest RAM at frame
+3,000, with one window throughout. Sessions started with `--netplay-host`
+or `--netplay-join` still stop with exit code 4.
+
+B, Back or Esc on STARTING MATCH cancels it, and the runner goes back to
+its room. The side that cancels says goodbye to the other once it knows it,
+which ends that side's wait too, and a host back in its room answers a
+joiner still calling the old match with a goodbye. With two scripted
+runners, the host cancelled while its joiner was suspended, and that joiner
+was sent back when it resumed. The joiner then cancelled while the host was
+suspended, and the host went back when it resumed. A rematch after both
+matched guest RAM at frame 3,000. A host that closed its window mid-session
+sent its joiner back to the room, and a new host process then played that
+joiner to frame 3,000 with matching guest RAM.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
@@ -330,14 +437,22 @@ None of the comparisons masked a byte.
 
 Limits of the lobby:
 
-- The launcher has no lobby screen. Without UPnP the host must forward its
-  UDP port by hand; there is no hole punching or relay.
+- Without UPnP the host must forward its UDP port by hand; there is no hole
+  punching or relay. A joiner types an IPv4 address; host names and room
+  codes are not supported.
+- The hidden walks still take their time: about 6 s on STARTING MATCH
+  before character select, and about 3 s behind the room after a session.
+- A joiner that cancels before the host has heard its hello, in practice
+  during the host's 600 ms of saying start, goes unheard; that host waits
+  on STARTING MATCH until it cancels too.
+- Chat typing and the clipboard work only on Windows; the SDL presenter
+  has no text input yet. A pad cannot type.
 - The game's own menus still choose which profile plays each side, and two
   copies of one save folder keep only the joiner's.
 - A runner that is killed leaves its port forward on the router until the
   next host run replaces it.
-- When one runner quits, the other stops 5 s later
-  (`rollback:peer-timeout`).
+- A runner that is killed or loses its network sends no goodbye; the other
+  then counts down for 15 s and stops (`rollback:peer-timeout`).
 - A save in a frame that ran with a wrong guess still ends the session; no
   save site seen so far comes within the 8-frame window of a live round.
 - The condition reads two fighters; Tag matches and rounds without a time

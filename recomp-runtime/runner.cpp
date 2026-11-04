@@ -7,8 +7,11 @@
 #include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
+#include "input_keyboard_win32.h"
 #include "input_pulse_source.h"
 #include "netplay.h"
+#include "netplay_menu.h"
+#include "overlay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -19,6 +22,7 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
+#include "native_fiber.h"
 #include "program_manual.h"
 #include "stop_report.h"
 RecompFunction recomp_program_lookup(std::uint32_t address);
@@ -80,12 +84,18 @@ struct RollbackRun {
     // inflated advantage never reaches the peer's frame sync.
     std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
+    std::chrono::steady_clock::time_point contact{}; // when a stall first saw the other player
     const char *dump = nullptr;
     RecompRollbackSession session;
     RecompNetplay net;
     RecompInputGamepad pads[2]{}; // the running frame's pads by guest port
 };
 static RollbackRun rollback;
+
+/* After a room session ends, the game boots offline and walks to the main
+   menu's Versus entry behind the reopened room (walkToVersus). */
+static bool backToVersus;
+static RecompInputGamepad backPad;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
@@ -97,7 +107,11 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         *gamepad = rollback.pads[port];
         return true;
     }
-    if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
+    if (port != 0u) {
+        const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
+        if (sampled) recomp_netplay_menu_filter(port, gamepad);
+        return sampled;
+    }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
     static bool startHeld;
     const bool start = sampled && (gamepad->buttons & RECOMP_INPUT_BUTTON_START) != 0u;
@@ -105,6 +119,11 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         std::fprintf(stderr, "recomp input: Start %s poll=%llu\n", start ? "down" : "up",
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
+    }
+    if (sampled) recomp_netplay_menu_filter(0u, gamepad);
+    if (backToVersus) {
+        *gamepad = backPad;
+        return true;
     }
     return sampled;
 }
@@ -249,10 +268,19 @@ static void showCard()
     recomp_dsound_output_unlock();
 }
 
+static void startRoomSession();
+static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &pad);
+
 static void onSwap(std::uint32_t frame)
 {
     if (unlockAll) unlockProfile(frame);
     if (storyFinale) applyStoryFinale();
+    if (backToVersus && walkToVersus(frame, false, backPad)) {
+        backToVersus = false;
+        recomp_dsound_buffer_set_output_suppressed(false);
+        std::fprintf(stderr, "recomp netplay: back at the Versus menu from frame %u\n", frame);
+    }
+    startRoomSession();
     if (!cardPending) return;
     cardPending = false;
     showCard();
@@ -336,6 +364,67 @@ static void receivePads()
 
 /* At the newest frame: gathers pads until the frame may run or a rewind is
    due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
+/* A stalled session shows a notice over its last frame after 1 s, which also
+   keeps the window answering, and ends after its grace: 15 s once the other
+   player has been heard, 120 s while their runner may still be booting. A
+   goodbye from the other runner ends it at once; a killed runner sends none. */
+static bool interrupted;
+static std::chrono::steady_clock::time_point noticeShown;
+static const char *noticeTitle, *noticeHint;
+static std::string noticeDetail;
+static void endSession(const char *reason);
+
+static void drawNotice(const RecompD3dPresenterTarget *target)
+{
+    // opaque, so each redraw looks the same
+    recomp_overlay_rect(120.0f, 194.0f, 400.0f, noticeHint != nullptr ? 118.0f : 92.0f, 0xff181820u);
+    recomp_overlay_rect(120.0f, 194.0f, 400.0f, 4.0f, 0xffd8283cu);
+    recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeTitle, 3.0f) / 2.0f, 214.0f, 3.0f, 0xffffffffu,
+        noticeTitle);
+    recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeDetail.c_str(), 2.0f) / 2.0f, 252.0f, 2.0f,
+        0xffa8a8b0u, noticeDetail.c_str());
+    if (noticeHint != nullptr)
+        recomp_overlay_text(320.0f - recomp_overlay_text_width(noticeHint, 2.0f) / 2.0f, 282.0f, 2.0f, 0xff707078u,
+            noticeHint);
+    recomp_overlay_submit(target, recomp_overlay_display_aspect());
+}
+
+static void stalled(std::chrono::steady_clock::time_point began)
+{
+    using namespace std::chrono;
+    if (rollback.net.peer_left) {
+        std::fprintf(stderr, "recomp netplay: the other player left at frame %u\n", rollback.session.frame);
+        noticeTitle = "OPPONENT LEFT";
+        noticeDetail = "ENDING THE SESSION";
+        recomp_d3d8_present_overlay(drawNotice);
+        std::this_thread::sleep_for(seconds(2));
+        endSession("rollback:peer-left");
+    }
+    const auto now = steady_clock::now();
+    const bool heard = rollback.net.peer_seen;
+    if (heard && rollback.contact == steady_clock::time_point{}) rollback.contact = now;
+    const seconds grace(heard ? 15 : 120);
+    // Contact heard during this wait starts its 15 s afresh.
+    const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
+    if (waited > grace) endSession("rollback:peer-timeout");
+    if (waited < seconds(1) || now - noticeShown < milliseconds(100)) return;
+    if (!interrupted && heard)
+        std::fprintf(stderr, "recomp netplay: the other player went quiet at frame %u\n", rollback.session.frame);
+    interrupted = true;
+    noticeShown = now;
+    noticeTitle = heard ? "WAITING FOR OPPONENT" : "CONNECTING";
+    noticeDetail = "ENDING THE SESSION IN " + std::to_string(duration_cast<seconds>(grace - waited).count() + 1) + " S";
+    recomp_d3d8_present_overlay(drawNotice);
+}
+
+static void resumed(std::chrono::steady_clock::time_point began)
+{
+    if (!interrupted) return;
+    interrupted = false;
+    std::fprintf(stderr, "recomp netplay: the other player is back after %.1f s\n",
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
+}
+
 static std::uint32_t awaitFrontier(bool last)
 {
     using Clock = std::chrono::steady_clock;
@@ -349,7 +438,10 @@ static std::uint32_t awaitFrontier(bool last)
         // Rewinds wait for it too, so one replay covers every pad that arrived.
         const bool started = Clock::now() >= rollback.next_frame;
         const std::uint32_t target = started ? recomp_rollback_take_rewind(&s) : RECOMP_ROLLBACK_NONE;
-        if (target != RECOMP_ROLLBACK_NONE) return target;
+        if (target != RECOMP_ROLLBACK_NONE) {
+            resumed(began);
+            return target;
+        }
         if (started) {
             while (s.local_count <= s.frame + rollback.delay) {
                 const RecompInputGamepad pad = localPad(s.local_count);
@@ -359,16 +451,17 @@ static std::uint32_t awaitFrontier(bool last)
         const bool ready = last
             ? s.remote_count >= rollback.stop && (!udp || rollback.net.peer_ack >= rollback.stop)
             : started && recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
-        if (ready) return RECOMP_ROLLBACK_NONE;
+        if (ready) {
+            resumed(began);
+            return RECOMP_ROLLBACK_NONE;
+        }
         if (!udp) recomp_stop(4, "rollback:stalled");
         const Clock::time_point now = Clock::now();
         if (now - sent >= std::chrono::milliseconds(4)) {
             recomp_netplay_send(&rollback.net, &s, rollback.advantage);
             sent = now;
         }
-        // The first contact waits out the other runner's boot.
-        if (now - began > std::chrono::seconds(rollback.net.peer_seen ? 5 : 120))
-            recomp_stop(4, "rollback:peer-timeout");
+        stalled(began);
         // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
         Clock::time_point until = now + std::chrono::milliseconds(2);
         if (rollback.next_frame > now && rollback.next_frame < until) until = rollback.next_frame;
@@ -432,6 +525,40 @@ static bool roundLive()
     return true;
 }
 
+/* Sets the frame's press toward Versus: Start until the front end runs
+   (g_game_mode_state 4), Right until the main menu (scene 0) has Versus
+   (mode 5) chosen, then with select A, and A for Single Battle, the first
+   choice on the battle type menu (scene 2), to character select (frontend
+   scene 3). It presses for one frame in every 16 and never while a scene
+   change is pending (g_frontend_scene_target 0xdf5dda past 0). True on
+   arrival, leaving pad alone. */
+static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &pad)
+{
+    const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
+                       target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
+    if (state == 4u && (select ? scene == 3u : scene == 0u && mode == 5u)) return true;
+    pad = RecompInputGamepad{};
+    if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;
+    if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
+    else if (scene == 0u && mode != 5u) pad.buttons = 8u; // d-pad right
+    else pad.analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
+    return false;
+}
+
+/* A session started from the Versus menu's room walks to character select.
+   Both sides set the frame's pads the same way from the same guest state. */
+static bool landOnVersus;
+static void driveToVersus(std::uint32_t frame)
+{
+    if (!landOnVersus) return;
+    if (walkToVersus(frame, true, rollback.pads[0])) {
+        landOnVersus = false;
+        std::fprintf(stderr, "recomp netplay: Versus character select from frame %u\n", frame);
+        return;
+    }
+    rollback.pads[1] = RecompInputGamepad{};
+}
+
 static void setWindow(std::uint32_t window)
 {
     RecompRollbackSession &s = rollback.session;
@@ -456,11 +583,42 @@ static void confirmSaveFrame()
     while (s.remote_count <= running) {
         recomp_netplay_receive(&rollback.net, &s);
         recomp_netplay_send(&rollback.net, &s, rollback.advantage);
-        if (std::chrono::steady_clock::now() - began > std::chrono::seconds(5))
-            recomp_stop(4, "rollback:peer-timeout");
+        stalled(began);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
+    resumed(began);
+    if (s.rewind_to <= running) endSession("rollback:save-mispredicted");
+}
+
+static void sayGoodbye()
+{
+    // Both sides of a scripted run stop at the same frame and need no goodbye.
+    if (rollback.mode == RollbackMode::Udp && rollback.session.frame < rollback.stop)
+        recomp_netplay_send_goodbye(&rollback.net);
+}
+
+/* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
+   the deepest rewind of the last second and how many frames this side runs
+   ahead of the other. */
+static int networkDisplay;
+static std::uint32_t rewindDepth;
+static std::chrono::steady_clock::time_point rewoundAt;
+
+static void drawNetworkStats(const RecompD3dPresenterTarget *target)
+{
+    const RecompNetplay &net = rollback.net;
+    std::string text = "PING " + (net.rtt_known ? std::to_string(net.rtt_ms) + " MS" : std::string("--"));
+    if (networkDisplay == 2) {
+        const bool recent = std::chrono::steady_clock::now() - rewoundAt < std::chrono::seconds(1);
+        text += "  DELAY " + std::to_string(rollback.delay) + "  ROLLBACK " +
+            std::to_string(recent ? rewindDepth : 0u) + "F  AHEAD " + std::to_string(rollback.advantage) + 'F';
+    }
+    const std::uint32_t color = !net.rtt_known || net.rtt_ms < 80u ? 0xff60e080u
+        : net.rtt_ms < 150u ? 0xffffd040u : 0xffff5050u;
+    const float width = recomp_overlay_text_width(text.c_str(), 2.0f);
+    recomp_overlay_rect(628.0f - width - 12.0f, 446.0f, width + 12.0f, 24.0f, 0xa0000000u);
+    recomp_overlay_text(628.0f - width - 6.0f, 451.0f, 2.0f, color, text.c_str());
+    recomp_overlay_submit(target, recomp_overlay_display_aspect());
 }
 
 static void onRollbackFrame(std::uint32_t swap)
@@ -488,9 +646,13 @@ static void onRollbackFrame(std::uint32_t swap)
             // The newest save is the frame before the frontier.
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
             if (!recomp_rollback_ring_load(rollback.frontier - 1u - target))
-                recomp_stop(4, "rollback:unrestorable");
+                endSession("rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
+            const auto now = std::chrono::steady_clock::now();
+            const std::uint32_t depth = rollback.frontier - target;
+            rewindDepth = now - rewoundAt < std::chrono::seconds(1) ? std::max(rewindDepth, depth) : depth;
+            rewoundAt = now;
         } else if (s.frame == rollback.stop) {
             finishRollback();
             return;
@@ -508,12 +670,13 @@ static void onRollbackFrame(std::uint32_t swap)
         saved = recomp_rollback_ring_save();
     }
     if (!saved) recomp_stop(4, "rollback:save");
-    // Frames run again were already shown and heard with the predicted pads.
+    // Frames run again were already shown and heard with the predicted pads; the walk to Versus stays unseen.
     rollback.hidden = s.frame < rollback.frontier;
-    recomp_d3d8_set_present_suppressed(rollback.hidden);
+    recomp_d3d8_set_present_suppressed(rollback.hidden || landOnVersus);
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
-    recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
+    recomp_dsound_buffer_set_output_suppressed(rollback.hidden || landOnVersus);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
+    driveToVersus(s.frame);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
 }
 
@@ -560,7 +723,8 @@ static bool readRollbackConfig()
 // --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
 static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
 static std::string netplayJoin;
-enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u };
+static bool roomSession, ownUnlockAll;
+enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
 
 // SHA-256 of this runner's executable, so both sides of a lobby run one build.
 static std::string runnerDigest()
@@ -631,6 +795,16 @@ static std::string latestProfile(const std::filesystem::path &root)
         }
     }
     return latest;
+}
+
+// The name on the profile this player saved last, or empty without one.
+static std::string ownProfileName(const std::filesystem::path &partition1)
+{
+    const std::string own = latestProfile(partition1);
+    if (own.empty()) return {};
+    std::ifstream meta(partition1 / own / "SaveMeta.xbx", std::ios::binary);
+    const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
+    return saveName(bytes.data(), bytes.size());
 }
 
 /* Part of partition 1 as one blob: profile's tree and, with title, the title
@@ -705,6 +879,33 @@ static bool safeProfilePath(const std::string &name)
     }
 }
 
+/* A save folder holds only what the game writes there. Its loader trusts the
+   framing of ups.dat (save_blob_decrypt underflows below 0x18 bytes), so the
+   size is pinned; SaveMeta.xbx must name the save exactly once, as the game
+   takes the first Name= anywhere in the file. */
+static bool profileEntryOk(const std::string &name, bool folder, const std::uint8_t *data, std::size_t size)
+{
+    const auto depth = std::count(name.begin(), name.end(), '/');
+    if (name.rfind("UDATA/", 0u) != 0u || depth < 3) return true;
+    if (depth > 3 || folder) return false;
+    std::string file = name.substr(name.rfind('/') + 1u);
+    for (char &c : file) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (file == "UPS.DAT") return size == 0x12148u;
+    if (file == "SAVEIMAGE.XBX") return size <= 0x4000u;
+    if (file != "SAVEMETA.XBX" || size < 2u || size > 0x1000u || size % 2u != 0u || data[0] != 0xffu ||
+        data[1] != 0xfeu)
+        return false;
+    static const char key[] = "Name=";
+    unsigned keys = 0u;
+    for (std::size_t at = 2u; at + 10u <= size; at += 2u) {
+        bool match = true;
+        for (std::size_t i = 0u; i < 5u && match; ++i)
+            match = data[at + 2u * i] == static_cast<std::uint8_t>(key[i]) && data[at + 2u * i + 1u] == 0u;
+        keys += match ? 1u : 0u;
+    }
+    return keys == 1u;
+}
+
 /* Writes a packProfile blob below root, adding its save names; false for a
    damaged or unsafe one. A joiner's blob holds one UDATA/<title>/<save>
    folder and no title saves, since the host's are used. */
@@ -735,17 +936,21 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
         at += length;
         if (!safeProfilePath(name)) return false;
         if (joiner) {
-            if (name.rfind("UDATA/", 0u) != 0u || std::count(name.begin(), name.end(), '/') < 2) return false;
+            // Files only inside the one save folder, so none can replace the host's title files.
+            const auto depth = std::count(name.begin(), name.end(), '/');
+            if (name.rfind("UDATA/", 0u) != 0u || depth < 2 || (kind == 1u && depth < 3)) return false;
             const std::string top = name.substr(0u, name.find('/', name.find('/', 6u) + 1u));
             if (folder.empty()) folder = top;
             if (top != folder) return false;
         }
         const fs::path path = root / fs::path(name);
         if (kind == 0u) {
+            if (!profileEntryOk(name, true, nullptr, 0u)) return false;
             fs::create_directories(path, error);
             continue;
         }
         if (!get(4u, bytes) || body.size() - at < bytes) return false;
+        if (!profileEntryOk(name, false, body.data() + at, bytes)) return false;
         fs::create_directories(path.parent_path(), error);
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
@@ -762,7 +967,7 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
    options win. Each player sends the profile they saved last, and both
    sides play from fresh copies of the two, with the host's title saves, so
    they start alike and neither player's own profile changes. */
-static bool joinLobby(const std::filesystem::path &discPath)
+static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)() = nullptr)
 {
     if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
         std::cerr << "recomp runner: RECOMP_ROLLBACK cannot be combined with --netplay-host or --netplay-join\n";
@@ -776,18 +981,15 @@ static bool joinLobby(const std::filesystem::path &discPath)
     }
     std::memcpy(lobby.digest, digest.data(), sizeof lobby.digest);
     lobby.delay = static_cast<std::uint8_t>(netplayDelay);
-    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
+    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) |
+        (recomp_skip_intro ? LobbySkipIntro : 0u) | (landOnVersus ? LobbyVersus : 0u));
     const bool hosting = netplayHostPort != 0u;
     const std::filesystem::path storage = discPath / ".recomp-storage";
     // Recovery first, so an interrupted save is never sent.
     const std::string own = recomp_save_initialize(recomp_disc_root_path) ? latestProfile(storage / "partition1") : "";
-    if (!own.empty()) {
-        std::ifstream meta(storage / "partition1" / own / "SaveMeta.xbx", std::ios::binary);
-        const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
-        if (recomp_netplay_name_banned(saveName(bytes.data(), bytes.size()).c_str())) {
-            std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
-            return false;
-        }
+    if (recomp_netplay_name_banned(ownProfileName(storage / "partition1").c_str())) {
+        std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
+        return false;
     }
     std::vector<std::uint8_t> mine, theirs(RECOMP_NETPLAY_MAX_PROFILE);
     if (!recomp_save_ready() || !packProfile(storage / "partition1", own, hosting, mine) ||
@@ -799,9 +1001,10 @@ static bool joinLobby(const std::filesystem::path &discPath)
     RecompNetplayLobbyResult result;
     if (hosting) {
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
-        if (recomp_netplay_open_router_port(port)) std::atexit(recomp_netplay_close_router_port);
+        // A room's host already asked for the forward on the menu's thread; it stays for the session.
+        if (!roomSession && recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
-        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
+        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
         const char *end = netplayJoin.data() + netplayJoin.size();
@@ -813,17 +1016,19 @@ static bool joinLobby(const std::filesystem::path &discPath)
         }
         std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
         result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
-            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u);
+            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u, cancelled);
     }
     if (result != RECOMP_NETPLAY_LOBBY_OK) {
-        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
-            ? "refused: the other player runs a different build"
+        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_CANCELLED
+            ? (rollback.net.peer_left ? "cancelled by the other player" : "cancelled")
+            : result == RECOMP_NETPLAY_LOBBY_MISMATCH ? "refused: the other player runs a different build"
             : result == RECOMP_NETPLAY_LOBBY_TIMEOUT ? "timed out" : "could not open its UDP port") << '\n';
         return false;
     }
     if (lobby.delay > RECOMP_ROLLBACK_WINDOW) return false;
     unlockAll = (lobby.flags & LobbyUnlockAll) != 0u;
     recomp_skip_intro = (lobby.flags & LobbySkipIntro) != 0u;
+    landOnVersus = (lobby.flags & LobbyVersus) != 0u;
     rollback.mode = RollbackMode::Udp;
     rollback.lobby = true;
     rollback.player = hosting ? 0u : 1u;
@@ -862,6 +1067,117 @@ static bool joinLobby(const std::filesystem::path &discPath)
     std::fprintf(stderr, "recomp netplay: connected as player %u (%s) against %s with %u frames of input delay\n",
         rollback.player + 1u, shown(ownNames).c_str(), shown(peerNames).c_str(), rollback.delay);
     return true;
+}
+
+static const doaxbv::XbeParseResult *xbe;
+static std::filesystem::path discFolder;
+
+static bool loadImage()
+{
+    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
+    std::string error;
+    if (!recomp_load_xbe(*xbe, image, error)) {
+        std::cerr << "recomp runner: " << error << '\n';
+        return false;
+    }
+    std::memcpy(guestRam, image.data(), image.size());
+    const auto imageEnd = static_cast<std::uint64_t>(xbe->metadata.header.baseAddress) + xbe->metadata.header.sizeImage;
+    if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
+        std::cerr << "recomp runner: invalid heap image boundary\n";
+        return false;
+    }
+    return true;
+}
+
+static void bootGuest();
+
+static VOID WINAPI rebootGuest(void *)
+{
+    recomp_reset_runtime_modules();
+    if (!loadImage()) recomp_stop(2, "runner:reboot-image");
+    bootGuest();
+}
+
+static void reboot()
+{
+    recomp_input_host_stop_vibration();
+    // The guest's stacks are never resumed; the new fiber frees them.
+    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
+    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
+    recomp_native_fiber_switch(fiber);
+}
+
+// B, Back or Esc, pressed while STARTING MATCH shows; one already held must be let go first.
+static bool cancelHeld;
+static bool cancelPressed()
+{
+    std::uint8_t keys[RECOMP_INPUT_KEY_COUNT];
+    recomp_input_keyboard_sample(keys); // before the pad, which would take the press edges
+    RecompInputGamepad pad{};
+    (void)recomp_input_host_sample(0u, &pad);
+    const bool down = keys[0x1bu] != 0u || pad.analog_buttons[RECOMP_INPUT_ANALOG_B] > 0x40u ||
+        (pad.buttons & 0x20u) != 0u; // Esc, B, Back
+    const bool pressed = down && !cancelHeld;
+    cancelHeld = down;
+    return pressed;
+}
+
+/* A room's launch: connect while the menu's last frame stays up, then boot
+   the game again in this process, so the window stays open. */
+static void startRoomSession()
+{
+    std::uint32_t port = 0u, delay = 0u;
+    std::string join;
+    if (!recomp_netplay_menu_take_launch(port, delay, join)) return;
+    netplayHostPort = port;
+    netplayDelay = delay;
+    netplayJoin = join;
+    roomSession = true;
+    ownUnlockAll = unlockAll;
+    // The room's players skip the intro and land on Versus character select. The
+    // skip stays on, since every later boot is a session or the walk back to the room.
+    recomp_skip_intro = true;
+    landOnVersus = true;
+    noticeTitle = "STARTING MATCH";
+    noticeDetail = port != 0u ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST";
+    noticeHint = "B / ESC CANCEL";
+    recomp_d3d8_present_overlay(drawNotice);
+    cancelHeld = true;
+    const bool joined = joinLobby(discFolder, cancelPressed);
+    noticeHint = nullptr;
+    if (!joined) endSession("netplay:session-failed");
+    noticeDetail = "LOADING VERSUS";
+    noticeHint = ""; // keeps the panel's height, so it covers the cancel line
+    recomp_d3d8_present_overlay(drawNotice);
+    noticeHint = nullptr;
+    reboot();
+}
+
+/* A room session that ends boots the game offline again and reopens its
+   room. Sessions started from the command line stop with exit code 4. */
+static void endSession(const char *reason)
+{
+    if (!roomSession) recomp_stop(4, "%s", reason);
+    std::fprintf(stderr, "recomp netplay: session ended (%s); back to the room\n", reason);
+    sayGoodbye();
+    recomp_netplay_close(&rollback.net);
+    rollback = RollbackRun{};
+    roomSession = false;
+    netplayHostPort = 0u;
+    netplayJoin.clear();
+    recomp_save_session = nullptr;
+    unlockAll = ownUnlockAll;
+    landOnVersus = false;
+    backToVersus = true;
+    interrupted = false;
+    recomp_d3d_frame_boundary_hook = nullptr;
+    recomp_kernel_profile_mutation_hook = nullptr;
+    recomp_xapi_frame_clock_set_enabled(false);
+    recomp_kernel_file_set_synchronous_reads(false);
+    recomp_dsound_buffer_set_game_thread_pump(false);
+    recomp_dsound_buffer_set_output_suppressed(false);
+    recomp_netplay_menu_return_to_room();
+    reboot();
 }
 
 int main(int argc, char **argv)
@@ -1018,26 +1334,14 @@ int main(int argc, char **argv)
         std::cerr << "recomp runner: XBE SHA-256 differs from the authenticated program target\n";
         return 1;
     }
-    std::vector<std::uint8_t> image(RECOMP_XBOX_RAM_SIZE, 0u);
-    std::string error;
-    if (!recomp_load_xbe(parsed, image, error)) {
-        std::cerr << "recomp runner: " << error << '\n';
-        return 1;
-    }
+    xbe = &parsed;
     std::uint8_t *memory = recomp_guest_ram_allocate(RECOMP_XBOX_RAM_SIZE, &guestRamWriteWatch);
     guestRam = memory;
     if (memory == nullptr) {
         std::cerr << "recomp runner: guest RAM allocation failed\n";
         return 1;
     }
-    std::memcpy(memory, image.data(), image.size());
-    std::vector<std::uint8_t>().swap(image);
-    const auto imageEnd = static_cast<std::uint64_t>(parsed.metadata.header.baseAddress) +
-        parsed.metadata.header.sizeImage;
-    if (!xbox_HeapSetImageEnd(static_cast<std::uint32_t>(imageEnd))) {
-        std::cerr << "recomp runner: invalid heap image boundary\n";
-        return 1;
-    }
+    if (!loadImage()) return 1;
     if (discRoot.empty()) discRoot = std::filesystem::absolute(std::filesystem::u8path(xbePath)).parent_path().string();
     const auto discPath = std::filesystem::u8path(discRoot);
     std::error_code filesystemError;
@@ -1046,26 +1350,37 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
+    discFolder = discPath;
     if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
+    bootGuest();
+}
+
+static void bootGuest()
+{
+    static bool booted;
+    const bool first = !booted;
+    booted = true;
+    const std::filesystem::path storage = discFolder / ".recomp-storage";
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
-        return 2;
+        std::exit(2);
     }
-    const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
+    static RecompMemoryRegion region;
+    region = {0u, RECOMP_XBOX_RAM_SIZE, guestRam};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!rollback.lobby && !readRollbackConfig()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
                   << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";
-        return 1;
+        std::exit(1);
     }
     const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)
             recomp_xapi_frame_clock_set_enabled(true);
-        recomp_synctest_set_guest_ram(memory, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
+        recomp_synctest_set_guest_ram(guestRam, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
         recomp_kernel_file_set_synchronous_reads(true);
         recomp_dsound_buffer_set_game_thread_pump(true);
         recomp_synctest_install_default_modules();
@@ -1081,21 +1396,34 @@ int main(int argc, char **argv)
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
-    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
+    // The walks to Versus run unseen behind the last notice, and unheard (walkToVersus).
+    recomp_d3d8_set_present_suppressed(landOnVersus);
+    recomp_dsound_buffer_set_output_suppressed(landOnVersus || backToVersus);
+    if (rollback.lobby) {
+        networkDisplay = recomp_netplay_menu_display(storage);
+        recomp_d3d_overlay_hook = networkDisplay != 0 ? drawNetworkStats : nullptr;
+    } else if (!rollbackEnabled && !recomp_synctest_enabled()) {
+        recomp_netplay_menu_install(storage, runnerDigest(), [storage] { return ownProfileName(storage / "partition1"); });
+    }
+    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(setVibration);
-    std::atexit(recomp_input_host_stop_vibration);
-    std::atexit(recomp_d3d8_shutdown);
-    std::atexit(recomp_dsound_api_shutdown);
+    if (first) {
+        std::atexit(sayGoodbye);
+        std::atexit(recomp_input_host_stop_vibration);
+        std::atexit(recomp_d3d8_shutdown);
+        std::atexit(recomp_dsound_api_shutdown);
+        recomp_watchdog_start();
+    }
     recomp_runtime.registers.esp = XBOX_STARTUP_STACK_TOP;
     std::fprintf(stderr, "recomp runner: entry=0x%08x image_end=0x%08x native-d3d8-dsound\n",
-        parsed.metadata.selectedEntryPoint, static_cast<unsigned>(imageEnd));
-    recomp_watchdog_start();
+        xbe->metadata.selectedEntryPoint,
+        static_cast<unsigned>(xbe->metadata.header.baseAddress + xbe->metadata.header.sizeImage));
     recomp_runtime.registers.esp -= 4u;
     *recomp_memory_u32(recomp_runtime.registers.esp) = 0u;
-    recomp_dispatch_indirect_site(parsed.metadata.selectedEntryPoint,
+    recomp_dispatch_indirect_site(xbe->metadata.selectedEntryPoint,
         XBOX_STARTUP_STACK_TOP, __FILE__, __LINE__);
     recomp_kernel_run_threads();
     recomp_stop(0, "program-returned");

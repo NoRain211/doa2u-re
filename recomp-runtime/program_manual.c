@@ -77,6 +77,11 @@ static void skip_startup_logo(void)
 static bool boot_opening_pending = true;
 bool recomp_skip_intro;
 
+void recomp_program_manual_reset(void)
+{
+    boot_opening_pending = true;
+}
+
 static void movie_scene_tick(void)
 {
     /* 0x69180 ticks movie scenes 1 and 5: once 0xfa170 reports the movie

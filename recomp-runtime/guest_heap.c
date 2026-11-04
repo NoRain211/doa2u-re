@@ -9,6 +9,12 @@ static uint32_t heap_base;
 static uint32_t heap_cursor;
 static uint32_t contiguous_cursor = XBOX_GUEST_ALLOC_LIMIT;
 
+void xbox_HeapReset(void)
+{
+    heap_base = heap_cursor = 0u;
+    contiguous_cursor = XBOX_GUEST_ALLOC_LIMIT;
+}
+
 bool xbox_HeapSetImageEnd(uint32_t image_end)
 {
     uint64_t aligned = ((uint64_t)image_end + XBOX_PAGE_SIZE - 1u) &

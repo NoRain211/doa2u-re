@@ -24,6 +24,10 @@ enum {
     RECOMP_NETPLAY_DIGEST_BYTES = 64u,
     /* The largest profile a host sends; it arrives in 1 KiB chunks. */
     RECOMP_NETPLAY_MAX_PROFILE = 1024u * 1024u,
+    /* The longest profile name a room passes on, in UTF-8 bytes. */
+    RECOMP_NETPLAY_NAME_BYTES = 32u,
+    /* The longest room chat line, in printable ASCII. */
+    RECOMP_NETPLAY_CHAT_BYTES = 40u,
 };
 
 /* What the lobby agrees on before either runner boots. */
@@ -46,6 +50,7 @@ typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_TIMEOUT,
     RECOMP_NETPLAY_LOBBY_MISMATCH, /* the other runner is a different build */
     RECOMP_NETPLAY_LOBBY_SOCKET,
+    RECOMP_NETPLAY_LOBBY_CANCELLED, /* by this side, or by the other when peer_left is set */
 } RecompNetplayLobbyResult;
 
 typedef struct RecompNetplay {
@@ -63,31 +68,82 @@ typedef struct RecompNetplay {
     uint32_t local_count;
     uint32_t peer_count;
     uint32_t cooldown;
+    /* Round trip: from a local pad's first send until the peer says it holds it. */
+    uint64_t pad_sent_ms[RECOMP_NETPLAY_MAX_PADS];
+    uint32_t pads_stamped;
+    uint32_t rtt_ms; /* smoothed over the last few samples */
+    bool rtt_known;
+    bool peer_left; /* the other runner said goodbye */
 } RecompNetplay;
 
 /* Binds local_port on all interfaces; packets from any other address are
    dropped. shortcut: IPv4 only; add AF_INET6 when the lobby needs it. */
 bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     const char *peer_host, uint16_t peer_port);
+/* Binds port on all interfaces with no peer yet, for a room's host. */
+bool recomp_netplay_listen(RecompNetplay *net, uint16_t port);
+
+/* The room two players wait in, from the Versus menu, before the runners
+   restart into a session. Each side says its build, name and readiness ten
+   times a second; the host also says when to start. */
+typedef struct RecompNetplayRoom {
+    bool hosting;  /* set before the first tick; a host takes the first player who talks */
+    bool joined;   /* the other player spoke in the last 3 s */
+    bool mismatch; /* the other player runs another build */
+    bool ready;
+    bool start;    /* from the host: restart into the session now */
+    bool pinged;
+    uint32_t ping_ms;
+    char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    /* The other player's newest chat line, already checked; heard_new is set
+       when one arrives, for the caller to clear. */
+    char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+    bool heard_new;
+    /* Kept between ticks. */
+    uint64_t heard_ms, sent_ms, echo_at_ms, heard_line_ms;
+    uint32_t echo;
+    char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+    uint32_t say_id, heard_id;
+    uint64_t said_ms;
+} RecompNetplayRoom;
+
+/* Reads what the other player said and, every 100 ms or every call while
+   start is set, says this side's state. digest holds
+   RECOMP_NETPLAY_DIGEST_BYTES bytes; name is UTF-8 and cut to
+   RECOMP_NETPLAY_NAME_BYTES. A host not starting answers a joiner still
+   calling its last match with a goodbye. */
+void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
+    const char *name, bool ready, bool start);
+/* Sends a chat line, cut to RECOMP_NETPLAY_CHAT_BYTES, with the next ticks:
+   each tick for 2 s repeats it, and the other side shows it once. The other
+   side takes at most one line a second and drops a line that is not
+   printable ASCII or that recomp_netplay_name_banned refuses. */
+void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner with the same digest becomes the
    peer; one with another digest learns it from the answer and is ignored.
-   Returns once both sides hold both profiles. */
+   Returns once both sides hold both profiles. cancelled, when not null, is
+   polled every 20 ms; either side cancelling sends the other a goodbye,
+   which ends its wait too. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
+    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void));
 /* Says hello to the host until it answers, copies the host's delay and flags
    into lobby, then swaps profiles as the host does. Binds an ephemeral local
    port. */
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
+    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void));
 void recomp_netplay_close(RecompNetplay *net);
 /* The local IPv4 address of the interface that reaches the internet, as
    text; it also starts Winsock on Windows. */
 bool recomp_netplay_route_address(char *text, size_t size);
 /* Asks the router over UPnP to forward UDP port to this computer, and
-   prints the outcome and the address the other player joins. False when no
-   router answered or it refused; the port may still be reachable. */
-bool recomp_netplay_open_router_port(uint16_t port);
+   prints the outcome and the address the other player joins, which also
+   goes to address as host:port (empty when the router's own address is
+   private). False when no router answered or it refused; the port may
+   still be reachable. Takes seconds. */
+bool recomp_netplay_open_router_port(uint16_t port, char *address, size_t size);
 /* Removes that forward; nothing when none was made. */
 void recomp_netplay_close_router_port(void);
 /* True for a profile name that is not allowed online, or one too long to
@@ -95,6 +151,8 @@ void recomp_netplay_close_router_port(void);
 bool recomp_netplay_name_banned(const char *name);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);
+/* Tells the peer this runner is quitting, a few times since UDP may drop one. */
+void recomp_netplay_send_goodbye(const RecompNetplay *net);
 /* Drains the socket into the session. */
 void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *session);
 /* Frames to wait now so neither side runs ahead: half the difference of the
@@ -104,7 +162,7 @@ uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage);
 
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage, uint8_t *packet);
-/* False for a malformed packet, which changes nothing. */
+/* False for a malformed packet, which changes nothing. A goodbye sets peer_left. */
 bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *session,
     const uint8_t *packet, size_t size);
 

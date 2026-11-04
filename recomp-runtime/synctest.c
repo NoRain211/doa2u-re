@@ -329,6 +329,7 @@ static RecompGuestSnapshots ring_ram;
 bool recomp_rollback_ring_init(size_t frames)
 {
     if (frames == 0u || frames == SIZE_MAX) return false;
+    /* A second session in one process replaces the first one's ring. */
     for (size_t i = 0u; ring != NULL && i < ring_size; ++i) free_snapshot(&ring[i]);
     free(ring);
     ring_size = frames + 1u;

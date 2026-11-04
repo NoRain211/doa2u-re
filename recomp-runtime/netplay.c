@@ -24,13 +24,20 @@ typedef socklen_t SocketLength;
 
 enum {
     MAGIC = 0x42523244u,       /* "D2RB" */
+    GOODBYE_MAGIC = 0x59423244u, /* "D2BY", the whole packet */
     LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
-    LOBBY_VERSION = 3u,
+    LOBBY_VERSION = 4u,
     LOBBY_HELLO = 1u,
     LOBBY_WELCOME = 2u,
     LOBBY_REQUEST = 3u, /* send your chunks from this index; past your last, I hold them all */
     LOBBY_CHUNK = 4u,   /* one chunk of the sender's profile */
+    LOBBY_ROOM = 5u,    /* a room member's state */
     LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
+    ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u + 5u +
+        RECOMP_NETPLAY_CHAT_BYTES,
+    ROOM_READY = 1u,
+    ROOM_START = 2u,
+    ROOM_SILENCE_MS = 3000u,
     PART_HEADER = 10u,
     CHUNK_BYTES = 1024u,
     CHUNKS_PER_REQUEST = 16u,
@@ -102,9 +109,15 @@ size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSessi
     return RECOMP_NETPLAY_HEADER_BYTES + count * RECOMP_NETPLAY_PAD_BYTES;
 }
 
+static uint64_t now_ms(void);
+
 bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
     const uint8_t *packet, size_t size)
 {
+    if (size == 4u && get32(packet) == GOODBYE_MAGIC) {
+        net->peer_left = true;
+        return true;
+    }
     if (size < RECOMP_NETPLAY_HEADER_BYTES || get32(packet) != MAGIC) return false;
     const uint32_t count = packet[20];
     if (count > RECOMP_NETPLAY_MAX_PADS ||
@@ -122,7 +135,15 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
         net->peer_frame = frame;
         net->peer_advantage = advantage;
     }
-    if (ack > net->peer_ack) net->peer_ack = ack;
+    if (ack > net->peer_ack) {
+        /* The newest pad the peer holds was sent once, when it was stamped. */
+        if (ack <= net->pads_stamped && ack + RECOMP_NETPLAY_MAX_PADS > net->pads_stamped) {
+            const uint64_t sample = now_ms() - net->pad_sent_ms[(ack - 1u) % RECOMP_NETPLAY_MAX_PADS];
+            net->rtt_ms = net->rtt_known ? (uint32_t)((net->rtt_ms * 7u + sample) / 8u) : (uint32_t)sample;
+            net->rtt_known = true;
+        }
+        net->peer_ack = ack;
+    }
     net->peer_seen = true;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t frame = first + i;
@@ -240,6 +261,11 @@ void recomp_netplay_close(RecompNetplay *net)
     net->socket = (uintptr_t)INVALID_SOCKET;
 }
 
+bool recomp_netplay_listen(RecompNetplay *net, uint16_t port)
+{
+    return open_socket(net, port);
+}
+
 bool recomp_netplay_route_address(char *text, size_t size)
 {
 #ifdef _WIN32
@@ -278,8 +304,18 @@ static void send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *s, int32_t advantage)
 {
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET];
+    const uint64_t now = now_ms();
+    for (; net->pads_stamped < s->local_count; ++net->pads_stamped)
+        net->pad_sent_ms[net->pads_stamped % RECOMP_NETPLAY_MAX_PADS] = now;
     send_to(net, net->peer_address, net->peer_port, packet,
         recomp_netplay_encode(net, s, advantage, packet));
+}
+
+void recomp_netplay_send_goodbye(const RecompNetplay *net)
+{
+    uint8_t packet[4];
+    put32(packet, GOODBYE_MAGIC);
+    for (int i = 0; i < 3; ++i) send_to(net, net->peer_address, net->peer_port, packet, sizeof packet);
 }
 
 /* The next queued packet's size, or -1 when none is left. */
@@ -321,6 +357,117 @@ static uint64_t now_ms(void)
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0u;
     return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
 #endif
+}
+
+/* Layout: magic, version, kind, digest, flags, name length, name, the
+   sender's clock, the last clock it heard and how long ago, for the ping,
+   then a chat line's id, length and text. */
+void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
+    const char *name, bool ready, bool start)
+{
+    const uint64_t now = now_ms();
+    uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
+    struct sockaddr_in from;
+    int size;
+    while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
+        if (room->hosting && !start && size == LOBBY_BYTES && get32(packet) == LOBBY_MAGIC &&
+            packet[5] == LOBBY_HELLO) {
+            /* A joiner calling a match this host cancelled: send it back to its room. */
+            uint8_t goodbye[4];
+            put32(goodbye, GOODBYE_MAGIC);
+            send_to(net, from.sin_addr.s_addr, from.sin_port, goodbye, sizeof goodbye);
+            continue;
+        }
+        if (size != ROOM_BYTES || get32(packet) != LOBBY_MAGIC || packet[4] != LOBBY_VERSION ||
+            packet[5] != LOBBY_ROOM)
+            continue;
+        if (!from_peer(net, &from)) {
+            if (!room->hosting || room->joined) continue;
+            net->peer_address = from.sin_addr.s_addr;
+            net->peer_port = from.sin_port;
+            room->pinged = false;
+        }
+        const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+        room->joined = true;
+        room->heard_ms = now;
+        room->mismatch = memcmp(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0;
+        room->ready = (at[0] & ROOM_READY) != 0u;
+        room->start = (at[0] & ROOM_START) != 0u;
+        const size_t length = at[1] < RECOMP_NETPLAY_NAME_BYTES ? at[1] : RECOMP_NETPLAY_NAME_BYTES;
+        memcpy(room->name, at + 2u, length);
+        room->name[length] = '\0';
+        at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+        room->echo = get32(at);
+        room->echo_at_ms = now;
+        const uint32_t echo = get32(at + 4u), age = get16(at + 8u);
+        if (echo != 0u) {
+            /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
+            const int64_t ping = (int64_t)(int32_t)((uint32_t)now - echo) - (int64_t)age;
+            room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
+            room->pinged = true;
+        }
+        at += 10u;
+        const uint32_t id = get32(at);
+        const size_t said = at[4];
+        /* One line a second; a line held back here comes again in a later repeat. */
+        if (id != room->heard_id && said != 0u && said <= RECOMP_NETPLAY_CHAT_BYTES &&
+            now - room->heard_line_ms >= 1000u) {
+            room->heard_id = id;
+            room->heard_line_ms = now;
+            char line[RECOMP_NETPLAY_CHAT_BYTES + 1u];
+            bool printable = true;
+            for (size_t i = 0u; i < said; ++i) printable = printable && at[5u + i] >= 0x20u && at[5u + i] < 0x7fu;
+            memcpy(line, at + 5u, said);
+            line[said] = '\0';
+            if (printable && !recomp_netplay_name_banned(line)) {
+                memcpy(room->heard, line, said + 1u);
+                room->heard_new = true;
+            }
+        }
+    }
+    if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) {
+        room->joined = room->ready = room->start = room->pinged = false;
+        room->echo = 0u;
+        if (room->hosting) net->peer_port = 0u; /* let another player in */
+    }
+    if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
+    room->sent_ms = now;
+    memset(packet, 0, ROOM_BYTES);
+    put32(packet, LOBBY_MAGIC);
+    packet[4] = LOBBY_VERSION;
+    packet[5] = LOBBY_ROOM;
+    memcpy(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+    at[0] = (uint8_t)((ready ? ROOM_READY : 0u) | (start ? ROOM_START : 0u));
+    const size_t length = strlen(name);
+    at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
+    memcpy(at + 2u, name, at[1]);
+    at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+    put32(at, (uint32_t)now | 1u); /* never 0, which means no clock heard */
+    put32(at + 4u, room->echo);
+    const uint64_t age = now - room->echo_at_ms;
+    put16(at + 8u, (uint16_t)(room->echo == 0u ? 0u : age > 65535u ? 65535u : age));
+    at += 10u;
+    if (now - room->said_ms < 2000u) {
+        put32(at, room->say_id);
+        at[4] = (uint8_t)strlen(room->say);
+        memcpy(at + 5u, room->say, at[4]);
+    }
+    send_to(net, net->peer_address, net->peer_port, packet, ROOM_BYTES);
+}
+
+void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text)
+{
+    const uint64_t now = now_ms();
+    const size_t length = strlen(text);
+    const size_t kept = length < RECOMP_NETPLAY_CHAT_BYTES ? length : RECOMP_NETPLAY_CHAT_BYTES;
+    memcpy(room->say, text, kept);
+    room->say[kept] = '\0';
+    /* The clock makes each line's id differ from those of earlier rooms, too. */
+    const uint32_t id = (uint32_t)now | 1u;
+    room->say_id = id == room->say_id ? id + 2u : id;
+    room->said_ms = now;
+    room->sent_ms = 0u; /* on the next tick */
 }
 
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
@@ -408,8 +555,14 @@ static bool transfer_tick(RecompNetplay *net, Transfer *t, uint64_t now)
     return done;
 }
 
+static bool is_goodbye(const uint8_t *packet, int size)
+{
+    return size == 4 && get32(packet) == GOODBYE_MAGIC;
+}
+
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
-    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
+    const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void))
 {
     profiles->theirs_size = 0u;
     if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
@@ -424,6 +577,10 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
             if (t.known && !from_peer(net, &from)) continue;
+            if (t.known && is_goodbye(packet, size)) {
+                net->peer_left = true;
+                return RECOMP_NETPLAY_LOBBY_CANCELLED;
+            }
             RecompNetplayLobby hello;
             uint32_t theirs;
             if (decode_lobby(packet, (size_t)size, &hello, &theirs) == LOBBY_HELLO) {
@@ -451,12 +608,18 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
             profiles->theirs_size = 0u;
             return RECOMP_NETPLAY_LOBBY_TIMEOUT;
         }
+        if (cancelled != NULL && cancelled()) {
+            if (t.known) recomp_netplay_send_goodbye(net);
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_CANCELLED;
+        }
         wait_readable(net, 20u);
     }
 }
 
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
-    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
+    uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
+    bool (*cancelled)(void))
 {
     profiles->theirs_size = 0u;
     if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
@@ -472,6 +635,10 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *hos
         int size;
         while ((size = receive_from(net, packet, sizeof packet, &from)) >= 0) {
             if (!from_peer(net, &from)) continue;
+            if (is_goodbye(packet, size)) {
+                net->peer_left = true;
+                return RECOMP_NETPLAY_LOBBY_CANCELLED;
+            }
             RecompNetplayLobby welcome;
             uint32_t theirs;
             if (!t.known && decode_lobby(packet, (size_t)size, &welcome, &theirs) == LOBBY_WELCOME) {
@@ -494,6 +661,11 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *hos
         if (now >= deadline) {
             profiles->theirs_size = 0u;
             return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        }
+        if (cancelled != NULL && cancelled()) {
+            recomp_netplay_send_goodbye(net);
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_CANCELLED;
         }
         wait_readable(net, 20u);
     }

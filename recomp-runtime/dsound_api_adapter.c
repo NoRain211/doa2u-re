@@ -217,6 +217,14 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     }
 }
 
+void recomp_dsound_api_reset(void)
+{
+    recomp_dsound_buffers_reset();
+    recomp_dsound_effects_reset();
+    recomp_dsound_device_reset(&device);
+    root = settings = 0u;
+}
+
 void recomp_dsound_api_shutdown(void)
 {
     if (!recomp_audio_output_on_owner_thread()) {
@@ -224,9 +232,6 @@ void recomp_dsound_api_shutdown(void)
         fprintf(stderr, "recomp dsound: shutdown deferred to process cleanup on non-owner thread\n");
         return;
     }
-    recomp_dsound_buffers_reset();
-    recomp_dsound_effects_reset();
+    recomp_dsound_api_reset();
     recomp_audio_output_shutdown();
-    recomp_dsound_device_reset(&device);
-    root = settings = 0u;
 }

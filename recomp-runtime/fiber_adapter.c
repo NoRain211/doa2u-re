@@ -244,9 +244,11 @@ size_t recomp_fiber_adapter_stack_ranges(RecompFiberStackRange *ranges, size_t c
 
 void recomp_fiber_adapter_reset(void)
 {
+    void *running = recomp_native_fiber_current();
     for (size_t i = 0u; i < RECOMP_FIBER_MAX_COUNT; ++i) {
         RecompHostFiber *host = &host_fibers[i];
-        if (host != current_host_fiber && host->native_fiber != NULL) {
+        /* A converted thread's fiber belongs to its guest thread. */
+        if (host->native_fiber != NULL && host->native_fiber != running && host->guest_stack_base != 0u) {
             recomp_native_fiber_delete(host->native_fiber);
         }
         *host = (RecompHostFiber){0};
@@ -254,6 +256,16 @@ void recomp_fiber_adapter_reset(void)
     recomp_fiber_model_reset(&fiber_model);
     current_host_fiber = NULL;
     converted_thread = false;
+}
+
+void *recomp_fiber_adapter_thread_fiber(void *native_fiber)
+{
+    const RecompHostFiber *host = host_fiber_find_native(native_fiber);
+    if (host == NULL || host->guest_stack_base == 0u) return native_fiber;
+    for (size_t i = 0u; i < RECOMP_FIBER_MAX_COUNT; ++i) {
+        if (host_fibers[i].active && host_fibers[i].guest_stack_base == 0u) return host_fibers[i].native_fiber;
+    }
+    return NULL;
 }
 
 static VOID WINAPI fiber_entry(void *parameter)

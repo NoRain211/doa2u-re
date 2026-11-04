@@ -2335,6 +2335,7 @@ uint32_t virtualKey(SDL_Scancode code)
     switch (code) {
     case SDL_SCANCODE_BACKSPACE: return 0x08u;
     case SDL_SCANCODE_RETURN: return 0x0du;
+    case SDL_SCANCODE_ESCAPE: return 0x1bu;
     case SDL_SCANCODE_LEFT: return 0x25u;
     case SDL_SCANCODE_UP: return 0x26u;
     case SDL_SCANCODE_RIGHT: return 0x27u;

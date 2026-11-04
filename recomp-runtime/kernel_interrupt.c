@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Interrupts and DPCs.
  *
@@ -37,6 +38,16 @@ typedef struct InterruptRecord {
 
 static InterruptRecord interrupts[32];
 static unsigned interrupt_count;
+
+void recomp_kernel_interrupt_reset(void)
+{
+    memset(dpc_queue, 0, sizeof dpc_queue);
+    dpc_queue_count = 0u;
+    current_irql = 0u;
+    draining = 0;
+    memset(interrupts, 0, sizeof interrupts);
+    interrupt_count = 0u;
+}
 
 void recomp_kernel_drain_dpcs(void)
 {

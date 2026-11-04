@@ -21,6 +21,8 @@ bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size);
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size);
 void recomp_d3d8_shutdown(void);
+/* Shutdown for a reboot: the window stays, and the next CreateDevice reuses it. */
+void recomp_d3d8_reset_keeping_window(void);
 /* Hidden run-ahead frames keep their device model but skip the flip. */
 void recomp_d3d8_set_present_suppressed(bool suppressed);
 /* Repeated run-ahead frames also skip draws, clears, copies and visibility tests. */
@@ -29,8 +31,14 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed);
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
     float display_aspect, uint8_t level);
+/* Presents the last shown frame again with draw's shapes over it, for a
+   wait between guest frames; shapes drawn opaque look the same each time. */
+void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *target));
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
+/* Optional host hook that draws over a shown frame, into target, just
+   before its Present. */
+extern void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
 /* Optional host hook at the frame boundary: guest state is final and the
    frame-locked clock has already advanced. SyncTest snapshots here. */
 extern void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);

@@ -210,6 +210,27 @@ static uint64_t wait_deadline(uint32_t timeout)
    and the idle scheduler poll; nothing raises a clock interrupt. */
 static uint32_t armed_timers[MAX_EVENTS];
 
+void recomp_kernel_thread_reset(void)
+{
+    void *running = recomp_native_fiber_current();
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        /* XAPI fibers are freed by the fiber adapter's reset, which runs next. */
+        void *fiber = recomp_fiber_adapter_thread_fiber(threads[i].native_fiber);
+        /* A converted thread's stack is the host thread's own. */
+        if (fiber != NULL && fiber != running && recomp_native_fiber_owns_stack(fiber))
+            recomp_native_fiber_delete(fiber);
+    }
+    memset(threads, 0, sizeof threads);
+    threads[0] = (GuestThread){.handle = 1u, .object = XBOX_STARTUP_THREAD_OBJECT, .priority = 8};
+    current_thread = 0u;
+    scheduler_started = false;
+    host_waits = 0u;
+    poll_slice = 0u;
+    memset(events, 0, sizeof events);
+    next_event_handle = 0xbee20000u;
+    memset(armed_timers, 0, sizeof armed_timers);
+}
+
 static bool expire_timer(uint32_t timer)
 {
     uint64_t due = *recomp_memory_u64(timer + TIMER_DUE_TIME);

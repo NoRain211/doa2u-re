@@ -418,6 +418,7 @@ LRESULT CALLBACK presenterWindowProc(
 {
     if (message == WM_KEYDOWN || message == WM_KEYUP)
         recomp_input_keyboard_event(static_cast<uint32_t>(wparam), message == WM_KEYDOWN);
+    if (message == WM_CHAR) recomp_input_keyboard_char(static_cast<uint32_t>(wparam));
     if (message == WM_KILLFOCUS || message == WM_DESTROY)
         recomp_input_keyboard_reset();
     if (message == WM_NCCREATE) {
@@ -2969,17 +2970,13 @@ RecompD3dPresenterError submitDraw(
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-bool pumpMessages()
+/* The presenter thread pumps between packets. Dispatching here could start
+   a window drag's modal loop in the middle of a frame, which nothing can
+   draw through. */
+bool quitPending()
 {
     MSG message{};
-    while (PeekMessageW(&message, nullptr, 0u, 0u, PM_REMOVE)) {
-        if (message.message == WM_QUIT) {
-            return false;
-        }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
-    return true;
+    return PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_NOREMOVE) != 0;
 }
 
 bool frameDumpDue(ULONGLONG now, unsigned interval_ms, ULONGLONG &next)
@@ -3444,7 +3441,7 @@ RecompD3dPresenterError submitPresent(
     /* Three distinct conditions used to collapse into one HOST_FAILURE code,
        so a stop here named the symptom and not the cause. Name each one. */
     {
-        const bool pumped = pumpMessages();
+        const bool pumped = !quitPending();
         if (pumped && presenter->close_requested) {
             return RECOMP_D3D_PRESENTER_CLOSED;
         }
@@ -3638,7 +3635,7 @@ RecompD3dPresenterError submitPresent(
     if (!presenter->first_present_reported) {
         ShowWindow(presenter->window, SW_SHOW);
         UpdateWindow(presenter->window);
-        if (!pumpMessages()) {
+        if (quitPending()) {
             return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
         if (presenter->close_requested) {
