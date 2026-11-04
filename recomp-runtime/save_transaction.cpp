@@ -499,7 +499,14 @@ extern "C" bool recomp_save_initialize(const char *disc_root)
         check_parents(root);
         require(exists_plain(root) && fs::is_directory(root));
         storage = root / ".recomp-storage";
-        const fs::path saves = recomp_save_session != nullptr ? storage / recomp_save_session : storage;
+        fs::path saves = storage;
+        if (recomp_save_session != nullptr) {
+            const fs::path session(recomp_save_session);
+            require(!session.empty() && session.parent_path().empty() &&
+                !session.has_root_name() && !session.has_root_directory() &&
+                session != "." && session != "..");
+            saves /= session;
+        }
         live = saves / "partition1"; /* UDATA profiles and TDATA title saves */
         journal = saves / "save-undo-v1";
         undo = journal / "undo";
