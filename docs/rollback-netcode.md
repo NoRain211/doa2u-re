@@ -79,9 +79,12 @@ SyncTest.
   straight into guest RAM. Other hosts compare every page with a shadow
   copy. Saves and loads must run while no host thread writes guest RAM, so
   netplay makes file reads synchronous as SyncTest does.
-- Each XAPI fiber keeps its C continuation on a native host stack. Parked
-  fibers are saved with their captured context and live stack, so a rewind
-  restores the C frames as well as the guest registers.
+- Each XAPI fiber keeps its C continuation on a native host stack. On
+  Windows, parked fibers are saved with their captured context and live
+  stack (up to 64 KiB), so a rewind restores the C frames as well as the
+  guest registers. POSIX hosts do not capture them yet: a save with a
+  parked fiber that owns its stack reports itself unrestorable there, and
+  rollback on Linux and macOS is unverified.
 - The other host modules (heap, allocations, threads, files, input, D3D8,
   DirectSound) save and restore their own state.
 - `frame_time_update` (`0xfefc0`) feeds QueryPerformanceCounter time into

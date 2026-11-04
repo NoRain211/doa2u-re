@@ -115,7 +115,11 @@ void recomp_synctest_configure(bool on, unsigned frames, bool loop)
 
 void recomp_synctest_set_modules(const RecompSyncTestModule *table, size_t count)
 {
-    if (count > MAX_MODULES) count = MAX_MODULES;
+    if (count > MAX_MODULES) {
+        fprintf(stderr, "recomp synctest: %zu modules exceed the %u-module table\n",
+            count, (unsigned)MAX_MODULES);
+        exit(2);
+    }
     memcpy(modules, table, count * sizeof *table);
     module_count = count;
     allocated = false;
@@ -162,9 +166,19 @@ static void allocate_snapshot(Snapshot *snapshot)
     snapshot->extra = extra_size != 0u ? allocate(extra_size) : NULL;
 }
 
+static void free_snapshot(Snapshot *snapshot)
+{
+    for (size_t i = 0u; i < MAX_MODULES; ++i) free(snapshot->block[i]);
+    free(snapshot->extra);
+    *snapshot = (Snapshot){0};
+}
+
 static void ensure_allocated(void)
 {
     if (allocated) return;
+    free_snapshot(&baseline);
+    free_snapshot(&reference);
+    free_snapshot(&current);
     allocate_snapshot(&baseline);
     allocate_snapshot(&reference);
     allocate_snapshot(&current);
@@ -313,6 +327,8 @@ static RecompGuestSnapshots ring_ram;
 
 bool recomp_rollback_ring_init(size_t frames)
 {
+    for (size_t i = 0u; ring != NULL && i < ring_size; ++i) free_snapshot(&ring[i]);
+    free(ring);
     ring_size = frames + 1u;
     ring = calloc(ring_size, sizeof *ring);
     if (ring == NULL) return false;

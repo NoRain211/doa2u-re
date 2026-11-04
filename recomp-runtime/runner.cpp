@@ -521,9 +521,13 @@ static bool readRollbackConfig()
 {
     const char *mode = std::getenv("RECOMP_ROLLBACK");
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
-    const auto number = [](const char *name, std::uint32_t &value) {
-        if (const char *text = std::getenv(name); text != nullptr && *text != '\0')
-            value = static_cast<std::uint32_t>(std::strtoul(text, nullptr, 10));
+    bool valid = true;
+    const auto number = [&valid](const char *name, std::uint32_t &value) {
+        const char *text = std::getenv(name);
+        if (text == nullptr || *text == '\0') return;
+        const char *end = text + std::strlen(text);
+        const auto [stop, error] = std::from_chars(text, end, value);
+        if (error != std::errc{} || stop != end) valid = false;
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
@@ -533,7 +537,7 @@ static bool readRollbackConfig()
         rollback.player = 1u;
         if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0') rollback.stop = 600u;
         number("RECOMP_ROLLBACK_LAG", rollback.lag);
-        return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+        return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
     }
     // udp:<local port>:<peer host>:<peer port>
     if (std::strncmp(mode, "udp:", 4u) != 0) return false;
@@ -545,7 +549,7 @@ static bool readRollbackConfig()
     const std::string host = spec.substr(hostAt + 1u, portAt - hostAt - 1u);
     number("RECOMP_ROLLBACK_PLAYER", rollback.player);
     number("RECOMP_ROLLBACK_DELAY", rollback.delay);
-    if (localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
+    if (!valid || localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
         rollback.player > 1u || rollback.delay > RECOMP_ROLLBACK_WINDOW)
         return false;
     rollback.mode = RollbackMode::Udp;
@@ -1038,7 +1042,7 @@ int main(int argc, char **argv)
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!rollback.lobby && !readRollbackConfig()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
-                  << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
+                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";
         return 1;
     }

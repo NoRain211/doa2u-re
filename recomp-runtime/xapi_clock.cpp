@@ -46,8 +46,11 @@ struct FrameClockEnv {
         if (value != nullptr && *value != '\0' && std::strcmp(value, "0") != 0)
             frame_clock_enabled.store(true, std::memory_order_relaxed);
         const char *tick = std::getenv("RECOMP_FRAME_CLOCK_TICK_NS");
-        if (tick != nullptr && *tick != '\0')
-            frame_clock_tick_ns.store(strtoull(tick, nullptr, 10), std::memory_order_relaxed);
+        if (tick != nullptr && *tick != '\0') {
+            char *end = nullptr;
+            const unsigned long long parsed = std::strtoull(tick, &end, 10);
+            if (*end == '\0') frame_clock_tick_ns.store(parsed, std::memory_order_relaxed);
+        }
     }
 };
 const FrameClockEnv frame_clock_env;

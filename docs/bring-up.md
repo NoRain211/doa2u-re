@@ -875,10 +875,12 @@ Rollback replays frames, so a replayed frame must reproduce the first pass
 exactly. `RECOMP_FRAME_CLOCK=1` replaces the host clock with a frame-locked
 guest clock: every read inside a frame returns the frame's end, plus a 1 us
 tick per read (`RECOMP_FRAME_CLOCK_TICK_NS`) so loops that poll the counter
-reach their deadline. Each Swap advances exactly 1/60 s. A skipped wait (a
+reach their deadline. Each Swap advances 1/60 s. A skipped wait (a
 vblank wait, or the scheduler idling until the next timer) jumps the counter
 to its deadline; a wait that ends by the next frame's end moves time inside
-the current frame only. A refresh at the current time counts as reached, or
+the current frame only. A wait whose deadline is more than two frames past
+the frame start moves the next frame's start to that deadline, so that Swap
+advances further. A refresh at the current time counts as reached, or
 every frame that waited for vblank would span two. The scheduler slice a
 clock read offers is gated on guest time, so a replay preempts at the same
 points.
@@ -896,23 +898,29 @@ table, kernel allocations, the guest heap cursors, input, the D3D8 device,
 frame and render-state models with completed visibility counts, and the
 DirectSound device, buffers and effects. Guest RAM rewinds through
 `guest_snapshot.c`. The compare skips host-scheduled ranges: audio worker
-counters, QPC bookkeeping, XAPI fiber and guest thread stacks, and the kernel
-and PCR page.
+counters, QPC bookkeeping, XAPI fiber and guest thread stacks, and the whole
+reserved final MiB (`0x03f00000`-`0x04000000`): the startup thread's stack,
+kernel data and the PCR page.
 
-Fibers are saved as plain data: each parked fiber's captured CONTEXT and the
-live part of its native stack, up to 64 KiB. The running fiber (its stack is
-the caller's), a converted thread's fiber and a fiber whose stack does not
-fit are not rewound. Deleted fibers stay parked and native fiber objects
-restart in place, so a saved state that still names one stays valid.
+On Windows, fibers are saved as plain data: each parked fiber's captured
+CONTEXT and the live part of its native stack, up to 64 KiB. The running
+fiber (its stack is the caller's), a converted thread's fiber and a fiber
+whose stack does not fit are not rewound. Deleted fibers stay parked and
+native fiber objects restart in place, so a saved state that still names one
+stays valid. Linux and macOS do not capture fiber stacks, so SyncTest skips
+frames with a parked fiber that owns its stack there.
 
 Some frames cannot be rewound and are skipped rather than reported:
 
 - A Present from the display mode change (`0x28284f`) instead of the frame
   loop (`0x282947`): the rewind resumes the host in the frame loop's native
   continuation.
-- A frame that opened a save file for writing, creating or deleting, or that
-  ends inside a save transaction: save storage is host disk, outside the
-  snapshot.
+- A frame that opened a save file for writing, creating or deleting, wrote
+  or changed one, or that ends inside a save transaction: save storage is
+  host disk, outside the snapshot.
+- A save taken on another guest thread, or before a guest thread's native
+  fiber was created or replaced.
+- A save from before the DirectSound effects image was replaced or released.
 - A frame boundary with a guest thread waiting on a host read: the worker may
   still be writing guest RAM. SyncTest makes reads synchronous, so this
   does not happen while it runs.
