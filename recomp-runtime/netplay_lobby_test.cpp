@@ -1,5 +1,6 @@
 #include "netplay.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -79,9 +80,31 @@ static void sendFrom(const RecompNetplay &from, std::uint16_t port, const std::v
         static_cast<int>(packet.size()), 0, reinterpret_cast<const sockaddr *>(&to), sizeof to);
 }
 
-static std::vector<std::uint8_t> peerPacket(std::uint16_t port)
+// netplay.c's lobby packets: "D2LB", LOBBY_VERSION, kind, then the body.
+static std::vector<std::uint8_t> helloPacket()
 {
-    std::vector<std::uint8_t> packet = {'D', '2', 'M', 'M', 1u, 6u};
+    std::vector<std::uint8_t> hello = {'D', '2', 'L', 'B', 4u, 1u};
+    hello.insert(hello.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
+    hello.resize(hello.size() + 6u); // delay, flags, no profile
+    return hello;
+}
+
+// Counts the lobby packets of one kind waiting on a socket.
+static int drainKind(const RecompNetplay &net, std::uint8_t kind)
+{
+    int count = 0;
+    std::uint8_t packet[2048];
+    for (int got; (got = static_cast<int>(recv(static_cast<RawSocket>(net.socket), reinterpret_cast<char *>(packet),
+                       sizeof packet, 0))) > 0;)
+        count += got > 6 && std::memcmp(packet, "D2LB", 4) == 0 && packet[5] == kind;
+    return count;
+}
+
+// PEER, to the socket whose nonce it carries.
+static std::vector<std::uint8_t> peerPacket(std::uint16_t port, const std::uint8_t *nonce)
+{
+    std::vector<std::uint8_t> packet = {'D', '2', 'M', 'M', 2u, 6u};
+    packet.insert(packet.end(), nonce, nonce + RECOMP_NETPLAY_TOKEN_BYTES);
     const std::uint8_t endpoint[6] = {127u, 0u, 0u, 1u, static_cast<std::uint8_t>(port >> 8), static_cast<std::uint8_t>(port)};
     if (port != 0u) packet.insert(packet.end(), endpoint, endpoint + 6);
     else packet.resize(packet.size() + 6u);
@@ -99,8 +122,8 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     bool opened = listening[0] && listening[1] && listening[2] &&
         recomp_netplay_match_server(&host, "127.0.0.1", 47622u) &&
         recomp_netplay_match_server(&joiner, "127.0.0.1", 47622u);
-    sendFrom(server, 47620u, peerPacket(toHost));
-    sendFrom(server, 47621u, peerPacket(toJoiner));
+    sendFrom(server, 47620u, peerPacket(toHost, host.match.nonce));
+    sendFrom(server, 47621u, peerPacket(toJoiner, joiner.match.nonce));
     RecompNetplayRoom hostRoom{}, joinerRoom{};
     hostRoom.hosting = true;
     char digest[RECOMP_NETPLAY_DIGEST_BYTES];
@@ -119,9 +142,16 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
         for (int got; (got = static_cast<int>(recvfrom(static_cast<RawSocket>(server.socket),
                            reinterpret_cast<char *>(packet), sizeof packet, 0, reinterpret_cast<sockaddr *>(&from),
                            &size))) > 0;) {
-            if (got > 6 && packet[5] == 9u) // relay to the other room, as the server does
-                sendFrom(server, ntohs(from.sin_port) == 47620u ? 47621u : 47620u,
-                    std::vector<std::uint8_t>(packet, packet + got));
+            // Relay to the other room, as the server does: the header, the receiver's nonce, then what came
+            // after the sender's nonce and cookie.
+            if (got >= 6 + 2 * RECOMP_NETPLAY_TOKEN_BYTES && packet[5] == 9u) {
+                const bool toJoiner = ntohs(from.sin_port) == 47620u;
+                const std::uint8_t *nonce = toJoiner ? joiner.match.nonce : host.match.nonce;
+                std::vector<std::uint8_t> relayed(packet, packet + 6);
+                relayed.insert(relayed.end(), nonce, nonce + RECOMP_NETPLAY_TOKEN_BYTES);
+                relayed.insert(relayed.end(), packet + 6 + 2 * RECOMP_NETPLAY_TOKEN_BYTES, packet + got);
+                sendFrom(server, toJoiner ? 47621u : 47620u, relayed);
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -131,7 +161,7 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     // A late pairing for another player leaves the host's talking peer alone.
     const std::uint16_t peer = host.peer_port;
     const bool hostRelay = host.match.relay;
-    sendFrom(server, 47620u, peerPacket(47630u));
+    sendFrom(server, 47620u, peerPacket(47630u, host.match.nonce));
     for (int i = 0; i < 5; ++i) {
         recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -334,6 +364,28 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
+    // A room packet from an address that never heard this host draws one room packet, not ten a second.
+    {
+        RecompNetplay forger;
+        RecompNetplayRoom doubtedRoom{};
+        doubtedRoom.hosting = true;
+        check("doubted room opens", recomp_netplay_listen(&host, 47643u) &&
+            recomp_netplay_open(&forger, 0u, "127.0.0.1", 47643u));
+        std::vector<std::uint8_t> roomPacket = {'D', '2', 'L', 'B', 4u, 5u};
+        roomPacket.insert(roomPacket.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
+        roomPacket.resize(159u); // flags, name, clocks with none heard, no chat
+        sendFrom(forger, 47643u, roomPacket);
+        int answers = 0;
+        for (int i = 0; i < 25; ++i) {
+            recomp_netplay_room_tick(&host, &doubtedRoom, digest, "HOST", false, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            answers += drainKind(forger, 5u);
+        }
+        check("doubted peer answered one for one", doubtedRoom.joined && answers == 1);
+        recomp_netplay_close(&forger);
+        recomp_netplay_close(&host);
+    }
+
     // A flood of chunk requests draws one 16-chunk burst per 50 ms, not 16 chunks per request.
     {
         RecompNetplay flooder;
@@ -342,10 +394,7 @@ int main()
         wait = std::thread([&] { hosted = hostOn(&host, 47640u, &offered, &served, 5000u, cancelled); });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         check("flood socket", recomp_netplay_open(&flooder, 0u, "127.0.0.1", 47640u));
-        // netplay.c's lobby packets: "D2LB", LOBBY_VERSION, kind, then the body.
-        std::vector<std::uint8_t> hello = {'D', '2', 'L', 'B', 4u, 1u};
-        hello.insert(hello.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
-        hello.resize(hello.size() + 6u); // delay, flags, no profile
+        const std::vector<std::uint8_t> hello = helloPacket();
         const std::vector<std::uint8_t> request = {'D', '2', 'L', 'B', 4u, 3u, 0u, 0u, 0u, 0u};
         int chunks = 0;
         const auto drain = [&] {
@@ -380,6 +429,77 @@ int main()
         if (chunks == 0 || chunks > 160) std::fprintf(stderr, "flood drew %d chunks\n", chunks);
         recomp_netplay_close(&flooder);
         recomp_netplay_close(&host);
+    }
+
+    // A room's socket arrives with its peer, so a hello from any other address cannot take the match.
+    {
+        RecompNetplay forger;
+        check("handed-over socket", recomp_netplay_listen(&host, 47641u) &&
+            recomp_netplay_open(&forger, 0u, "127.0.0.1", 47641u));
+        host.peer_address = htonl(0x7f000001u);
+        host.peer_port = htons(47642u);
+        wait = std::thread([&] { hosted = recomp_netplay_host(&host, &offered, &none, 5000u, nullptr); });
+        int welcomes = 0;
+        for (int i = 0; i < 10; ++i) {
+            sendFrom(forger, 47641u, helloPacket());
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            welcomes += drainKind(forger, 2u);
+        }
+        asked = offered;
+        const bool joinedPeer = recomp_netplay_open(&joiner, 47642u, "127.0.0.1", 47641u) &&
+            recomp_netplay_join(&joiner, &asked, &noneJoiner, 5000u, nullptr) == RECOMP_NETPLAY_LOBBY_OK;
+        wait.join();
+        welcomes += drainKind(forger, 2u);
+        check("forged hello ignored", welcomes == 0 && joinedPeer && hosted == RECOMP_NETPLAY_LOBBY_OK &&
+            host.peer_port == htons(47642u));
+        recomp_netplay_close(&forger);
+        recomp_netplay_close(&host);
+        recomp_netplay_close(&joiner);
+    }
+
+    // A packet from the matchmaker's address that does not echo the socket's nonce is forged, and ignored.
+    {
+        RecompNetplay server, room;
+        const bool listening[2] = {recomp_netplay_listen(&server, 47644u), recomp_netplay_listen(&room, 47645u)};
+        const bool opened = listening[0] && listening[1] && recomp_netplay_match_server(&room, "127.0.0.1", 47644u);
+        std::uint8_t wrong[RECOMP_NETPLAY_TOKEN_BYTES];
+        std::memcpy(wrong, room.match.nonce, sizeof wrong);
+        wrong[0] ^= 1u;
+        sendFrom(server, 47645u, peerPacket(47630u, wrong));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        recomp_netplay_match_poll(&room);
+        const bool ignored = !room.match.met;
+        sendFrom(server, 47645u, peerPacket(47630u, room.match.nonce));
+        for (int i = 0; i < 50 && !room.match.met; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            recomp_netplay_match_poll(&room);
+        }
+        check("forged matchmaker packet ignored", opened && ignored && room.match.met);
+
+        // A HOST without a cookie draws one, and the room says HOST again with it.
+        const auto heardHost = [&] {
+            std::vector<std::uint8_t> got(2048);
+            for (int i = 0; i < 50; ++i, std::this_thread::sleep_for(std::chrono::milliseconds(10))) {
+                const int size = static_cast<int>(recv(static_cast<RawSocket>(server.socket),
+                    reinterpret_cast<char *>(got.data()), static_cast<int>(got.size()), 0));
+                if (size > 6 + 2 * RECOMP_NETPLAY_TOKEN_BYTES && got[5] == 1u) return got;
+            }
+            return std::vector<std::uint8_t>();
+        };
+        recomp_netplay_match_host(&room, digest, 2u, true, "HOST");
+        const std::vector<std::uint8_t> first = heardHost();
+        std::vector<std::uint8_t> cookie = {'D', '2', 'M', 'M', 2u, 10u};
+        cookie.insert(cookie.end(), room.match.nonce, room.match.nonce + RECOMP_NETPLAY_TOKEN_BYTES);
+        for (std::uint8_t i = 1u; i <= RECOMP_NETPLAY_TOKEN_BYTES; ++i) cookie.push_back(i);
+        sendFrom(server, 47645u, cookie);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        recomp_netplay_match_poll(&room);
+        const std::vector<std::uint8_t> again = heardHost();
+        check("cookie sent again", !first.empty() && !again.empty() &&
+            std::all_of(first.begin() + 14, first.begin() + 22, [](std::uint8_t b) { return b == 0u; }) &&
+            std::equal(cookie.begin() + 14, cookie.end(), again.begin() + 14));
+        recomp_netplay_close(&server);
+        recomp_netplay_close(&room);
     }
 
     // Matched rooms punch through to each other, or meet through the relay without
