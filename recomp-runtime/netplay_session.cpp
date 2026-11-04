@@ -565,7 +565,7 @@ static void onRollbackFrame(std::uint32_t swap)
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
-            if (!recomp_rollback_ring_load(target))
+            if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost())
                 endSession("rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;

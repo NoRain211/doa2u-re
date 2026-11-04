@@ -235,9 +235,19 @@ void recomp_kernel_file_state_save(void *state)
     }
 }
 
+static bool file_restore_lost;
+
+bool recomp_kernel_file_state_lost(void)
+{
+    const bool lost = file_restore_lost;
+    file_restore_lost = false;
+    return lost;
+}
+
 void recomp_kernel_file_state_restore(const void *state)
 {
     const FilePositionState *in = state;
+    file_restore_lost = false;
     /* Close what the abandoned timeline opened: an unreleased native handle
        also shifts every later guest handle number. */
     for (size_t i = 0; i < MAX_FILE_HANDLES; ++i) {
@@ -264,7 +274,11 @@ void recomp_kernel_file_state_restore(const void *state)
                 break;
             }
         }
-        if (slot == MAX_FILE_HANDLES) continue;
+        /* The game closed this handle after the save; guest RAM still holds it. */
+        if (slot == MAX_FILE_HANDLES) {
+            file_restore_lost = true;
+            continue;
+        }
         file_handles[slot].cursor = in->entries[i].cursor;
         file_handles[slot].directory.cursor = in->entries[i].directory_cursor;
         file_handles[slot].directory_queried = (int)in->entries[i].directory_queried;

@@ -104,6 +104,8 @@ bool recomp_kernel_thread_fiber_state_restorable(const void *state);
 size_t recomp_kernel_file_state_size(void);
 void recomp_kernel_file_state_save(void *state);
 void recomp_kernel_file_state_restore(const void *state);
+/* True once after a restore found a saved handle the host had closed since. */
+bool recomp_kernel_file_state_lost(void);
 /* Reads finish inside the guest call instead of on a host worker, so no read
    is in flight at a frame boundary that a rewind may return to. */
 void recomp_kernel_file_set_synchronous_reads(bool enabled);
