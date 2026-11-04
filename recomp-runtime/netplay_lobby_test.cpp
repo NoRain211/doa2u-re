@@ -136,12 +136,13 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
         std::strcmp(joinerRoom.name, "HOST") == 0 && !host.match.punching && !joiner.match.punching;
     // A late pairing for another player leaves the host's talking peer alone.
     const std::uint16_t peer = host.peer_port;
+    const bool hostRelay = host.match.relay;
     sendFrom(server, 47620u, peerPacket(47630u));
     for (int i = 0; i < 5; ++i) {
         recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    met = met && host.peer_port == peer && host.match.relay == relayed && !host.match.punching;
+    met = met && host.peer_port == peer && host.match.relay == hostRelay && !host.match.punching;
     if (!met) // one failure under load has not been explained; this says which side stalled next time
         std::fprintf(stderr, "rooms %u/%u: opened %d, pinged %d/%d, names %s/%s, punching %d/%d, relay %d/%d\n",
             toHost, toJoiner, (int)opened, (int)hostRoom.pinged, (int)joinerRoom.pinged, hostRoom.name,
