@@ -107,6 +107,12 @@ bool blockedId(std::uint64_t id)
     return std::any_of(menu.blocked.begin(), menu.blocked.end(), [id](const auto &entry) { return entry.first == id; });
 }
 
+// A peer's name as the screens show it: one the filter refuses never appears.
+std::string shownName(const char *name)
+{
+    return recomp_netplay_name_banned(name) ? "HIDDEN NAME" : name;
+}
+
 // Router forward, asked on its own thread: 0 not asked, 1 asking, 2 forwarded, 3 not forwarded,
 // 4 asking for a room already left.
 std::atomic<int> upnpState{0};
@@ -519,7 +525,7 @@ void leaveBlockedHost(const std::string &message)
 void blockPeer()
 {
     RecompNetplayRoom &room = menu.room;
-    const std::string name = room.name;
+    const std::string name = shownName(room.name);
     menu.blockAsked = Clock::time_point{};
     if (!blockedId(room.peer_id)) {
         menu.blocked.emplace_back(room.peer_id, name);
@@ -655,7 +661,7 @@ bool updateRoom(std::uint16_t keys)
             return false;
         }
         menu.blockAsked = now;
-        menu.message = "PRESS X AGAIN TO BLOCK " + std::string(room.name) + ".";
+        menu.message = "PRESS X AGAIN TO BLOCK " + shownName(room.name) + ".";
     } else if ((keys & X) && menu.hosting) {
         copyText(shownAddress());
         menu.message = "ADDRESS COPIED.";
@@ -888,8 +894,7 @@ void drawRoom()
     title("ONLINE LOBBY ROOM");
     const std::string ping = room.pinged ? std::to_string(room.ping_ms) + " MS" + (menu.net.match.relay ? "  RELAY" : "") : "";
     const bool peer = room.joined;
-    const std::string peerName = room.mismatch ? "OTHER BUILD"
-        : recomp_netplay_name_banned(room.name) ? "HIDDEN NAME" : room.name;
+    const std::string peerName = room.mismatch ? "OTHER BUILD" : shownName(room.name);
     if (menu.hosting) {
         plate(40.0f, "P1  HOST", menu.name, true, "YOU", menu.ready);
         plate(350.0f, "P2", peerName, peer, ping, room.ready);
