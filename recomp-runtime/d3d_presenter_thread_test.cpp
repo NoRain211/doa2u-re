@@ -25,6 +25,7 @@ static ULONGLONG GetTickCount64()
 
 #include <cmath>
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -113,6 +114,15 @@ static bool testTicks()
     passed &= expect("publish without present", recomp_d3d_presenter_flush(presenter, false));
     passed &= expect("wait idle", recomp_d3d_presenter_flush(presenter, true));
     passed &= expect("empty wait idle", recomp_d3d_presenter_flush(presenter, true));
+    // Once the host catches up, Swap's guest wait for the presenter ends.
+    const auto ready_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!recomp_d3d_presenter_present_ready(presenter) && std::chrono::steady_clock::now() < ready_by) {
+        std::this_thread::yield();
+    }
+    if (!recomp_d3d_presenter_present_ready(presenter)) {
+        std::fprintf(stderr, "FAIL present ready after idle\n");
+        passed = false;
+    }
     recomp_d3d_presenter_report_draw_textures();
     passed &= destroy(presenter);
     if (passed) std::puts("PASS five CLEAR/PRESENT ticks and partial shutdown");

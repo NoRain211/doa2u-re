@@ -404,6 +404,13 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     return thread.status;
 }
 
+bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
+{
+    if (validate(presenter) != RECOMP_D3D_PRESENTER_OK) return true;
+    std::lock_guard<std::mutex> lock(active_thread->mutex);
+    return active_thread->pending < 2 || active_thread->status != RECOMP_D3D_PRESENTER_OK;
+}
+
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
     RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand *draw, bool *covered)
 {
