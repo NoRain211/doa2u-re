@@ -4,11 +4,6 @@
 
 static uint32_t av_saved_data_address;
 
-void recomp_kernel_video_reset(void)
-{
-    av_saved_data_address = 0u;
-}
-
 uint32_t recomp_kernel_av_get_saved_data_address(void)
 {
     return av_saved_data_address;

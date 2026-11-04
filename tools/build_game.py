@@ -22,7 +22,7 @@ CAPSTONE = "5.0.7"
 PILLOW = "12.2.0"  # minimum; run_game.py builds the optional dedication card with it
 # The generated program the runtime was validated against. Changing the lifter
 # pin or the function list in tools/doa2u/functions changes it; regenerate and update both.
-PROGRAM_SHA256 = "ba127cee2e4b0aa222ef2ddaf9984c131be2a84def362b752d3811551ed68517"
+PROGRAM_SHA256 = "5f43bf496a7b2e22c66598ed75eda161220eb420b55e833e5f3e70ce84ad1760"
 PROGRAM_EBP = 0
 # The disassembler's function list, minus call edges the lift does not need, so players skip disassembly.
 FUNCTIONS = ROOT / "tools/doa2u/functions"

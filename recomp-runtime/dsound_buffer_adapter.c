@@ -72,39 +72,6 @@ static const char *pump_failure;
 /* When the game thread last pumped; looping rings play at most 100 ms past it. */
 static uint64_t game_pump_ms;
 
-/* Rollback copies every buffer, and muting covers a re-simulated frame; both
-   take the output lock so the pump thread never sees half a restore. */
-size_t recomp_dsound_buffer_state_size(void) { return sizeof buffers; }
-void recomp_dsound_buffer_state_save(void *state)
-{
-    recomp_dsound_output_lock();
-    memcpy(state, buffers, sizeof buffers);
-    recomp_dsound_output_unlock();
-}
-void recomp_dsound_buffer_state_restore(const void *state)
-{
-    recomp_dsound_output_lock();
-    memcpy(buffers, state, sizeof buffers);
-    recomp_dsound_output_unlock();
-}
-
-static bool output_suppressed; /* read and written only under the output lock */
-static bool game_thread_pump;  /* read and written only under the output lock */
-
-void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
-{
-    recomp_dsound_output_lock();
-    output_suppressed = suppressed;
-    recomp_dsound_output_unlock();
-}
-
-void recomp_dsound_buffer_set_game_thread_pump(bool only)
-{
-    recomp_dsound_output_lock();
-    game_thread_pump = only;
-    recomp_dsound_output_unlock();
-}
-
 static uint32_t canonical(uint32_t address)
 {
     uint32_t window = address & ~(RECOMP_XBOX_RAM_SIZE - 1u);
@@ -288,9 +255,7 @@ static void write_mix(Buffer *buffer)
 
 static void reset_output(Buffer *buffer)
 {
-    /* Host voices belong to the frames the game keeps; a speculative run-ahead
-       frame resetting one would discard audio those frames queued. */
-    if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
+    recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
     /* The backend accepts routing only from its owner thread, so it is set here
@@ -350,7 +315,7 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
         return;
     }
     const uint32_t slot = (uint32_t)(buffer - buffers);
-    if (!buffer->is3d && !output_suppressed) {
+    if (!buffer->is3d) {
         recomp_audio_output_submit(slot, pcm, bytes, buffer->model.sample_rate, buffer->channels,
             buffer->format == 0x69u ? 16u : buffer->bits, buffer->volume);
     }
@@ -362,7 +327,7 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
         uint32_t piece = frames - done < limit ? frames - done : limit;
         uint32_t rendered = recomp_hrtf_render(&buffer->hrtf, samples + done, piece,
             buffer->model.sample_rate, ears, 20000u);
-        if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
+        if (rendered) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
             RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
         done += piece;
     }
@@ -438,7 +403,7 @@ static bool pump_pass(void)
 {
     recomp_dsound_output_lock();
     const bool running = !pump_stopping;
-    if (running && !game_thread_pump) {
+    if (running) {
         const uint64_t now = now_ms();
         for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
     }
@@ -487,7 +452,7 @@ static void start_pump(void)
 
 static void dispose(Buffer *buffer)
 {
-    if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
+    recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     if (buffer->owned) recomp_kernel_free_pool(buffer->owned);
     if (buffer->settings) recomp_kernel_free_pool(buffer->settings);
     if (buffer->root) recomp_kernel_free_pool(buffer->root);
