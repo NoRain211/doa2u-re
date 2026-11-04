@@ -98,8 +98,9 @@ int main()
 
     // A profile, a second one, title saves and a file beside the profiles.
     const std::vector<std::uint8_t> data{1u, 2u, 3u}, title{4u}, beside{5u}, other{6u};
+    const std::vector<std::uint8_t> ups(0x12148u, 7u); // ups.dat is always this size
     write(mine / "UDATA/54430006/0F515488395E/SaveMeta.xbx", kasumi);
-    write(mine / "UDATA/54430006/0F515488395E/ups.dat", data);
+    write(mine / "UDATA/54430006/0F515488395E/ups.dat", ups);
     write(mine / "UDATA/54430006/AAAAAAAAAAAA/SaveMeta.xbx", meta(u"Name=Other\r\n"));
     write(mine / "UDATA/54430006/AAAAAAAAAAAA/ups.dat", other);
     write(mine / "UDATA/54430006/TitleMeta.xbx", beside);
@@ -119,7 +120,7 @@ int main()
     std::vector<std::string> names;
     check("unpack host", recomp_netplay_unpack_profile(host.data(), host.size(), theirs / "host", false, names));
     check("host names", names == std::vector<std::string>{"Kasumi \xc3\xa9\xe4\xb8\x80"});
-    check("host files", read(theirs / "host/UDATA/54430006/0F515488395E/ups.dat") == data &&
+    check("host files", read(theirs / "host/UDATA/54430006/0F515488395E/ups.dat") == ups &&
         read(theirs / "host/TDATA/54430006/title.dat") == title &&
         read(theirs / "host/UDATA/54430006/TitleMeta.xbx") == beside &&
         !fs::exists(theirs / "host/UDATA/54430006/AAAAAAAAAAAA"));
@@ -128,8 +129,21 @@ int main()
         !fs::exists(theirs / "joiner/TDATA") && !fs::exists(theirs / "joiner/UDATA/54430006/TitleMeta.xbx"));
     // A joiner sends one profile folder and never title saves.
     check("joiner title saves", !unpacks(host, theirs / "joiner-title", true));
-    check("joiner two profiles", !unpacks(blobOf({{1u, "UDATA/54430006/AAAAAAAAAAAA/ups.dat", data},
-        {1u, "UDATA/54430006/BBBBBBBBBBBB/ups.dat", data}}), theirs / "joiner-two", true));
+    check("joiner two profiles", !unpacks(blobOf({{1u, "UDATA/54430006/AAAAAAAAAAAA/ups.dat", ups},
+        {1u, "UDATA/54430006/BBBBBBBBBBBB/ups.dat", ups}}), theirs / "joiner-two", true));
+    // A save folder holds only what the game writes, and ups.dat's framing is the game's to trust.
+    const std::string save = "UDATA/54430006/AAAAAAAAAAAA/";
+    check("a save as the game writes it", unpacks(blobOf({{1u, save + "SaveMeta.xbx", kasumi},
+        {1u, save + "ups.dat", ups}, {1u, save + "SaveImage.xbx", std::vector<std::uint8_t>(4096u)}}),
+        theirs / "save-ok", true));
+    check("short ups.dat", !unpacks(blobOf({{1u, save + "ups.dat", std::vector<std::uint8_t>(0x14u)}}),
+        theirs / "save-short", true));
+    check("another file in a save", !unpacks(blobOf({{1u, save + "br.dat", data}}), theirs / "save-other", true));
+    check("a folder in a save", !unpacks(blobOf({{0u, save + "sub", {}}}), theirs / "save-folder", true));
+    check("meta without its mark", !unpacks(blobOf({{1u, save + "SaveMeta.xbx",
+        std::vector<std::uint8_t>(kasumi.begin() + 2, kasumi.end())}}), theirs / "save-mark", true));
+    check("meta naming twice", !unpacks(blobOf({{1u, save + "SaveMeta.xbx", meta(u"Name=A\r\nName=B\r\n")}}),
+        theirs / "save-twice", true));
     // Windows opens SaveMeta.xbx in any case, so the filter reads that name too.
     names.clear();
     const std::vector<std::uint8_t> lower = blobOf({{1u, "UDATA/54430006/AAAAAAAAAAAA/savemeta.XBX", meta(u"Name=Low\r\n")}});
