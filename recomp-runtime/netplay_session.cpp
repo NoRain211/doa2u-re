@@ -450,7 +450,7 @@ static void hashCheckFrame()
     if (!isCheckFrame(frame)) return;
     const auto began = std::chrono::steady_clock::now();
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
-    std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 2u);
+    std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 3u);
     if (count == SIZE_MAX) recomp_stop(4, "rollback:hash-ranges");
     /* draw_fight_name (program_manual.c) draws the local player's name in
        yellow and the other's in white, so the two sides' 2D draw state
@@ -459,6 +459,10 @@ static void hashCheckFrame()
        (0xb1060) fills below 0x89bed9, and in the text color g_ui_text_color. */
     ignored[count++] = RecompRamRange{0x0088eed8u, 0x0089bed9u};
     ignored[count++] = RecompRamRange{0x008a01c8u, 0x008a01ccu};
+    /* The lens flare's visibility-test flags and pixel counts (0xe5d628,
+       read by flare_draw_ghosts 0x276ee0) come from each machine's own GPU and
+       only scale the flare's alpha, so the two sides may differ there. */
+    ignored[count++] = RecompRamRange{0x00e5d628u, 0x00e5d768u};
     if (!recomp_rollback_ring_hash(ignored, count, &rollback.checkHash)) recomp_stop(4, "rollback:hash");
     rollback.checkFrame = frame;
     rollback.slowestHashMs = std::max(rollback.slowestHashMs,
