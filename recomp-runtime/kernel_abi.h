@@ -95,6 +95,9 @@ void recomp_kernel_thread_times(char *out, size_t size);
 size_t recomp_kernel_thread_state_size(void);
 void recomp_kernel_thread_state_save(void *state);
 void recomp_kernel_thread_state_restore(const void *state);
+/* False when the frame boundary runs on another guest thread, or a thread's
+   native fiber changed since the save. */
+bool recomp_kernel_thread_state_restorable(const void *state);
 /* Each parked guest thread's native continuation, beside its guest state. */
 size_t recomp_kernel_thread_fiber_state_size(void);
 void recomp_kernel_thread_fiber_state_save(void *state);
@@ -121,7 +124,7 @@ size_t recomp_kernel_thread_stack_ranges(RecompGuestStackRange *ranges, size_t c
 RecompFunction recomp_kernel_video(uint32_t ordinal);
 RecompFunction recomp_kernel_file(uint32_t ordinal);
 bool recomp_kernel_save_handles_closed(uint32_t owner);
-/* Counts opens that may change save storage; see kernel_file.c. */
+/* Counts opens, writes and metadata changes that may change save storage. */
 uint32_t recomp_kernel_profile_mutations(void);
 /* Close native profile handles so a rollback can rebuild the tree. */
 void recomp_kernel_release_profile_handles(void);

@@ -1049,8 +1049,7 @@ bool recomp_kernel_thread_fiber_state_restorable(const void *state)
             return false;
         }
         if ((in->threads[i].native.flags & RECOMP_NATIVE_STATE_UNAVAILABLE) != 0u) {
-            fprintf(stderr, "recomp thread: fiber %u stack %u too deep\n", i,
-                in->threads[i].native.stack_bytes);
+            fprintf(stderr, "recomp thread: fiber %u continuation not captured\n", i);
             return false;
         }
     }
@@ -1094,6 +1093,27 @@ void recomp_kernel_thread_state_restore(const void *state)
     memcpy(events, in->events, sizeof events);
     next_event_handle = in->next_event_handle;
     memcpy(armed_timers, in->armed_timers, sizeof armed_timers);
+}
+
+bool recomp_kernel_thread_state_restorable(const void *state)
+{
+    const KernelThreadState *in = state;
+    /* The thread running now is on its live host stack; a save from another
+       thread has that stack as a parked continuation and would overwrite it. */
+    if (in->current_thread != current_thread) {
+        fprintf(stderr, "recomp thread: saved on thread %u, restoring on %u\n",
+            in->current_thread, current_thread);
+        return false;
+    }
+    /* The restore would drop a fiber created since the save, or name one
+       that was replaced. */
+    for (unsigned i = 0u; i < MAX_THREADS; ++i) {
+        if (in->threads[i].native_fiber != threads[i].native_fiber) {
+            fprintf(stderr, "recomp thread: thread %u fiber changed since the save\n", i);
+            return false;
+        }
+    }
+    return true;
 }
 
 size_t recomp_kernel_thread_stack_ranges(RecompGuestStackRange *ranges, size_t capacity)

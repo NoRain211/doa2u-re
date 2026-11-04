@@ -46,6 +46,10 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
             (size_t)thread_stacks[i].base + thread_stacks[i].size};
     RecompGuestStackRange kernel_stacks[16];
     const size_t kernel_stack_count = recomp_kernel_memory_stack_ranges(kernel_stacks, 16u);
+    if (kernel_stack_count > sizeof kernel_stacks / sizeof *kernel_stacks) {
+        fprintf(stderr, "recomp synctest: kernel stack list full\n");
+        exit(2);
+    }
     for (size_t i = 0u; i < kernel_stack_count && count < capacity; ++i)
         ranges[count++] = (IgnoreRange){kernel_stacks[i].base,
             (size_t)kernel_stacks[i].base + kernel_stacks[i].size};
@@ -57,7 +61,7 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
             fprintf(stderr, "recomp synctest: thread stack +0x%x..+0x%x\n",
                 thread_stacks[i].base, thread_stacks[i].base + thread_stacks[i].size);
     }
-    /* Kernel data and the PCR page: host-scheduled kernel bookkeeping. */
+    /* The reserved final MiB: startup stack, kernel data and the PCR page. */
     if (count < capacity) ranges[count++] = (IgnoreRange){0x03f00000u, 0x04000000u};
     if (count == capacity) {
         fprintf(stderr, "recomp synctest: ignore range list full\n");
@@ -139,6 +143,16 @@ static bool thread_fibers_restorable(const void *state, size_t size)
     (void)size;
     return recomp_kernel_thread_fiber_state_restorable(state);
 }
+static bool threads_restorable(const void *state, size_t size)
+{
+    (void)size;
+    return recomp_kernel_thread_state_restorable(state);
+}
+static bool effects_restorable(const void *state, size_t size)
+{
+    (void)size;
+    return recomp_dsound_effects_state_restorable(state);
+}
 /* Save storage and its journal live on the host disk, outside the snapshot.
    A replay after a save sees the files the first pass wrote and takes another
    branch, and a rewind into an open transaction would replay its begin and
@@ -185,7 +199,8 @@ void recomp_synctest_install_default_modules(void)
         recomp_fiber_adapter_state_equal,
         fibers_restorable, false};
     table[count++] = (RecompSyncTestModule){"threads", recomp_kernel_thread_state_size(),
-        recomp_kernel_thread_state_save, recomp_kernel_thread_state_restore, NULL, NULL, true};
+        recomp_kernel_thread_state_save, recomp_kernel_thread_state_restore, NULL,
+        threads_restorable, true};
     table[count++] = (RecompSyncTestModule){"thread_fibers",
         recomp_kernel_thread_fiber_state_size(),
         recomp_kernel_thread_fiber_state_save, recomp_kernel_thread_fiber_state_restore,
@@ -205,7 +220,8 @@ void recomp_synctest_install_default_modules(void)
     table[count++] = (RecompSyncTestModule){"dsound_buffers", recomp_dsound_buffer_state_size(),
         recomp_dsound_buffer_state_save, recomp_dsound_buffer_state_restore};
     table[count++] = (RecompSyncTestModule){"dsound_effects", recomp_dsound_effects_state_size(),
-        recomp_dsound_effects_state_save, recomp_dsound_effects_state_restore};
+        recomp_dsound_effects_state_save, recomp_dsound_effects_state_restore, NULL,
+        effects_restorable};
     table[count++] = (RecompSyncTestModule){"save_storage", sizeof(SaveStorageState),
         save_storage_save, save_storage_restore, NULL, save_storage_restorable, true};
     table[count++] = (RecompSyncTestModule){"host_reads", sizeof(unsigned),
