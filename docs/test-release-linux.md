@@ -81,13 +81,14 @@ the match takes both players back to the room. Both players need this same
 release built from the same disc, or the room shows OTHER BUILD. The other
 player sees your game profile name.
 
-The host's game asks the router to open UDP port 47701 (UPnP). If the room
-says to forward it by hand, forward UDP 47701 to the host's computer, or use
-FIND MATCH, which gets through most routers and falls back to a relay.
+The host's game asks the router to open its UDP port, 47701 unless changed
+in NETPLAY SETTINGS (UPnP). If the room says to forward it by hand, forward
+the UDP port the room shows to the host's computer, or use FIND MATCH, which
+tries a direct connection and falls back to a relay.
 NETPLAY SETTINGS sets the input delay, the port, the network display in a
 match, blocked players and the matchmaker. In a room Y mutes the other
-player and X twice blocks them. The menu hides IP addresses, so they stay off
-streams; while your room is empty, Y shows your address.
+player and X twice blocks them. The menu hides players' IP addresses, so they
+stay off streams; while your room is empty, Y shows your address.
 Typing, chat and the clipboard work only on Windows for now: enter an
 address with the controller (up/down changes a character, left/right moves).
 
