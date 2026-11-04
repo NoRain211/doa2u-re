@@ -118,7 +118,8 @@ padded. A joined room leaves the list for 10 s while the two connect, and
 returns if its host still says it is open. A joiner repeats JOIN every
 0.5 s until it hears, and the server answers its own claim again.
 One address holds one claim at a time, and the server takes at most 10
-JOINs a second from it, so a single address cannot empty the list.
+JOINs from it between its once-a-second sweeps (up to 20 across one), so
+a single address cannot empty the list.
 
 A list entry is 40 bytes, or 46 with the endpoint. Runners before the ping
 send 0 after the digest and read 40-byte entries, and current runners read
@@ -183,7 +184,9 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
    pings them and joins the nearest, or the oldest when none answered.
    With none open, the player hosts instead.
 3. JOIN gives both players the other's public endpoint, and the LAN one
-   when both are behind the same router. Both then
+   when both share a public address, as players behind one router do.
+   Under carrier NAT two households can share one, so they still see each
+   other's private address; the server cannot tell them apart. Both then
    send room packets to both endpoints for about 5 s. The first that
    answers becomes the peer. Sending first opens each router for the
    other's packets, which works behind most home routers.
