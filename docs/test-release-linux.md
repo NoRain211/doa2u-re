@@ -1,5 +1,5 @@
-Dead or Alive 2 Ultimate native Linux port - 0.2.0 Experimental online play
-===========================================================================
+Dead or Alive 2 Ultimate native Linux port - 0.1.15 Alpha (experimental)
+========================================================================
 
 This is an early, experimental build. It contains no game files. You
 build the game yourself from your own copy of Dead or Alive Ultimate
