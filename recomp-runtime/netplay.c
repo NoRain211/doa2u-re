@@ -518,7 +518,8 @@ static void transfer_packet(RecompNetplay *net, Transfer *t, const uint8_t *pack
         const uint64_t now = now_ms();
         if (t->served >= 8ull * p->mine_size || (index < t->served_end && now < t->next_serve)) return;
         t->next_serve = now + 50u;
-        t->served_end = index + CHUNKS_PER_REQUEST < mine ? index + CHUNKS_PER_REQUEST : mine;
+        const uint32_t end = index + CHUNKS_PER_REQUEST < mine ? index + CHUNKS_PER_REQUEST : mine;
+        if (end > t->served_end) t->served_end = end; /* only forward, so a replayed window stays a replay */
         uint8_t chunk[PART_HEADER + CHUNK_BYTES];
         for (uint32_t i = index; i < mine && i < index + CHUNKS_PER_REQUEST; ++i) {
             const uint32_t bytes = chunk_size(p->mine_size, i);
