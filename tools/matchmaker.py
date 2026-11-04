@@ -153,6 +153,7 @@ class Matchmaker:
             nowhere = ("0.0.0.0", 0)
             return [(peer(nowhere, bytes(6), name[:length]), room.host), (peer(nowhere, bytes(6), room.name), sender)]
         # LAN endpoints only help two players behind one router; anyone else would learn a private address.
+        # shortcut: carrier NAT can put two households on one public address; add a LAN probe if that matters.
         same_router = sender[0] == room.host[0]
         return [(peer(sender, lan_endpoint(lan) if same_router else bytes(6), name[:length]), room.host),
                 (peer(room.host, room.lan if same_router else bytes(6), room.name), sender)]

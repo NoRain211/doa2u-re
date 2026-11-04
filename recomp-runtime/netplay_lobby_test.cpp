@@ -354,8 +354,17 @@ int main()
                                reinterpret_cast<char *>(packet), sizeof packet, 0))) > 0;)
                 chunks += got > 6 && std::memcmp(packet, "D2LB", 4) == 0 && packet[5] == 4u;
         };
-        sendFrom(flooder, 47640u, hello);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Say hello until the host welcomes it, so a slow host thread cannot drop the only one.
+        bool welcomed = false;
+        for (int i = 0; i < 100 && !welcomed; ++i) {
+            sendFrom(flooder, 47640u, hello);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            std::uint8_t packet[2048];
+            for (int got; (got = static_cast<int>(recv(static_cast<RawSocket>(flooder.socket),
+                               reinterpret_cast<char *>(packet), sizeof packet, 0))) > 0;)
+                welcomed = welcomed || (got > 6 && std::memcmp(packet, "D2LB", 4) == 0 && packet[5] == 2u);
+        }
+        check("flood welcomed", welcomed);
         for (int i = 0; i < 200; ++i) {
             sendFrom(flooder, 47640u, request);
             drain();
