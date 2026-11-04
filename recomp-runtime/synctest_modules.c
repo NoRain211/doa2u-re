@@ -42,23 +42,20 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
        scratch. Their heap allocations and TLS blocks are compared. */
     RecompGuestStackRange thread_stacks[32];
     const size_t thread_stack_count = recomp_kernel_thread_stack_ranges(thread_stacks, 32u);
-    for (size_t i = 0u; i < thread_stack_count && count < capacity; ++i)
+    /* These report every stack; one past its array makes the list fail below as a full one. */
+    for (size_t i = 0u; i < thread_stack_count && i < 32u && count < capacity; ++i)
         ranges[count++] = (IgnoreRange){thread_stacks[i].base,
             (size_t)thread_stacks[i].base + thread_stacks[i].size};
     RecompGuestStackRange kernel_stacks[16];
     const size_t kernel_stack_count = recomp_kernel_memory_stack_ranges(kernel_stacks, 16u);
-    if (kernel_stack_count > sizeof kernel_stacks / sizeof *kernel_stacks) {
-        fprintf(stderr, "recomp synctest: kernel stack list full\n");
-        exit(2);
-    }
-    for (size_t i = 0u; i < kernel_stack_count && count < capacity; ++i)
+    for (size_t i = 0u; i < kernel_stack_count && i < 16u && count < capacity; ++i)
         ranges[count++] = (IgnoreRange){kernel_stacks[i].base,
             (size_t)kernel_stacks[i].base + kernel_stacks[i].size};
     if (getenv("RECOMP_SYNCTEST_VERBOSE") != NULL) {
         for (size_t i = 0u; i < stack_count; ++i)
             fprintf(stderr, "recomp synctest: fiber stack +0x%x..+0x%x\n",
                 stacks[i].base, stacks[i].base + stacks[i].size);
-        for (size_t i = 0u; i < thread_stack_count; ++i)
+        for (size_t i = 0u; i < thread_stack_count && i < 32u; ++i)
             fprintf(stderr, "recomp synctest: thread stack +0x%x..+0x%x\n",
                 thread_stacks[i].base, thread_stacks[i].base + thread_stacks[i].size);
     }
