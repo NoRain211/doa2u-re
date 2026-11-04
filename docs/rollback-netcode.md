@@ -246,8 +246,7 @@ bursts on a local network. The log names both players from the `Name=`
 line of each profile's `SaveMeta.xbx`.
 
 Each runner also checks both profile names against a list of names that
-are not allowed online and refuses the session on a match, or on any
-letter outside ASCII, which could spell a listed name with look-alikes.
+are not allowed online and refuses the session on a match.
 
 Before it waits, the host asks the router to forward its UDP port with UPnP
 (miniupnpc 2.3.3), and removes the forward when the runner exits. It sends
