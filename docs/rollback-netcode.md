@@ -289,8 +289,8 @@ Limits of the checks:
 - Only guest RAM is hashed; the host modules' state (D3D8, DirectSound,
   fibers, CPU) is not, and a difference only in the ignored ranges goes
   unseen.
-- A desync is found at the next check frame plus about a round trip, up to
-  half a second after it began.
+- A desync is found at the next check frame plus about a round trip: up to
+  half a second plus a round trip after it began.
 
 ## Lobby
 
