@@ -9,9 +9,6 @@ extern "C" {
 #endif
 
 void recomp_d3d_vblank_reset(void);
-// The presenter's vblank marks are guest time, so a state rewind restores them.
-void recomp_d3d_vblank_state_save(uint64_t *state);
-void recomp_d3d_vblank_state_restore(const uint64_t *state);
 void recomp_d3d_wait_vblank(void);
 void recomp_d3d_wait_present(void);
 // RECOMP_PERF_COUNTER: tallies a guest BlockUntilVerticalBlank by return address and

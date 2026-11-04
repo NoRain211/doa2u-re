@@ -76,7 +76,7 @@ keeps running.
 ## Status
 
 > [!WARNING]
-> **0.2.0 Alpha is bring-up software.** Story, Watch and the attract demo play
+> **0.1.15 Alpha is bring-up software.** Story, Watch and the attract demo play
 > in development runs on every stage, but many modes and characters have not
 > been tried. A draw the port cannot render yet stops the game with a message
 > in the log.
@@ -95,7 +95,6 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Xbox Live menus | Stop the game; there is no online service |
-| Online Versus | Rollback netplay from the Versus menu; test build |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
@@ -234,9 +233,9 @@ profiles already saved with the unlock keep it.
 To package a release ZIP from a clean checkout:
 
 ```powershell
-python tools/package_test.py 0.2.0-Alpha
-python tools/package_test.py 0.2.0-Alpha --platform macos
-python tools/package_test.py 0.2.0-Alpha --platform linux
+python tools/package_test.py 0.1.15-Alpha
+python tools/package_test.py 0.1.15-Alpha --platform macos
+python tools/package_test.py 0.1.15-Alpha --platform linux
 ```
 
 It zips the files of committed HEAD that building and playing on that platform

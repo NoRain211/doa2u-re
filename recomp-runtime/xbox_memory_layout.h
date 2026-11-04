@@ -22,8 +22,6 @@ extern "C" {
 
 /* Call once before allocating, after validating the image range in 64-bit arithmetic. */
 bool xbox_HeapSetImageEnd(uint32_t image_end);
-/* Forgets the image end and every allocation, for a reboot. */
-void xbox_HeapReset(void);
 uint32_t xbox_HeapAlloc(uint32_t size, uint32_t alignment);
 void xbox_HeapFree(uint32_t guest_address);
 uint32_t xbox_HeapCheckpoint(void);
@@ -33,14 +31,6 @@ typedef struct XboxHeapSnapshot {
     uint32_t available_pages;
 } XboxHeapSnapshot;
 XboxHeapSnapshot xbox_HeapSnapshot(void);
-/* Both allocator cursors, for a frame snapshot. */
-typedef struct XboxHeapState {
-    uint32_t base;
-    uint32_t cursor;
-    uint32_t contiguous_cursor;
-} XboxHeapState;
-void xbox_HeapStateSave(XboxHeapState *state);
-void xbox_HeapStateRestore(const XboxHeapState *state);
 uint32_t xbox_ContiguousAlloc(
     uint32_t size,
     uint32_t lowest_address,

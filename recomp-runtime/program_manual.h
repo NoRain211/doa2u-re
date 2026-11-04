@@ -8,9 +8,6 @@
 
 /* --skip-intro: omit the logo movie's playback wait and end the boot opening movie. */
 extern bool recomp_skip_intro;
-void recomp_program_manual_reset(void);
-/* Netplay: the names shown above each life bar, local_side's in yellow; null or empty draws none. */
-void recomp_program_set_fight_names(const char *side0, const char *side1, uint32_t local_side);
 
 RecompFunction recomp_lookup_manual(uint32_t guest_address);
 

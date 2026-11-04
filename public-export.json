@@ -23,15 +23,10 @@
     "docs/test-release.md",
     "docs/test-release-macos.md",
     "docs/test-release-linux.md",
-    "docs/rollback-netcode.md",
-    "docs/matchmaking.md",
     "private/README.md",
     "recomp-runtime/**",
     "tools/extract_iso.py",
     "tools/test_extract_iso.py",
-    "tools/matchmaker.py",
-    "tools/matchmaker.service",
-    "tools/test_matchmaker.py",
     "tools/public_export.py",
     "tools/xbe_info.py",
     "tools/xboxrecomp",
@@ -80,7 +75,7 @@
     {
       "path": "tools/xboxrecomp",
       "url": "https://github.com/NoRain211/xboxrecomp.git",
-      "commit": "f122d6dc5f98d70737383e6b5363c2a3941a8678"
+      "commit": "653782777dee86b70030622a64efb53d6d06cc0b"
     }
   ],
   "forbidden_extensions": [
@@ -106,10 +101,6 @@
     ".jsonl"
   ],
   "byte_literal_exceptions": [
-    {
-      "sha256": "3678064993b9a107c5cd38e2cd987029c88ad69b623c1d0e77efb39613a22e4a",
-      "reason": "The default matchmaker's host:port XORed with 0x5a in netplay_menu.cpp; the runner's own server setting, not retail data."
-    },
     {
       "sha256": "de346b217c24b4ae309bf87684207ac728a6e7e9527122403bf34ec9e7595d03",
       "reason": "Class ID of the runtime's own audio capture XAPO in audio_capture_xapo.cpp, copied from committed DOA3 public source."

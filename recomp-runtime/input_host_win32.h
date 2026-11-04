@@ -10,10 +10,6 @@ extern "C" {
 #endif
 
 bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad);
-/* True while a host gamepad holds the port, as of the last sample. For tests,
-   RECOMP_TEST_UNPLUG=<file> stands in a pad on port 0 that is unplugged while
-   the file exists. */
-bool recomp_input_host_pad_connected(uint32_t port);
 
 void recomp_input_host_set_vibration(
     uint32_t port,

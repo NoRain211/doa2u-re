@@ -73,27 +73,6 @@ static bool trace_enabled(void)
     return enabled != 0;
 }
 
-static const char *test_unplug_file(void)
-{
-    static const char *path;
-    static bool read;
-    if (!read) {
-        read = true;
-        path = getenv("RECOMP_TEST_UNPLUG");
-        if (path != NULL && *path == '\0') path = NULL;
-    }
-    return path;
-}
-
-static bool test_unplugged(void)
-{
-    const char *path = test_unplug_file();
-    FILE *file = path != NULL ? fopen(path, "rb") : NULL;
-    if (file == NULL) return false;
-    fclose(file);
-    return true;
-}
-
 /* SDL starts lazily on the guest thread that polls it. There is no SDL event
    loop; SDL_UpdateGamepads pumps it. A new gamepad takes the lowest free port
    and keeps it until it disconnects. */
@@ -255,7 +234,7 @@ bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad)
     }
     memset(gamepad, 0, sizeof *gamepad);
     update_pads();
-    SDL_Gamepad *host = port == 0u && test_unplugged() ? NULL : pads[port];
+    SDL_Gamepad *host = pads[port];
     if (host != NULL) {
         read_pad(host, gamepad);
     }
@@ -287,11 +266,4 @@ bool recomp_input_host_sample(uint32_t port, RecompInputGamepad *gamepad)
     if (pressed('R')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] = 0xffu;
     trace_sample(gamepad, host, true);
     return true;
-}
-
-bool recomp_input_host_pad_connected(uint32_t port)
-{
-    if (port >= RECOMP_INPUT_PORT_COUNT) return false;
-    if (port == 0u && test_unplug_file() != NULL) return !test_unplugged();
-    return pads[port] != NULL;
 }
