@@ -170,8 +170,8 @@ static void speaker_config(void)
     recomp_dsound_require_device(kernel_arg(1u));
     const uint32_t output = kernel_arg(2u);
     if (output == 0u) { kernel_return(2u, RECOMP_DSOUND_POINTER_ERROR); return; }
-    /* Matches the kernel's XC_AUDIO setting: stereo, or surround with AC3. */
-    *recomp_memory_u32(output) = recomp_audio_output_speakers() == 6u ? 0x00010002u : 0u;
+    /* The game's speaker setting, which the output folds to the local speakers. */
+    *recomp_memory_u32(output) = recomp_kernel_audio_flags();
     kernel_return(2u, RECOMP_DSOUND_OK);
 }
 

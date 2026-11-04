@@ -356,9 +356,9 @@ RecompD3dPresenter *active_presenter;
 
 static bool immediate_present;
 
-/* kernel_config.c reports the Xbox widescreen video flag only when
-   RECOMP_D3D_WIDESCREEN=1, so the game renders 4:3 (or anamorphic 16:9) into
-   the guest backbuffer; the window presents that buffer at the same aspect. */
+/* The window's aspect: 16:9 with RECOMP_D3D_WIDESCREEN=1, else 4:3. The game
+   renders 4:3 or anamorphic 16:9 into its backbuffer, normally the same; a
+   netplay session takes the host's, and submitPresent fits it in. */
 uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
 {
     return static_cast<uint32_t>(presenter->widescreen
@@ -755,7 +755,8 @@ HRESULT createGraphics(RecompD3dPresenter *presenter)
         }
         releaseCom(guest_buffer);
     }
-    if (SUCCEEDED(result) && vrrScaled(presenter)) {
+    // Also the source of a picture whose aspect differs from the window's.
+    if (SUCCEEDED(result)) {
         D3D11_TEXTURE2D_DESC desc{};
         desc.Width = mainWidth(presenter);
         desc.Height = mainHeight(presenter);
@@ -3434,11 +3435,12 @@ RecompD3dPresenterError submitPresent(
        unconditionally meant the throttled path was never actually throttled:
        every frame was retired immediately and only the blocking behaviour
        changed. Pace to one refresh unless immediate presenting is asked for. */
-    if (!renderOutput(presenter, presenter->vrr_target_view != nullptr
-            ? presenter->vrr_target_view : presenter->present_target_view)) {
+    // A picture at another aspect than the window's is drawn smaller, with black bars.
+    const bool drawn = vrrScaled(presenter) || present.widescreen != presenter->widescreen;
+    if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
-    if (presenter->vrr_target_view != nullptr) {
+    if (drawn) {
         auto *context = presenter->context;
         D3D11_TEXTURE2D_DESC window{};
         ID3D11Texture2D *back_buffer = nullptr;
@@ -3446,9 +3448,18 @@ RecompD3dPresenterError submitPresent(
         if (back_buffer == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         back_buffer->GetDesc(&window);
         releaseCom(back_buffer);
-        const D3D11_VIEWPORT viewport = {0.0f, 0.0f,
+        D3D11_VIEWPORT viewport = {0.0f, 0.0f,
             static_cast<float>(window.Width), static_cast<float>(window.Height), 0.0f, 1.0f};
+        // The swap chain fills the window, whose aspect is the player's setting.
+        const float shown = present.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+        const float room = presenter->widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+        if (shown < room) viewport.Width *= shown / room;
+        else viewport.Height *= room / shown;
+        viewport.TopLeftX = (window.Width - viewport.Width) / 2.0f;
+        viewport.TopLeftY = (window.Height - viewport.Height) / 2.0f;
+        const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         context->ClearState();
+        context->ClearRenderTargetView(presenter->present_target_view, black);
         context->RSSetViewports(1u, &viewport);
         context->OMSetRenderTargets(1u, &presenter->present_target_view, nullptr);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

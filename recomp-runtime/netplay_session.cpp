@@ -50,7 +50,10 @@ static RecompNetplaySessionHost host;
    lobby session from the first frame instead, and --replay plays one again.
    Everything a session changes lives here, so ending one is one reset. */
 enum class RollbackMode { Off, Loopback, Udp, Replay };
-enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
+enum : std::uint8_t {
+    LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u,
+    LobbyWidescreen = 8u, LobbySurround = 16u, // the game's logic reads both, so both sides take the host's
+};
 struct RollbackRun {
     RollbackMode mode = RollbackMode::Off;
     bool active = false;
@@ -701,6 +704,8 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
     if (delay > RECOMP_ROLLBACK_WINDOW) return false;
     recomp_skip_intro = (rollback.flags & LobbySkipIntro) != 0u;
     rollback.landOnVersus = (rollback.flags & LobbyVersus) != 0u;
+    recomp_kernel_widescreen = (rollback.flags & LobbyWidescreen) != 0u;
+    recomp_kernel_surround = (rollback.flags & LobbySurround) != 0u;
     rollback.lobby = true;
     rollback.player = player;
     rollback.delay = delay;
@@ -761,7 +766,9 @@ static bool joinLobby(bool hosting, std::uint32_t delay, bool (*cancelled)())
     std::memcpy(lobby.digest, host.digest.data(), sizeof lobby.digest);
     lobby.delay = static_cast<std::uint8_t>(delay);
     lobby.flags = static_cast<std::uint8_t>((host.unlockAll ? LobbyUnlockAll : 0u) |
-        (recomp_skip_intro ? LobbySkipIntro : 0u) | (rollback.landOnVersus ? LobbyVersus : 0u));
+        (recomp_skip_intro ? LobbySkipIntro : 0u) | (rollback.landOnVersus ? LobbyVersus : 0u) |
+        ((recomp_kernel_video_flags() & 0x00010000u) != 0u ? LobbyWidescreen : 0u) |
+        (recomp_kernel_audio_flags() != 0u ? LobbySurround : 0u));
     const std::filesystem::path partition1 = host.disc / ".recomp-storage" / "partition1";
     // Recovery first, so an interrupted save is never sent.
     const std::string own =
@@ -902,6 +909,7 @@ static void endSession(const char *reason)
     sayGoodbye();
     const RecompNetplay socket = rollback.net; // back to the room, so the router's path stays
     rollback = RollbackRun{};
+    recomp_kernel_widescreen = recomp_kernel_surround = -1; // the player's own settings offline
     recomp_save_session = nullptr;
     recomp_program_set_fight_names(nullptr, nullptr, 0u);
     backToVersus = true;

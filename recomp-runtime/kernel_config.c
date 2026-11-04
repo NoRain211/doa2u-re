@@ -9,24 +9,30 @@ enum {
     REG_DWORD = 4u,
 };
 
-/* DOA2U selects its native 16:9 camera and UI from XC_VIDEO's widescreen bit.
-   Keep this in step with the presenter's RECOMP_D3D_WIDESCREEN setting. */
-static uint32_t video_flags(void)
-{
-    const char *widescreen = getenv("RECOMP_D3D_WIDESCREEN");
+int recomp_kernel_widescreen = -1;
+int recomp_kernel_surround = -1;
 
-    return widescreen != NULL && strcmp(widescreen, "0") != 0
+static int setting(int chosen, const char *name)
+{
+    const char *value = getenv(name);
+
+    return chosen >= 0 ? chosen : value != NULL && strcmp(value, "0") != 0;
+}
+
+/* DOA2U selects its native 16:9 camera and UI from XC_VIDEO's widescreen bit;
+   the presenter fits the picture to the window either way. */
+uint32_t recomp_kernel_video_flags(void)
+{
+    return setting(recomp_kernel_widescreen, "RECOMP_D3D_WIDESCREEN")
         ? 0x004f0000u : 0x004e0000u;
 }
 
-/* XC_AUDIO: RECOMP_AUDIO_SURROUND selects surround with AC3 (discrete 5.1),
-   the setting that sends DOA2 and DSOUND down their 5.1 paths. Keep this in
-   step with recomp_audio_output_speakers(). */
-static uint32_t audio_flags(void)
+/* XC_AUDIO: surround with AC3 (discrete 5.1) sends DOA2 and DSOUND down
+   their 5.1 paths; the output folds that mix to the local speakers. */
+uint32_t recomp_kernel_audio_flags(void)
 {
-    const char *surround = getenv("RECOMP_AUDIO_SURROUND");
-
-    return surround != NULL && strcmp(surround, "0") != 0 ? 0x00010002u : 0u;
+    return setting(recomp_kernel_surround, "RECOMP_AUDIO_SURROUND")
+        ? 0x00010002u : 0u;
 }
 
 uint32_t recomp_kernel_query_nonvolatile_setting(
@@ -36,8 +42,8 @@ uint32_t recomp_kernel_query_nonvolatile_setting(
     uint32_t value_length,
     uint32_t result_length)
 {
-    uint32_t dword_value = value_index == 0x08u ? video_flags()
-        : value_index == 0x09u ? audio_flags() : 0u;
+    uint32_t dword_value = value_index == 0x08u ? recomp_kernel_video_flags()
+        : value_index == 0x09u ? recomp_kernel_audio_flags() : 0u;
     int dword_backed = value_length == sizeof dword_value;
 
     if (type != 0u) {

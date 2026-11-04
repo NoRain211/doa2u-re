@@ -38,6 +38,7 @@ static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
+static bool content_widescreen; /* the game's D3DPRESENTFLAG_WIDESCREEN at CreateDevice */
 static bool gpu_work_suppressed;
 
 void recomp_d3d8_set_present_suppressed(bool suppressed)
@@ -471,6 +472,7 @@ static void create_device(void)
         }
     }
     device_state = candidate;
+    content_widescreen = (request.presentation.flags & 0x10u) != 0u;
     write_initial_device(&request.presentation);
     if (recomp_d3d_frame_initialize(&frame_state, candidate.width, candidate.height) != RECOMP_D3D_FRAME_OK) {
         recomp_stop(2, "d3d8:frame-initialize");
@@ -659,7 +661,7 @@ static void swap(void)
     swap_caller = *recomp_memory_u32(entry);
     recomp_d3d8_require_device();
     const uint32_t completed_bank = frame_state.swap_counter & 1u;
-    const RecompD3dFrameResult result = recomp_d3d_frame_swap(&frame_state, argument(entry, 0u));
+    RecompD3dFrameResult result = recomp_d3d_frame_swap(&frame_state, argument(entry, 0u));
     if (result.error != RECOMP_D3D_FRAME_OK) recomp_stop(2, "d3d8:swap:%u", (unsigned)result.error);
     for (uint32_t i = 0; i < 2u; ++i) load(&device_state.color[i], color_header(i), sizeof device_state.color[i]);
     if (recomp_d3d_device_swap_buffers(&device_state) != RECOMP_D3D_DEVICE_OK) recomp_stop(2, "d3d8:swap-headers");
@@ -671,6 +673,7 @@ static void swap(void)
         resolve_target(color_header(0u), 0u, &target);
         recomp_d3d_overlay_hook(&target);
     }
+    result.command.data.present.widescreen = content_widescreen;
     if (!present_suppressed) recomp_d3d8_submit(&result.command);
     back_buffer_displayed = true;
     back_buffer_saved = false;
@@ -710,6 +713,7 @@ void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t h
     command = (RecompD3dPresenterCommand){.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     command.data.present.effective_flags = 5u;
     command.data.present.swap_counter = frame_state.swap_counter;
+    command.data.present.widescreen = content_widescreen;
     recomp_d3d8_submit(&command);
     back_buffer_displayed = true;
     back_buffer_saved = false;
@@ -736,6 +740,7 @@ void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *ta
     RecompD3dPresenterCommand command = {.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     command.data.present.effective_flags = 5u;
     command.data.present.swap_counter = frame_state.swap_counter;
+    command.data.present.widescreen = content_widescreen;
     recomp_d3d8_submit(&command);
     back_buffer_displayed = true;
     back_buffer_saved = false;

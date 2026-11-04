@@ -163,6 +163,14 @@ uint32_t recomp_kernel_query_nonvolatile_setting(
     uint32_t value_length,
     uint32_t result_length);
 
+/* The game's XC_VIDEO and XC_AUDIO. Its logic reads both, so a netplay
+   session sets the host's here (1 or 0); -1 follows RECOMP_D3D_WIDESCREEN
+   and RECOMP_AUDIO_SURROUND. */
+extern int recomp_kernel_widescreen;
+extern int recomp_kernel_surround;
+uint32_t recomp_kernel_video_flags(void);
+uint32_t recomp_kernel_audio_flags(void);
+
 /* Plain RTL models used by their import adapters. */
 uint32_t recomp_kernel_ntstatus_to_dos_error(uint32_t status);
 

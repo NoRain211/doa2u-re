@@ -2713,9 +2713,8 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     Uint32 swap_width = 0u, swap_height = 0u;
     if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height) &&
         swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
-        // The window keeps the guest aspect; the rest of the swapchain is black.
-        const float source_aspect = static_cast<float>(presentClientWidth(presenter, mainHeight(presenter))) /
-            mainHeight(presenter);
+        // The picture keeps the game's aspect, which a netplay session may set apart from the window's.
+        const float source_aspect = present.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
         int x = 0, y = 0, width = static_cast<int>(swap_width), height = static_cast<int>(swap_height);
         if (static_cast<float>(swap_width) / swap_height > source_aspect) {
             width = static_cast<int>(swap_height * source_aspect + 0.5f);

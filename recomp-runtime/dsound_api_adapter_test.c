@@ -47,6 +47,7 @@ int recomp_audio_output_ready(void) { return ready; }
 int recomp_audio_output_on_owner_thread(void) { return on_owner; }
 static uint32_t speakers = 2u;
 uint32_t recomp_audio_output_speakers(void) { return speakers; }
+uint32_t recomp_kernel_audio_flags(void) { return speakers == 6u ? 0x00010002u : 0u; }
 void recomp_audio_output_shutdown(void) { ++shutdown_count; ready = 0; }
 void recomp_dsound_buffers_pump(void) { ++pump_count; }
 void recomp_dsound_buffers_reset(void) { ++reset_count; }

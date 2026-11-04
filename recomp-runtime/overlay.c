@@ -2,6 +2,7 @@
 #include "overlay.h"
 #include "d3d8_adapter.h"
 #include "d3d_draw_model.h"
+#include "kernel_abi.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -183,7 +184,6 @@ void recomp_overlay_submit(const RecompD3dPresenterTarget *target, float display
 
 float recomp_overlay_display_aspect(void)
 {
-    const char *wide = getenv("RECOMP_D3D_WIDESCREEN");
-    return wide != NULL && strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
+    return recomp_kernel_video_flags() & 0x00010000u ? 16.0f / 9.0f : 4.0f / 3.0f;
 }
 
