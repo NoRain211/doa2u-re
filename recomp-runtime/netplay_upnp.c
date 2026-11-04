@@ -82,9 +82,10 @@ void recomp_netplay_close_router_port(void)
        it is someone else's: a failed lookup still deletes, so the permanent forward never stays. */
     bool ours;
     int result = look_up_forward(mapped_port, mapped_client, &ours);
-    if (ours || (result != UPNPCOMMAND_SUCCESS && result != 714))
+    const bool deleting = ours || (result != UPNPCOMMAND_SUCCESS && result != 714);
+    if (deleting)
         result = UPNP_DeletePortMapping(urls.controlURL, data.first.servicetype, mapped_port, "UDP", NULL);
-    if (result == UPNPCOMMAND_SUCCESS && !ours)
+    if (result == UPNPCOMMAND_SUCCESS && !deleting)
         fprintf(stderr, "recomp netplay: left the router's forward of UDP port %s in place; it now belongs "
             "to another device or program\n", mapped_port);
     else if (result != UPNPCOMMAND_SUCCESS && result != 714) /* 714: NoSuchEntryInArray, already gone */
