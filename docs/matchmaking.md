@@ -43,17 +43,19 @@ Only in memory, and the log holds only the status counts:
 
 - Each room: a random id, the host's public endpoint as the server sees it,
   the host's LAN endpoint, the build digest, name, input delay, whether
-  its room is empty, its socket's nonce, and when it was first and last
-  heard. A room that is not heard for 20 s is dropped. One address may
-  hold 4 rooms, and the server holds 4,096.
+  its room is empty, its socket's nonce, the host's last round trip to the
+  server, and when it was first and last heard. A room that is not heard
+  for 20 s is dropped. One address may hold 4 rooms, and the server holds
+  4,096.
 - Each pair made by a join: the two public endpoints and nonces, kept 10
   minutes past their last relayed packet.
 
 Cookies are not stored; the server makes them again from a random secret
 it picks at start.
 
-The room list shows ids, names, ages and delays. Endpoints go only to the
-two players of a join.
+The room list shows ids, names, ages, delays and each host's round trip to
+the server, never an endpoint. Endpoints go only to the two players of a
+join, and `--relay-only` sends none.
 
 ## Deploying
 
@@ -63,12 +65,8 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 1. Sign up with a US home region. Always Free compute is created only in
    the home region, so treat the choice as permanent; the region nearest
    the middle of the players keeps relayed matches even.
-2. Upgrade the account to Pay As You Go and set a small budget alert.
-   Oracle may reclaim Always Free VMs that look idle for 7 days (CPU and
-   network, and memory on A1 shapes, under 20%), and the matchmaker always
-   looks idle. Oracle's reclamation notices offered the upgrade as the way
-   out; usage inside the Always Free limits stays free, and the alert
-   catches anything that is not.
+2. Set a small budget alert. Usage inside the Always Free limits stays
+   free, and the alert catches anything that is not.
 3. Create an instance from the Canonical Ubuntu 24.04 image on the
    VM.Standard.E2.1.Micro shape (1/8 OCPU, 1 GB, Always Free, two per
    account), with a public IPv4 address and SSH keys only. It is far more
@@ -114,8 +112,8 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
-| 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint | 2 HOSTED: room id, the host's public endpoint |
-| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay and name per room, oldest first |
+| 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint, round trip in ms (2 bytes, 0 unknown) | 2 HOSTED: room id, the host's public endpoint |
+| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, oldest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second |
@@ -142,6 +140,10 @@ One address holds one claim at a time, and the server takes at most 10
 JOINs from it between its once-a-second sweeps (up to 20 across one), so
 a single address cannot empty the list.
 
+A list entry is 42 bytes, so a list holds 12 rooms. The host's round trip
+is its own HOST to HOSTED time from its last heartbeat; a version 1 runner
+or server gets no answer from a version 2 one.
+
 ## In the game
 
 MATCHMAKER in NETPLAY SETTINGS names the server as host:port, edited like
@@ -167,6 +169,13 @@ session run the same way over either path.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
   check. A joins the chosen room and Y quick-matches.
+- A host times each HOST until its HOSTED and says the latest time in its
+  next HOST. FIND MATCH times each LIST until its ROOMS, ignores a ROOMS it
+  did not ask for, and shows each room's estimated ping as its own round
+  trip plus the host's, such as `~45 MS`. A room whose host has no round
+  trip yet shows none. Nothing is sent to a listed host, so FIND MATCH
+  never learns where one is. Quick match takes the lowest estimate, or the
+  oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. A host that takes a player from that player's own
@@ -186,15 +195,17 @@ joiner's quick match reached it directly, and both played to frame 1,500
 with identical guest RAM. With `--relay-only`, the same run went through
 the relay with identical guest RAM. A test in
 `recomp-runtime/netplay_lobby_test.cpp` stands in for the server and
-checks punching, a relay without endpoints, and the fallback after 5 s.
+checks punching, a relay without endpoints, the fallback after 5 s, and
+the ping estimate from both round trips.
 
 ## Connecting
 
 1. The host opens its room, asks the router over UPnP as now, and says
    HOST from its room socket. The server records the address the packet
    came from, which is the host's public endpoint.
-2. Quick match sends LIST, which returns only rooms on the same build, and
-   joins the oldest. With none open, the player hosts instead.
+2. Quick match sends LIST, which returns only rooms on the same build,
+   and joins the nearest by estimate, or the oldest when none has one.
+   With none open, the player hosts instead.
 3. JOIN gives both players the other's public endpoint, and the LAN one
    when both share a public address, as players behind one router do.
    Under carrier NAT two households can share one, so they still see each
@@ -212,10 +223,9 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 
 - The default server is not running yet; until it is, FIND MATCH says
   THE MATCHMAKER CANNOT BE FOUND and hosts are not listed.
-- Oracle's docs do not say outright that Pay As You Go accounts are spared
-  idle reclamation; watch for its notice email after the first idle week.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
-- Rooms carry no region, so quick match does not prefer nearby hosts.
+- The estimate goes through the server, so two players near each other
+  and far from it see a ping higher than their direct one.
 - IPv4 only.

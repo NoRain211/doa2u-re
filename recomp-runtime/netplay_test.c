@@ -62,6 +62,30 @@ int main(void)
     check("ack beyond our pads rejected", (packet[8] = 9u, !recomp_netplay_decode(&net_b, &b, packet,
         RECOMP_NETPLAY_HEADER_BYTES)));
 
+    // Desync checks: each packet carries the newest; a side compares the frames it also hashed.
+    memset(&net_a, 0, sizeof net_a);
+    memset(&net_b, 0, sizeof net_b);
+    uint64_t mine = 0u;
+    size = recomp_netplay_encode(&net_a, &a, 0, packet);
+    check("no check yet", recomp_netplay_decode(&net_b, &b, packet, size) && net_b.peer_check_frame == 0u &&
+        !recomp_netplay_own_check(&net_b, &mine));
+    for (uint32_t frame = 30u; frame <= 300u; frame += 30u)
+        recomp_netplay_add_check(&net_a, frame, 0x0123456789abcdefull * frame);
+    size = recomp_netplay_encode(&net_a, &a, 0, packet);
+    check("check decode", recomp_netplay_decode(&net_b, &b, packet, size) && net_b.peer_check_frame == 300u &&
+        net_b.peer_check_hash == 0x0123456789abcdefull * 300u);
+    check("peer ahead waits", !recomp_netplay_own_check(&net_b, &mine));
+    recomp_netplay_add_check(&net_b, 270u, 0x0123456789abcdefull * 270u);
+    recomp_netplay_add_check(&net_b, 300u, 0x0123456789abcdefull * 300u);
+    check("same hash", recomp_netplay_own_check(&net_b, &mine) && mine == net_b.peer_check_hash);
+    check("older check ignored", (net_a.check_count = 9u, size = recomp_netplay_encode(&net_a, &a, 0, packet),
+        recomp_netplay_decode(&net_b, &b, packet, size) && net_b.peer_check_frame == 300u));
+    net_b.check_hashes[1] ^= 1u << 20;
+    check("desync found", recomp_netplay_own_check(&net_b, &mine) && mine != net_b.peer_check_hash);
+    // A check that has left the ring compares with nothing.
+    for (uint32_t frame = 330u; frame <= 540u; frame += 30u) recomp_netplay_add_check(&net_b, frame, 0u);
+    check("forgotten check", !recomp_netplay_own_check(&net_b, &mine));
+
     // Frame wait: a side 4 frames ahead waits 2, then backs off.
     memset(&net_a, 0, sizeof net_a);
     for (unsigned i = 0u; i < RECOMP_NETPLAY_SYNC_FRAMES; ++i) net_a.peer_samples[i] = -2;
@@ -138,6 +162,11 @@ int main(void)
     memset(longName, 'a', sizeof longName - 1u);
     longName[sizeof longName - 1u] = 0;
     check("too long to check", recomp_netplay_name_banned(longName));
+
+    static const uint32_t rtts[] = {0u, 20u, 21u, 33u, 34u, 66u, 100u, 264u, 1000u, 0xffffffffu};
+    static const uint32_t delays[] = {0u, 0u, 1u, 1u, 2u, 2u, 4u, 8u, 8u, 8u};
+    for (size_t i = 0u; i < sizeof rtts / sizeof *rtts; ++i)
+        check("suggested delay", recomp_netplay_suggested_delay(rtts[i]) == delays[i]);
 
     if (failures != 0) return 1;
     puts("PASS netplay carries pads, acks, advantage and goodbyes over UDP and screens names");

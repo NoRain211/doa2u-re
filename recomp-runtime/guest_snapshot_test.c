@@ -26,6 +26,16 @@ static void fill(uint8_t *ram, size_t page, uint8_t value)
     memset(ram + page * PAGE, value, PAGE);
 }
 
+/* What a fresh snapshot of ram hashes to, against which the incremental one is checked. */
+static uint64_t fresh_hash(uint8_t *ram, const RecompRamRange *ignored, size_t count)
+{
+    RecompGuestSnapshots t;
+    uint64_t hash = 0u;
+    if (recomp_snapshots_init(&t, ram, RAM_SIZE, false, 1u)) (void)recomp_snapshots_hash(&t, ignored, count, &hash);
+    recomp_snapshots_free(&t);
+    return hash;
+}
+
 #ifdef _WIN32
 /* Host read workers fill guest RAM with ReadFile; write watch must see it. */
 static bool read_file_into(uint8_t *target)
@@ -99,6 +109,29 @@ static int run(uint8_t *ram, bool write_watch, const char *mode)
     if (recomp_snapshots_load(&s, 3u)) return fail(mode, "load past a full ring");
     if (!recomp_snapshots_load(&s, 2u) || memcmp(ram, first, RAM_SIZE) != 0) {
         return fail(mode, "load across the ring");
+    }
+
+    /* The hash follows saves, loads and moved ranges as a fresh pass would. */
+    const RecompRamRange ignored[] = {{3 * PAGE + 4, 3 * PAGE + 8}, {40 * PAGE, 42 * PAGE}};
+    uint64_t hash = 0u, again = 0u;
+    if (!recomp_snapshots_hash(&s, ignored, 2u, &hash) || hash != fresh_hash(ram, ignored, 2u)) {
+        return fail(mode, "first hash");
+    }
+    ram[3 * PAGE + 5] ^= 0x10u;
+    ram[41 * PAGE + 7] ^= 1u;
+    if (!recomp_snapshots_save(&s) || !recomp_snapshots_hash(&s, ignored, 2u, &again) || again != hash) {
+        return fail(mode, "an ignored byte changed the hash");
+    }
+    ram[3 * PAGE + 9] ^= 1u;
+    if (!recomp_snapshots_save(&s) || !recomp_snapshots_hash(&s, ignored, 2u, &again) || again == hash ||
+        again != fresh_hash(ram, ignored, 2u)) {
+        return fail(mode, "hash after a save");
+    }
+    if (!recomp_snapshots_load(&s, 1u) || !recomp_snapshots_hash(&s, ignored, 2u, &again) || again != hash) {
+        return fail(mode, "hash after a load");
+    }
+    if (!recomp_snapshots_hash(&s, NULL, 0u, &again) || again == hash || again != fresh_hash(ram, NULL, 0u)) {
+        return fail(mode, "hash after the ranges moved");
     }
     recomp_snapshots_free(&s);
     return 0;

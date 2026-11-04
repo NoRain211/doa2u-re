@@ -35,9 +35,9 @@ JOINS_PER_SECOND = 10  # per address; a joiner repeats JOIN until it hears
 RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while waiting for the other player
 MAX_RELAY = 1200
 
-HOST_BODY = struct.Struct(">64sBBB32s6s")  # digest, delay, open, name length, name, LAN endpoint
+HOST_BODY = struct.Struct(">64sBBB32s6sH")  # digest, delay, open, name length, name, LAN endpoint, round trip
 JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, LAN endpoint
-ENTRY = struct.Struct(">IHBB32s")  # room id, age in seconds, delay, name length, name
+ENTRY = struct.Struct(">IHBB32sH")  # room id, age in seconds, delay, name length, name, the host's round trip
 LAN_NETWORKS = [ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
 
 
@@ -124,7 +124,7 @@ class Matchmaker:
         return hmac.new(self.secret, endpoint(sender) + struct.pack(">q", epoch), hashlib.sha256).digest()[:TOKEN]
 
     def host(self, body, sender, nonce, now):
-        digest, delay, is_open, length, name, lan = HOST_BODY.unpack(body)
+        digest, delay, is_open, length, name, lan, rtt = HOST_BODY.unpack(body)
         if length > NAME:
             return []
         room = self.rooms.get(sender)
@@ -138,6 +138,7 @@ class Matchmaker:
             room = self.rooms[sender] = self.by_id[room_id] = Room(room_id, sender, now)
         room.digest, room.delay, room.open = digest, delay, is_open != 0
         room.name, room.lan, room.nonce, room.seen = name[:length], lan_endpoint(lan), nonce, now
+        room.rtt = rtt  # the host's own HOST to HOSTED in ms, 0 unknown; joiners add theirs for an estimate
         return [(header(HOSTED) + nonce + struct.pack(">I", room.id) + endpoint(sender), sender)]
 
     def list(self, digest, sender, nonce, now):
@@ -147,7 +148,8 @@ class Matchmaker:
         rooms = rooms[:(LIST_BYTES - 7 - TOKEN) // ENTRY.size]
         answer = header(ROOMS) + nonce + bytes((len(rooms),))
         for room in rooms:
-            answer += ENTRY.pack(room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name)
+            answer += ENTRY.pack(room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name,
+                                 room.rtt)
         return [(answer, sender)]
 
     def join(self, body, sender, nonce, now):

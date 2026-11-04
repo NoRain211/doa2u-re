@@ -76,10 +76,58 @@ static void skip_startup_logo(void)
 
 static bool boot_opening_pending = true;
 bool recomp_skip_intro;
+static char fight_names[2][16];
+static uint32_t fight_local_side;
+static bool fight_names_set;
 
 void recomp_program_manual_reset(void)
 {
     boot_opening_pending = true;
+}
+
+void recomp_program_set_fight_names(const char *side0, const char *side1, uint32_t local_side)
+{
+    const char *names[2] = {side0, side1};
+    fight_names_set = false;
+    for (unsigned side = 0u; side < 2u; ++side) {
+        unsigned length = 0u;
+        for (const char *c = names[side]; c != NULL && *c != '\0' && length + 1u < sizeof fight_names[side]; ++c)
+            fight_names[side][length++] = *c >= 0x20 && *c < 0x7f ? *c : '?';
+        fight_names[side][length] = '\0';
+        fight_names_set |= length != 0u;
+    }
+    fight_local_side = local_side;
+}
+
+static void draw_fight_name(void)
+{
+    /* 0x12b460(side, slot) draws a side's profile name above its life bar; the
+       fight HUD (0xb36a0) calls it with slot 0 when not online. cdecl, ret 0,
+       AL 1 when drawn. Netplay sides load no profile, so draw each player's
+       name where and how the Xbox Live HUD draws gamertags: at (177, 40),
+       the local player's in yellow. */
+    const uint32_t side = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
+    uint32_t drawn = 0u;
+    if (side < 2u && fight_names[side][0] != '\0') {
+        const uint32_t saved_esp = recomp_runtime.registers.esp;
+        recomp_runtime.registers.esp -= 2u * sizeof fight_names[side]; /* the wide name, below the caller */
+        const uint32_t name = recomp_runtime.registers.esp;
+        for (unsigned i = 0u; i < sizeof fight_names[side]; ++i) {
+            uint8_t *c = recomp_memory(name + 2u * i, 2u);
+            c[0] = (uint8_t)fight_names[side][i];
+            c[1] = 0u;
+        }
+        kernel_call_guest(0x0006baa0u, NULL, 0u); /* ui_draw_state_reset */
+        *recomp_memory_u32(0x008a0980u) = 0x01200000u; /* text origin (0, 0x120), as the original */
+        kernel_call_guest(0x00099ec0u, NULL, 0u);
+        const uint32_t args[10] = {name, 0u, 177u, 40u, 4u, 0x3f800000u,
+            side == fight_local_side ? 0xffffff00u : 0xffffffffu, 0x3f800000u, side == 0u ? 0x01u : 0x21u, 0xc0u};
+        kernel_call_guest(0x0009f1f0u, args, 10u);
+        recomp_runtime.registers.esp = saved_esp;
+        drawn = 1u;
+    }
+    recomp_runtime.registers.eax = drawn;
+    recomp_runtime.registers.esp += 4u;
 }
 
 static void movie_scene_tick(void)
@@ -125,6 +173,7 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (guest_address == 0x000d92c0u) return skip_startup_legal;
     if (recomp_skip_intro && guest_address == 0x000d9300u) return skip_startup_logo;
     if (recomp_skip_intro && guest_address == 0x00069180u) return movie_scene_tick;
+    if (fight_names_set && guest_address == 0x0012b460u) return draw_fight_name;
     if (guest_address == 0x002bab9du) return launch_new_image;
     if (guest_address == 0x00336dfeu) return crt_fmod_intrinsic;
     if (guest_address == 0x002bd531u) return host_kernel_init_segment;

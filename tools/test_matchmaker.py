@@ -19,8 +19,8 @@ def nonce(sender):
     return mm.endpoint(sender) + b"\0\0"
 
 
-def hosting(name=b"KASUMI", is_open=1, build=BUILD, lan=LAN):
-    return mm.header(mm.HOST) + NO_TOKENS + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, lan)
+def hosting(name=b"KASUMI", is_open=1, build=BUILD, lan=LAN, rtt=0):
+    return mm.header(mm.HOST) + NO_TOKENS + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, lan, rtt)
 
 
 def listing(build=BUILD, size=mm.LIST_BYTES):
@@ -41,6 +41,7 @@ def relayed(to, game=b"pads"):
 
 def rooms(answer):
     count = answer[6 + mm.TOKEN]
+    assert len(answer) == 7 + mm.TOKEN + count * mm.ENTRY.size
     return [mm.ENTRY.unpack_from(answer, 7 + mm.TOKEN + i * mm.ENTRY.size) for i in range(count)]
 
 
@@ -84,6 +85,22 @@ class MatchmakerTest(unittest.TestCase):
         self.assertEqual([(entry[0], entry[1], entry[4][:entry[3]]) for entry in listed],
                          [(first, 3, b"KASUMI"), (first + 1, 2, b"HAYATE")])
         self.assertEqual(self.send(listing(size=100), JOINER_AT, 3.0), [])
+
+    def test_a_list_carries_each_hosts_round_trip_and_never_its_address(self):
+        first, _ = self.host(now=0.0, rtt=45)
+        self.host(now=1.0, sender=("203.0.113.8", 47702), name=b"HAYATE")
+        [(answer, _)] = self.send(listing(), JOINER_AT, 3.0)
+        self.assertEqual([(entry[0], entry[4][:entry[3]], entry[5]) for entry in rooms(answer)],
+                         [(first, b"KASUMI", 45), (first + 1, b"HAYATE", 0)])
+        for host in (HOST_AT[0], "203.0.113.8"):
+            self.assertNotIn(socket.inet_aton(host), answer)
+        self.host(now=5.0, rtt=60)  # the latest heartbeat's round trip
+        self.assertEqual(rooms(self.send(listing(), JOINER_AT, 6.0)[0][0])[0][5], 60)
+
+    def test_a_full_list_stays_within_its_ask(self):
+        for i in range(13):  # one more than a list holds
+            self.host(now=0.0, sender=(f"203.0.113.{i + 1}", 47701))
+        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), (mm.LIST_BYTES - 7 - mm.TOKEN) // mm.ENTRY.size)
 
     def test_join_sends_each_side_the_others_endpoints(self):
         room_id, _ = self.host()

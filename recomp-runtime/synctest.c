@@ -377,6 +377,11 @@ bool recomp_rollback_ring_load(size_t back)
     return true;
 }
 
+bool recomp_rollback_ring_hash(const RecompRamRange *ignored, size_t count, uint64_t *hash)
+{
+    return ring_ram.ram != NULL && recomp_snapshots_hash(&ring_ram, ignored, count, hash);
+}
+
 RecompSyncTestResult recomp_synctest_frame(uint32_t swap_counter)
 {
     read_env();

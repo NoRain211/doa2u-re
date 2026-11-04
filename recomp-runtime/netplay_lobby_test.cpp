@@ -37,6 +37,12 @@ static bool joinerWelcomed()
     return welcomed->delay != 0xffu; // the host's welcome overwrites the joiner's marker
 }
 
+static std::uint64_t blockedPlayer;
+static bool isBlocked(std::uint64_t id)
+{
+    return id == blockedPlayer;
+}
+
 static void check(const char *name, bool passed)
 {
     if (!passed) {
@@ -83,7 +89,7 @@ static void sendFrom(const RecompNetplay &from, std::uint16_t port, const std::v
 // netplay.c's lobby packets: "D2LB", LOBBY_VERSION, kind, then the body.
 static std::vector<std::uint8_t> helloPacket()
 {
-    std::vector<std::uint8_t> hello = {'D', '2', 'L', 'B', 4u, 1u};
+    std::vector<std::uint8_t> hello = {'D', '2', 'L', 'B', 5u, 1u};
     hello.insert(hello.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
     hello.resize(hello.size() + 6u); // delay, flags, no profile
     return hello;
@@ -176,6 +182,95 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
     return met;
+}
+
+// A ROOMS answer, to the socket whose nonce it carries, listing one room named HOST whose host reported
+// a round trip of hostRtt ms.
+static std::vector<std::uint8_t> roomsPacket(const std::uint8_t *nonce, std::uint32_t id, std::uint16_t hostRtt)
+{
+    std::vector<std::uint8_t> packet = {'D', '2', 'M', 'M', 2u, 4u};
+    packet.insert(packet.end(), nonce, nonce + RECOMP_NETPLAY_TOKEN_BYTES);
+    packet.push_back(1u);
+    for (int shift = 24; shift >= 0; shift -= 8) packet.push_back(static_cast<std::uint8_t>(id >> shift));
+    const std::uint8_t rest[] = {0u, 7u, 2u, 4u, 'H', 'O', 'S', 'T'}; // age, delay, name length, name
+    packet.insert(packet.end(), rest, rest + sizeof rest);
+    packet.resize(7u + RECOMP_NETPLAY_TOKEN_BYTES + 40u);
+    packet.push_back(static_cast<std::uint8_t>(hostRtt >> 8));
+    packet.push_back(static_cast<std::uint8_t>(hostRtt));
+    return packet;
+}
+
+// A host times HOST to HOSTED and says it in its next HOST. FIND MATCH estimates a room's ping as
+// its own LIST to ROOMS round trip plus the host's, and ignores a list it did not ask for.
+static void estimatePings()
+{
+    using std::chrono::steady_clock;
+    RecompNetplay server, host, joiner;
+    const bool listening[3] = {recomp_netplay_listen(&server, 47623u), recomp_netplay_listen(&host, 47624u),
+        recomp_netplay_listen(&joiner, 47625u)};
+    check("estimate sockets", listening[0] && listening[1] && listening[2] &&
+        recomp_netplay_match_server(&host, "127.0.0.1", 47623u) &&
+        recomp_netplay_match_server(&joiner, "127.0.0.1", 47623u));
+    char digest[RECOMP_NETPLAY_DIGEST_BYTES];
+    std::memset(digest, 'a', sizeof digest);
+    // The server's next packet, as the server sees it.
+    const auto asked = [&]() {
+        std::uint8_t packet[2048];
+        const auto end = steady_clock::now() + std::chrono::seconds(2);
+        for (int got; steady_clock::now() < end; std::this_thread::sleep_for(std::chrono::milliseconds(5)))
+            if ((got = static_cast<int>(recv(static_cast<RawSocket>(server.socket), reinterpret_cast<char *>(packet),
+                     sizeof packet, 0))) > 0)
+                return std::vector<std::uint8_t>(packet, packet + got);
+        return std::vector<std::uint8_t>();
+    };
+    const auto waitFor = [&](RecompNetplay &net, const bool &done, int milliseconds) {
+        const auto end = steady_clock::now() + std::chrono::milliseconds(milliseconds);
+        while (!done && steady_clock::now() < end) {
+            recomp_netplay_match_poll(&net);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return done;
+    };
+    const auto rtt = [](const std::vector<std::uint8_t> &host) {
+        return host.size() < 2u ? -1 : host[host.size() - 2u] << 8 | host.back();
+    };
+
+    recomp_netplay_match_host(&host, digest, 2u, true, "HOST");
+    check("a first HOST knows no round trip", rtt(asked()) == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::vector<std::uint8_t> hostedPacket = {'D', '2', 'M', 'M', 2u, 2u};
+    hostedPacket.insert(hostedPacket.end(), host.match.nonce, host.match.nonce + RECOMP_NETPLAY_TOKEN_BYTES);
+    const std::uint8_t hostedBody[] = {1u, 2u, 3u, 4u, 127u, 0u, 0u, 1u, 0xbau, 0x18u}; // room id, endpoint
+    hostedPacket.insert(hostedPacket.end(), hostedBody, hostedBody + sizeof hostedBody);
+    sendFrom(server, 47624u, hostedPacket);
+    bool hosted = false;
+    const auto end = steady_clock::now() + std::chrono::seconds(2);
+    while (!(hosted = host.match.room_id == 0x01020304u) && steady_clock::now() < end) {
+        recomp_netplay_match_poll(&host);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check("HOSTED times the HOST", hosted && host.match.host_rtt_ms >= 20u && host.match.host_rtt_ms < 1000u);
+    recomp_netplay_match_host(&host, digest, 2u, true, "HOST");
+    check("the next HOST says it", rtt(asked()) == host.match.host_rtt_ms);
+
+    const RecompNetplayListedRoom &listed = joiner.match.rooms[0];
+    sendFrom(server, 47625u, roomsPacket(joiner.match.nonce, 0x01020304u, 30u));
+    check("an unasked list is ignored", !waitFor(joiner, joiner.match.listed, 300));
+    recomp_netplay_match_list(&joiner, digest);
+    check("LIST is padded", asked().size() == 512u);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    sendFrom(server, 47625u, roomsPacket(joiner.match.nonce, 0x01020304u, 30u));
+    check("list estimates the ping", waitFor(joiner, joiner.match.listed, 2000) && joiner.match.room_count == 1u &&
+        listed.id == 0x01020304u && std::strcmp(listed.name, "HOST") == 0 && listed.pinged &&
+        listed.ping_ms >= 50u && listed.ping_ms < 1030u);
+    joiner.match.listed = false;
+    recomp_netplay_match_list(&joiner, digest);
+    (void)asked();
+    sendFrom(server, 47625u, roomsPacket(joiner.match.nonce, 0x01020304u, 0u));
+    check("an unknown host round trip shows no ping", waitFor(joiner, joiner.match.listed, 2000) && !listed.pinged);
+    recomp_netplay_close(&server);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
 }
 
 int main()
@@ -314,6 +409,8 @@ int main()
     std::memset(otherDigest, 'b', sizeof otherDigest);
     RecompNetplayRoom hostRoom{}, joinerRoom{};
     hostRoom.hosting = true;
+    hostRoom.id = 0x1111222233334444ull;
+    joinerRoom.id = 0x5555666677778888ull;
     check("room opens", recomp_netplay_listen(&host, 47615u) &&
         recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47615u));
     for (int i = 0; i < 100 && !(joinerRoom.start && hostRoom.pinged && joinerRoom.pinged); ++i) {
@@ -326,6 +423,7 @@ int main()
     check("room ping", hostRoom.pinged && joinerRoom.pinged && hostRoom.ping_ms < 1000u &&
         joinerRoom.ping_ms < 1000u);
     check("room same build", hostRoom.joined && joinerRoom.joined && !hostRoom.mismatch && !joinerRoom.mismatch);
+    check("room ids", hostRoom.peer_id == joinerRoom.id && joinerRoom.peer_id == hostRoom.id);
 
     // A chat line arrives once, and one that is not printable ASCII never does.
     recomp_netplay_room_say(&joinerRoom, "gg, one more?");
@@ -350,6 +448,45 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
+    // A host never answers a joiner it blocked, takes the same joiner once unblocked,
+    // and a joiner that blocked the host stops calling it.
+    hostRoom = RecompNetplayRoom{};
+    joinerRoom = RecompNetplayRoom{};
+    hostRoom.hosting = true;
+    hostRoom.id = 1u;
+    joinerRoom.id = 2u;
+    hostRoom.blocked = isBlocked;
+    blockedPlayer = 2u;
+    check("block room opens", recomp_netplay_listen(&host, 47624u) &&
+        recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47624u));
+    for (int i = 0; i < 25; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("host refuses a blocked joiner", hostRoom.refused && !hostRoom.joined && !joinerRoom.joined &&
+        host.peer_port == 0u);
+    blockedPlayer = 0u;
+    for (int i = 0; i < 50 && !(hostRoom.joined && joinerRoom.joined); ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("unblocked joiner gets in", hostRoom.joined && joinerRoom.joined && hostRoom.peer_id == 2u);
+    recomp_netplay_room_drop(&host, &hostRoom);
+    check("host drops the joiner", !hostRoom.joined && host.peer_port == 0u);
+    joinerRoom.blocked = isBlocked;
+    blockedPlayer = 1u;
+    joinerRoom.joined = false;
+    for (int i = 0; i < 50 && !joinerRoom.refused; ++i) {
+        recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+        recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    check("joiner refuses a blocked host", joinerRoom.refused && !joinerRoom.joined && joiner.peer_port == 0u);
+    recomp_netplay_close(&host);
+    recomp_netplay_close(&joiner);
+
     hostRoom = RecompNetplayRoom{};
     joinerRoom = RecompNetplayRoom{};
     hostRoom.hosting = true;
@@ -371,9 +508,9 @@ int main()
         doubtedRoom.hosting = true;
         check("doubted room opens", recomp_netplay_listen(&host, 47643u) &&
             recomp_netplay_open(&forger, 0u, "127.0.0.1", 47643u));
-        std::vector<std::uint8_t> roomPacket = {'D', '2', 'L', 'B', 4u, 5u};
+        std::vector<std::uint8_t> roomPacket = {'D', '2', 'L', 'B', 5u, 5u};
         roomPacket.insert(roomPacket.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
-        roomPacket.resize(159u); // flags, name, clocks with none heard, no chat
+        roomPacket.resize(167u); // flags, name, clocks with none heard, no chat, sender id
         sendFrom(forger, 47643u, roomPacket);
         int answers = 0;
         for (int i = 0; i < 25; ++i) {
@@ -395,7 +532,7 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         check("flood socket", recomp_netplay_open(&flooder, 0u, "127.0.0.1", 47640u));
         const std::vector<std::uint8_t> hello = helloPacket();
-        const std::vector<std::uint8_t> request = {'D', '2', 'L', 'B', 4u, 3u, 0u, 0u, 0u, 0u};
+        const std::vector<std::uint8_t> request = {'D', '2', 'L', 'B', 5u, 3u, 0u, 0u, 0u, 0u};
         int chunks = 0;
         const auto drain = [&] {
             std::uint8_t packet[2048];
@@ -509,6 +646,7 @@ int main()
     check("matched rooms punch through", matchRooms(47621u, 47620u, 4500, relayed) && !relayed);
     check("matched rooms relay without endpoints", matchRooms(0u, 0u, 5000, relayed) && relayed);
     check("matched rooms relay when punching fails", matchRooms(47629u, 47628u, 10000, relayed) && relayed);
+    estimatePings();
 
     if (failures != 0) return 1;
     std::puts("PASS netplay lobby joins one build, swaps profiles, refuses another and runs a room");

@@ -30,7 +30,7 @@ enum {
     MAGIC = 0x42523244u,       /* "D2RB" */
     GOODBYE_MAGIC = 0x59423244u, /* "D2BY", the whole packet */
     LOBBY_MAGIC = 0x424c3244u, /* "D2LB" */
-    LOBBY_VERSION = 4u,
+    LOBBY_VERSION = 5u,
     LOBBY_HELLO = 1u,
     LOBBY_WELCOME = 2u,
     LOBBY_REQUEST = 3u, /* send your chunks from this index; past your last, I hold them all */
@@ -38,7 +38,7 @@ enum {
     LOBBY_ROOM = 5u,    /* a room member's state */
     LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
     ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u + 5u +
-        RECOMP_NETPLAY_CHAT_BYTES,
+        RECOMP_NETPLAY_CHAT_BYTES + 8u,
     ROOM_READY = 1u,
     ROOM_START = 2u,
     ROOM_SILENCE_MS = 3000u,
@@ -91,7 +91,8 @@ static void get_pad(const uint8_t *in, RecompInputGamepad *pad)
 }
 
 /* Layout: magic, sender's next frame, pads it holds from us, its advantage,
-   first pad's frame, pad count, pads. */
+   first pad's frame, pad count, its newest desync check's frame and hash,
+   pads. */
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *s,
     int32_t advantage, uint8_t *packet)
 {
@@ -107,6 +108,11 @@ size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSessi
     put32(packet + 12, (uint32_t)advantage);
     put32(packet + 16, first);
     packet[20] = (uint8_t)count;
+    const uint32_t newest = (net->check_count + RECOMP_NETPLAY_CHECKS - 1u) % RECOMP_NETPLAY_CHECKS;
+    const bool checked = net->check_count != 0u;
+    put32(packet + 21, checked ? net->check_frames[newest] : 0u);
+    put32(packet + 25, checked ? (uint32_t)net->check_hashes[newest] : 0u);
+    put32(packet + 29, checked ? (uint32_t)(net->check_hashes[newest] >> 32) : 0u);
     for (uint32_t i = 0u; i < count; ++i)
         put_pad(packet + RECOMP_NETPLAY_HEADER_BYTES + i * RECOMP_NETPLAY_PAD_BYTES,
             &s->local[(first + i) % RECOMP_ROLLBACK_HISTORY]);
@@ -149,6 +155,11 @@ bool recomp_netplay_decode(RecompNetplay *net, RecompRollbackSession *s,
         net->peer_ack = ack;
     }
     net->peer_seen = true;
+    const uint32_t check_frame = get32(packet + 21);
+    if (check_frame > net->peer_check_frame) {
+        net->peer_check_frame = check_frame;
+        net->peer_check_hash = get32(packet + 25) | (uint64_t)get32(packet + 29) << 32;
+    }
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t frame = first + i;
         if (frame < s->remote_count) continue;
@@ -328,7 +339,7 @@ enum {
     MATCH_BODY = MATCH_HEADER + RECOMP_NETPLAY_TOKEN_BYTES, /* after the nonce */
     MATCH_ASKED = MATCH_BODY + RECOMP_NETPLAY_TOKEN_BYTES,  /* after the cookie */
     MATCH_LIST_BYTES = 512u, /* a list request is padded, so its answer is never larger */
-    MATCH_ENTRY = 40u,
+    MATCH_ENTRY = 42u, /* ends with the host's round trip to the server */
     MATCH_PEER_BYTES = MATCH_BODY + 6u + 6u + 1u + RECOMP_NETPLAY_NAME_BYTES,
     PUNCH_MS = 5000u,
 };
@@ -418,18 +429,31 @@ static void match_answer(RecompNetplay *net, const uint8_t *packet, size_t size)
         const uint32_t id = get32be(packet + MATCH_BODY);
         if (id != m->room_id) fprintf(stderr, "recomp netplay: listed on the matchmaker as room %u\n", id);
         m->room_id = id;
-    } else if (packet[5] == MATCH_ROOMS && size >= MATCH_BODY + 1u && packet[MATCH_BODY] <= RECOMP_NETPLAY_LISTED_ROOMS &&
-        size == MATCH_BODY + 1u + packet[MATCH_BODY] * MATCH_ENTRY) {
-        m->room_count = packet[MATCH_BODY];
+        if (m->host_sent_ms != 0u) {
+            const uint64_t rtt = now_ms() - m->host_sent_ms;
+            m->host_rtt_ms = (uint16_t)(rtt == 0u ? 1u : rtt > 65535u ? 65535u : rtt); /* 0 means unknown */
+            m->host_sent_ms = 0u;
+        }
+    } else if (packet[5] == MATCH_ROOMS && m->list_sent_ms != 0u && size >= MATCH_BODY + 1u &&
+        packet[MATCH_BODY] <= RECOMP_NETPLAY_LISTED_ROOMS) {
+        const uint32_t count = packet[MATCH_BODY];
+        if (size != MATCH_BODY + 1u + count * MATCH_ENTRY) return;
+        const uint64_t rtt = now_ms() - m->list_sent_ms;
+        m->list_sent_ms = 0u;
+        m->room_count = count;
         for (uint32_t i = 0u; i < m->room_count; ++i) {
             const uint8_t *at = packet + MATCH_BODY + 1u + i * MATCH_ENTRY;
             RecompNetplayListedRoom *room = &m->rooms[i];
             const size_t length = at[7] < RECOMP_NETPLAY_NAME_BYTES ? at[7] : RECOMP_NETPLAY_NAME_BYTES;
+            memset(room, 0, sizeof *room);
             room->id = get32be(at);
             room->age_s = (uint32_t)at[4] << 8 | at[5];
             room->delay = at[6];
             memcpy(room->name, at + 8u, length);
             room->name[length] = '\0';
+            const uint32_t host_rtt = (uint32_t)at[MATCH_ENTRY - 2u] << 8 | at[MATCH_ENTRY - 1u];
+            room->pinged = host_rtt != 0u;
+            room->ping_ms = room->pinged ? (uint32_t)rtt + host_rtt : 0u;
         }
         m->listed = true;
     } else if (packet[5] == MATCH_GONE) {
@@ -541,7 +565,7 @@ static uint64_t now_ms(void)
 
 /* Layout: magic, version, kind, digest, flags, name length, name, the
    sender's clock, the last clock it heard and how long ago, for the ping,
-   then a chat line's id, length and text. */
+   a chat line's id, length and text, then the sender's install ID. */
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
     const char *name, bool ready, bool start)
 {
@@ -562,12 +586,23 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             packet[5] != LOBBY_ROOM)
             continue;
         RecompNetplayMatch *m = &net->match;
+        bool candidate = false;
+        for (unsigned i = 0u; i < 2u; ++i)
+            candidate = candidate || (m->punching && m->candidate_port[i] == from.sin_port &&
+                                         m->candidate_address[i] == from.sin_addr.s_addr);
+        const uint8_t *sender = packet + ROOM_BYTES - 8u;
+        if (room->blocked != NULL && room->blocked((uint64_t)get32(sender + 4u) << 32 | get32(sender))) {
+            /* Say nothing back. Relay stays on, so the server's relayed packets end here quietly. */
+            /* Only this room's own peer, a candidate or, for an empty host, the would-be peer. */
+            if (from_peer(net, &from) || candidate || (room->hosting && !room->joined)) room->refused = true;
+            if (from_peer(net, &from) || candidate) {
+                net->peer_port = 0u;
+                m->punching = false;
+            }
+            continue;
+        }
         if (!from_peer(net, &from)) {
             /* A host takes the first player who talks; a joiner either endpoint the matchmaker gave. */
-            bool candidate = false;
-            for (unsigned i = 0u; i < 2u; ++i)
-                candidate = candidate || (m->punching && m->candidate_port[i] == from.sin_port &&
-                                             m->candidate_address[i] == from.sin_addr.s_addr);
             if (room->joined || (!room->hosting && !candidate)) continue;
             net->peer_address = from.sin_addr.s_addr;
             net->peer_port = from.sin_port;
@@ -589,6 +624,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         const size_t length = at[1] < RECOMP_NETPLAY_NAME_BYTES ? at[1] : RECOMP_NETPLAY_NAME_BYTES;
         memcpy(room->name, at + 2u, length);
         room->name[length] = '\0';
+        room->peer_id = (uint64_t)get32(sender + 4u) << 32 | get32(sender);
         at += 2u + RECOMP_NETPLAY_NAME_BYTES;
         room->echo = get32(at);
         room->echo_at_ms = now;
@@ -624,15 +660,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             }
         }
     }
-    if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) {
-        room->joined = room->ready = room->start = room->pinged = room->doubted = false;
-        room->echo = 0u;
-        net->match.busy = false;
-        if (room->hosting) { /* let another player in */
-            net->peer_port = 0u;
-            net->match.relay = false;
-        }
-    }
+    if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) recomp_netplay_room_drop(net, room);
     /* punch_ms can be newer than now when this tick read the match itself. */
     if (net->match.punching && now > net->match.punch_ms + PUNCH_MS) relay_on(net, "no direct path after 5 s");
     if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
@@ -660,6 +688,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         at[4] = (uint8_t)strlen(room->say);
         memcpy(at + 5u, room->say, at[4]);
     }
+    put32(packet + ROOM_BYTES - 8u, (uint32_t)room->id);
+    put32(packet + ROOM_BYTES - 4u, (uint32_t)(room->id >> 32));
     const RecompNetplayMatch *m = &net->match;
     if (!m->punching) {
         send_to(net, net->peer_address, net->peer_port, packet, ROOM_BYTES);
@@ -682,6 +712,17 @@ void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text)
     room->say_id = id == room->say_id ? id + 2u : id;
     room->said_ms = now;
     room->sent_ms = 0u; /* on the next tick */
+}
+
+void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
+{
+    room->joined = room->ready = room->start = room->pinged = room->doubted = false;
+    room->echo = 0u;
+    net->match.busy = false;
+    if (room->hosting) { /* let another player in */
+        net->peer_port = 0u;
+        net->match.relay = false;
+    }
 }
 
 bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t port)
@@ -730,13 +771,17 @@ static void put_lan(const RecompNetplay *net, uint8_t *out)
 void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t delay, bool open,
     const char *name)
 {
-    uint8_t packet[MATCH_ASKED + RECOMP_NETPLAY_DIGEST_BYTES + 2u + 1u + RECOMP_NETPLAY_NAME_BYTES + 6u];
+    uint8_t packet[MATCH_ASKED + RECOMP_NETPLAY_DIGEST_BYTES + 2u + 1u + RECOMP_NETPLAY_NAME_BYTES + 6u + 2u];
     uint8_t *at = match_header(net, packet, MATCH_HOST);
     memcpy(at, digest, RECOMP_NETPLAY_DIGEST_BYTES);
     at += RECOMP_NETPLAY_DIGEST_BYTES;
     at[0] = delay;
     at[1] = open ? 1u : 0u;
-    put_lan(net, put_name(at + 2u, name));
+    at = put_name(at + 2u, name);
+    put_lan(net, at);
+    at[6] = (uint8_t)(net->match.host_rtt_ms >> 8);
+    at[7] = (uint8_t)net->match.host_rtt_ms;
+    net->match.host_sent_ms = now_ms();
     send_match(net, packet, sizeof packet);
 }
 
@@ -745,6 +790,7 @@ void recomp_netplay_match_list(RecompNetplay *net, const char *digest)
     uint8_t packet[MATCH_LIST_BYTES];
     memset(packet, 0, sizeof packet);
     memcpy(match_header(net, packet, MATCH_LIST), digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    net->match.list_sent_ms = now_ms();
     send_match(net, packet, sizeof packet);
 }
 
@@ -770,8 +816,14 @@ void recomp_netplay_match_poll(RecompNetplay *net)
 {
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
     struct sockaddr_in from;
-    while (receive_from(net, packet, sizeof packet, &from) >= 0) {
-    }
+    while (receive_from(net, packet, sizeof packet, &from) >= 0) {}
+}
+
+uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms)
+{
+    if (rtt_ms <= 20u) return 0u;
+    const uint32_t frames = rtt_ms / 33u + (rtt_ms % 33u != 0u);
+    return frames < RECOMP_ROLLBACK_WINDOW ? frames : RECOMP_ROLLBACK_WINDOW;
 }
 
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
@@ -1000,5 +1052,22 @@ uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage)
     /* The peer needs a round trip to report the new advantage. */
     net->cooldown = RECOMP_NETPLAY_SYNC_FRAMES;
     return wait > (int32_t)RECOMP_ROLLBACK_WINDOW ? RECOMP_ROLLBACK_WINDOW : (uint32_t)wait;
+}
+
+void recomp_netplay_add_check(RecompNetplay *net, uint32_t frame, uint64_t hash)
+{
+    net->check_frames[net->check_count % RECOMP_NETPLAY_CHECKS] = frame;
+    net->check_hashes[net->check_count % RECOMP_NETPLAY_CHECKS] = hash;
+    ++net->check_count;
+}
+
+bool recomp_netplay_own_check(const RecompNetplay *net, uint64_t *mine)
+{
+    for (uint32_t i = 0u; net->peer_check_frame != 0u && i < RECOMP_NETPLAY_CHECKS; ++i) {
+        if (net->check_frames[i] != net->peer_check_frame) continue;
+        *mine = net->check_hashes[i];
+        return true;
+    }
+    return false;
 }
 

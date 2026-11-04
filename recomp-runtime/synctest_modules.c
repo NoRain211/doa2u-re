@@ -27,7 +27,7 @@ static const struct { uint32_t offset, size; } ram_ignore[] = {
     {0xdf3790u, 0x30u}, {0xa94810u, 0x60u},
 };
 
-typedef struct IgnoreRange { size_t start, stop; } IgnoreRange;
+typedef RecompRamRange IgnoreRange;
 
 static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
 {
@@ -42,32 +42,28 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
        scratch. Their heap allocations and TLS blocks are compared. */
     RecompGuestStackRange thread_stacks[32];
     const size_t thread_stack_count = recomp_kernel_thread_stack_ranges(thread_stacks, 32u);
-    for (size_t i = 0u; i < thread_stack_count && count < capacity; ++i)
+    /* These report every stack; one past its array makes the list fail below as a full one. */
+    for (size_t i = 0u; i < thread_stack_count && i < 32u && count < capacity; ++i)
         ranges[count++] = (IgnoreRange){thread_stacks[i].base,
             (size_t)thread_stacks[i].base + thread_stacks[i].size};
     RecompGuestStackRange kernel_stacks[16];
     const size_t kernel_stack_count = recomp_kernel_memory_stack_ranges(kernel_stacks, 16u);
-    if (kernel_stack_count > sizeof kernel_stacks / sizeof *kernel_stacks) {
-        fprintf(stderr, "recomp synctest: kernel stack list full\n");
-        exit(2);
-    }
-    for (size_t i = 0u; i < kernel_stack_count && count < capacity; ++i)
+    for (size_t i = 0u; i < kernel_stack_count && i < 16u && count < capacity; ++i)
         ranges[count++] = (IgnoreRange){kernel_stacks[i].base,
             (size_t)kernel_stacks[i].base + kernel_stacks[i].size};
     if (getenv("RECOMP_SYNCTEST_VERBOSE") != NULL) {
         for (size_t i = 0u; i < stack_count; ++i)
             fprintf(stderr, "recomp synctest: fiber stack +0x%x..+0x%x\n",
                 stacks[i].base, stacks[i].base + stacks[i].size);
-        for (size_t i = 0u; i < thread_stack_count; ++i)
+        for (size_t i = 0u; i < thread_stack_count && i < 32u; ++i)
             fprintf(stderr, "recomp synctest: thread stack +0x%x..+0x%x\n",
                 thread_stacks[i].base, thread_stacks[i].base + thread_stacks[i].size);
     }
     /* The reserved final MiB: startup stack, kernel data and the PCR page. */
     if (count < capacity) ranges[count++] = (IgnoreRange){0x03f00000u, 0x04000000u};
-    if (count == capacity) {
-        fprintf(stderr, "recomp synctest: ignore range list full\n");
-        exit(2);
-    }
+    const size_t wanted = sizeof ram_ignore / sizeof ram_ignore[0] + stack_count + thread_stack_count +
+        kernel_stack_count + 1u;
+    if (count < wanted) return SIZE_MAX;
     // Small list; insertion sort keeps the walk below simple.
     for (size_t i = 1u; i < count; ++i) {
         IgnoreRange value = ranges[i];
@@ -81,11 +77,21 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
     return count;
 }
 
+static size_t synctest_ignore_ranges(IgnoreRange ranges[64])
+{
+    const size_t count = build_ignore_ranges(ranges, 64u);
+    if (count == SIZE_MAX) {
+        fprintf(stderr, "recomp synctest: ignore range list full\n");
+        exit(2);
+    }
+    return count;
+}
+
 static bool ram_equal(const void *left, const void *right, size_t size)
 {
     const uint8_t *a = left, *b = right;
     IgnoreRange ranges[64];
-    const size_t range_count = build_ignore_ranges(ranges, 64u);
+    const size_t range_count = synctest_ignore_ranges(ranges);
     size_t at = 0u;
     for (size_t range = 0u; range <= range_count && at < size; ++range) {
         size_t end = range < range_count && ranges[range].start < size ? ranges[range].start : size;
@@ -104,12 +110,17 @@ static bool ram_equal(const void *left, const void *right, size_t size)
 void recomp_synctest_mask_ignored(uint8_t *ram, size_t size)
 {
     IgnoreRange ranges[64];
-    const size_t range_count = build_ignore_ranges(ranges, 64u);
+    const size_t range_count = synctest_ignore_ranges(ranges);
     for (size_t i = 0u; i < range_count; ++i) {
         if (ranges[i].start >= size) continue;
         const size_t stop = ranges[i].stop < size ? ranges[i].stop : size;
         memset(ram + ranges[i].start, 0, stop - ranges[i].start);
     }
+}
+
+size_t recomp_synctest_ignored_ranges(RecompRamRange *ranges, size_t capacity)
+{
+    return build_ignore_ranges(ranges, capacity);
 }
 
 /* Guest time plus the presenter marks derived from it; both rewind together

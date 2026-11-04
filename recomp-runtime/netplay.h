@@ -16,11 +16,14 @@ extern "C" {
    and there is no resend. */
 enum {
     RECOMP_NETPLAY_PAD_BYTES = 18u,
-    RECOMP_NETPLAY_HEADER_BYTES = 21u,
+    RECOMP_NETPLAY_HEADER_BYTES = 33u,
     RECOMP_NETPLAY_MAX_PADS = RECOMP_ROLLBACK_HISTORY,
+    /* At most the 1,200 bytes the matchmaker relays (tools/matchmaker.py). */
     RECOMP_NETPLAY_MAX_PACKET =
         RECOMP_NETPLAY_HEADER_BYTES + RECOMP_NETPLAY_MAX_PADS * RECOMP_NETPLAY_PAD_BYTES,
     RECOMP_NETPLAY_SYNC_FRAMES = 32u,
+    /* Desync checks a side keeps to compare with the other's newest. */
+    RECOMP_NETPLAY_CHECKS = 8u,
     RECOMP_NETPLAY_DIGEST_BYTES = 64u,
     /* The largest profile a host sends; it arrives in 1 KiB chunks. */
     RECOMP_NETPLAY_MAX_PROFILE = 1024u * 1024u,
@@ -64,6 +67,11 @@ typedef struct RecompNetplayListedRoom {
     uint32_t age_s;
     uint8_t delay;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    /* An estimate: this socket's LIST to ROOMS round trip plus the host's
+       HOST to HOSTED, which the list carries. Not pinged when the host's is
+       unknown; the list never says where a host is. */
+    uint32_t ping_ms;
+    bool pinged;
 } RecompNetplayListedRoom;
 
 /* What a socket heard from the matchmaker (tools/matchmaker.py), which the
@@ -72,6 +80,8 @@ typedef struct RecompNetplayMatch {
     uint32_t server_address; /* network order; port 0 means none */
     uint16_t server_port;
     uint32_t room_id; /* this host's listing, once the server answered */
+    uint64_t host_sent_ms, list_sent_ms; /* when the last HOST or LIST went out; 0 once answered */
+    uint16_t host_rtt_ms; /* HOST to HOSTED, said in the next HOST; 0 unknown */
     RecompNetplayListedRoom rooms[RECOMP_NETPLAY_LISTED_ROOMS];
     uint32_t room_count;
     bool listed;  /* a list arrived; the caller clears it */
@@ -116,6 +126,13 @@ typedef struct RecompNetplay {
     uint32_t rtt_ms; /* smoothed over the last few samples */
     bool rtt_known;
     bool peer_left; /* the other runner said goodbye */
+    /* Desync checks: hashes of guest RAM at frames both sides' pads are
+       known for. Each packet carries this side's newest; frame 0 is none. */
+    uint32_t check_frames[RECOMP_NETPLAY_CHECKS];
+    uint64_t check_hashes[RECOMP_NETPLAY_CHECKS];
+    uint32_t check_count;
+    uint32_t peer_check_frame;
+    uint64_t peer_check_hash;
     RecompNetplayMatch match;
 } RecompNetplay;
 
@@ -131,6 +148,13 @@ bool recomp_netplay_listen(RecompNetplay *net, uint16_t port);
    times a second; the host also says when to start. */
 typedef struct RecompNetplayRoom {
     bool hosting;  /* set before the first tick; a host takes the first player who talks */
+    uint64_t id;   /* this install's player ID, set before the first tick */
+    /* Set before the first tick, or null: true for a player ID this player
+       blocked. Their messages are dropped; when the peer, a punch candidate
+       or an empty host's first caller is blocked, refused is set, and a call
+       or punch to them stops. */
+    bool (*blocked)(uint64_t id);
+    bool refused;  /* this room's peer is blocked; the caller clears it */
     bool joined;   /* the other player spoke in the last 3 s */
     bool mismatch; /* the other player runs another build */
     bool ready;
@@ -138,6 +162,7 @@ typedef struct RecompNetplayRoom {
     bool pinged;
     uint32_t ping_ms;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
+    uint64_t peer_id; /* the other player's install ID */
     /* The other player's newest chat line, already checked; heard_new is set
        when one arrives, for the caller to clear. */
     char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
@@ -165,6 +190,9 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    side takes at most one line a second and drops a line that is not
    printable ASCII or that recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
+/* Forgets the other player as if they went quiet; a host stops answering
+   them and lets another player in. */
+void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room);
 
 /* Matchmaking, all from the room's own socket so the server sees the
    endpoint the room uses. False when host does not resolve. */
@@ -178,6 +206,9 @@ void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char 
 void recomp_netplay_match_leave(RecompNetplay *net);
 /* Drains the socket outside a room, keeping only the matchmaker's answers. */
 void recomp_netplay_match_poll(RecompNetplay *net);
+/* The input delay to suggest for a round trip: none up to 20 ms, then a
+   frame per 33 ms rounded up, at most RECOMP_ROLLBACK_WINDOW. */
+uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
    digest and settings. The first joiner with the same digest becomes the
@@ -218,6 +249,11 @@ void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *session);
    two averaged advantages, which cancels the latency both of them include.
    Call once per new frame with the advantage that frame sent. */
 uint32_t recomp_netplay_wait_frames(RecompNetplay *net, int32_t advantage);
+/* Keeps this side's hash of a confirmed frame for its packets to carry. */
+void recomp_netplay_add_check(RecompNetplay *net, uint32_t frame, uint64_t hash);
+/* This side's hash for the frame of the other side's newest check (peer_check_frame);
+   false when this side has not hashed that frame or no longer keeps it. */
+bool recomp_netplay_own_check(const RecompNetplay *net, uint64_t *mine);
 
 size_t recomp_netplay_encode(const RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage, uint8_t *packet);
