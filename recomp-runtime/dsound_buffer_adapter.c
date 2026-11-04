@@ -13,7 +13,15 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <time.h>
+#endif
 
 enum { BUFFER_COUNT = 256, ROOT_SIZE = 0x24, SETTINGS_SIZE = 0xe0, PUBLIC_OFFSET = 0x1c };
 /* DSOUND 5849 full-HRTF tables: response bank, [61][31] map, 45-step center gains. */
@@ -37,15 +45,64 @@ typedef struct Buffer {
 static Buffer buffers[BUFFER_COUNT];
 static void update_3d(Buffer *buffer);
 
-size_t recomp_dsound_buffer_state_size(void) { return sizeof buffers; }
-void recomp_dsound_buffer_state_save(void *state) { memcpy(state, buffers, sizeof buffers); }
-void recomp_dsound_buffer_state_restore(const void *state) { memcpy(buffers, state, sizeof buffers); }
+/* Guards buffers[] and host output calls shared with the output pump thread.
+   Never held across generated code. Synthetic tests are single-threaded and
+   leave stops by longjmp, so their test clock builds have no lock. */
+#ifdef RECOMP_DSOUND_TEST_CLOCK
+static bool output_lock_held(void) { return false; }
+void recomp_dsound_output_lock(void) {}
+void recomp_dsound_output_unlock(void) {}
+#elif defined(_WIN32)
+static SRWLOCK output_lock = SRWLOCK_INIT;
+static _Thread_local bool output_held;
+static bool output_lock_held(void) { return output_held; }
+void recomp_dsound_output_lock(void) { AcquireSRWLockExclusive(&output_lock); output_held = true; }
+void recomp_dsound_output_unlock(void) { output_held = false; ReleaseSRWLockExclusive(&output_lock); }
+#else
+static pthread_mutex_t output_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local bool output_held;
+static bool output_lock_held(void) { return output_held; }
+void recomp_dsound_output_lock(void) { pthread_mutex_lock(&output_lock); output_held = true; }
+void recomp_dsound_output_unlock(void) { output_held = false; pthread_mutex_unlock(&output_lock); }
+#endif
+/* Both are read and written only under the output lock. */
+static bool pump_stopping;
+/* A failure seen by the pump thread, raised on the game thread's next DoWork. */
+static const char *pump_failure;
+/* When the game thread last pumped; looping rings play at most 100 ms past it. */
+static uint64_t game_pump_ms;
 
-static bool output_suppressed;
+/* Rollback copies every buffer, and muting covers a re-simulated frame; both
+   take the output lock so the pump thread never sees half a restore. */
+size_t recomp_dsound_buffer_state_size(void) { return sizeof buffers; }
+void recomp_dsound_buffer_state_save(void *state)
+{
+    recomp_dsound_output_lock();
+    memcpy(state, buffers, sizeof buffers);
+    recomp_dsound_output_unlock();
+}
+void recomp_dsound_buffer_state_restore(const void *state)
+{
+    recomp_dsound_output_lock();
+    memcpy(buffers, state, sizeof buffers);
+    recomp_dsound_output_unlock();
+}
+
+static bool output_suppressed; /* read and written only under the output lock */
+static bool game_thread_pump;  /* read and written only under the output lock */
 
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
 {
+    recomp_dsound_output_lock();
     output_suppressed = suppressed;
+    recomp_dsound_output_unlock();
+}
+
+void recomp_dsound_buffer_set_game_thread_pump(bool only)
+{
+    recomp_dsound_output_lock();
+    game_thread_pump = only;
+    recomp_dsound_output_unlock();
 }
 
 static uint32_t canonical(uint32_t address)
@@ -181,10 +238,12 @@ static void apply_routing(Buffer *buffer)
 
 void recomp_dsound_buffers_refresh_routing(void)
 {
+    recomp_dsound_output_lock();
     for (uint32_t i = 0u; i < BUFFER_COUNT; ++i) if (buffers[i].root) {
         update_3d(&buffers[i]);
         apply_routing(&buffers[i]);
     }
+    recomp_dsound_output_unlock();
 }
 
 static uint32_t read_mix(RecompDsoundMixModel *mix, uint32_t address, bool replace, bool is3d)
@@ -234,21 +293,36 @@ static void reset_output(Buffer *buffer)
     if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
+    /* The backend accepts routing only from its owner thread, so it is set here
+       and on every change, never by the pump thread. */
+    apply_routing(buffer);
 }
 
-static void pump(Buffer *buffer, uint64_t now)
+/* Copies the cursor's span up to now into host output. The pump thread
+   (background) batches >= 10 ms and leaves failures to the game thread. */
+static void pump(Buffer *buffer, uint64_t now, bool background)
 {
-    if (!recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
+    if (!recomp_audio_output_ready()) {
+        if (background) return;
+        recomp_stop(2, "dsound:audio-output-failed");
+    }
+    /* Every game-thread call counts, so a loop started by Play is not capped behind its start. */
+    if (!background) game_pump_ms = now;
     if (!buffer->model.playing || !buffer->pcm) return;
+    /* A stalled game cannot refill a ring; past CRI's ~200 ms lead the ring
+       would replay audio already heard, so a long stall goes quiet instead. */
+    if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING) && now > game_pump_ms + 100u)
+        now = game_pump_ms + 100u;
+    if (background && now < buffer->model.last_ms + 10u) return;
     uint32_t offset = 0u;
     uint32_t bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
     if (!bytes) return;
     int16_t samples[40000];
     uint8_t *pcm = (uint8_t *)samples;
-    if (bytes > sizeof samples) recomp_stop(2, "dsound:buffer-output-size");
+    const char *failure = bytes > sizeof samples ? "dsound:buffer-output-size" : NULL;
     uint32_t end = buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING
         ? buffer->model.loop_end_bytes : buffer->model.size_bytes;
-    for (uint32_t written = 0u; written < bytes;) {
+    for (uint32_t written = 0u; !failure && written < bytes;) {
         uint32_t count = end - offset;
         const uint8_t *source;
         int16_t decoded[XBOX_ADPCM_BLOCK_SAMPLES * 2u];
@@ -258,7 +332,8 @@ static void pump(Buffer *buffer, uint64_t now)
             if (count > block_bytes - within) count = block_bytes - within;
             if (!xbox_adpcm_decode_block(buffer->pcm + offset / block_bytes * buffer->align,
                     buffer->align, buffer->channels, decoded, 128u)) {
-                recomp_stop(2, "dsound:buffer-adpcm-invalid");
+                failure = "dsound:buffer-adpcm-invalid";
+                break;
             }
             source = (const uint8_t *)decoded + within;
         } else source = buffer->pcm + offset;
@@ -268,8 +343,12 @@ static void pump(Buffer *buffer, uint64_t now)
         offset += count;
         if (offset == end) offset = buffer->model.loop_start_bytes;
     }
-    if (!recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
-    apply_routing(buffer);
+    if (failure) {
+        if (!background) recomp_stop(2, "%s", failure);
+        buffer->model.playing = 0u;
+        pump_failure = failure;
+        return;
+    }
     const uint32_t slot = (uint32_t)(buffer - buffers);
     if (!buffer->is3d && !output_suppressed) {
         recomp_audio_output_submit(slot, pcm, bytes, buffer->model.sample_rate, buffer->channels,
@@ -287,7 +366,7 @@ static void pump(Buffer *buffer, uint64_t now)
             RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
         done += piece;
     }
-    if (!recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
+    if (!background && !recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
 }
 
 /* DSOUND 5849 CDirectSound3DCalculator (0x365553, 0x364236) with the full-HRTF
@@ -300,7 +379,7 @@ static void update_3d(Buffer *buffer)
     static const float *front_table, *center_table;
     float listener[6], d[3], n[3] = {0.0f, 0.0f, 0.0f}, u = 0.0f, azimuth, elevation;
     if (!buffer->is3d) return;
-    pump(buffer, now_ms());
+    pump(buffer, now_ms(), false);
     recomp_dsound_listener_vectors(listener);
     for (int i = 0; i < 3; ++i) d[i] = buffer->position[i] - listener[i];
     const float distance = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
@@ -346,10 +425,64 @@ static void update_3d(Buffer *buffer)
 
 void recomp_dsound_buffers_pump(void)
 {
-    /* shortcut: API/DoWork pumping drops spans after >100 ms stalls; add an
-       independent producer when continuous playback across stalls is required. */
+    recomp_dsound_output_lock();
+    if (pump_failure) recomp_stop(2, "%s", pump_failure);
     uint64_t now = now_ms();
-    for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now);
+    for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, false);
+    recomp_dsound_output_unlock();
+}
+
+#ifndef RECOMP_DSOUND_TEST_CLOCK
+/* Returns false once reset has stopped the pump. */
+static bool pump_pass(void)
+{
+    recomp_dsound_output_lock();
+    const bool running = !pump_stopping;
+    if (running && !game_thread_pump) {
+        const uint64_t now = now_ms();
+        for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
+    }
+    recomp_dsound_output_unlock();
+    return running;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI pump_thread(LPVOID unused)
+{
+    (void)unused;
+    do Sleep(5u); while (pump_pass());
+    return 0u;
+}
+#else
+static void *pump_thread(void *unused)
+{
+    (void)unused;
+    const struct timespec period = {0, 5000000};
+    do nanosleep(&period, NULL); while (pump_pass());
+    return NULL;
+}
+#endif
+#endif
+
+/* Feeds host output while the game thread is busy, as the APU plays guest
+   buffers on its own; a frame hitch then delays only the guest's refills.
+   Synthetic tests keep pumping on their test clock. */
+static void start_pump(void)
+{
+#ifndef RECOMP_DSOUND_TEST_CLOCK
+    static bool pump_started; /* a failed start retries at the next buffer */
+    if (pump_started || !recomp_audio_output_enabled()) return;
+#ifdef _WIN32
+    HANDLE thread = CreateThread(NULL, 0u, pump_thread, NULL, 0u, NULL);
+    pump_started = thread != NULL;
+    if (thread) { SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL); CloseHandle(thread); }
+#else
+    pthread_t thread;
+    pump_started = pthread_create(&thread, NULL, pump_thread, NULL) == 0;
+    if (pump_started) pthread_detach(thread);
+#endif
+    if (!pump_started) fprintf(stderr, "recomp dsound: output pump thread failed to start\n");
+#endif
 }
 
 static void dispose(Buffer *buffer)
@@ -363,23 +496,32 @@ static void dispose(Buffer *buffer)
 
 void recomp_dsound_buffers_reset(void)
 {
+    /* A stop raised under the lock exits through here; the process ends anyway. */
+    if (output_lock_held()) { pump_stopping = true; return; }
+    recomp_dsound_output_lock();
+    pump_stopping = true;
     for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) {
         dispose(&buffers[i]);
         recomp_dsound_device_release_owner();
     }
+    recomp_dsound_output_unlock();
 }
 
 int recomp_dsound_buffer_addref_root(uint32_t root, uint32_t *references)
 {
     uint32_t address = canonical(root);
+    int found = 0;
+    recomp_dsound_output_lock();
     for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root && buffers[i].root == address) {
         Buffer *buffer = buffer_at(address + PUBLIC_OFFSET);
         if (buffer->references == UINT32_MAX) recomp_stop(2, "dsound:buffer-refcount-overflow");
         *references = ++buffer->references;
         write32(address + 4u, *references);
-        return 1;
+        found = 1;
+        break;
     }
-    return 0;
+    recomp_dsound_output_unlock();
+    return found;
 }
 
 static uint32_t set_data(Buffer *buffer, uint32_t data, uint32_t size)
@@ -405,7 +547,7 @@ static uint32_t set_data(Buffer *buffer, uint32_t data, uint32_t size)
         if (!storage) { recomp_kernel_free_pool(owned); return RECOMP_DSOUND_OUT_OF_MEMORY; }
         memset(storage, buffer->format == 1u && buffer->bits == 8u ? 0x80 : 0, size);
     }
-    pump(buffer, now_ms());
+    pump(buffer, now_ms(), false);
     reset_output(buffer);
     if (buffer->owned) recomp_kernel_free_pool(buffer->owned);
     buffer->owned = owned;
@@ -422,7 +564,7 @@ static uint32_t set_data(Buffer *buffer, uint32_t data, uint32_t size)
     return RECOMP_DSOUND_OK;
 }
 
-static void create_buffer(void)
+static void create_buffer_locked(void)
 {
     recomp_dsound_require_device(kernel_arg(1u));
     uint32_t desc_address = kernel_arg(2u), output = kernel_arg(3u);
@@ -490,8 +632,15 @@ static void create_buffer(void)
     buffer->hrtf.rendered = buffer->hrtf.filter;
     result = set_data(buffer, 0u, desc[2]);
     if (result != RECOMP_DSOUND_OK) dispose(buffer);
-    else { recomp_dsound_device_add_owner(); write32(output, buffer->root + PUBLIC_OFFSET); }
+    else { recomp_dsound_device_add_owner(); write32(output, buffer->root + PUBLIC_OFFSET); start_pump(); }
     kernel_return(4u, result);
+}
+
+static void create_buffer(void)
+{
+    recomp_dsound_output_lock();
+    create_buffer_locked();
+    recomp_dsound_output_unlock();
 }
 
 static uint32_t release_buffer(Buffer *buffer)
@@ -506,6 +655,7 @@ enum Operation { RELEASE, DATA, LOCK, UNLOCK, PLAY, STOP, STOP_EX, STATUS, POSIT
     POSITION_3D, VELOCITY_3D, MIN_DISTANCE, MAX_DISTANCE, DISTANCE_FACTOR, ROLLOFF };
 static void buffer_call(enum Operation operation, uint32_t arguments)
 {
+    recomp_dsound_output_lock();
     Buffer *buffer = buffer_at(kernel_arg(1u));
     if (operation != RELEASE && !recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");
     uint32_t value = arguments >= 2u ? kernel_arg(2u) : 0u;
@@ -529,6 +679,7 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
             memcpy(target + i, &bits, sizeof bits);
         }
         update_3d(buffer);
+        apply_routing(buffer);
         break;
     }
     case RELEASE: result = release_buffer(buffer); break;
@@ -538,7 +689,7 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         uint32_t p1 = kernel_arg(4u), n1 = kernel_arg(5u), p2 = kernel_arg(6u), n2 = kernel_arg(7u);
         if (!span(p1, 4u) || !span(n1, 4u) || (p2 && !span(p2, 4u)) ||
             (n2 && !span(n2, 4u)) || (!p2 != !n2)) { result = RECOMP_DSOUND_POINTER_ERROR; break; }
-        pump(buffer, now);
+        pump(buffer, now, false);
         if (flags & 1u) value = source_cursor(buffer);
         if (flags & 2u) bytes = size;
         if (!size || value >= size || !bytes || bytes > size || (flags & ~3u) ||
@@ -560,7 +711,7 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
     case PLAY: {
         uint32_t flags = kernel_arg(4u);
         if (flags & ~3u) recomp_stop(2, "dsound:buffer-play-flags-unbound:%08x", flags);
-        pump(buffer, now);
+        pump(buffer, now, false);
         uint32_t continuing = buffer->model.playing && !(flags & RECOMP_DSOUND_PLAY_FROMSTART);
         result = recomp_dsound_buffer_play(&buffer->model, flags, now);
         if (!result && !continuing) reset_output(buffer);
@@ -570,32 +721,32 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if (value || kernel_arg(3u) || kernel_arg(4u)) recomp_stop(2, "dsound:buffer-stop-ex-unbound");
         /* Zero time/flags have immediate Stop semantics. */
     case STOP:
-        pump(buffer, now); recomp_dsound_buffer_stop(&buffer->model, now);
+        pump(buffer, now, false); recomp_dsound_buffer_stop(&buffer->model, now);
         reset_output(buffer); break;
     case STATUS:
         if (!span(value, 4u)) { result = RECOMP_DSOUND_POINTER_ERROR; break; }
-        pump(buffer, now);
+        pump(buffer, now, false);
         write32(value, buffer->model.playing ? 1u | ((buffer->model.play_flags & 1u) ? 4u : 0u) : 0u); break;
     case POSITION: {
         uint32_t write = kernel_arg(3u);
         if ((!value && !write) || (value && !span(value, 4u)) || (write && !span(write, 4u))) {
             result = RECOMP_DSOUND_POINTER_ERROR; break;
         }
-        pump(buffer, now);
+        pump(buffer, now, false);
         if (value) write32(value, source_cursor(buffer));
         if (write) write32(write, source_cursor(buffer));
         break;
     }
     case SEEK:
         if (value >= buffer->size || value % buffer->align) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
-        pump(buffer, now);
+        pump(buffer, now, false);
         result = recomp_dsound_buffer_set_position(&buffer->model, decoded_bytes(buffer, value), now);
         if (!result) reset_output(buffer); break;
     case LOOP: {
         uint32_t length = kernel_arg(3u);
         if (value >= buffer->size || !length || length > buffer->size - value ||
             value % buffer->align || length % buffer->align) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
-        pump(buffer, now);
+        pump(buffer, now, false);
         buffer->model.loop_start_bytes = decoded_bytes(buffer, value);
         buffer->model.loop_end_bytes = decoded_bytes(buffer, value + length);
         reset_output(buffer); break;
@@ -603,7 +754,7 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
     case FREQUENCY:
         if (!value) value = buffer->rate;
         if (value < 1000u || value > 200000u) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
-        pump(buffer, now); buffer->frequency = value;
+        pump(buffer, now, false); buffer->frequency = value;
         if (buffer->size) result = recomp_dsound_buffer_set_frequency(&buffer->model, pitch_hz(buffer), now); break;
     case VOLUME: case HEADROOM: {
         int32_t input = (int32_t)value;
@@ -613,12 +764,13 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if ((operation == VOLUME && (input < -10000 || input > 0)) || volume < INT32_MIN || volume > 0) {
             result = RECOMP_DSOUND_INVALID_PARAM; break;
         }
-        pump(buffer, now); buffer->volume = (int32_t)volume;
+        pump(buffer, now, false); buffer->volume = (int32_t)volume;
         if (operation == HEADROOM) { buffer->headroom = value; write32(buffer->settings + 0x20u, value); }
         write32(buffer->settings + 0x1cu, (uint32_t)buffer->volume); break;
     }
     }
     kernel_return(arguments, result);
+    recomp_dsound_output_unlock();
 }
 
 #define METHOD(name, op, count) static void name(void) { buffer_call(op, count); }
@@ -633,7 +785,9 @@ METHOD(min_distance, MIN_DISTANCE, 3u) METHOD(max_distance, MAX_DISTANCE, 3u)
 METHOD(distance_factor, DISTANCE_FACTOR, 3u) METHOD(rolloff, ROLLOFF, 3u)
 static void private_release(void)
 {
+    recomp_dsound_output_lock();
     kernel_return(1u, release_buffer(buffer_at(kernel_arg(1u) + PUBLIC_OFFSET)));
+    recomp_dsound_output_unlock();
 }
 static void unbound_stream(void) { recomp_stop(2, "dsound:stream-unbound"); }
 
