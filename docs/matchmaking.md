@@ -78,6 +78,8 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
        sudo install -D -m 0644 matchmaker.py /opt/doa2u-matchmaker/matchmaker.py
        sudo install -m 0644 matchmaker.service /etc/systemd/system/doa2u-matchmaker.service
        sudo iptables -I INPUT 1 -p udp --dport 47700 -j ACCEPT
+       sudo apt-get update
+       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
        sudo netfilter-persistent save
        sudo systemctl daemon-reload
        sudo systemctl enable --now doa2u-matchmaker
