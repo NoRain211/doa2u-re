@@ -35,7 +35,7 @@ unsigned long long host_thread_id(void)
 #ifdef _WIN32
     return static_cast<unsigned long long>(GetCurrentThreadId());
 #else
-    return static_cast<unsigned long long>(pthread_self());
+    return (unsigned long long)(uintptr_t)pthread_self(); // pthread_t is a pointer on macOS
 #endif
 }
 
