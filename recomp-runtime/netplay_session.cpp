@@ -25,6 +25,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
