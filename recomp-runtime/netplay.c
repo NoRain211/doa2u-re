@@ -439,6 +439,7 @@ static void match_answer(RecompNetplay *net, const uint8_t *packet, size_t size)
     } else if (packet[5] == MATCH_GONE) {
         m->gone = true;
     } else if (packet[5] == MATCH_PEER && size == MATCH_PEER_BYTES) {
+        if (m->busy) return;
         uint32_t address[2];
         uint16_t port[2];
         for (unsigned i = 0u; i < 2u; ++i) {
@@ -564,7 +565,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         const uint8_t *sender = packet + ROOM_BYTES - 8u;
         if (room->blocked != NULL && room->blocked((uint64_t)get32(sender + 4u) << 32 | get32(sender))) {
             /* Say nothing back. Relay stays on, so the server's relayed packets end here quietly. */
-            room->refused = true;
+            /* Only this room's own peer, a candidate or, for an empty host, the would-be peer. */
+            if (from_peer(net, &from) || candidate || (room->hosting && !room->joined)) room->refused = true;
             if (from_peer(net, &from) || candidate) {
                 net->peer_port = 0u;
                 m->punching = false;
@@ -587,6 +589,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         }
         const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
         room->joined = true;
+        m->busy = true;
         room->heard_ms = now;
         room->mismatch = memcmp(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0;
         room->ready = (at[0] & ROOM_READY) != 0u;
@@ -679,6 +682,7 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
 {
     room->joined = room->ready = room->start = room->pinged = false;
     room->echo = 0u;
+    net->match.busy = false;
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;
         net->match.relay = false;

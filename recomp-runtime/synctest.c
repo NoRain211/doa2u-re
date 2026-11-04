@@ -105,6 +105,7 @@ bool recomp_synctest_loop(void)
 
 void recomp_synctest_configure(bool on, unsigned frames, bool loop)
 {
+    if (verbose < 0) verbose = getenv("RECOMP_SYNCTEST_VERBOSE") != NULL;
     env_read = true;
     enabled = on;
     interval = frames == 0u ? 1u : frames;
@@ -329,6 +330,7 @@ static RecompGuestSnapshots ring_ram;
 
 bool recomp_rollback_ring_init(size_t frames)
 {
+    if (frames == 0u || frames == SIZE_MAX) return false;
     /* A second session in one process replaces the first one's ring. */
     for (size_t i = 0u; ring != NULL && i < ring_size; ++i) free_snapshot(&ring[i]);
     free(ring);
