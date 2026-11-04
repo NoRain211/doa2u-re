@@ -85,5 +85,5 @@ https://github.com/NoRain211/doa2u-re/issues and say what you did and what
 happened. Copy the "recomp stop" or crash lines from the end of the newest
 log in private\play-logs, the error Launcher.exe shows if there is no log, or
 the error from the newest private\build-logs folder if the build failed.
-Remove your user name and other private paths,
+Logs show your home folder and user name as ~; remove any other private paths,
 and do not upload whole logs or any game files.

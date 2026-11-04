@@ -268,7 +268,8 @@ game C is never patched by hand. Read [bring-up](docs/bring-up.md) and
 When [reporting a bug](https://github.com/NoRain211/doa2u-re/issues), say
 what you did and what happened, and copy the `recomp stop` or crash lines
 from the end of the newest log in `private\play-logs` (or the error from the
-newest `private\build-logs` folder). Remove private paths, and never upload
+newest `private\build-logs` folder). Logs show your home folder and user name
+as `~`; remove any other private paths, and never upload
 game binaries, generated game C, assets, extracted filenames, saves or whole
 logs.
 

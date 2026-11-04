@@ -6,10 +6,19 @@ import unittest
 import json
 import os
 import subprocess
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
+from extract_iso import private_pattern, redact_private
 from package_test import build_launchers
 from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
+
+
+def runner(code, output=()):
+    """A subprocess.Popen double for the runner: prints output, then exits with code."""
+    child = MagicMock(stdout=list(output))
+    child.__enter__.return_value = child
+    child.wait.return_value = code
+    return child
 
 
 class DiscTests(unittest.TestCase):
@@ -80,6 +89,35 @@ $keyDown.Invoke($form, @($down))
             # Entered the page; the repeat left 1080p alone; a fresh press stepped down to 720p.
             self.assertEqual(result.stdout.split(), ["True", "2", "1"])
 
+    @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
+    def test_launcher_logs_show_the_home_folder_and_user_as_tilde(self):
+        script = r'''
+$ErrorActionPreference = 'Stop'
+$type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('Game')
+$profileDir = [Environment]::GetFolderPath('UserProfile')
+$line = "$profileDir\doa2u " + $profileDir.ToUpper().Replace('\', '/') + " D:\$([Environment]::UserName)\x"
+$type.GetMethod('RedactPrivate').Invoke($null, @($line))
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            build_launchers(Path(folder))
+            env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(Path(folder) / "Launcher.exe"))
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
+                                     "-ExecutionPolicy", "Bypass", "-Command", script],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), r"~\doa2u ~ D:\~\x")
+
+    def test_logs_show_the_home_folder_and_user_as_tilde(self):
+        windows = private_pattern("E:\\Profiles\\Ann", "ann.b")
+        for line, expected in ((r"open E:\Profiles\Ann\doa2u\.recomp-storage", r"open ~\doa2u\.recomp-storage"),
+                               ("open e:/profiles/ann/doa2u", "open ~/doa2u"),
+                               (r"D:\ANN.B\games and E:/x/Ann/y", r"D:\~\games and E:/x/~/y"),
+                               (r"E:\Profiles\Anna\x and Annex", r"E:\Profiles\Anna\x and Annex")):
+            self.assertEqual(redact_private(line, windows), expected)
+        posix = private_pattern("/srv/ann/", "ann")
+        self.assertEqual(redact_private("/srv/ann/x /run/media/ann/USB", posix), "~/x /run/media/~/USB")
+        self.assertIsNone(private_pattern("/", ""))
+
     def test_play_keeps_player_saves_and_has_no_deadline_or_script(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -97,8 +135,8 @@ $keyDown.Invoke($form, @($down))
             with patch("run_game.ROOT", root), patch("run_game.selected_xbe", return_value=selected), \
                     patch("run_game.program_manifest", return_value=("hash", 0)), \
                     patch("run_game.sha256", return_value="hash"), \
-                    patch("run_game.subprocess.run") as execute:
-                execute.return_value.returncode = 0
+                    patch("run_game.subprocess.Popen") as execute:
+                execute.return_value = runner(0, [f"open {Path.home() / 'doa2u'}\n"])
                 for height in (480, 720, 1080, 1440, 2160):
                     self.assertEqual(run(None, widescreen=True, msaa=32, smaa=True,
                                          resolution=height), 0)
@@ -106,7 +144,7 @@ $keyDown.Invoke($form, @($down))
                     self.assertEqual([env[name] for name in (
                         "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA")], ["1", "32", "1"])
                     self.assertEqual(float(env["RECOMP_D3D_SCALE"]), height / 480)
-                self.assertIsNone(execute.call_args.kwargs["timeout"])
+                self.assertIsNone(execute.return_value.wait.call_args.kwargs["timeout"])
                 self.assertEqual(execute.call_args.args[0], [
                     str(runner_path(root)),
                     "--xbe", str(disc / selected.name), "--disc-root", str(disc)])
@@ -118,13 +156,14 @@ $keyDown.Invoke($form, @($down))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
-                execute.side_effect = [Mock(returncode=4), Mock(returncode=0)]
+                execute.side_effect = [runner(4), runner(0)]
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_count, 2)
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
             self.assertEqual(len(logs), 9)
             self.assertIn("runner_sha256=hash", logs[0].read_text())
+            self.assertIn(f"open ~{os.sep}doa2u", logs[0].read_text())
 
     def test_isolated_probe_uses_separate_saves_and_scripted_input(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -142,8 +181,8 @@ $keyDown.Invoke($form, @($down))
             with patch("run_game.ROOT", root), patch("run_game.selected_xbe", return_value=selected), \
                     patch("run_game.program_manifest", return_value=("hash", 0)), \
                     patch("run_game.sha256", return_value="hash"), \
-                    patch("run_game.subprocess.run") as execute:
-                execute.return_value.returncode = 0
+                    patch("run_game.subprocess.Popen") as execute:
+                execute.return_value = runner(0)
                 self.assertEqual(run(1, [30, 100], [200], isolated=True,
                                      buttons_polls=[(3800, 8), (4000, 1)],
                                      analog_polls=[(4500, 3), (4600, 1)],
