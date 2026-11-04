@@ -25,10 +25,11 @@ void recomp_native_fiber_release_thread(void);
 
 /* A fiber's host continuation: the CPU context captured just before it
    switched away and the live part of its native stack. Plain data, so a
-   snapshot can rewind it. */
+   snapshot can rewind it. Only Windows captures it; POSIX reports every
+   parked fiber that owns a stack as unavailable. */
 enum { RECOMP_NATIVE_STACK_SAVE_MAX = 0x10000u };
 /* Bit 0: host stack captured. Bit 1: entry has started.
-   Bit 2: the stack did not fit, so the continuation is not in this state. */
+   Bit 2: the continuation is not in this state (stack too deep, or POSIX). */
 enum {
     RECOMP_NATIVE_STATE_STACK = 1u,
     RECOMP_NATIVE_STATE_STARTED = 2u,
