@@ -140,6 +140,8 @@ int main()
         theirs / "save-short", true));
     check("another file in a save", !unpacks(blobOf({{1u, save + "br.dat", data}}), theirs / "save-other", true));
     check("a folder in a save", !unpacks(blobOf({{0u, save + "sub", {}}}), theirs / "save-folder", true));
+    check("joiner title file", !unpacks(blobOf({{1u, "UDATA/54430006/TitleMeta.xbx", beside}}),
+        theirs / "joiner-title-file", true));
     check("meta without its mark", !unpacks(blobOf({{1u, save + "SaveMeta.xbx",
         std::vector<std::uint8_t>(kasumi.begin() + 2, kasumi.end())}}), theirs / "save-mark", true));
     check("meta naming twice", !unpacks(blobOf({{1u, save + "SaveMeta.xbx", meta(u"Name=A\r\nName=B\r\n")}}),
