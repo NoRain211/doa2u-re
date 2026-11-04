@@ -99,6 +99,12 @@ says why. The Xbox Live menus stop the game, as there is no online service.
 Online play is a test: Windows, Linux and macOS players have not played
 each other yet. If FIND MATCH cannot reach the matchmaker, JOIN ONLINE by
 address still works.
+Online matches are unranked: nothing goes to a leaderboard, and each match
+plays on copies of both profiles, so your own profile never changes. If the
+two games stop matching, the match ends with DESYNC DETECTED. Every online
+match saves a replay in private/play-disc/.recomp-storage/replays. Keep it
+when you report a desync or a cheating player; it holds both players'
+profiles, so share it only privately, when a developer asks for it.
 MSAA stops at 8x on Linux; a higher choice falls back to 8x.
 
 This Linux build comes from @tmcleroy's port (pull request #1), which was
