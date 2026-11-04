@@ -122,9 +122,10 @@ same pad however often the game polls. Frames run again are hidden.
 `RECOMP_ROLLBACK_START`, a generated remote player on port 0 changes pads
 nearly every frame, and its pads arrive `RECOMP_ROLLBACK_LAG` frames late
 (default 4, at most 8). At session frame `RECOMP_ROLLBACK_FRAMES` (default
-600) every pad arrives. After the last rollback the runner writes guest RAM,
-with SyncTest's host-scheduled ranges zeroed, to `RECOMP_ROLLBACK_DUMP` and
-exits 0. Lag 0 never predicts, so its dump is the reference.
+600) every pad arrives. After the last rollback the runner exits 0, first
+writing guest RAM, with SyncTest's host-scheduled ranges zeroed, to
+`RECOMP_ROLLBACK_DUMP` when that is set. Lag 0 never predicts, so its dump
+is the reference.
 
 From swap 3000 of the scripted Story fight, lag 4 over 600 frames rolled
 back 594 times (2,376 frames run again) and lag 8 over 900 frames 890 times
