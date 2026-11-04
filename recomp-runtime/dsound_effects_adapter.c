@@ -68,6 +68,14 @@ static uint32_t settings_address(void)
     return *recomp_memory_u32(recomp_dsound_current_device());
 }
 
+static int set_reverb(const RecompAudioReverb *parameters)
+{
+    recomp_dsound_output_lock();
+    const int applied = recomp_audio_output_set_reverb(parameters);
+    recomp_dsound_output_unlock();
+    return applied;
+}
+
 void recomp_dsound_listener_vectors(float vectors[6])
 {
     memcpy(vectors, recomp_memory(settings_address() + 0x38u, 6u * sizeof *vectors), 6u * sizeof *vectors);
@@ -142,7 +150,7 @@ static void download(void)
     }
     RecompAudioReverb listener;
     memcpy(&listener, recomp_memory(settings_address() + 0x84u, sizeof listener), sizeof listener);
-    if (selected[0] != NO_EFFECT && !recomp_audio_output_set_reverb(&listener)) {
+    if (selected[0] != NO_EFFECT && !set_reverb(&listener)) {
         free(next_dirty);
         free_guest(next_payload, next.payload_bytes);
         free_guest(next_descriptor, 8u + next.count * 32u);
@@ -211,7 +219,7 @@ static uint32_t commit_listener(void)
     if (moved) recomp_dsound_buffers_refresh_routing();
     if (!listener_dirty) return RECOMP_DSOUND_OK;
     if (locations[0] == NO_EFFECT) return INVALID_EFFECT;
-    if (!recomp_audio_output_set_reverb(&pending_listener)) {
+    if (!set_reverb(&pending_listener)) {
         return recomp_audio_output_ready() ? RECOMP_DSOUND_INVALID_PARAM : RECOMP_DSOUND_FAIL;
     }
     for (uint32_t i = effects.state_offset; i < effects.payload_bytes; ++i) {

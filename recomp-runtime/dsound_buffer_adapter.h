@@ -10,6 +10,9 @@ extern "C" {
 RecompFunction recomp_dsound_buffer_lookup_manual(uint32_t address);
 void recomp_dsound_buffers_pump(void);
 void recomp_dsound_buffers_refresh_routing(void);
+/* Serializes host output calls with the buffer output pump thread. */
+void recomp_dsound_output_lock(void);
+void recomp_dsound_output_unlock(void);
 /* Reset buffers before releasing/resetting their device owner. */
 void recomp_dsound_buffers_reset(void);
 /* Shared private AddRef dispatch: root, not the public root+0x1C handle. */

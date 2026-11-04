@@ -197,6 +197,8 @@ static void showCard()
     const char *wide = std::getenv("RECOMP_D3D_WIDESCREEN");
     const float aspect = wide != nullptr && std::strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
     std::fprintf(stderr, "recomp runner: staff roll starts; dedication card shown\n");
+    // Guest time stops for the card, so the output pump must not play past it.
+    recomp_dsound_output_lock();
     const auto start = steady_clock::now();
     for (auto next = start;;) {
         const auto elapsed = steady_clock::now() - start;
@@ -209,6 +211,7 @@ static void showCard()
     }
     recomp_xapi_hold_time(static_cast<std::uint64_t>(
         duration_cast<nanoseconds>(steady_clock::now() - start).count()));
+    recomp_dsound_output_unlock();
 }
 
 static void onSwap(std::uint32_t frame)

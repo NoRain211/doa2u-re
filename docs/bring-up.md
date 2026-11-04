@@ -757,9 +757,18 @@ The buffer adapter binds the 5849 descriptor and public handle layout to
 the independent cursor model, PCM/Xbox ADPCM decoding and native output.
 Owned and borrowed sample storage have separate lifetimes. Headroom changes
 adjust effective volume; API argument cleanup is verified per entry.
-Buffers pump synchronously from API polling and DoWork.
-The inherited clock drops output spans after a stall over 100 ms while
-advancing its cursor. Native endpoint consumption has an opt-in host test;
+Buffer calls that read or move playback pump that buffer first, and DoWork
+pumps them all. As the
+APU plays on its own, a host thread (after DOA3's output pump) also pumps every
+buffer about every 5 ms under the same lock, so a frame hitch delays only the
+game's refills. DoWork alone ran 35-150 ms apart in heavy scenes, past the
+50 ms output cushion, and voices dropped out (issue #69). CRI keeps its
+announcer and music rings 200-280 ms ahead, but a stalled game cannot refill
+them, so the pump plays looping buffers at most 100 ms past the game thread's
+last pump; a longer stall goes quiet instead of replaying the ring's last lap
+as an echo. One-shot buffers play on. Only the game thread sets voice
+routing. A pump gap over 100 ms still drops its span while the cursor advances.
+Native endpoint consumption has an opt-in host test;
 synthetic API and backend tests remain suitable for public CI.
 
 `dsound_effects_image.c` decodes the encrypted DSP programs; CPU parameter
