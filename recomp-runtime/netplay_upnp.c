@@ -75,8 +75,8 @@ bool recomp_netplay_open_router_port(uint16_t port)
 void recomp_netplay_close_router_port(void)
 {
     if (mapped_port[0] == '\0') return;
-    /* The forward may have been replaced since we added it. Keep it only when the router
-       says it is someone else's; a failed lookup deletes as before, or a crash-proof forward stays. */
+    /* The forward may have been replaced since we added it. Keep it only when the router says
+       it is someone else's: a failed lookup still deletes, so the permanent forward never stays. */
     bool ours;
     int result = look_up_forward(mapped_port, mapped_client, &ours);
     if (ours || (result != UPNPCOMMAND_SUCCESS && result != 714))
