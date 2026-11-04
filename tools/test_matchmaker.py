@@ -75,9 +75,9 @@ class MatchmakerTest(unittest.TestCase):
                           (first + 1, b"HAYATE", mm.endpoint(("203.0.113.8", 47702)))])
 
     def test_a_full_list_stays_within_its_ask_in_either_form(self):
-        for i in range(12):
+        for i in range(13):  # one more than the plain form holds
             self.host(now=0.0, sender=(f"203.0.113.{i + 1}", 47701))
-        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), 12)
+        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), (mm.LIST_BYTES - 7) // mm.ENTRY.size)
         self.assertEqual(len(rooms(self.send(listing(endpoints=True), JOINER_AT, 1.0)[0][0], mm.ENTRY_AT)),
                          (mm.LIST_BYTES - 7) // mm.ENTRY_AT.size)
 
