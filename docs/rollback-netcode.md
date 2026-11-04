@@ -357,7 +357,7 @@ Once the host's room has a round trip, INPUT DELAY suggests one frame per
 once the other player is in, the host's left/right steps the delay. The
 joiner still takes whatever the host chose.
 
-Once the other player is in, Enter opens a chat line from the keyboard;
+Once the other player is in, Enter or Tab opens a chat line from the keyboard;
 Enter sends it and Esc drops it. While a line is open, the room ignores the
 pad buttons that letters also press. A line holds up to 40 printable ASCII
 characters. Each player can send one line a second, and a line that fails
@@ -411,8 +411,10 @@ and sound output until character select. The battle type menu's fade-out
 select fading in. Game state is unchanged, so both sides still match.
 
 A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
-`rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
-fails to connect) goes back to its room. The runner says goodbye, drops the
+`rollback:save-mispredicted`, `rollback:unrestorable`, a lobby that
+fails to connect, or `netplay:left-versus` when a player backs out of
+Versus to the main menu, which both sides reach in the same lockstep
+frame) goes back to its room. The runner says goodbye, drops the
 session's state, reboots the game offline the same way and reopens the
 room: the host listens again and the joiner calls the host. Each runner
 keeps one UDP socket from its room through the session and back: the room

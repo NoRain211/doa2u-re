@@ -29,6 +29,8 @@ bool recomp_game_round_live(void);
    change is pending (g_frontend_scene_target 0xdf5dda past 0). True on
    arrival, leaving pad alone. */
 bool recomp_game_walk_to_versus(uint32_t frame, bool select, RecompInputGamepad *pad);
+/* The front end (g_game_mode_state 4) on its main menu (frontend scene 0). */
+bool recomp_game_at_main_menu(void);
 
 #ifdef __cplusplus
 }

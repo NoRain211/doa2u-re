@@ -54,8 +54,9 @@ opens a room: a PUBLIC room shows on FIND MATCH, a PRIVATE room only takes
 players who have your address. JOIN ONLINE takes the host's address, such
 as 203.0.113.7:47701. FIND MATCH lists open rooms with their ping; A joins
 one and Y quick-matches the nearest. In the room A readies up; when both
-players are ready the match starts at Versus character select, and leaving
-the match takes both players back to the room. Both players need this same
+players are ready the match starts at Versus character select. Fights
+follow one another there; backing out of Versus to the main menu takes
+both players back to the room. Both players need this same
 release built from the same disc, or the room shows OTHER BUILD. The other
 player sees your game profile name.
 
@@ -67,8 +68,9 @@ NETPLAY SETTINGS sets the input delay, the port, the network display in a
 match, blocked players and the matchmaker. In a room Y mutes the other
 player and X twice blocks them. The menu hides players' IP addresses, so they
 stay off streams; while your room is empty, Y shows your address.
-On Windows, allow the game through the firewall when asked. Enter opens a
-chat line in the room, X copies the host's address, and Ctrl+V pastes one.
+On Windows, allow the game through the firewall when asked. Enter or Tab
+opens a chat line in the room, X copies the host's address, and Ctrl+V
+pastes one.
 
 Known limits: this is bring-up software. Story, Watch and the attract demo
 play in development runs on every stage, but many modes and characters

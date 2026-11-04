@@ -76,8 +76,9 @@ opens a room: a PUBLIC room shows on FIND MATCH, a PRIVATE room only takes
 players who have your address. JOIN ONLINE takes the host's address, such
 as 203.0.113.7:47701. FIND MATCH lists open rooms with their ping; A joins
 one and Y quick-matches the nearest. In the room A readies up; when both
-players are ready the match starts at Versus character select, and leaving
-the match takes both players back to the room. Both players need this same
+players are ready the match starts at Versus character select. Fights
+follow one another there; backing out of Versus to the main menu takes
+both players back to the room. Both players need this same
 release built from the same disc, or the room shows OTHER BUILD. The other
 player sees your game profile name.
 
