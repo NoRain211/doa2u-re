@@ -463,9 +463,11 @@ Before it waits, the host asks the router to forward its UDP port with UPnP
 (miniupnpc 2.3.3), and removes the forward when the runner exits. It sends
 the search from the address its default route uses: on the development
 machine, Tailscale, WSL and Hyper-V adapters took the default multicast
-route, and the router never heard a search sent without it. The log names
-the public address the other player joins, or says the port must be
-forwarded by hand. A router whose own address is private (carrier-grade
+route, and the router never heard a search sent without it. The log says
+the port is forwarded, or that it must be forwarded by hand. It leaves out
+the public address, since players paste this log into public issues; the
+joiner uses the host's public address, as any "what is my IP" page shows
+it, with that port. A router whose own address is private (carrier-grade
 NAT) still forwards, but players outside the provider's network cannot
 reach it, and the log says so. On the development network the router
 (MiniUPnPd, IGD v2) listed the forward during a session and had removed it
