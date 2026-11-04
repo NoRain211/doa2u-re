@@ -305,7 +305,7 @@ static RecompInputGamepad localPad(std::uint32_t frame)
         else (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
         return pad;
     }
-    (void)recomp_input_host_sample(0u, &pad);
+    (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
     return pad;
 }
 
@@ -531,7 +531,7 @@ static bool readRollbackConfig()
     if (std::strcmp(mode, "loopback") == 0) {
         rollback.mode = RollbackMode::Loopback;
         rollback.player = 1u;
-        if (std::getenv("RECOMP_ROLLBACK_FRAMES") == nullptr) rollback.stop = 600u;
+        if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0') rollback.stop = 600u;
         number("RECOMP_ROLLBACK_LAG", rollback.lag);
         return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
     }
@@ -786,8 +786,10 @@ static bool joinLobby(const std::filesystem::path &discPath)
         result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
-        const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
-        if (colon == 0u || port == 0u || port > 65535u) {
+        const char *end = netplayJoin.data() + netplayJoin.size();
+        std::uint32_t port = 0u;
+        if (colon == std::string::npos || colon == 0u ||
+            std::from_chars(netplayJoin.data() + colon + 1u, end, port).ptr != end || port == 0u || port > 65535u) {
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }

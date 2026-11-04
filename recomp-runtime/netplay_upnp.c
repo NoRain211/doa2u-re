@@ -24,10 +24,10 @@ bool recomp_netplay_open_router_port(uint16_t port)
     if (found != UPNP_CONNECTED_IGD && found != UPNP_PRIVATEIP_IGD) {
         if (found != UPNP_NO_IGD) FreeUPNPUrls(&urls);
         fprintf(stderr, "recomp netplay: no router answered UPnP; if the other player cannot join, "
-            "forward UDP port %u to this computer by hand\n", port);
+            "forward UDP port %u to this computer by hand\n", (unsigned)port);
         return false;
     }
-    snprintf(text, sizeof text, "%u", port);
+    snprintf(text, sizeof text, "%u", (unsigned)port);
     /* shortcut: a permanent forward that a crash leaves behind, until the next host run replaces it;
        use a renewed lease if routers fill up with them. */
     const int result = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype, text, text, lan,
@@ -35,16 +35,16 @@ bool recomp_netplay_open_router_port(uint16_t port)
     if (result != UPNPCOMMAND_SUCCESS) {
         FreeUPNPUrls(&urls);
         fprintf(stderr, "recomp netplay: the router refused to forward UDP port %u (%s); "
-            "forward it to this computer by hand\n", port, strupnperror(result));
+            "forward it to this computer by hand\n", (unsigned)port, strupnperror(result));
         return false;
     }
     snprintf(mapped_port, sizeof mapped_port, "%s", text);
     if (found == UPNP_PRIVATEIP_IGD)
         fprintf(stderr, "recomp netplay: the router forwards UDP port %u, but its own address %s is "
-            "private, so players outside your provider's network cannot reach it\n", port, wan);
+            "private, so players outside your provider's network cannot reach it\n", (unsigned)port, wan);
     else
         fprintf(stderr, "recomp netplay: the router forwards UDP port %u; the other player joins %s:%u\n",
-            port, wan, port);
+            (unsigned)port, wan, (unsigned)port);
     return true;
 }
 

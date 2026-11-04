@@ -198,7 +198,7 @@ frame's budget, so both sides fall below 60 Hz together.
 In every pair the two sides' guest RAM matched except for one save file's
 times, which the game lists at boot and the host reports from each play
 folder. Players' profiles and save metadata will differ the same way, so
-the lobby must start both sides from the same profile.
+the lobby must start both sides from the same combined profile and save tree.
 
 A temporary hook slept player 1 for 250 ms at frame 300 on localhost with
 input delay 2. Before the grid, player 0 settled a frame ahead (advantages
@@ -225,11 +225,11 @@ joiner on the second. That avoids all of XOnline.
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the SHA-256 of the joiner's runner executable, and the
-host refuses any other build. That also refuses a Windows and Linux pair,
-whose floating point is unverified. The host answers with its input delay
-(`--netplay-delay`, default 2) and the options that change the simulation
-(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
-messages carry the size of the sender's profile.
+host refuses any other build and keeps waiting. That also refuses a Windows
+and Linux pair, whose floating point is unverified. The host answers with
+its input delay (`--netplay-delay`, default 2) and the options that change
+the simulation (`--no-unlock-all`, `--skip-intro`), which the joiner
+adopts. Both messages carry the size of the sender's profile.
 
 Each side first recovers its own save journal, then packs the profile it
 saved last (`UDATA/<title>/<save>`) into one blob of at most 1 MiB with a
@@ -246,7 +246,8 @@ bursts on a local network. The log names both players from the `Name=`
 line of each profile's `SaveMeta.xbx`.
 
 Each runner also checks both profile names against a list of names that
-are not allowed online and refuses the session on a match.
+are not allowed online and refuses the session on a match, or on any
+letter outside ASCII, which could spell a listed name with look-alikes.
 
 Before it waits, the host asks the router to forward its UDP port with UPnP
 (miniupnpc 2.3.3), and removes the forward when the runner exits. It sends

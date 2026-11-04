@@ -72,7 +72,6 @@ static bool normalize(const char *name, bool leet, char *out, size_t *size)
     for (const unsigned char *c = (const unsigned char *)name; *c != 0u; ++c) {
         if (n == MAX_NAME) return false;
         const char *mapped = leet ? strchr(from, *c) : NULL;
-        // shortcut: non-ASCII letters split words, so look-alike letters pass; map them if they show up.
         out[n++] = *c < 0x80u && isalpha(*c) ? (char)tolower(*c) : mapped != NULL ? to[mapped - from] : ' ';
     }
     *size = n;
@@ -81,6 +80,9 @@ static bool normalize(const char *name, bool leet, char *out, size_t *size)
 
 bool recomp_netplay_name_banned(const char *name)
 {
+    // Look-alike letters from other scripts would pass every check below.
+    for (const unsigned char *c = (const unsigned char *)name; *c != 0u; ++c)
+        if (*c >= 0x80u) return true;
     char code[MAX_NAME + 1u];
     size_t code_size = 0u;
     for (const unsigned char *c = (const unsigned char *)name; *c != 0u && code_size < MAX_NAME; ++c)

@@ -81,14 +81,19 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
-    // A different build is refused on both sides.
+    // A different build is refused, and the host waits on for the right one.
     const RecompNetplayLobby other = lobby('b', 2u, 0u);
     wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47612u, &offered, &none, 5000u); });
     asked = other;
     const RecompNetplayLobbyResult refused =
         recomp_netplay_join(&joiner, "127.0.0.1", 47612u, &asked, &noneJoiner, 5000u);
+    recomp_netplay_close(&joiner);
+    asked = offered;
+    const RecompNetplayLobbyResult retried =
+        recomp_netplay_join(&joiner, "127.0.0.1", 47612u, &asked, &noneJoiner, 5000u);
     wait.join();
-    check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && hosted == RECOMP_NETPLAY_LOBBY_MISMATCH);
+    check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && retried == RECOMP_NETPLAY_LOBBY_OK &&
+        hosted == RECOMP_NETPLAY_LOBBY_OK);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 

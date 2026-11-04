@@ -38,7 +38,7 @@ typedef struct RecompNetplayProfiles {
     const uint8_t *mine;
     uint32_t mine_size;   /* at most RECOMP_NETPLAY_MAX_PROFILE */
     uint8_t *theirs;      /* holds RECOMP_NETPLAY_MAX_PROFILE bytes */
-    uint32_t theirs_size; /* set by a successful lobby */
+    uint32_t theirs_size; /* set by a successful lobby; 0 after a failed one */
 } RecompNetplayProfiles;
 
 typedef enum RecompNetplayLobbyResult {
@@ -70,9 +70,9 @@ typedef struct RecompNetplay {
 bool recomp_netplay_open(RecompNetplay *net, uint16_t local_port,
     const char *peer_host, uint16_t peer_port);
 /* Binds port and waits for a joiner's hello, answering each with the host's
-   digest and settings. The first joiner becomes the peer; one with another
-   digest ends the wait with MISMATCH. Returns once both sides hold both
-   profiles. */
+   digest and settings. The first joiner with the same digest becomes the
+   peer; one with another digest learns it from the answer and is ignored.
+   Returns once both sides hold both profiles. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
     const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms);
 /* Says hello to the host until it answers, copies the host's delay and flags
@@ -90,8 +90,8 @@ bool recomp_netplay_route_address(char *text, size_t size);
 bool recomp_netplay_open_router_port(uint16_t port);
 /* Removes that forward; nothing when none was made. */
 void recomp_netplay_close_router_port(void);
-/* True for a profile name that is not allowed online, or one too long to
-   check. Takes UTF-8. */
+/* True for a profile name that is not allowed online, one with a non-ASCII
+   byte, or one too long to check. */
 bool recomp_netplay_name_banned(const char *name);
 void recomp_netplay_send(RecompNetplay *net, const RecompRollbackSession *session,
     int32_t advantage);

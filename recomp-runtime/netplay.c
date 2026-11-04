@@ -1,5 +1,6 @@
 #include "netplay.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -386,6 +387,7 @@ static bool transfer_tick(RecompNetplay *net, Transfer *t, uint64_t now)
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
     const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
 {
+    profiles->theirs_size = 0u;
     if (!open_socket(net, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
@@ -407,8 +409,11 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
                 }
                 if (theirs > RECOMP_NETPLAY_MAX_PROFILE) continue;
                 send_to(net, from.sin_addr.s_addr, from.sin_port, welcome, welcome_size);
-                if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
-                    return RECOMP_NETPLAY_LOBBY_MISMATCH;
+                // Keep waiting, so a stray hello cannot end the lobby; the welcome tells that joiner.
+                if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0) {
+                    fprintf(stderr, "recomp netplay: refused a player who runs a different build; still waiting\n");
+                    continue;
+                }
                 net->peer_address = from.sin_addr.s_addr;
                 net->peer_port = from.sin_port;
                 transfer_start(&t, theirs);
@@ -418,7 +423,10 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
         }
         const uint64_t now = now_ms();
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
-        if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (now >= deadline) {
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        }
         wait_readable(net, 20u);
     }
 }
@@ -426,6 +434,7 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *host,
     uint16_t port, RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms)
 {
+    profiles->theirs_size = 0u;
     if (!recomp_netplay_open(net, 0u, host, port)) return RECOMP_NETPLAY_LOBBY_SOCKET;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
@@ -458,7 +467,10 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, const char *hos
             next_hello = now + 100u;
         }
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
-        if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (now >= deadline) {
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        }
         wait_readable(net, 20u);
     }
 }
