@@ -33,5 +33,8 @@ enum D3dBackendVisibilityPoll {
    its index and count. Queries resolve in submission order. */
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(
     RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels);
+/* Inline backends only: true when the next swapchain acquire would not wait
+   for the GPU to finish an earlier frame. */
+bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
 
 #endif

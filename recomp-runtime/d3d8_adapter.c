@@ -653,6 +653,12 @@ static void clear(void)
     recomp_runtime.registers.esp = entry + 28u;
 }
 
+static bool present_ready(void *unused)
+{
+    (void)unused;
+    return recomp_d3d_presenter_present_ready(presenter);
+}
+
 static void swap(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -670,6 +676,13 @@ static void swap(void)
         RecompD3dPresenterTarget target;
         resolve_target(color_header(0u), 0u, &target);
         recomp_d3d_overlay_hook(&target);
+    }
+    /* A host wait for the GPU here would stall every guest thread, including
+       the vblank threads that refill CRI's audio rings (issue #69). Under the
+       frame clock the guest wait is skipped: which threads run while the GPU
+       catches up would depend on host timing and desync netplay. */
+    if (!present_suppressed && !recomp_xapi_frame_clock_enabled()) {
+        (void)recomp_kernel_wait_host(present_ready, NULL);
     }
     if (!present_suppressed) recomp_d3d8_submit(&result.command);
     back_buffer_displayed = true;
