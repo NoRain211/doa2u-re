@@ -43,16 +43,16 @@ Only in memory, and the log holds only the status counts:
 
 - Each room: a random id, the host's public endpoint as the server sees it,
   the host's LAN endpoint, the build digest, name, input delay, whether
-  its room is empty, and when it was first and last heard. A room that
+  its room is empty, the host's last round trip to the server, and when it
+  was first and last heard. A room that
   is not heard for 20 s is dropped. One address may hold 4 rooms, and the
   server holds 4,096.
 - Each pair made by a join: the two public endpoints, kept 10 minutes past
   their last relayed packet.
 
-The room list shows ids, names, ages and delays, and to a runner that asks,
-each host's public endpoint so the runner can ping the room; a listed room
-is public. Other endpoints go only to the two players of a join, and
-`--relay-only` sends none.
+The room list shows ids, names, ages, delays and each host's round trip to
+the server, never an endpoint. Endpoints go only to the two players of a
+join, and `--relay-only` sends none.
 
 ## Deploying
 
@@ -99,15 +99,15 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 
 ## Packets
 
-Every packet starts with `D2MM`, version 1 and a kind. Numbers are big
+Every packet starts with `D2MM`, version 2 and a kind. Numbers are big
 endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 32 bytes, zero padded after a length byte. Digests are the runner build's
 64 hex characters.
 
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
-| 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint | 2 HOSTED: room id, the host's public endpoint |
-| 3 LIST | anyone | digest, then 1 to ask for endpoints, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and, when asked, the host's public endpoint per room, oldest first |
+| 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint, round trip in ms (2 bytes, 0 unknown) | 2 HOSTED: room id, the host's public endpoint |
+| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, oldest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same packet to the other player, up to 250 a second |
@@ -121,10 +121,9 @@ One address holds one claim at a time, and the server takes at most 10
 JOINs from it between its once-a-second sweeps (up to 20 across one), so
 a single address cannot empty the list.
 
-A list entry is 40 bytes, or 46 with the endpoint. Runners before the ping
-send 0 after the digest and read 40-byte entries, and current runners read
-either, so old and new runners and servers still list and join each other;
-against an older server the list shows no pings.
+A list entry is 42 bytes, so a list holds 12 rooms. The host's round trip
+is its own HOST to HOSTED time from its last heartbeat; a version 1 runner
+or server gets no answer from a version 2 one.
 
 ## In the game
 
@@ -151,14 +150,13 @@ session run the same way over either path.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
   check. A joins the chosen room and Y quick-matches.
-- After each list, FIND MATCH sends each room's host a 12-byte ping
-  (`D2PI`, the room id and the runner's clock) at its listed endpoint. A
-  host's room answers with the same bytes as `D2PO` only while the server
-  lists it under that id, so a private room never answers, and a session
-  drops pings as it drops any packet from a stranger. The list shows each
-  room's round trip, or `--` until one answers. Quick match waits until
-  every room answered or a second passed, then takes the lowest ping, or
-  the oldest room when none answered.
+- A host times each HOST until its HOSTED and says the latest time in its
+  next HOST. FIND MATCH times each LIST until its ROOMS, ignores a ROOMS it
+  did not ask for, and shows each room's estimated ping as its own round
+  trip plus the host's, such as `~45 MS`. A room whose host has no round
+  trip yet shows none. Nothing is sent to a listed host, so FIND MATCH
+  never learns where one is. Quick match takes the lowest estimate, or the
+  oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. After 5 s without an answer, or with no endpoints,
@@ -173,7 +171,8 @@ joiner's quick match reached it directly, and both played to frame 1,500
 with identical guest RAM. With `--relay-only`, the same run went through
 the relay with identical guest RAM. A test in
 `recomp-runtime/netplay_lobby_test.cpp` stands in for the server and
-checks punching, a relay without endpoints, and the fallback after 5 s.
+checks punching, a relay without endpoints, the fallback after 5 s, and
+the ping estimate from both round trips.
 
 ## Connecting
 
@@ -181,7 +180,7 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
    HOST from its room socket. The server records the address the packet
    came from, which is the host's public endpoint.
 2. Quick match sends LIST, which returns only rooms on the same build,
-   pings them and joins the nearest, or the oldest when none answered.
+   and joins the nearest by estimate, or the oldest when none has one.
    With none open, the player hosts instead.
 3. JOIN gives both players the other's public endpoint, and the LAN one
    when both share a public address, as players behind one router do.
@@ -203,7 +202,6 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
-- A ping reaches a host only when its router lets a stranger's packet in,
-  as a UPnP or hand forward does. Other rooms show `--` and quick match
-  takes them only when no room answered.
+- The estimate goes through the server, so two players near each other
+  and far from it see a ping higher than their direct one.
 - IPv4 only.
