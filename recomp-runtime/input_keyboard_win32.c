@@ -32,6 +32,7 @@ void recomp_input_keyboard_reset(void)
     AcquireSRWLockExclusive(&lock);
     memset(held, 0, sizeof held);
     memset(pending, 0, sizeof pending);
+    text_size = 0u;
     ReleaseSRWLockExclusive(&lock);
 }
 
