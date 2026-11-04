@@ -8,9 +8,11 @@
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
+#include "netplay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "sha.h"
 #include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
@@ -23,6 +25,7 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 }
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -33,11 +36,18 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #include <iterator>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 #include <charconv>
 #ifndef _WIN32
 #include <strings.h>
 #define _stricmp strcasecmp
+#endif
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 static RecompInputPulseSource inputPulses;
@@ -46,32 +56,45 @@ static bool scriptedInputOnly;
 static bool guestRamWriteWatch;
 static std::uint8_t *guestRam;
 
-/* Rollback over a fight (docs/rollback-netcode.md). RECOMP_ROLLBACK=loopback
-   starts a session at swap RECOMP_ROLLBACK_START with a generated remote
-   player on port 0 whose pads arrive RECOMP_ROLLBACK_LAG frames late, so most
-   frames run on a wrong prediction and are rolled back. At session frame
-   RECOMP_ROLLBACK_FRAMES every pad arrives; once the last rollback has run
-   again, guest RAM goes to RECOMP_ROLLBACK_DUMP. Lag 0 never predicts, so
-   its dump is the reference. */
+/* Rollback over a fight (docs/rollback-netcode.md), from swap
+   RECOMP_ROLLBACK_START. RECOMP_ROLLBACK=loopback plays a generated remote
+   player on port 0 whose pads arrive RECOMP_ROLLBACK_LAG frames late.
+   RECOMP_ROLLBACK=udp:<local port>:<peer host>:<peer port> plays a peer runner;
+   RECOMP_ROLLBACK_PLAYER (0 or 1) picks the local port and
+   RECOMP_ROLLBACK_DELAY the input delay, both matching on the two sides. At
+   session frame RECOMP_ROLLBACK_FRAMES every pad is confirmed and guest RAM
+   goes to RECOMP_ROLLBACK_DUMP. --netplay-host and --netplay-join start a
+   lobby session from the first frame instead. */
+enum class RollbackMode { Off, Loopback, Udp };
 struct RollbackRun {
-    bool enabled = false;
+    RollbackMode mode = RollbackMode::Off;
     bool active = false;
-    std::uint32_t start = 0u, stop = 600u, lag = 4u;
+    bool hidden = false;
+    bool lobby = false; // lockstep menus, rollback over live rounds
+    std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
-    std::uint32_t rollbacks = 0u, replayed = 0u;
+    std::uint32_t rollbacks = 0u, replayed = 0u, waited = 0u;
+    std::uint32_t wait = 0u, paced = UINT32_MAX; // frame sync's next wait; last frame paced
+    std::chrono::steady_clock::time_point next_frame{};
+    // Measured once per new frame and repeated while stalled, so a stall's
+    // inflated advantage never reaches the peer's frame sync.
+    std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
     const char *dump = nullptr;
     RecompRollbackSession session;
-    RecompInputGamepad remotePad{};
+    RecompNetplay net;
+    RecompInputGamepad pads[2]{}; // the running frame's pads by guest port
 };
 static RollbackRun rollback;
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
+    // Both runners must see the same controllers: the session's two ports, once it runs.
+    if (rollback.lobby && (port >= 2u || !rollback.active)) return false;
     if (rollback.active && port < 2u) {
-        // shortcut: loopback has no local player, so port 1 stays empty; netplay fills it.
-        if (port != 0u) return false;
-        *gamepad = rollback.remotePad;
+        // Loopback has no local player, so its port stays empty.
+        if (rollback.mode == RollbackMode::Loopback && port == rollback.player) return false;
+        *gamepad = rollback.pads[port];
         return true;
     }
     if (port != 0u) return !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
@@ -257,7 +280,7 @@ static void onFrameBoundary(std::uint32_t frame)
 }
 
 // A new pad nearly every frame, so repeating the last pad mispredicts.
-static RecompInputGamepad loopbackPad(std::uint32_t frame)
+static RecompInputGamepad generatedPad(std::uint32_t frame)
 {
     std::uint32_t x = frame * 2654435761u;
     x ^= x >> 13;
@@ -267,13 +290,99 @@ static RecompInputGamepad loopbackPad(std::uint32_t frame)
     return pad;
 }
 
+static bool roundLive();
+
+static RecompInputGamepad localPad(std::uint32_t frame)
+{
+    RecompInputGamepad pad{};
+    if (rollback.mode == RollbackMode::Loopback) return pad;
+    if (scriptedInputOnly) {
+        // Scripted runs play a generated stream per player so two runners differ.
+        if (!rollback.lobby) return generatedPad(frame * 2u + rollback.player);
+        // A scripted lobby: each side walks the menus with its input script, one
+        // sample per frame, and the joiner mashes in live rounds.
+        if (rollback.player == 1u && roundLive()) pad = generatedPad(frame);
+        else (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
+        return pad;
+    }
+    (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
+    return pad;
+}
+
+// The local player's port drives the local pad; the peer's port and hidden frames stay still.
+static void setVibration(std::uint32_t port, std::uint16_t left, std::uint16_t right)
+{
+    if (!rollback.active) {
+        recomp_input_host_set_vibration(port, left, right);
+        return;
+    }
+    // shortcut: a motor change made only in a hidden frame is dropped until the next visible one.
+    if (port == rollback.player && !rollback.hidden) recomp_input_host_set_vibration(0u, left, right);
+}
+
+static void receivePads()
+{
+    RecompRollbackSession &s = rollback.session;
+    if (rollback.mode == RollbackMode::Udp) {
+        recomp_netplay_receive(&rollback.net, &s);
+        return;
+    }
+    const std::uint32_t lag = s.frame >= rollback.stop ? 0u : rollback.lag;
+    while (s.remote_count + lag <= s.frame) {
+        const RecompInputGamepad pad = generatedPad(s.remote_count);
+        recomp_rollback_add_remote(&s, &pad);
+    }
+}
+
+/* At the newest frame: gathers pads until the frame may run or a rewind is
+   due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
+static std::uint32_t awaitFrontier(bool last)
+{
+    using Clock = std::chrono::steady_clock;
+    RecompRollbackSession &s = rollback.session;
+    const bool udp = rollback.mode == RollbackMode::Udp;
+    Clock::time_point sent{};
+    const Clock::time_point began = Clock::now();
+    for (;;) {
+        receivePads();
+        // The local pad is read at the frame's start, so pacing adds no input lag.
+        // Rewinds wait for it too, so one replay covers every pad that arrived.
+        const bool started = Clock::now() >= rollback.next_frame;
+        const std::uint32_t target = started ? recomp_rollback_take_rewind(&s) : RECOMP_ROLLBACK_NONE;
+        if (target != RECOMP_ROLLBACK_NONE) return target;
+        if (started) {
+            while (s.local_count <= s.frame + rollback.delay) {
+                const RecompInputGamepad pad = localPad(s.local_count);
+                recomp_rollback_add_local(&s, &pad);
+            }
+        }
+        const bool ready = last
+            ? s.remote_count >= rollback.stop && (!udp || rollback.net.peer_ack >= rollback.stop)
+            : started && recomp_rollback_can_run(&s) && (!udp || rollback.net.peer_seen);
+        if (ready) return RECOMP_ROLLBACK_NONE;
+        if (!udp) recomp_stop(4, "rollback:stalled");
+        const Clock::time_point now = Clock::now();
+        if (now - sent >= std::chrono::milliseconds(4)) {
+            recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+            sent = now;
+        }
+        // The first contact waits out the other runner's boot.
+        if (now - began > std::chrono::seconds(rollback.net.peer_seen ? 5 : 120))
+            recomp_stop(4, "rollback:peer-timeout");
+        // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
+        Clock::time_point until = now + std::chrono::milliseconds(2);
+        if (rollback.next_frame > now && rollback.next_frame < until) until = rollback.next_frame;
+        recomp_d3d_sleep_until(std::chrono::duration_cast<std::chrono::nanoseconds>(until.time_since_epoch()).count());
+    }
+}
+
 static void finishRollback()
 {
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - rollback.started).count();
     std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
-        "(%u frames run again) in %.1f s\n",
-        rollback.session.frame, rollback.rollbacks, rollback.replayed, seconds);
+        "(%u frames run again, %u waited) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, seconds);
     if (rollback.dump != nullptr) {
         std::vector<std::uint8_t> ram(guestRam, guestRam + RECOMP_XBOX_RAM_SIZE);
         recomp_synctest_mask_ignored(ram.data(), ram.size());
@@ -281,7 +390,77 @@ static void finishRollback()
         out.write(reinterpret_cast<const char *>(ram.data()), static_cast<std::streamsize>(ram.size()));
         if (!out) recomp_stop(4, "rollback:dump");
     }
+    if (rollback.mode == RollbackMode::Udp) {
+        // shortcut: the peer may still need our acknowledgement; repeat it briefly instead of a close handshake.
+        for (int i = 0; i < 50; ++i) {
+            recomp_netplay_send(&rollback.net, &rollback.session, 0);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
     recomp_stop(0, "rollback:done");
+}
+
+/* Schedules each new frame on a 60 Hz grid. Display backpressure alone let the
+   guest regain a frame sync wait from the presenter queue; a wait moves the grid. */
+static void scheduleFrame()
+{
+    using namespace std::chrono;
+    constexpr steady_clock::duration interval = nanoseconds(1000000000 / 60);
+    const steady_clock::time_point now = steady_clock::now();
+    // Late frames may catch up by the two the presenter queues.
+    rollback.next_frame = std::max(rollback.next_frame + interval, now - 2 * interval);
+    if (rollback.wait != 0u) rollback.next_frame = std::max(rollback.next_frame, now) + rollback.wait * interval;
+    rollback.wait = 0u;
+}
+
+/* A lobby session predicts only while a round is live: the game-mode task in
+   its match state (g_game_mode_state, 0x8a56d0, is 5), the fight not frozen
+   by the pause menu (g_game_tasks_suspended, 0x8783c9), time left
+   (g_round_timer_seconds, 0x87ae08) and both fighters' life (0x87ae54,
+   stride 0x94) above 0. A KO or time-over ends it seconds before the save
+   at the end of a match, so menus and saves run in lockstep, which never
+   rewinds. */
+static bool roundLive()
+{
+    if (*recomp_memory(0x008a56d0u, 1u) != 5u || *recomp_memory(0x008783c9u, 1u) != 0u ||
+        *recomp_memory(0x0087ae08u, 1u) == 0u)
+        return false;
+    for (std::uint32_t side = 0; side < 2u; ++side) {
+        const std::uint8_t *life = recomp_memory(0x0087ae54u + side * 0x94u, 2u);
+        if (static_cast<std::int16_t>(life[0] | life[1] << 8) <= 0) return false;
+    }
+    return true;
+}
+
+static void setWindow(std::uint32_t window)
+{
+    RecompRollbackSession &s = rollback.session;
+    if (s.window == window) return;
+    s.window = window;
+    std::fprintf(stderr, "recomp netplay: %s from frame %u\n", window != 0u ? "rollback" : "lockstep", s.frame);
+}
+
+/* A profile write cannot be rewound (synctest_modules.c, save storage), so
+   it waits until the peer's pads through the running frame have arrived.
+   The window is normally closed long before, and this never waits. A pad
+   that differs from the prediction means the frame is already wrong; the
+   session then ends before the write. */
+static void confirmSaveFrame()
+{
+    RecompRollbackSession &s = rollback.session;
+    if (!rollback.active || rollback.mode != RollbackMode::Udp || s.frame == 0u) return;
+    const std::uint32_t running = s.frame - 1u;
+    if (s.remote_count <= running)
+        std::fprintf(stderr, "recomp netplay: save in frame %u waits for the other player's input\n", running);
+    const auto began = std::chrono::steady_clock::now();
+    while (s.remote_count <= running) {
+        recomp_netplay_receive(&rollback.net, &s);
+        recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+        if (std::chrono::steady_clock::now() - began > std::chrono::seconds(5))
+            recomp_stop(4, "rollback:peer-timeout");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (s.rewind_to <= running) recomp_stop(4, "rollback:save-mispredicted");
 }
 
 static void onRollbackFrame(std::uint32_t swap)
@@ -289,22 +468,22 @@ static void onRollbackFrame(std::uint32_t swap)
     RecompRollbackSession &s = rollback.session;
     if (!rollback.active) {
         if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
-        recomp_rollback_init(&s, 0u);
+        recomp_rollback_init(&s, rollback.delay);
+        if (rollback.lobby) s.window = 0u;
         if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
         rollback.active = true;
         rollback.started = std::chrono::steady_clock::now();
-        std::fprintf(stderr, "recomp rollback: session starts at swap %u, lag %u\n", swap, rollback.lag);
+        std::fprintf(stderr, "recomp rollback: session starts at swap %u as player %u\n",
+            swap, rollback.player);
     }
     bool saved = true;
     if (s.frame == rollback.frontier) {
-        const std::uint32_t lag = s.frame >= rollback.stop ? 0u : rollback.lag;
-        while (s.remote_count + lag <= s.frame) {
-            const RecompInputGamepad pad = loopbackPad(s.remote_count);
-            recomp_rollback_add_remote(&s, &pad);
+        if (rollback.lobby) setWindow(roundLive() ? RECOMP_ROLLBACK_WINDOW : 0u);
+        if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
+            scheduleFrame();
+            rollback.paced = s.frame;
         }
-        const RecompInputGamepad neutral{};
-        while (s.local_count <= s.frame) recomp_rollback_add_local(&s, &neutral);
-        const std::uint32_t target = recomp_rollback_take_rewind(&s);
+        const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
             // The newest save is the frame before the frontier.
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
@@ -317,20 +496,24 @@ static void onRollbackFrame(std::uint32_t swap)
             return;
         } else {
             saved = recomp_rollback_ring_save();
+            if (rollback.mode == RollbackMode::Udp) {
+                rollback.advantage = static_cast<std::int32_t>(s.frame - rollback.net.peer_frame);
+                recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+                const std::uint32_t wait = recomp_netplay_wait_frames(&rollback.net, rollback.advantage);
+                rollback.waited += wait;
+                rollback.wait = wait;
+            }
         }
     } else {
         saved = recomp_rollback_ring_save();
     }
     if (!saved) recomp_stop(4, "rollback:save");
-    // shortcut: loopback never runs out of window; netplay waits here for the peer.
-    if (!recomp_rollback_can_run(&s)) recomp_stop(4, "rollback:stalled");
     // Frames run again were already shown and heard with the predicted pads.
-    const bool hidden = s.frame < rollback.frontier;
-    recomp_d3d8_set_present_suppressed(hidden);
-    recomp_d3d8_set_gpu_work_suppressed(hidden);
-    recomp_dsound_buffer_set_output_suppressed(hidden);
-    RecompInputGamepad local;
-    recomp_rollback_run(&s, &local, &rollback.remotePad);
+    rollback.hidden = s.frame < rollback.frontier;
+    recomp_d3d8_set_present_suppressed(rollback.hidden);
+    recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
+    recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
+    recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
 }
 
@@ -338,8 +521,6 @@ static bool readRollbackConfig()
 {
     const char *mode = std::getenv("RECOMP_ROLLBACK");
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
-    if (std::strcmp(mode, "loopback") != 0) return false;
-    rollback.enabled = true;
     bool valid = true;
     const auto number = [&valid](const char *name, std::uint32_t &value) {
         const char *text = std::getenv(name);
@@ -350,9 +531,337 @@ static bool readRollbackConfig()
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
-    number("RECOMP_ROLLBACK_LAG", rollback.lag);
     rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
-    return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+    if (std::strcmp(mode, "loopback") == 0) {
+        rollback.mode = RollbackMode::Loopback;
+        rollback.player = 1u;
+        if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0') rollback.stop = 600u;
+        number("RECOMP_ROLLBACK_LAG", rollback.lag);
+        return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+    }
+    // udp:<local port>:<peer host>:<peer port>
+    if (std::strncmp(mode, "udp:", 4u) != 0) return false;
+    const std::string spec = mode + 4;
+    const std::size_t hostAt = spec.find(':'), portAt = spec.rfind(':');
+    if (hostAt == std::string::npos || portAt == hostAt) return false;
+    const unsigned long localPort = std::strtoul(spec.substr(0u, hostAt).c_str(), nullptr, 10);
+    const unsigned long peerPort = std::strtoul(spec.substr(portAt + 1u).c_str(), nullptr, 10);
+    const std::string host = spec.substr(hostAt + 1u, portAt - hostAt - 1u);
+    number("RECOMP_ROLLBACK_PLAYER", rollback.player);
+    number("RECOMP_ROLLBACK_DELAY", rollback.delay);
+    if (!valid || localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
+        rollback.player > 1u || rollback.delay > RECOMP_ROLLBACK_WINDOW)
+        return false;
+    rollback.mode = RollbackMode::Udp;
+    return recomp_netplay_open(&rollback.net, static_cast<std::uint16_t>(localPort), host.c_str(),
+        static_cast<std::uint16_t>(peerPort));
+}
+
+// --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
+static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
+static std::string netplayJoin;
+enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u };
+
+// SHA-256 of this runner's executable, so both sides of a lobby run one build.
+static std::string runnerDigest()
+{
+    std::filesystem::path path;
+#ifdef _WIN32
+    std::wstring buffer(32768u, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length != 0u && length < buffer.size()) path = buffer.substr(0u, length);
+#elif defined(__APPLE__)
+    char buffer[4096];
+    std::uint32_t size = sizeof buffer;
+    if (_NSGetExecutablePath(buffer, &size) == 0) path = buffer;
+#else
+    std::error_code error;
+    path = std::filesystem::read_symlink("/proc/self/exe", error);
+#endif
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (path.empty() || !file) return {};
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(file.tellg()));
+    file.seekg(0);
+    if (!file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return {};
+    return doaxbv::sha256Hex(bytes);
+}
+
+// The save name on a profile's SaveMeta.xbx "Name=" line (UTF-16), as UTF-8.
+static std::string saveName(const std::uint8_t *bytes, std::size_t size)
+{
+    std::string line;
+    for (std::size_t i = 0u; i + 1u < size; i += 2u) {
+        const std::uint32_t c = bytes[i] | bytes[i + 1u] << 8;
+        if (c == '\r' || c == '\n') {
+            if (line.rfind("Name=", 0u) == 0u) break;
+            line.clear();
+        } else if (c == 0xfeffu || c == 0x200bu || c < 0x20u) {
+            continue; // byte order mark, the game's zero-width space, controls
+        } else if (c < 0x80u) {
+            line += static_cast<char>(c);
+        } else if (c < 0x800u) {
+            line += static_cast<char>(0xc0u | c >> 6);
+            line += static_cast<char>(0x80u | (c & 0x3fu));
+        } else {
+            line += static_cast<char>(0xe0u | c >> 12);
+            line += static_cast<char>(0x80u | (c >> 6 & 0x3fu));
+            line += static_cast<char>(0x80u | (c & 0x3fu));
+        }
+    }
+    return line.rfind("Name=", 0u) == 0u ? line.substr(5u) : std::string();
+}
+
+// The profile this player saved last, as UDATA/<title>/<save>, or empty without one.
+static std::string latestProfile(const std::filesystem::path &root)
+{
+    namespace fs = std::filesystem;
+    std::string latest;
+    fs::file_time_type newest{};
+    std::error_code error;
+    for (const auto &title : fs::directory_iterator(root / "UDATA", error)) {
+        for (const auto &save : fs::directory_iterator(title.path(), error)) {
+            if (!fs::is_regular_file(save.path() / "SaveMeta.xbx", error)) continue;
+            fs::file_time_type changed{};
+            for (const auto &file : fs::directory_iterator(save.path(), error))
+                changed = std::max(changed, fs::last_write_time(file.path(), error));
+            if (latest.empty() || changed > newest) {
+                latest = save.path().lexically_relative(root).generic_string();
+                newest = changed;
+            }
+        }
+    }
+    return latest;
+}
+
+/* Part of partition 1 as one blob: profile's tree and, with title, the title
+   saves (TDATA) and the files beside the profiles. The blob is the SHA-256
+   of the rest, then per entry a kind (0 folder, 1 file), a 2-byte path
+   length, the path below partition 1 and, for a file, a 4-byte size and its
+   bytes. */
+static bool packProfile(const std::filesystem::path &root, const std::string &profile, bool title,
+    std::vector<std::uint8_t> &blob)
+{
+    namespace fs = std::filesystem;
+    std::vector<std::uint8_t> body;
+    const auto put = [&body](std::size_t value, unsigned bytes) {
+        for (unsigned i = 0; i < bytes; ++i) body.push_back(static_cast<std::uint8_t>(value >> (8u * i)));
+    };
+    const auto keep = [&](const std::string &name, bool folder) {
+        if (!profile.empty() && (name == profile || name.rfind(profile + "/", 0u) == 0u)) return true;
+        if (!title) return false;
+        if (name == "TDATA" || name.rfind("TDATA/", 0u) == 0u) return true;
+        const auto depth = std::count(name.begin(), name.end(), '/');
+        return (name == "UDATA" || name.rfind("UDATA/", 0u) == 0u) && (depth < 2 || (depth == 2 && !folder));
+    };
+    std::error_code error;
+    if (fs::exists(root, error)) {
+        for (fs::recursive_directory_iterator it(root, error), end; !error && it != end; it.increment(error)) {
+            const fs::file_status status = it->symlink_status(error);
+            const bool folder = fs::is_directory(status);
+            if (error || (!folder && !fs::is_regular_file(status))) return false;
+            const std::string name = it->path().lexically_relative(root).generic_string();
+            if (!keep(name, folder)) continue;
+            body.push_back(folder ? 0u : 1u);
+            put(name.size(), 2u);
+            body.insert(body.end(), name.begin(), name.end());
+            if (folder) continue;
+            const std::uintmax_t size = fs::file_size(it->path(), error);
+            if (error || size > RECOMP_NETPLAY_MAX_PROFILE) return false;
+            std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+            std::ifstream file(it->path(), std::ios::binary);
+            if (!file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return false;
+            put(bytes.size(), 4u);
+            body.insert(body.end(), bytes.begin(), bytes.end());
+        }
+    }
+    if (error) return false;
+    const std::string hash = doaxbv::sha256Hex(body);
+    blob.assign(hash.begin(), hash.end());
+    blob.insert(blob.end(), body.begin(), body.end());
+    return true;
+}
+
+// A path from the host: relative, below UDATA or TDATA, plain names, no Windows device names.
+static bool safeProfilePath(const std::string &name)
+{
+    std::size_t start = 0u;
+    for (bool first = true;; first = false) {
+        const std::size_t slash = name.find('/', start);
+        const std::string part = name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        if (part.empty() || part == "." || part == "..") return false;
+        // Windows drops a trailing dot, so "SaveMeta.xbx." would open as SaveMeta.xbx.
+        if (part.back() == '.') return false;
+        for (const char c : part)
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
+        if (first && part != "UDATA" && part != "TDATA") return false;
+        std::string stem = part.substr(0u, part.find('.'));
+        for (char &c : stem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+            (stem.size() == 4u && (stem.rfind("COM", 0u) == 0u || stem.rfind("LPT", 0u) == 0u) &&
+                std::isdigit(static_cast<unsigned char>(stem[3]))))
+            return false;
+        if (slash == std::string::npos) return true;
+        start = slash + 1u;
+    }
+}
+
+/* Writes a packProfile blob below root, adding its save names; false for a
+   damaged or unsafe one. A joiner's blob holds one UDATA/<title>/<save>
+   folder and no title saves, since the host's are used. */
+static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root,
+    bool joiner, std::vector<std::string> &names)
+{
+    namespace fs = std::filesystem;
+    if (size < 64u) return false;
+    const std::vector<std::uint8_t> body(blob + 64, blob + size);
+    if (doaxbv::sha256Hex(body) != std::string(reinterpret_cast<const char *>(blob), 64u)) return false;
+    std::size_t at = 0u;
+    const auto get = [&](unsigned bytes, std::uint32_t &value) {
+        if (body.size() - at < bytes) return false;
+        value = 0u;
+        for (unsigned i = 0; i < bytes; ++i) value |= static_cast<std::uint32_t>(body[at++]) << (8u * i);
+        return true;
+    };
+    std::error_code error;
+    fs::create_directories(root, error);
+    std::string folder;
+    for (unsigned entries = 0u; !error && at < body.size(); ++entries) {
+        std::uint32_t kind, length, bytes;
+        if (entries == 512u || !get(1u, kind) || kind > 1u || !get(2u, length) || length > 200u ||
+            body.size() - at < length)
+            return false;
+        const std::string name(body.begin() + static_cast<std::ptrdiff_t>(at),
+            body.begin() + static_cast<std::ptrdiff_t>(at + length));
+        at += length;
+        if (!safeProfilePath(name)) return false;
+        if (joiner) {
+            if (name.rfind("UDATA/", 0u) != 0u || std::count(name.begin(), name.end(), '/') < 2) return false;
+            const std::string top = name.substr(0u, name.find('/', name.find('/', 6u) + 1u));
+            if (folder.empty()) folder = top;
+            if (top != folder) return false;
+        }
+        const fs::path path = root / fs::path(name);
+        if (kind == 0u) {
+            fs::create_directories(path, error);
+            continue;
+        }
+        if (!get(4u, bytes) || body.size() - at < bytes) return false;
+        fs::create_directories(path.parent_path(), error);
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
+        std::string file_name = path.filename().string();
+        for (char &c : file_name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        // Windows opens any case of the name, so the filter reads every one.
+        if (file_name == "SAVEMETA.XBX") names.push_back(saveName(body.data() + at, bytes));
+        at += bytes;
+    }
+    return !error;
+}
+
+/* Connects the two runners before either boots. The host's input delay and
+   options win. Each player sends the profile they saved last, and both
+   sides play from fresh copies of the two, with the host's title saves, so
+   they start alike and neither player's own profile changes. */
+static bool joinLobby(const std::filesystem::path &discPath)
+{
+    if (const char *mode = std::getenv("RECOMP_ROLLBACK"); mode != nullptr && *mode != '\0') {
+        std::cerr << "recomp runner: RECOMP_ROLLBACK cannot be combined with --netplay-host or --netplay-join\n";
+        return false;
+    }
+    RecompNetplayLobby lobby{};
+    const std::string digest = runnerDigest();
+    if (digest.size() != sizeof lobby.digest) {
+        std::cerr << "recomp runner: cannot read this runner to identify its build\n";
+        return false;
+    }
+    std::memcpy(lobby.digest, digest.data(), sizeof lobby.digest);
+    lobby.delay = static_cast<std::uint8_t>(netplayDelay);
+    lobby.flags = static_cast<std::uint8_t>((unlockAll ? LobbyUnlockAll : 0u) | (recomp_skip_intro ? LobbySkipIntro : 0u));
+    const bool hosting = netplayHostPort != 0u;
+    const std::filesystem::path storage = discPath / ".recomp-storage";
+    // Recovery first, so an interrupted save is never sent.
+    const std::string own = recomp_save_initialize(recomp_disc_root_path) ? latestProfile(storage / "partition1") : "";
+    if (!own.empty()) {
+        std::ifstream meta(storage / "partition1" / own / "SaveMeta.xbx", std::ios::binary);
+        const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(meta), {}};
+        if (recomp_netplay_name_banned(saveName(bytes.data(), bytes.size()).c_str())) {
+            std::cerr << "recomp runner: your profile name is not allowed online; rename the profile to play\n";
+            return false;
+        }
+    }
+    std::vector<std::uint8_t> mine, theirs(RECOMP_NETPLAY_MAX_PROFILE);
+    if (!recomp_save_ready() || !packProfile(storage / "partition1", own, hosting, mine) ||
+        mine.size() > RECOMP_NETPLAY_MAX_PROFILE) {
+        std::cerr << "recomp runner: cannot read your profile to send, or it is over 1 MiB\n";
+        return false;
+    }
+    RecompNetplayProfiles profiles{mine.data(), static_cast<std::uint32_t>(mine.size()), theirs.data(), 0u};
+    RecompNetplayLobbyResult result;
+    if (hosting) {
+        const auto port = static_cast<std::uint16_t>(netplayHostPort);
+        if (recomp_netplay_open_router_port(port)) std::atexit(recomp_netplay_close_router_port);
+        std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
+        result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u);
+    } else {
+        const std::size_t colon = netplayJoin.rfind(':');
+        const char *end = netplayJoin.data() + netplayJoin.size();
+        std::uint32_t port = 0u;
+        if (colon == std::string::npos || colon == 0u ||
+            std::from_chars(netplayJoin.data() + colon + 1u, end, port).ptr != end || port == 0u || port > 65535u) {
+            std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
+            return false;
+        }
+        std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
+        result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
+            static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u);
+    }
+    if (result != RECOMP_NETPLAY_LOBBY_OK) {
+        std::cerr << "recomp runner: netplay " << (result == RECOMP_NETPLAY_LOBBY_MISMATCH
+            ? "refused: the other player runs a different build"
+            : result == RECOMP_NETPLAY_LOBBY_TIMEOUT ? "timed out" : "could not open its UDP port") << '\n';
+        return false;
+    }
+    if (lobby.delay > RECOMP_ROLLBACK_WINDOW) return false;
+    unlockAll = (lobby.flags & LobbyUnlockAll) != 0u;
+    recomp_skip_intro = (lobby.flags & LobbySkipIntro) != 0u;
+    rollback.mode = RollbackMode::Udp;
+    rollback.lobby = true;
+    rollback.player = hosting ? 0u : 1u;
+    rollback.delay = lobby.delay;
+    rollback.start = 0u;
+    // Test hooks, as for RECOMP_ROLLBACK.
+    if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames != nullptr && *frames != '\0')
+        rollback.stop = static_cast<std::uint32_t>(std::strtoul(frames, nullptr, 10));
+    rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
+    std::error_code error;
+    std::filesystem::remove_all(storage / "netplay", error);
+    if (error) {
+        std::cerr << "recomp runner: cannot clear the netplay save folder\n";
+        return false;
+    }
+    // The host's blob first; a joiner's profile with the same name, and so the same folder, replaces the host's.
+    const std::filesystem::path session = storage / "netplay" / "partition1";
+    std::vector<std::string> ownNames, peerNames;
+    if (!unpackProfile(hosting ? mine.data() : theirs.data(), hosting ? mine.size() : profiles.theirs_size, session,
+            false, hosting ? ownNames : peerNames) ||
+        !unpackProfile(hosting ? theirs.data() : mine.data(), hosting ? profiles.theirs_size : mine.size(), session,
+            true, hosting ? peerNames : ownNames)) {
+        std::cerr << "recomp runner: the other player's profile is damaged or unsafe\n";
+        return false;
+    }
+    for (const std::string &name : peerNames) {
+        if (recomp_netplay_name_banned(name.c_str())) {
+            std::cerr << "recomp runner: the other player's profile name is not allowed online\n";
+            return false;
+        }
+    }
+    recomp_save_session = "netplay";
+    const auto shown = [](const std::vector<std::string> &names) {
+        return names.empty() ? std::string("no profile") : names.front();
+    };
+    std::fprintf(stderr, "recomp netplay: connected as player %u (%s) against %s with %u frames of input delay\n",
+        rollback.player + 1u, shown(ownNames).c_str(), shown(peerNames).c_str(), rollback.delay);
+    return true;
 }
 
 int main(int argc, char **argv)
@@ -378,6 +887,24 @@ int main(int argc, char **argv)
         }
         if (argument == "--skip-intro") {
             recomp_skip_intro = true;
+            continue;
+        }
+        if ((argument == "--netplay-host" || argument == "--netplay-delay") && i + 1 < argc) {
+            const std::string value = argv[++i];
+            std::uint32_t number = 0u;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
+            const bool host = argument == "--netplay-host";
+            if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() ||
+                (host ? number == 0u || number > 65535u : number > RECOMP_ROLLBACK_WINDOW)) {
+                std::cerr << "recomp runner: --netplay-host needs a UDP port and --netplay-delay at most "
+                          << RECOMP_ROLLBACK_WINDOW << " frames\n";
+                return 64;
+            }
+            (host ? netplayHostPort : netplayDelay) = number;
+            continue;
+        }
+        if (argument == "--netplay-join" && i + 1 < argc) {
+            netplayJoin = argv[++i];
             continue;
         }
         if (argument == "--input-start-pulse-at" && i + 1 < argc) {
@@ -462,7 +989,8 @@ int main(int argc, char **argv)
                 " [--input-buttons-pulse-at <poll> <decimal-mask>]"
                 " [--input-analog-pulse-at <poll> <button-index>]"
                 " [--input-analog-pulse-every <first-poll> <period> <last-poll> <button-index>]"
-                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]\n";
+                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]"
+                " [--netplay-host <port> [--netplay-delay <frames>] | --netplay-join <host>:<port>]\n";
             return 64;
         }
         const std::string value = argv[++i];
@@ -473,6 +1001,10 @@ int main(int argc, char **argv)
     }
     if (xbePath.empty()) {
         std::cerr << "recomp runner: --xbe is required\n";
+        return 64;
+    }
+    if (netplayHostPort != 0u && !netplayJoin.empty()) {
+        std::cerr << "recomp runner: --netplay-host and --netplay-join cannot be combined\n";
         return 64;
     }
     recomp_stop_configure(expectStop.empty() ? nullptr : expectStop.c_str(),
@@ -514,6 +1046,7 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
+    if ((netplayHostPort != 0u || !netplayJoin.empty()) && !joinLobby(discPath)) return 1;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         return 2;
@@ -521,12 +1054,14 @@ int main(int argc, char **argv)
     const RecompMemoryRegion region = {0u, RECOMP_XBOX_RAM_SIZE, memory};
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
-    if (!readRollbackConfig()) {
-        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with decimal "
-                  << "frame counts and a lag of at most " << RECOMP_ROLLBACK_WINDOW << " frames\n";
+    if (!rollback.lobby && !readRollbackConfig()) {
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
+                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
+                  << " frames, and the UDP port must open\n";
         return 1;
     }
-    if (recomp_synctest_enabled() || rollback.enabled) {
+    const bool rollbackEnabled = rollback.mode != RollbackMode::Off;
+    if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)
             recomp_xapi_frame_clock_set_enabled(true);
@@ -534,9 +1069,10 @@ int main(int argc, char **argv)
         recomp_kernel_file_set_synchronous_reads(true);
         recomp_dsound_buffer_set_game_thread_pump(true);
         recomp_synctest_install_default_modules();
-        if (rollback.enabled) {
+        if (rollbackEnabled) {
             // Rollback input lives in the session, outside the saved state.
             recomp_d3d_frame_boundary_hook = onRollbackFrame;
+            recomp_kernel_profile_mutation_hook = confirmSaveFrame;
         } else {
             recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
             recomp_d3d_frame_boundary_hook = onFrameBoundary;
@@ -549,7 +1085,7 @@ int main(int argc, char **argv)
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
-    if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(recomp_input_host_set_vibration);
+    if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(setVibration);
     std::atexit(recomp_input_host_stop_vibration);
     std::atexit(recomp_d3d8_shutdown);
     std::atexit(recomp_dsound_api_shutdown);

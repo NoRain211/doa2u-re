@@ -1,11 +1,12 @@
 # Rollback netcode
 
-Status: the save/replay core, a rollback ring, input prediction and a
-loopback test. Two runners will connect through a host-owned lobby and play
-the offline Versus mode, with rollback over the fight. A frame-locked clock
+Status: the save/replay core, a rollback ring, input prediction, a UDP
+transport with frame sync, and a lobby that connects two runners into one
+session from their first frame. Menus run in lockstep and live rounds roll
+back; two scripted runners have played offline Versus this way. A frame-locked clock
 and SyncTest (`docs/bring-up.md`, Determinism checks) save, replay and
 compare whole frames, with guest RAM in page snapshots
-(`guest_snapshot.c`). The transport, frame pacing and the lobby remain.
+(`guest_snapshot.c`). The launcher has no lobby screen yet.
 Game addresses below come from static analysis of `/DOA2.xbe` in Ghidra
 unless a section says otherwise.
 
@@ -137,19 +138,208 @@ Limits of this stage:
 
 - A save that cannot be rewound ends the run (`rollback:unrestorable`). At
   lag 8 the Story save after the fight, about 1,050 frames in, does this.
-  The session must fall back to lockstep before the game saves.
-- Loopback has no local player, so port 1 stays empty. Rumble from hidden
-  frames is not suppressed.
-- Two of about ten hidden-frame runs ended with exit code -1 and no host
-  report, and WerFault crashed while handling one. None of the runs under a
-  debugger crashed, and the cause is unknown.
+  Lobby sessions return to lockstep before the save after a match (see
+  Lobby); `RECOMP_ROLLBACK` runs do not.
+- Loopback has no local player, so port 1 stays empty.
+- Two early hidden-frame runs ended with exit code -1 and no host report.
+  Both started while the runner was being rebuilt and other runners were
+  being killed. 69 later lag 4 runs of 1,000 frames, several at once, on
+  this build and on a rebuild of the commit that first showed it, all exited
+  normally, so the cause is unconfirmed.
 
-## Entry point
+## Transport and pacing
+
+`netplay.c` sends one UDP packet per frame. It carries the sender's frame,
+how many of the receiver's pads it holds, its frame advantage and every
+local pad the receiver has not acknowledged, so the next packet covers a
+lost one and nothing is resent. Packets from any address other than the
+configured peer are dropped, and a malformed packet changes nothing.
+
+`RECOMP_ROLLBACK=udp:<local port>:<peer host>:<peer port>` plays a session
+against another runner. `RECOMP_ROLLBACK_PLAYER` (0 or 1) is the local
+player's port and `RECOMP_ROLLBACK_DELAY` the input delay; both sides must
+use the same delay and start swap. The local pad is the host's first
+controller, and only the local player's port in shown frames drives its
+rumble. Runs with `--input-script-only` play a generated stream for each
+player instead. While the session is outside its window, the newest frame
+waits and sends every 4 ms, for up to 120 s before first contact and 5 s
+after it.
+
+The presenter holds shown frames to 60 Hz, but the guest may run up to two
+frames ahead into its queue, and a sleep there only used up that slack. So
+each new frame of a UDP session starts on the runner's own 1/60 s grid, and
+a late frame may catch up by at most two frames. The local pad is read and
+any rewind taken when the frame's slot arrives, so pacing adds no input lag
+and one replay covers every pad that came in meanwhile. Hidden frames run
+unpaced.
+
+Each side also reports its advantage: its frame minus the peer's last
+reported frame, measured once per new frame and repeated unchanged while it
+stalls. The receiver keeps one sample per new peer frame. Both advantages
+include the same round trip, so half the difference of the two 32-frame
+averages is how far ahead one side really is. The side a frame or more
+ahead moves its grid back that many frames, then waits 32 frames before it
+checks again. On an asymmetric link the advantages settle equal, so both
+sides predict the same number of frames.
+
+Two runners on one machine, each in its own hardlinked play folder, started
+at swap 3000 and stopped at frame 900 with every pad confirmed. The lossy
+link went through a relay that delayed each packet ±20% and dropped some:
+
+| Link | Input delay | Rollbacks per side | Frames run again | Time |
+|---|---|---|---|---|
+| localhost | 0 | about 450 | about 455 | 15.0 to 15.2 s |
+| localhost | 2 | 0 | 0 | 15.0 s |
+| 50 ms each way, 5% loss | 0 | 350 to 390 | 1,210 to 1,270 | 18.9 to 19.1 s |
+| 10 ms out, 90 ms back, 2% loss | 0 | 380 to 460 | 1,240 to 1,460 | 17.5 to 19.4 s |
+| 10 ms out, 90 ms back, 2% loss | 2 | about 500 | about 950 | 15.4 to 15.5 s |
+
+Other work on the machine moved times by up to 2 s between identical runs.
+Alternating runs with and without the grid on the asymmetric link took the
+same time within that spread. At input delay 0 the replays cost more than a
+frame's budget, so both sides fall below 60 Hz together.
+
+In every pair the two sides' guest RAM matched except for one save file's
+times, which the game lists at boot and the host reports from each play
+folder. Players' profiles and save metadata will differ the same way, so
+the lobby must start both sides from the same combined profile and save tree.
+
+A temporary hook slept player 1 for 250 ms at frame 300 on localhost with
+input delay 2. Before the grid, player 0 settled a frame ahead (advantages
+about 2 and 0) and waited 15 times without closing the gap, because each
+sleep only drained the presenter queue. With the grid it waited 4 frames
+and both advantages were back to 0 by frame 420.
+
+Limits of the transport:
+
+- IPv4 only. There is no close handshake: a finished side repeats its last
+  packet for half a second.
+- There is no desync check between peers yet.
+- The grid assumes the 60 Hz progressive mode. With a display slower than
+  60 Hz the guest would wait in the presenter queue instead; that is untested.
+
+## Lobby
 
 The Live menus need XOnline logon, match search, QoS, friends and stats
 services before they reach a fight, and no System Link text appears in the
-XBE. A host-owned lobby connects two runners and then drives the offline
-Versus mode, with the remote player on the second controller port, which
-avoids all of XOnline. Menus stay in delay-based lockstep and rollback covers
-only the fight.
+XBE. Instead a lobby on the host connects two runners, which then play the
+game's offline modes together, the host on the first controller port and the
+joiner on the second. That avoids all of XOnline.
+
+`--netplay-host <port>` waits up to 10 minutes for a joiner, and
+`--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
+The hello carries the SHA-256 of the joiner's runner executable, and the
+host refuses any other build and keeps waiting. That also refuses a Windows
+and Linux pair, whose floating point is unverified. The host answers with
+its input delay (`--netplay-delay`, default 2) and the options that change
+the simulation (`--no-unlock-all`, `--skip-intro`), which the joiner
+adopts. Both messages carry the size of the sender's profile.
+
+Each side first recovers its own save journal, then packs the profile it
+saved last (`UDATA/<title>/<save>`) into one blob of at most 1 MiB with a
+SHA-256 of its contents. The host's blob also holds its `TDATA` title saves
+and the files beside the profiles. Each side asks the other for 16 chunks
+of 1 KiB at a time from the first one it lacks, asks again when a burst has
+arrived or after 100 ms, and says when it has them all. Each answers hellos
+and requests until the other is done; a request past the last chunk or a
+session packet also counts as done. Before writing,
+each side checks the hash, a limit of 512 entries and every path: relative,
+below `UDATA` or `TDATA`, letters, digits, `.`, `_` and `-` only, and
+no Windows device names. The host's 92 KB blob arrives in one run of
+bursts on a local network. The log names both players from the `Name=`
+line of each profile's `SaveMeta.xbx`.
+
+Each runner also checks both profile names against a list of names that
+are not allowed online and refuses the session on a match.
+
+Before it waits, the host asks the router to forward its UDP port with UPnP
+(miniupnpc 2.3.3), and removes the forward when the runner exits. It sends
+the search from the address its default route uses: on the development
+machine, Tailscale, WSL and Hyper-V adapters took the default multicast
+route, and the router never heard a search sent without it. The log says
+the port is forwarded, or that it must be forwarded by hand. It leaves out
+the public address, since players paste this log into public issues; the
+joiner uses the host's public address, as any "what is my IP" page shows
+it, with that port. A router whose own address is private (carrier-grade
+NAT) still forwards, but players outside the provider's network cannot
+reach it, and the log says so. On the development network the router
+(MiniUPnPd, IGD v2) listed the forward during a session and had removed it
+after the runner stopped.
+
+Both runners then boot and play one session from their first frame. Until
+it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
+neither machine's other pads reach the game. Saves go to
+`.recomp-storage/netplay/partition1` with their own undo journal, wiped when
+each session starts and filled with the host's blob and then the joiner's,
+so both sides start alike and neither player's own profile changes. Two
+profiles with the same save folder collide, and the joiner's wins. The
+cached archives in partitions 3 to
+5 stay shared; `run_game.py` prepares them the same way on every machine.
+During a session the host reports no file times, which differ between
+machines.
+
+The session runs in lockstep, where a frame runs only once the remote pad
+has arrived, and predicts up to 8 frames only while a round is live:
+
+- `g_game_mode_state` (`0x8a56d0`) is 5, the match state that
+  `game_mode_frontend_update` (`0xd87c0`) enters for every playable mode;
+- `g_game_tasks_suspended` (`0x8783c9`) is 0. `game_tasks_suspend`
+  (`0xd8d90`) sets it while the pause menu freezes the fight, and
+  `game_tasks_resume` (`0xd8e10`) clears it;
+- `g_round_timer_seconds` (`0x87ae08`), which `round_timer_tick`
+  (`0x119320`) counts down, is above 0;
+- both fighters' life (`0x87ae54`, stride `0x94`) is above 0.
+
+Each side decides from its own frames, as the window only limits how far it
+runs ahead. In the scripted Story fight the condition turned true 25 frames
+into the match state, while the stage still loaded for about 15 more frames;
+the display mode change came before it. A KO or time-over closes the window
+seconds before the save at the end of a match. Before the timer was part of
+the condition, that save ran in the frame the match state ended while the
+window was still open.
+
+Every open that may change the profile also waits, inside its frame, until
+the other player's pads through that frame have arrived
+(`recomp_kernel_profile_mutation_hook`). A save then never runs on a
+guess, and every later rewind lands after it. If an arrived pad differs from
+the one the frame ran with, the frame is already wrong, and the session
+stops before the write (`rollback:save-mispredicted`). With the window
+closed this never waits. Quitting from the pause menu saves about 20 frames
+after the quit, long after the window closed at the pause.
+
+Two runners on one machine, each in its own play folder, played scripted
+sessions. The host's input script chose Versus and Single Battle and picked
+a character, and the joiner picked one and pressed random buttons in live
+rounds. In the first four runs both sides started from an empty profile,
+and the host's script made one (nickname and flag); the last two started
+from the host's copied profile, where the host paused at frame 4,300 and
+chose Quit. A later run swapped both players' profiles and played a live
+round to frame 4,200 at delay 0 with 199 rollbacks on the host; the two
+session save trees and guest RAM matched:
+
+| Input delay | Frames | Rollbacks (host) | Window changes | Guest RAM at the end |
+|---|---|---|---|---|
+| 2 | 6,000, title screen only | 0 | none | identical |
+| 2 | 7,000 | 0 | rollback from 3,744 | identical |
+| 0 | 14,000 | 2,465 | two rounds; lockstep at both time-overs | identical |
+| 0 | 19,000 | 3,367 | two matches of two rounds | identical |
+| 0 | 6,000 | 233 | rollback from 3,748; lockstep from the pause | identical |
+| 0 | 5,000, test build with the window held open from 4,000 | 238 | the Quit save in frame 4,920 waited on both sides | identical |
+
+None of the comparisons masked a byte.
+
+Limits of the lobby:
+
+- The launcher has no lobby screen. Without UPnP the host must forward its
+  UDP port by hand; there is no hole punching or relay.
+- The game's own menus still choose which profile plays each side, and two
+  copies of one save folder keep only the joiner's.
+- A runner that is killed leaves its port forward on the router until the
+  next host run replaces it.
+- When one runner quits, the other stops 5 s later
+  (`rollback:peer-timeout`).
+- A save in a frame that ran with a wrong guess still ends the session; no
+  save site seen so far comes within the 8-frame window of a live round.
+- The condition reads two fighters; Tag matches and rounds without a time
+  limit are unverified.
 

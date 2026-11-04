@@ -295,10 +295,17 @@ static unsigned save_write_number;
    The disk is not part of a SyncTest snapshot, so a frame that makes one
    cannot be replayed. Attempts count, even rejected ones. */
 static uint32_t profile_mutation_count;
+void (*recomp_kernel_profile_mutation_hook)(void);
 
 uint32_t recomp_kernel_profile_mutations(void)
 {
     return profile_mutation_count;
+}
+
+static void note_profile_mutation(void)
+{
+    ++profile_mutation_count;
+    if (recomp_kernel_profile_mutation_hook != NULL) recomp_kernel_profile_mutation_hook();
 }
 
 static unsigned save_fault_write(const char *name)
@@ -475,16 +482,18 @@ static uint32_t register_file_handle(
                             continue;
                         }
                         strcpy(entry.name, data.cFileName);
-                        entry.creation_time =
-                            (uint64_t)data.ftCreationTime.dwLowDateTime |
-                            (uint64_t)data.ftCreationTime.dwHighDateTime << 32u;
-                        entry.last_access_time =
-                            (uint64_t)data.ftLastAccessTime.dwLowDateTime |
-                            (uint64_t)data.ftLastAccessTime.dwHighDateTime << 32u;
-                        entry.last_write_time =
-                            (uint64_t)data.ftLastWriteTime.dwLowDateTime |
-                            (uint64_t)data.ftLastWriteTime.dwHighDateTime << 32u;
-                        entry.change_time = entry.last_write_time;
+                        if (recomp_save_session == NULL) {
+                            entry.creation_time =
+                                (uint64_t)data.ftCreationTime.dwLowDateTime |
+                                (uint64_t)data.ftCreationTime.dwHighDateTime << 32u;
+                            entry.last_access_time =
+                                (uint64_t)data.ftLastAccessTime.dwLowDateTime |
+                                (uint64_t)data.ftLastAccessTime.dwHighDateTime << 32u;
+                            entry.last_write_time =
+                                (uint64_t)data.ftLastWriteTime.dwLowDateTime |
+                                (uint64_t)data.ftLastWriteTime.dwHighDateTime << 32u;
+                            entry.change_time = entry.last_write_time;
+                        }
                         size = (uint64_t)data.nFileSizeLow |
                             (uint64_t)data.nFileSizeHigh << 32u;
                         entry.size = size;
@@ -673,6 +682,16 @@ static int build_host_path(const char *relative, char *host_path, size_t host_pa
     return append_relative_path(relative, host_path, host_path_size);
 }
 
+/* Appends a storage partition's host folder; a save session moves partition 1. */
+static bool append_partition(char *path, size_t size, const char *partition)
+{
+    if (!append_segment(path, size, ".recomp-storage")) return false;
+    if (recomp_save_session != NULL && strcmp(partition, "partition1") == 0 &&
+        !append_segment(path, size, recomp_save_session))
+        return false;
+    return append_segment(path, size, partition);
+}
+
 static bool is_profile_path(const char *path)
 {
     char root[MAX_PATH_LEN];
@@ -680,8 +699,7 @@ static bool is_profile_path(const char *path)
         return false;
     }
     copy_root(root, sizeof root);
-    if (!append_segment(root, sizeof root, ".recomp-storage") ||
-        !append_segment(root, sizeof root, "partition1")) {
+    if (!append_partition(root, sizeof root, "partition1")) {
         return false;
     }
     size_t length = strlen(root);
@@ -724,8 +742,7 @@ static int build_storage_path(
     partition[sizeof partition - 2u] = guest_path[prefix_len - 1u];
 
     copy_root(host_path, host_path_size);
-    if (!append_segment(host_path, host_path_size, ".recomp-storage") ||
-        !append_segment(host_path, host_path_size, partition)) {
+    if (!append_partition(host_path, host_path_size, partition)) {
         return -1;
     }
 
@@ -1384,7 +1401,7 @@ static void bridge_nt_open_file(void)
     bool profile_path = is_profile_path(host_path);
     bool required_save_io = requested_write ||
         (profile_path && (desired_access & (DELETE | FILE_WRITE_ATTRIBUTES)) != 0u);
-    if (required_save_io && profile_path) ++profile_mutation_count;
+    if (required_save_io && profile_path) note_profile_mutation();
     if (required_save_io && recomp_save_pending() &&
         ((profile_path && !recomp_save_active(save_owner)) ||
          (recomp_save_active(save_owner) && !profile_path))) {
@@ -1480,7 +1497,7 @@ static void bridge_nt_create_file(void)
     bool mutation = (desired_access & GENERIC_WRITE_ACCESS) != 0u ||
         (profile_path && (desired_access & (DELETE | FILE_WRITE_ATTRIBUTES)) != 0u) ||
         create_disposition != FILE_OPEN_DISPOSITION;
-    if (mutation && profile_path) ++profile_mutation_count;
+    if (mutation && profile_path) note_profile_mutation();
     if (mutation && recomp_save_pending() &&
         ((profile_path && !recomp_save_active(save_owner)) ||
          (recomp_save_active(save_owner) && !profile_path))) {
@@ -1705,7 +1722,7 @@ static void bridge_nt_query_information_file(void)
         policy = profile_metadata ? "host-profile-file-information" : "host-file-information";
         const uint32_t attributes = profile_metadata
             ? host.FileAttributes : FILE_ATTRIBUTE_NORMAL;
-        if (profile_metadata && file_information != 0u &&
+        if (profile_metadata && recomp_save_session == NULL && file_information != 0u &&
             ((file_information_class == FILE_BASIC_INFORMATION && length >= 0x28u) ||
              (file_information_class == FILE_NETWORK_OPEN_INFORMATION && length >= 0x38u))) {
             const LARGE_INTEGER times[4] = {host.CreationTime, host.LastAccessTime,

@@ -126,6 +126,8 @@ RecompFunction recomp_kernel_file(uint32_t ordinal);
 bool recomp_kernel_save_handles_closed(uint32_t owner);
 /* Counts opens, writes and metadata changes that may change save storage. */
 uint32_t recomp_kernel_profile_mutations(void);
+/* Optional host hook at each of those opens, before the host file changes. */
+extern void (*recomp_kernel_profile_mutation_hook)(void);
 /* Close native profile handles so a rollback can rebuild the tree. */
 void recomp_kernel_release_profile_handles(void);
 /* File close model shared by the import bridge and ownership checks. */

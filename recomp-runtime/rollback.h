@@ -25,12 +25,16 @@ typedef struct RecompRollbackSession {
     uint32_t local_count;  /* local pads known for frames [0, local_count) */
     uint32_t remote_count;
     uint32_t rewind_to;    /* earliest frame that ran with a wrong prediction */
+    /* Frames the local side may run past the last remote pad, at most
+       RECOMP_ROLLBACK_WINDOW; 0 is lockstep. */
+    uint32_t window;
     RecompInputGamepad local[RECOMP_ROLLBACK_HISTORY];
     RecompInputGamepad remote[RECOMP_ROLLBACK_HISTORY];
     RecompInputGamepad used[RECOMP_ROLLBACK_HISTORY]; /* remote pad each frame ran with */
 } RecompRollbackSession;
 
-/* Both sides must use the same input delay; its first frames are neutral. */
+/* Both sides must use the same input delay; its first frames are neutral.
+   The window starts at RECOMP_ROLLBACK_WINDOW. */
 void recomp_rollback_init(RecompRollbackSession *session, uint32_t input_delay);
 /* False when the pad is too far ahead of the frame being run. */
 bool recomp_rollback_add_local(RecompRollbackSession *session, const RecompInputGamepad *pad);

@@ -289,6 +289,16 @@ add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
 add_test(NAME recomp-runtime-synctest COMMAND recomp_synctest_test)
 add_executable(recomp_rollback_test rollback.c rollback_test.c)
 add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
+add_executable(recomp_netplay_test netplay.c netplay_names.c rollback.c netplay_test.c)
+if(WIN32)
+    target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
+add_executable(recomp_netplay_lobby_test netplay.c rollback.c netplay_lobby_test.cpp)
+if(WIN32)
+    target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -469,6 +479,16 @@ if(RECOMP_PROGRAM_DIR)
         endif()
     endforeach()
     message(STATUS "Generated ${_missing_count} fail-loud stubs for absent snapshot bodies")
+    # The netplay host forwards its UDP port through the router with UPnP.
+    set(UPNPC_BUILD_SHARED OFF CACHE INTERNAL "")
+    set(UPNPC_BUILD_TESTS OFF CACHE INTERNAL "")
+    set(UPNPC_BUILD_SAMPLE OFF CACHE INTERNAL "")
+    set(UPNPC_NO_INSTALL ON CACHE INTERNAL "")
+    FetchContent_Declare(miniupnpc
+        URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_2_3_3.tar.gz
+        URL_HASH SHA256=8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222
+        SOURCE_SUBDIR miniupnpc)
+    FetchContent_MakeAvailable(miniupnpc)
     add_executable(recomp_program_runner runner.cpp program_adapters.c program_manual.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
@@ -477,7 +497,7 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c
+        synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c netplay_upnp.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
     target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
     if(MSVC)
@@ -488,9 +508,10 @@ if(RECOMP_PROGRAM_DIR)
         # The lifter writes conditions as if ((a == b)); clang would warn on every one.
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
-    target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio)
+    target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
+        libminiupnpc-static)
     if(WIN32)
-        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32)
+        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
     endif()
     recomp_use_sdl3(recomp_program_runner)
     target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")
