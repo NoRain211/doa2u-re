@@ -92,8 +92,8 @@ uint32_t recomp_dsound_buffer_consume(
     uint32_t position = recomp_dsound_buffer_cursor(model, model->last_ms);
     uint32_t remainder = model->frame_remainder;
     recomp_dsound_buffer_cursor(model, now_ms);
-    /* shortcut: discard stalls over 100 ms instead of replaying stale ring data;
-       use a device-driven producer when continuous output across stalls matters. */
+    /* A stall over 100 ms discards its span instead of replaying stale ring data;
+       the output pump thread keeps ordinary spans near 10 ms. */
     if (elapsed > 100u) {
         return 0u;
     }
