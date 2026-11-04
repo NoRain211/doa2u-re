@@ -829,6 +829,7 @@ typedef struct Transfer {
     uint32_t chunks, missing, asked; /* of the peer's profile */
     uint64_t next_ask, next_serve;
     uint64_t served; /* bytes of this side's profile sent */
+    uint32_t served_end; /* past the last chunk sent */
     bool known, peer_done;
     bool have[MAX_CHUNKS];
 } Transfer;
@@ -847,13 +848,18 @@ static void transfer_packet(RecompNetplay *net, Transfer *t, const uint8_t *pack
     uint32_t index;
     if (decode_part(packet, size, LOBBY_REQUEST, &index)) {
         const uint32_t mine = chunk_count(p->mine_size);
-        if (index >= mine) t->peer_done = true;
-        /* A 10-byte request draws up to 16 KB, so serve one burst per 50 ms
-           and eight copies in all; an honest peer, even on a lossy link,
-           needs far fewer. */
+        if (index >= mine) {
+            t->peer_done = true;
+            return;
+        }
+        /* A 10-byte request draws up to 16 KB. The next window goes out at
+           once, as an honest peer moves on; an earlier one, a retransmit or
+           a replay, waits 50 ms, and eight copies end it, far more than a
+           lossy link needs. */
         const uint64_t now = now_ms();
-        if (now < t->next_serve || t->served >= 8ull * p->mine_size) return;
+        if (t->served >= 8ull * p->mine_size || (index < t->served_end && now < t->next_serve)) return;
         t->next_serve = now + 50u;
+        t->served_end = index + CHUNKS_PER_REQUEST < mine ? index + CHUNKS_PER_REQUEST : mine;
         uint8_t chunk[PART_HEADER + CHUNK_BYTES];
         for (uint32_t i = index; i < mine && i < index + CHUNKS_PER_REQUEST; ++i) {
             const uint32_t bytes = chunk_size(p->mine_size, i);
