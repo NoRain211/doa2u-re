@@ -137,10 +137,11 @@ typedef struct RecompNetplayRoom {
     bool hosting;  /* set before the first tick; a host takes the first player who talks */
     uint64_t id;   /* this install's player ID, set before the first tick */
     /* Set before the first tick, or null: true for a player ID this player
-       blocked. Their messages are dropped and set refused; a side that was
-       calling or punching to them stops. */
+       blocked. Their messages are dropped; when the peer, a punch candidate
+       or an empty host's first caller is blocked, refused is set, and a call
+       or punch to them stops. */
     bool (*blocked)(uint64_t id);
-    bool refused;  /* a blocked player spoke; the caller clears it */
+    bool refused;  /* this room's peer is blocked; the caller clears it */
     bool joined;   /* the other player spoke in the last 3 s */
     bool mismatch; /* the other player runs another build */
     bool ready;

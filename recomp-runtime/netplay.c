@@ -564,7 +564,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         const uint8_t *sender = packet + ROOM_BYTES - 8u;
         if (room->blocked != NULL && room->blocked((uint64_t)get32(sender + 4u) << 32 | get32(sender))) {
             /* Say nothing back. Relay stays on, so the server's relayed packets end here quietly. */
-            room->refused = true;
+            /* Only this room's own peer, a candidate or, for an empty host, the would-be peer. */
+            if (from_peer(net, &from) || candidate || (room->hosting && !room->joined)) room->refused = true;
             if (from_peer(net, &from) || candidate) {
                 net->peer_port = 0u;
                 m->punching = false;
