@@ -409,7 +409,7 @@ void updateFind(std::uint16_t keys)
         match.listed = false;
         menu.listOk = true;
         recomp_netplay_match_probe(&menu.net);
-        if (menu.probedAt == Clock::time_point{}) menu.probedAt = now;
+        menu.probedAt = now; // newly listed rooms get their own second to answer
     }
     if (keys & B) {
         if (menu.joining == 0u) {

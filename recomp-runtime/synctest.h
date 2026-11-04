@@ -70,7 +70,7 @@ bool recomp_rollback_ring_load(size_t back);
 bool recomp_rollback_ring_hash(const RecompRamRange *ignored, size_t count, uint64_t *hash);
 /* Zeroes the guest RAM ranges SyncTest ignores (host-scheduled state). */
 void recomp_synctest_mask_ignored(uint8_t *ram, size_t size);
-/* Those ranges, sorted; fewer than capacity. */
+/* Those ranges, sorted, or SIZE_MAX when they do not all fit in capacity. */
 size_t recomp_synctest_ignored_ranges(RecompRamRange *ranges, size_t capacity);
 
 #ifdef __cplusplus

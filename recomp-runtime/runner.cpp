@@ -495,11 +495,15 @@ static void startReplay(std::uint32_t swap)
 {
     namespace fs = std::filesystem;
     const fs::path folder = discFolder / ".recomp-storage" / "replays";
-    char name[32];
+    char stamp[24], name[32];
     const std::time_t now = std::time(nullptr);
-    std::strftime(name, sizeof name, "%Y%m%d-%H%M%S.dr2r", std::localtime(&now));
+    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
     std::error_code error;
     fs::create_directories(folder, error);
+    // A second session within the same second gets a suffix instead of truncating the first one's replay.
+    std::snprintf(name, sizeof name, "%s.dr2r", stamp);
+    for (unsigned n = 2u; n < 100u && fs::exists(folder / name, error); ++n)
+        std::snprintf(name, sizeof name, "%s-%u.dr2r", stamp, n);
     replayFile.open(folder / name, std::ios::binary | std::ios::trunc);
     RecompReplayInfo info{};
     std::memcpy(info.digest, sessionDigest.data(), std::min(sessionDigest.size(), sizeof info.digest));
@@ -703,6 +707,7 @@ static void hashCheckFrame()
     const auto began = std::chrono::steady_clock::now();
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
     std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 2u);
+    if (count == SIZE_MAX) recomp_stop(4, "rollback:hash-ranges");
     /* draw_fight_name (program_manual.c) draws the local player's name in
        yellow and the other's in white, so the two sides' 2D draw state
        differs in glyph colors: in the sprite queue g_ui_sprite_queue, which

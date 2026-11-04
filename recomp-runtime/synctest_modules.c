@@ -60,10 +60,9 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
     }
     /* Kernel data and the PCR page: host-scheduled kernel bookkeeping. */
     if (count < capacity) ranges[count++] = (IgnoreRange){0x03f00000u, 0x04000000u};
-    if (count == capacity) {
-        fprintf(stderr, "recomp synctest: ignore range list full\n");
-        exit(2);
-    }
+    const size_t wanted = sizeof ram_ignore / sizeof ram_ignore[0] + stack_count + thread_stack_count +
+        kernel_stack_count + 1u;
+    if (count < wanted) return SIZE_MAX;
     // Small list; insertion sort keeps the walk below simple.
     for (size_t i = 1u; i < count; ++i) {
         IgnoreRange value = ranges[i];
@@ -77,11 +76,21 @@ static size_t build_ignore_ranges(IgnoreRange *ranges, size_t capacity)
     return count;
 }
 
+static size_t synctest_ignore_ranges(IgnoreRange ranges[64])
+{
+    const size_t count = build_ignore_ranges(ranges, 64u);
+    if (count == SIZE_MAX) {
+        fprintf(stderr, "recomp synctest: ignore range list full\n");
+        exit(2);
+    }
+    return count;
+}
+
 static bool ram_equal(const void *left, const void *right, size_t size)
 {
     const uint8_t *a = left, *b = right;
     IgnoreRange ranges[64];
-    const size_t range_count = build_ignore_ranges(ranges, 64u);
+    const size_t range_count = synctest_ignore_ranges(ranges);
     size_t at = 0u;
     for (size_t range = 0u; range <= range_count && at < size; ++range) {
         size_t end = range < range_count && ranges[range].start < size ? ranges[range].start : size;
@@ -100,7 +109,7 @@ static bool ram_equal(const void *left, const void *right, size_t size)
 void recomp_synctest_mask_ignored(uint8_t *ram, size_t size)
 {
     IgnoreRange ranges[64];
-    const size_t range_count = build_ignore_ranges(ranges, 64u);
+    const size_t range_count = synctest_ignore_ranges(ranges);
     for (size_t i = 0u; i < range_count; ++i) {
         if (ranges[i].start >= size) continue;
         const size_t stop = ranges[i].stop < size ? ranges[i].stop : size;
