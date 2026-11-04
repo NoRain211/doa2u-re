@@ -77,7 +77,8 @@ struct Menu {
 };
 Menu menu;
 
-// Router forward, asked on its own thread: 0 not asked, 1 asking, 2 forwarded, 3 not forwarded.
+// Router forward, asked on its own thread: 0 not asked, 1 asking, 2 forwarded, 3 not forwarded,
+// 4 asking for a room already left.
 std::atomic<int> upnpState{0};
 char upnpAddress[80];
 std::string lanAddress;
@@ -182,7 +183,11 @@ void openRouterPort(std::uint16_t port)
         char address[sizeof upnpAddress];
         const bool forwarded = recomp_netplay_open_router_port(port, address, sizeof address);
         std::memcpy(upnpAddress, address, sizeof address);
-        upnpState.store(forwarded ? 2 : 3);
+        int asking = 1;
+        if (upnpState.compare_exchange_strong(asking, forwarded ? 2 : 3)) return;
+        // The room closed meanwhile, so the forward closes with it.
+        if (forwarded) recomp_netplay_close_router_port();
+        upnpState.store(0);
     }).detach();
 }
 
@@ -248,9 +253,10 @@ void join()
 void leaveRoom()
 {
     recomp_netplay_close(&menu.net);
-    int forwarded = 2;
+    int forwarded = 2, asking = 1;
     if (menu.hosting && upnpState.compare_exchange_strong(forwarded, 0)) recomp_netplay_close_router_port();
-    else if (upnpState.load() == 3) upnpState.store(0);
+    else if (menu.hosting) upnpState.compare_exchange_strong(asking, 4); // the asking thread closes it
+    if (upnpState.load() == 3) upnpState.store(0);
     menu.screen = Screen::Versus;
     menu.cursor = menu.hosting ? 1 : 2;
 }

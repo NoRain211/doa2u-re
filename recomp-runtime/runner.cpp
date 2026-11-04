@@ -84,6 +84,7 @@ struct RollbackRun {
     // inflated advantage never reaches the peer's frame sync.
     std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
+    std::chrono::steady_clock::time_point contact{}; // when a stall first saw the other player
     const char *dump = nullptr;
     RecompRollbackSession session;
     RecompNetplay net;
@@ -401,8 +402,10 @@ static void stalled(std::chrono::steady_clock::time_point began)
     }
     const auto now = steady_clock::now();
     const bool heard = rollback.net.peer_seen;
+    if (heard && rollback.contact == steady_clock::time_point{}) rollback.contact = now;
     const seconds grace(heard ? 15 : 120);
-    const auto waited = now - began;
+    // Contact heard during this wait starts its 15 s afresh.
+    const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
     if (waited > grace) endSession("rollback:peer-timeout");
     if (waited < seconds(1) || now - noticeShown < milliseconds(100)) return;
     if (!interrupted && heard)
@@ -533,7 +536,7 @@ static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &p
 {
     const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
                        target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
-    if (state == 4u && (select ? scene != 0u && scene != 2u : scene == 0u && mode == 5u)) return true;
+    if (state == 4u && (select ? scene == 3u : scene == 0u && mode == 5u)) return true;
     pad = RecompInputGamepad{};
     if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;
     if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
@@ -716,6 +719,7 @@ static bool readRollbackConfig()
 // --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
 static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
 static std::string netplayJoin;
+static bool roomSession, ownUnlockAll;
 enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
 
 // SHA-256 of this runner's executable, so both sides of a lobby run one build.
@@ -948,7 +952,8 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
     RecompNetplayLobbyResult result;
     if (hosting) {
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
-        if (recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
+        // A room's host already asked for the forward on the menu's thread; it stays for the session.
+        if (!roomSession && recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
         result = recomp_netplay_host(&rollback.net, port, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
     } else {
@@ -1051,8 +1056,6 @@ static void reboot()
     recomp_native_fiber_switch(fiber);
 }
 
-static bool roomSession, ownUnlockAll;
-
 // B, Back or Esc, pressed while STARTING MATCH shows; one already held must be let go first.
 static bool cancelHeld;
 static bool cancelPressed()
@@ -1080,7 +1083,8 @@ static void startRoomSession()
     netplayJoin = join;
     roomSession = true;
     ownUnlockAll = unlockAll;
-    // The room's players skip the intro and land on Versus character select.
+    // The room's players skip the intro and land on Versus character select. The
+    // skip stays on, since every later boot is a session or the walk back to the room.
     recomp_skip_intro = true;
     landOnVersus = true;
     noticeTitle = "STARTING MATCH";
@@ -1119,6 +1123,7 @@ static void endSession(const char *reason)
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
     recomp_kernel_file_set_synchronous_reads(false);
+    recomp_dsound_buffer_set_game_thread_pump(false);
     recomp_dsound_buffer_set_output_suppressed(false);
     recomp_netplay_menu_return_to_room();
     reboot();

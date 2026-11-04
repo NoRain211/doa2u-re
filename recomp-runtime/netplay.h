@@ -100,7 +100,7 @@ typedef struct RecompNetplayRoom {
     char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     bool heard_new;
     /* Kept between ticks. */
-    uint64_t heard_ms, sent_ms, echo_at_ms;
+    uint64_t heard_ms, sent_ms, echo_at_ms, heard_line_ms;
     uint32_t echo;
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
@@ -116,8 +116,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     const char *name, bool ready, bool start);
 /* Sends a chat line, cut to RECOMP_NETPLAY_CHAT_BYTES, with the next ticks:
    each tick for 2 s repeats it, and the other side shows it once. The other
-   side drops a line that is not printable ASCII or that
-   recomp_netplay_name_banned refuses. */
+   side takes at most one line a second and drops a line that is not
+   printable ASCII or that recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Binds port and waits for a joiner's hello, answering each with the host's
    digest and settings. The first joiner becomes the peer; one with another

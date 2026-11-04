@@ -1,6 +1,7 @@
 #include "netplay.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -195,12 +196,16 @@ int main()
     }
     check("chat arrives", hostRoom.heard_new && std::strcmp(hostRoom.heard, "gg, one more?") == 0);
     hostRoom.heard_new = false;
+    // The next line waits out the receiver's second, then is read and dropped as not printable.
     recomp_netplay_room_say(&joinerRoom, "bell\a");
-    for (int i = 0; i < 25; ++i) {
+    const auto bellSaid = std::chrono::steady_clock::now();
+    for (int i = 0; i < 100 && hostRoom.heard_id != joinerRoom.say_id; ++i) {
         recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", true, false);
         recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    check("chat a line a second", hostRoom.heard_id == joinerRoom.say_id &&
+        std::chrono::steady_clock::now() - bellSaid >= std::chrono::milliseconds(900));
     check("chat once, printable only", !hostRoom.heard_new);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);

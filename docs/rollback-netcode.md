@@ -270,11 +270,12 @@ pad buttons that letters also press. A line holds up to 40 printable ASCII
 characters. Each player can send one line a second, and a line that fails
 the name check is refused. The newest line rides in each room message for
 2 s under an id taken from the sender's clock, so a lost packet costs
-nothing and the other side shows it once. The receiver checks it again and
-drops anything else. The last four lines replace the address lines. Two
-scripted runners typed into each other's rooms, and real keystrokes for X
-and Z went into the line without leaving the room or toggling ready. A
-session never shows chat, since its room is closed.
+nothing and the other side shows it once. The receiver checks it again,
+drops anything else and takes at most one line a second, so a line held
+back shows from a later repeat. The last four lines replace the address
+lines. Two scripted runners typed into each other's rooms, and real
+keystrokes for X and Z went into the line without leaving the room or
+toggling ready. A session never shows chat, since its room is closed.
 
 When both are
 ready the host says start for 600 ms. Each runner closes the room, shows
