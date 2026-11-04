@@ -57,15 +57,16 @@ void recomp_synctest_configure(bool enabled, unsigned frames, bool loop);
 /* Call at each Swap after the frame-locked clock advances. */
 RecompSyncTestResult recomp_synctest_frame(uint32_t swap_counter);
 
-/* Rollback save points of the same modules and guest RAM, one per frame.
+/* Rollback save points of the same modules and guest RAM, for chosen frames.
    SyncTest and the ring share the RAM write tracking, so only one of them
    may run. */
 bool recomp_rollback_ring_init(size_t frames);
-/* Saves the frame about to run. False drops the history; treat it as fatal. */
-bool recomp_rollback_ring_save(void);
-/* Restores the save `back` saves before the newest and discards later ones.
-   False, with nothing changed, when that save cannot be rewound. */
-bool recomp_rollback_ring_load(size_t back);
+/* Saves the state as `frame` starts. Frames between saves need none; their
+   changes fold into the next save. False drops the history; treat it as fatal. */
+bool recomp_rollback_ring_save(uint32_t frame);
+/* Restores the save made for `frame` and discards later ones. False, with
+   nothing changed, when no kept save has that frame or it cannot be rewound. */
+bool recomp_rollback_ring_load(uint32_t frame);
 /* A hash of guest RAM as of the ring's newest save or load, reading the
    ignored ranges as zero (recomp_snapshots_hash). */
 bool recomp_rollback_ring_hash(const RecompRamRange *ignored, size_t count, uint64_t *hash);

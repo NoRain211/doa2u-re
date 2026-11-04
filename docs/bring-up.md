@@ -933,7 +933,7 @@ and back to the menus matched 6,295 frames with no mismatch. It skipped three
 display mode changes and one save. With asynchronous reads, 102 more frames
 were skipped.
 
-`RECOMP_ROLLBACK=loopback` keeps the same state in a ring of per-frame saves
+`RECOMP_ROLLBACK=loopback` keeps the same state in a ring of saves
 and rewinds it on mispredicted input; `docs/rollback-netcode.md` describes
 the run. It uses the frame clock and synchronous reads as SyncTest does.
 

@@ -173,24 +173,30 @@ int main(void)
     guest[0x3000u] = 4u;
     check("ram mismatch", recomp_synctest_frame(92u) == RECOMP_SYNCTEST_MISMATCH);
 
-    // The rollback ring keeps one save per frame and loads any of them back.
+    // The rollback ring keeps the newest saves, made only for some frames, and loads them by frame.
     recomp_synctest_configure(false, 1u, false);
     recomp_synctest_set_modules(modules, 1u);
     recomp_synctest_set_guest_ram(guest, sizeof guest, false);
     check("ring init", recomp_rollback_ring_init(3u));
-    for (uint8_t frame = 0u; frame < 5u; ++frame) {
+    guest[0x3000u] = 0u;
+    for (uint8_t frame = 0u; frame < 7u; ++frame) {
         world[0] = frame;
         guest[0x2000u] = frame;
-        check("ring save", recomp_rollback_ring_save());
+        if (frame % 3u == 2u)
+            guest[0x3000u] = frame; // an unsaved frame's write lands in the next save
+        else
+            check("ring save", recomp_rollback_ring_save(frame));
     }
     world[0] = guest[0x2000u] = 9u;
-    check("ring too far back", !recomp_rollback_ring_load(4u));
-    check("ring load", recomp_rollback_ring_load(2u));
-    check("ring rewound", world[0] == 2u && guest[0x2000u] == 2u);
-    check("ring dropped later saves", !recomp_rollback_ring_load(2u));
-    check("ring older save", recomp_rollback_ring_load(1u) && world[0] == 1u && guest[0x2000u] == 1u);
+    check("ring too far back", !recomp_rollback_ring_load(0u));
+    check("ring unsaved frame", !recomp_rollback_ring_load(5u) && world[0] == 9u);
+    check("ring load", recomp_rollback_ring_load(4u));
+    check("ring rewound", world[0] == 4u && guest[0x2000u] == 4u && guest[0x3000u] == 2u);
+    check("ring dropped later saves", !recomp_rollback_ring_load(6u));
+    check("ring across an unsaved frame", recomp_rollback_ring_load(1u) && world[0] == 1u &&
+        guest[0x2000u] == 1u && guest[0x3000u] == 0u);
     swap_caller_stub = 0x28284Fu;
-    check("ring keeps caller", !recomp_rollback_ring_load(0u) && world[0] == 1u);
+    check("ring keeps caller", !recomp_rollback_ring_load(1u) && world[0] == 1u);
     swap_caller_stub = 0u;
 
     if (failures != 0) return 1;

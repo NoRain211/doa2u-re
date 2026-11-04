@@ -100,9 +100,17 @@ SyncTest.
   clock never sleeps there; without it hidden frames diverged.
 - Frames that write saves or present from the display mode change cannot be
   rewound. A rollback window must not reach back past one.
-- Both peers must produce identical floating-point results. The same build
-  on x86-64 is the safe case; macOS arm64 and host libm differences are
-  unverified.
+- Both peers must produce identical floating-point results. Basic float
+  operations are IEEE-exact on every host once GCC and Clang stop fusing
+  multiply-adds (`-ffp-contract=off`). The x87 transcendentals are not: each
+  host's libm differs in the last bit for a few percent of inputs. The runner
+  defines `RECOMP_PORTABLE_MATH`, so generated fsin, fcos, fptan, fpatan,
+  fyl2x, fyl2xp1 and f2xm1 call one copy of musl's code (`musl_math/`).
+  `portable_math_test.c` pins a hash of 160,000 results; MSVC, GCC and Clang
+  on x86-64 and arm64 Linux all match it.
+  `RCPSS` and `RSQRTSS` are table approximations whose bits differ between
+  Intel, AMD and the Xbox's CPU, so the runner computes the exact reciprocal
+  on every host, within Intel's documented 1.5 * 2^-12 error.
 
 ## Rollback session
 
@@ -110,12 +118,18 @@ SyncTest.
 arrived runs with the last remote pad; when its pad arrives and differs from
 the one that ran, the session rewinds to the earliest wrong frame. The local
 side runs at most `RECOMP_ROLLBACK_WINDOW` (8) frames past the last remote
-pad. The ring in `synctest.c` keeps one save per frame of SyncTest's modules
-and the guest RAM pages, and refuses a load that SyncTest would skip.
+pad. The ring in `synctest.c` keeps saves of SyncTest's modules and the
+guest RAM pages, each tagged with its frame, and refuses a load that SyncTest
+would skip.
 
 The runner drives the session from the Swap boundary. At the newest frame it
 adds the pads that arrived, then either loads the earliest mispredicted
-frame or saves the frame about to run. The frame's pads become the input
+frame or saves the frame about to run. A rewind only ever goes back to a
+frame that started before the other player's pad for it arrived, so only
+those frames save, plus every desync check frame, whose hash reads the
+newest save. Lockstep frames and frames whose pad came in time skip the
+save, and their RAM changes fold into the next one. In a localhost fight of
+2,400 frames the two sides made 79 and 106 saves. The frame's pads become the input
 adapter's sample source, so every XInputGetState in that frame reads the
 same pad however often the game polls. Frames run again are hidden.
 
@@ -416,12 +430,17 @@ joiner to frame 3,000 with matching guest RAM.
 
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
-The hello carries the SHA-256 of the joiner's runner executable, and the
-host refuses any other build and keeps waiting. That also refuses a Windows
-and Linux pair, whose floating point is unverified. The host answers with
-its input delay (`--netplay-delay`, default 2) and the options that change
-the simulation (`--no-unlock-all`, `--skip-intro`), which the joiner
-adopts. Both messages carry the size of the sender's profile.
+The hello carries the joiner's netplay build, and the host refuses any
+other and keeps waiting. It is a SHA-256 of the release in `VERSION` (the Git commit in a
+checkout), the generated program's manifest and the game XBE's SHA-256
+(`RECOMP_XBE_SHA256`), so runners of one release on Windows, macOS and Linux may pair; the
+runners' own bytes differ by platform and compiler. A Windows runner and a
+Linux runner built with GCC from one commit compute the same ID, but no
+fight between two different hosts has run yet. The host answers with
+its input delay
+(`--netplay-delay`, default 2) and the options that change the simulation
+(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
+messages carry the size of the sender's profile.
 
 Each side first recovers its own save journal, then packs the profile it
 saved last (`UDATA/<title>/<save>`) into one blob of at most 1 MiB with a
@@ -452,7 +471,8 @@ it, with that port. A router whose own address is private (carrier-grade
 NAT) still forwards, but players outside the provider's network cannot
 reach it, and the log says so. On the development network the router
 (MiniUPnPd, IGD v2) listed the forward during a session and had removed it
-after the runner stopped.
+after the runner stopped. A session started from a room keeps the forward
+HOST ONLINE asked for and asks for none of its own.
 
 Both runners then boot and play one session from their first frame. Until
 it starts, and on ports 3 and 4 throughout, the guest sees no controller, so
@@ -546,7 +566,7 @@ records a replay into the player's own play folder as
 `.recomp-storage/replays/<local time>.dr2r` (`replay.c`). The file stays
 on that computer and is never sent: it holds the other player's profile.
 It carries what the session needs to run again on the same build: the
-SHA-256 of the runner, the local player, the input delay and the host's
+netplay build, the local player, the input delay and the host's
 options, the swap the session started at, both profile blobs as the lobby
 swapped them, and both guest ports' pads for every frame. A frame goes in
 once it has run and both its pads have arrived, so the file holds only

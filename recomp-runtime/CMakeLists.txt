@@ -303,6 +303,21 @@ endif()
 add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
 add_executable(recomp_netplay_settings_test netplay_settings.cpp netplay_settings_test.cpp)
 add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_test)
+add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
+target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+# One x87 transcendental implementation for every host (portable_math.h).
+add_library(recomp_portable_math STATIC
+    musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
+    musl_math/__rem_pio2.c musl_math/__rem_pio2_large.c musl_math/atan.c musl_math/atan2.c
+    musl_math/log2.c musl_math/log1p.c musl_math/expm1.c)
+target_include_directories(recomp_portable_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT WIN32)
+    target_link_libraries(recomp_portable_math PUBLIC m)
+endif()
+add_executable(recomp_portable_math_test portable_math_test.c)
+target_link_libraries(recomp_portable_math_test PRIVATE recomp_portable_math)
+add_test(NAME recomp-runtime-portable-math COMMAND recomp_portable_math_test)
 add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
     RECOMP_UNPACED=1 "$<TARGET_FILE:recomp_d3d_vblank_test>")
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
@@ -502,9 +517,44 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_settings.cpp overlay.c
+        netplay_menu_room.cpp netplay_menu_find.cpp
+        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         host_diagnostics.cpp "${_missing_source}" ${_program_sources})
-    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}")
+    # Netplay pairs runners of one release (VERSION) or commit and one program,
+    # whatever the host; a runner's own bytes differ by platform and compiler.
+    set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
+    set(_netplay_version "${RECOMP_NETPLAY_VERSION}")
+    if(NOT _netplay_version AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" _netplay_version LIMIT_COUNT 1)
+    elseif(NOT _netplay_version)
+        execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _netplay_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        # Configure again when HEAD moves: a checkout rewrites HEAD, a commit its branch's ref and HEAD's log.
+        execute_process(COMMAND git symbolic-ref -q HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _git_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(NOT _git_branch)
+            set(_git_branch HEAD)
+        endif()
+        execute_process(COMMAND git rev-parse --git-path HEAD --git-path logs/HEAD --git-path "${_git_branch}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _git_head_files OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        string(REPLACE "\n" ";" _git_head_files "${_git_head_files}")
+        foreach(_git_head_file IN LISTS _git_head_files)
+            get_filename_component(_git_head_file "${_git_head_file}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+            if(EXISTS "${_git_head_file}")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_git_head_file}")
+            endif()
+        endforeach()
+    endif()
+    if(NOT _netplay_version)
+        message(FATAL_ERROR "Netplay needs a VERSION file, a Git checkout or RECOMP_NETPLAY_VERSION")
+    endif()
+    string(SHA256 _netplay_build "${_netplay_version}\n${_manifest_sha256}\n${_xbe_sha256}\n")
+    message(STATUS "Netplay build ${_netplay_build} (${_netplay_version})")
+    # RECOMP_PORTABLE_MATH gives every host the same transcendentals and RCPSS/RSQRTSS.
+    target_compile_definitions(recomp_program_runner PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
+    # Only runner.cpp reads it, so a new commit does not recompile the generated program.
+    set_source_files_properties(runner.cpp PROPERTIES COMPILE_DEFINITIONS RECOMP_NETPLAY_BUILD="${_netplay_build}")
     if(MSVC)
         # /MP compiles the large generated chunks side by side inside this one project.
         target_compile_options(recomp_program_runner PRIVATE /we4013 /MP)
@@ -514,7 +564,7 @@ if(RECOMP_PROGRAM_DIR)
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
     target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
-        libminiupnpc-static)
+        recomp_portable_math libminiupnpc-static)
     if(WIN32)
         target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
     endif()
