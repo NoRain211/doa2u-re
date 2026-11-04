@@ -524,9 +524,8 @@ static uint64_t now_ms(void)
 {
     /* Monotonic, so a system clock change cannot end a lobby or stall its retries. */
 #ifdef _WIN32
-    static LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-    if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
+    LARGE_INTEGER frequency, counter;
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) return 0u;
     QueryPerformanceCounter(&counter);
     return (uint64_t)(counter.QuadPart / frequency.QuadPart * 1000 +
         counter.QuadPart % frequency.QuadPart * 1000 / frequency.QuadPart);
