@@ -111,6 +111,14 @@ SyncTest.
   `RCPSS` and `RSQRTSS` are table approximations whose bits differ between
   Intel, AMD and the Xbox's CPU, so the runner computes the exact reciprocal
   on every host, within Intel's documented 1.5 * 2^-12 error.
+- The game reads its widescreen (XC_VIDEO) and surround (XC_AUDIO) settings
+  in its own logic: a joiner with either setting different from the host's
+  desynced on frame 1. The lobby sends the host's, and the kernel gives
+  them to the game for the session. Each player keeps their own window and
+  speakers. The presenter fits the game's 4:3 or 16:9 picture into the
+  window with black bars, and the 5.1 mix folds to stereo. Fights to frame
+  1,800 with the two settings crossed both ways, and with 4x MSAA on one
+  side, kept guest RAM equal.
 
 ## Rollback session
 
