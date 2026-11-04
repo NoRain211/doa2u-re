@@ -89,6 +89,12 @@ int main()
     const std::vector<std::uint8_t> kasumi = meta(u"Title=DOA2U\r\nName=Ka\u200bsumi \u00e9\u4e00\r\n");
     check("save name", recomp_netplay_profile_name(kasumi.data(), kasumi.size()) == "Kasumi \xc3\xa9\xe4\xb8\x80");
     check("no name line", recomp_netplay_profile_name(kasumi.data(), 8u).empty());
+    // A surrogate pair is one 4-byte character; a lone surrogate becomes U+FFFD.
+    std::u16string surrogates = u"Name=A\U0001F600";
+    surrogates += static_cast<char16_t>(0xd800u);
+    surrogates += u"B";
+    const std::vector<std::uint8_t> emoji = meta(surrogates);
+    check("surrogates", recomp_netplay_profile_name(emoji.data(), emoji.size()) == "A\xf0\x9f\x98\x80\xef\xbf\xbd" "B");
 
     // A profile, a second one, title saves and a file beside the profiles.
     const std::vector<std::uint8_t> data{1u, 2u, 3u}, title{4u}, beside{5u}, other{6u};

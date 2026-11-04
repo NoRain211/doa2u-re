@@ -21,7 +21,8 @@ std::string recomp_netplay_latest_profile(const std::filesystem::path &root);
 std::string recomp_netplay_own_profile_name(const std::filesystem::path &partition1);
 /* Packs profile's tree below root and, with title, the title saves (TDATA)
    and the files beside the profiles. False when a file is unreadable, over
-   RECOMP_NETPLAY_MAX_PROFILE or not a plain file or folder. */
+   RECOMP_NETPLAY_MAX_PROFILE or not a plain file or folder, or a path or the
+   entry count exceeds what recomp_netplay_unpack_profile accepts. */
 bool recomp_netplay_pack_profile(const std::filesystem::path &root, const std::string &profile, bool title,
     std::vector<std::uint8_t> &blob);
 /* Writes a blob from the other player below root, adding its save names.
