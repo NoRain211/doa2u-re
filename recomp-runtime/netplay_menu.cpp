@@ -809,7 +809,8 @@ void drawRoom()
     title("ONLINE LOBBY ROOM");
     const std::string ping = room.pinged ? std::to_string(room.ping_ms) + " MS" + (menu.net.match.relay ? "  RELAY" : "") : "";
     const bool peer = room.joined;
-    const std::string peerName = room.mismatch ? "OTHER BUILD" : room.name;
+    const std::string peerName = room.mismatch ? "OTHER BUILD"
+        : recomp_netplay_name_banned(room.name) ? "HIDDEN NAME" : room.name;
     if (menu.hosting) {
         plate(40.0f, "P1  HOST", menu.name, true, "YOU", menu.ready);
         plate(350.0f, "P2", peerName, peer, ping, room.ready);
