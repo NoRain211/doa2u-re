@@ -259,6 +259,8 @@ static void showCard()
     const char *wide = std::getenv("RECOMP_D3D_WIDESCREEN");
     const float aspect = wide != nullptr && std::strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
     std::fprintf(stderr, "recomp runner: staff roll starts; dedication card shown\n");
+    // Guest time stops for the card, so the output pump must not play past it.
+    recomp_dsound_output_lock();
     const auto start = steady_clock::now();
     for (auto next = start;;) {
         const auto elapsed = steady_clock::now() - start;
@@ -271,6 +273,7 @@ static void showCard()
     }
     recomp_xapi_hold_time(static_cast<std::uint64_t>(
         duration_cast<nanoseconds>(steady_clock::now() - start).count()));
+    recomp_dsound_output_unlock();
 }
 
 static void startRoomSession();
@@ -1601,6 +1604,7 @@ static void bootGuest()
             recomp_xapi_frame_clock_set_enabled(true);
         recomp_synctest_set_guest_ram(guestRam, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
         recomp_kernel_file_set_synchronous_reads(true);
+        recomp_dsound_buffer_set_game_thread_pump(true);
         recomp_synctest_install_default_modules();
         if (rollbackEnabled) {
             // Rollback input lives in the session, outside the saved state.
