@@ -340,15 +340,19 @@ static bool readRollbackConfig()
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
     if (std::strcmp(mode, "loopback") != 0) return false;
     rollback.enabled = true;
-    const auto number = [](const char *name, std::uint32_t &value) {
-        if (const char *text = std::getenv(name); text != nullptr && *text != '\0')
-            value = static_cast<std::uint32_t>(std::strtoul(text, nullptr, 10));
+    bool valid = true;
+    const auto number = [&valid](const char *name, std::uint32_t &value) {
+        const char *text = std::getenv(name);
+        if (text == nullptr || *text == '\0') return;
+        const char *end = text + std::strlen(text);
+        const auto [stop, error] = std::from_chars(text, end, value);
+        if (error != std::errc{} || stop != end) valid = false;
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
     number("RECOMP_ROLLBACK_LAG", rollback.lag);
     rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
-    return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+    return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
 }
 
 int main(int argc, char **argv)
@@ -518,8 +522,8 @@ int main(int argc, char **argv)
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!readRollbackConfig()) {
-        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with a lag of at most "
-                  << RECOMP_ROLLBACK_WINDOW << " frames\n";
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with decimal "
+                  << "frame counts and a lag of at most " << RECOMP_ROLLBACK_WINDOW << " frames\n";
         return 1;
     }
     if (recomp_synctest_enabled() || rollback.enabled) {
