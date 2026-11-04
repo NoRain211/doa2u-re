@@ -69,9 +69,10 @@ class MatchmakerTest(unittest.TestCase):
         answers = dict((to, packet) for packet, to in self.send(joining(room_id), JOINER_AT, 1.0))
         to_host, to_joiner = answers[HOST_AT], answers[JOINER_AT]
         self.assertEqual(to_host[:6], mm.header(mm.PEER))
-        self.assertEqual(to_host[6:18], mm.endpoint(JOINER_AT) + LAN)
+        # Behind different routers, neither learns the other's LAN address.
+        self.assertEqual(to_host[6:18], mm.endpoint(JOINER_AT) + bytes(6))
         self.assertEqual(to_host[19:19 + to_host[18]], b"AYANE")
-        self.assertEqual(to_joiner[6:18], mm.endpoint(HOST_AT) + LAN)
+        self.assertEqual(to_joiner[6:18], mm.endpoint(HOST_AT) + bytes(6))
         self.assertEqual(to_joiner[19:19 + to_joiner[18]], b"KASUMI")
         # Claimed while the two connect; a heartbeat still saying open lists it again later.
         self.assertEqual(rooms(self.send(listing(), ("192.0.2.1", 1), 2.0)[0][0]), [])
@@ -86,7 +87,8 @@ class MatchmakerTest(unittest.TestCase):
         self.send(joining(room_id), JOINER_AT, 1.0)
         self.assertEqual(self.send(joining(room_id), ("192.0.2.1", 1), 2.0)[0][0][5], mm.GONE)
 
-    def test_only_private_lan_endpoints_with_a_port_are_passed_on(self):
+    def test_only_private_lan_endpoints_with_a_port_are_passed_on_behind_one_router(self):
+        same_router = (HOST_AT[0], 51234)
         for lan, kept in ((LAN, True), (socket.inet_aton("10.1.2.3") + b"\x01\x02", True),
                           (socket.inet_aton("169.254.9.9") + b"\x01\x02", True),
                           (socket.inet_aton("8.8.8.8") + b"\x00\x35", False),
@@ -94,10 +96,25 @@ class MatchmakerTest(unittest.TestCase):
                           (socket.inet_aton("192.168.1.20") + bytes(2), False)):
             self.setUp()
             self.send(hosting(lan=lan), HOST_AT, 0.0)
-            answers = dict((to, packet) for packet, to in self.send(joining(1, lan=lan), JOINER_AT, 1.0))
+            answers = dict((to, packet) for packet, to in self.send(joining(1, lan=lan), same_router, 1.0))
             self.assertEqual(len(answers), 2)
             for packet in answers.values():
                 self.assertEqual(packet[12:18], lan if kept else bytes(6))
+
+    def test_one_address_holds_one_claim(self):
+        first, _ = self.host()
+        second, _ = self.host(sender=("203.0.113.8", 47701))
+        self.send(joining(first), JOINER_AT, 1.0)
+        self.send(joining(second), (JOINER_AT[0], 51235), 1.0)
+        listed = [entry[0] for entry in rooms(self.send(listing(), ("192.0.2.1", 1), 2.0)[0][0])]
+        self.assertEqual(listed, [first])
+
+    def test_joins_are_rate_limited_per_address(self):
+        room_id, _ = self.host()
+        answered = sum(bool(self.send(joining(room_id), (JOINER_AT[0], 50000 + i), 1.0))
+                       for i in range(mm.JOINS_PER_SECOND + 5))
+        self.assertEqual(answered, mm.JOINS_PER_SECOND)
+        self.assertTrue(self.send(joining(room_id), JOINER_AT, 2.5))  # a new second
 
     def test_a_repeated_join_answers_again(self):
         room_id, _ = self.host()
