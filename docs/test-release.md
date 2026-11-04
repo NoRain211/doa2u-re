@@ -82,7 +82,8 @@ address still works.
 Online matches are unranked: nothing goes to a leaderboard, and each match
 plays on copies of both profiles, so your own profile never changes. If the
 two games stop matching, the match ends with DESYNC DETECTED. Every online
-match saves a replay in private\play-disc\.recomp-storage\replays. Keep it
+match saves a replay in `private\play-disc\.recomp-storage\replays`, unless
+the log says it cannot write one. Keep it
 when you report a desync or a cheating player; it holds both players'
 profiles, so share it only privately, when a developer asks for it.
 A demanding moment on The Burai Zenin can still drop a single frame, and
