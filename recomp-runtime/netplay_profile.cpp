@@ -128,6 +128,8 @@ static bool safeProfilePath(const std::string &name)
         const std::size_t slash = name.find('/', start);
         const std::string part = name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
         if (part.empty() || part == "." || part == "..") return false;
+        // Windows drops a trailing dot, so "SaveMeta.xbx." would open as SaveMeta.xbx.
+        if (part.back() == '.') return false;
         for (const char c : part)
             if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
         if (first && part != "UDATA" && part != "TDATA") return false;
@@ -143,7 +145,7 @@ static bool safeProfilePath(const std::string &name)
 }
 
 bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root,
-    std::vector<std::string> &names)
+    bool joiner, std::vector<std::string> &names)
 {
     namespace fs = std::filesystem;
     if (size < 64u) return false;
@@ -158,6 +160,7 @@ bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, c
     };
     std::error_code error;
     fs::create_directories(root, error);
+    std::string folder;
     for (unsigned entries = 0u; !error && at < body.size(); ++entries) {
         std::uint32_t kind, length, bytes;
         if (entries == 512u || !get(1u, kind) || kind > 1u || !get(2u, length) || length > 200u ||
@@ -167,6 +170,12 @@ bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, c
             body.begin() + static_cast<std::ptrdiff_t>(at + length));
         at += length;
         if (!safeProfilePath(name)) return false;
+        if (joiner) {
+            if (name.rfind("UDATA/", 0u) != 0u || std::count(name.begin(), name.end(), '/') < 2) return false;
+            const std::string top = name.substr(0u, name.find('/', name.find('/', 6u) + 1u));
+            if (folder.empty()) folder = top;
+            if (top != folder) return false;
+        }
         const fs::path path = root / fs::path(name);
         if (kind == 0u) {
             fs::create_directories(path, error);
@@ -178,7 +187,10 @@ bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, c
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
         file.close();
         if (!file) return false;
-        if (path.filename() == "SaveMeta.xbx") names.push_back(recomp_netplay_profile_name(body.data() + at, bytes));
+        std::string file_name = path.filename().string();
+        for (char &c : file_name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        // Windows opens any case of the name, so the filter reads every one.
+        if (file_name == "SAVEMETA.XBX") names.push_back(recomp_netplay_profile_name(body.data() + at, bytes));
         at += bytes;
     }
     return !error;

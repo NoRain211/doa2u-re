@@ -464,11 +464,8 @@ static void match_answer(RecompNetplay *net, const uint8_t *packet, size_t size)
         net->peer_port = port[first];
         m->punching = true;
         m->punch_ms = now_ms();
-        char text[2][INET_ADDRSTRLEN];
-        for (unsigned i = 0u; i < 2u; ++i)
-            if (inet_ntop(AF_INET, &address[i], text[i], sizeof text[i]) == NULL) text[i][0] = '\0';
-        fprintf(stderr, "recomp netplay: matched; punching to %s:%u and %s:%u\n", text[0], ntohs(port[0]), text[1],
-            ntohs(port[1]));
+        /* No addresses here or below: players paste this log into public issues. */
+        fprintf(stderr, "recomp netplay: matched; punching to the other player\n");
     }
 }
 
@@ -592,9 +589,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         }
         if (m->punching) { /* relayed packets end punching first, so this one came directly */
             m->punching = false;
-            char text[INET_ADDRSTRLEN];
-            if (inet_ntop(AF_INET, &from.sin_addr, text, sizeof text) == NULL) text[0] = '\0';
-            fprintf(stderr, "recomp netplay: reached the other player directly at %s:%u\n", text, ntohs(from.sin_port));
+            fprintf(stderr, "recomp netplay: reached the other player directly\n");
         }
         const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
         room->joined = true;
@@ -832,7 +827,8 @@ static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
 typedef struct Transfer {
     RecompNetplayProfiles *profiles;
     uint32_t chunks, missing, asked; /* of the peer's profile */
-    uint64_t next_ask;
+    uint64_t next_ask, next_serve;
+    uint64_t served; /* bytes of this side's profile sent */
     bool known, peer_done;
     bool have[MAX_CHUNKS];
 } Transfer;
@@ -852,11 +848,18 @@ static void transfer_packet(RecompNetplay *net, Transfer *t, const uint8_t *pack
     if (decode_part(packet, size, LOBBY_REQUEST, &index)) {
         const uint32_t mine = chunk_count(p->mine_size);
         if (index >= mine) t->peer_done = true;
+        /* A 10-byte request draws up to 16 KB, so serve one burst per 50 ms
+           and eight copies in all; an honest peer, even on a lossy link,
+           needs far fewer. */
+        const uint64_t now = now_ms();
+        if (now < t->next_serve || t->served >= 8ull * p->mine_size) return;
+        t->next_serve = now + 50u;
         uint8_t chunk[PART_HEADER + CHUNK_BYTES];
         for (uint32_t i = index; i < mine && i < index + CHUNKS_PER_REQUEST; ++i) {
             const uint32_t bytes = chunk_size(p->mine_size, i);
             memcpy(chunk + encode_part(LOBBY_CHUNK, i, chunk), p->mine + i * CHUNK_BYTES, bytes);
             send_to(net, net->peer_address, net->peer_port, chunk, PART_HEADER + bytes);
+            t->served += bytes;
         }
     } else if (t->known && decode_part(packet, size, LOBBY_CHUNK, &index) && index < t->chunks &&
         size == PART_HEADER + chunk_size(p->theirs_size, index)) {

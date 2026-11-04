@@ -448,6 +448,45 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
+    // A flood of chunk requests draws one 16-chunk burst per 50 ms, not 16 chunks per request.
+    {
+        RecompNetplay flooder;
+        RecompNetplayProfiles served{hostSent.data(), static_cast<std::uint32_t>(hostSent.size()), hostGot.data(), 0u};
+        cancelNow = false;
+        wait = std::thread([&] { hosted = hostOn(&host, 47640u, &offered, &served, 5000u, cancelled); });
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        check("flood socket", recomp_netplay_open(&flooder, 0u, "127.0.0.1", 47640u));
+        // netplay.c's lobby packets: "D2LB", LOBBY_VERSION, kind, then the body.
+        std::vector<std::uint8_t> hello = {'D', '2', 'L', 'B', 5u, 1u};
+        hello.insert(hello.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
+        hello.resize(hello.size() + 6u); // delay, flags, no profile
+        const std::vector<std::uint8_t> request = {'D', '2', 'L', 'B', 5u, 3u, 0u, 0u, 0u, 0u};
+        int chunks = 0;
+        const auto drain = [&] {
+            std::uint8_t packet[2048];
+            for (int got; (got = static_cast<int>(recv(static_cast<RawSocket>(flooder.socket),
+                               reinterpret_cast<char *>(packet), sizeof packet, 0))) > 0;)
+                chunks += got > 6 && std::memcmp(packet, "D2LB", 4) == 0 && packet[5] == 4u;
+        };
+        sendFrom(flooder, 47640u, hello);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        for (int i = 0; i < 200; ++i) {
+            sendFrom(flooder, 47640u, request);
+            drain();
+        }
+        for (int i = 0; i < 15; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            drain();
+        }
+        cancelNow = true;
+        wait.join();
+        cancelNow = false;
+        check("request flood throttled", chunks > 0 && chunks <= 160);
+        if (chunks == 0 || chunks > 160) std::fprintf(stderr, "flood drew %d chunks\n", chunks);
+        recomp_netplay_close(&flooder);
+        recomp_netplay_close(&host);
+    }
+
     // Matched rooms punch through to each other, or meet through the relay without
     // endpoints, or after 5 s of punching at endpoints that never answer.
     bool relayed = true;

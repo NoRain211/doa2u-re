@@ -719,8 +719,8 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
     // The host's blob first; a joiner's profile with the same name, and so the same folder, replaces the host's.
     const std::filesystem::path session = storage / "netplay" / "partition1";
     std::vector<std::string> names[2];
-    if (!recomp_netplay_unpack_profile(rollback.blobs[0].data(), rollback.blobs[0].size(), session, names[0]) ||
-        !recomp_netplay_unpack_profile(rollback.blobs[1].data(), rollback.blobs[1].size(), session, names[1])) {
+    if (!recomp_netplay_unpack_profile(rollback.blobs[0].data(), rollback.blobs[0].size(), session, false, names[0]) ||
+        !recomp_netplay_unpack_profile(rollback.blobs[1].data(), rollback.blobs[1].size(), session, true, names[1])) {
         std::cerr << "recomp runner: the other player's profile is damaged or unsafe\n";
         return false;
     }
@@ -819,7 +819,7 @@ bool recomp_netplay_session_connect(const RecompNetplayLaunch &launch)
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
-        std::fprintf(stderr, "recomp netplay: joining %s\n", launch.join.c_str());
+        std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
         if (!recomp_netplay_open(&rollback.net, 0u, launch.join.substr(0u, colon).c_str(),
                 static_cast<std::uint16_t>(port))) {
             std::cerr << "recomp runner: netplay could not open its UDP port\n";
@@ -884,7 +884,7 @@ static void startRoomSession()
     rollback.landOnVersus = true;
     const bool hosting = port != 0u;
     if (hosting) std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", port);
-    else std::fprintf(stderr, "recomp netplay: joining %s\n", join.c_str());
+    else std::fprintf(stderr, "recomp netplay: joining the host\n");
     showNotice("STARTING MATCH", hosting ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST", "B / ESC CANCEL");
     cancelHeld = true;
     if (!joinLobby(hosting, delay, cancelPressed)) endSession("netplay:session-failed");
