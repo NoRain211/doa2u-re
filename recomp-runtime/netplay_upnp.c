@@ -78,10 +78,11 @@ bool recomp_netplay_open_router_port(uint16_t port, char *address, size_t size)
 void recomp_netplay_close_router_port(void)
 {
     if (mapped_port[0] == '\0') return;
-    /* The forward may have been replaced since we added it; delete only our own. */
+    /* The forward may have been replaced since we added it. Keep it only when the router says
+       it is someone else's: a failed lookup still deletes, so the permanent forward never stays. */
     bool ours;
     int result = look_up_forward(mapped_port, mapped_client, &ours);
-    if (ours)
+    if (ours || (result != UPNPCOMMAND_SUCCESS && result != 714))
         result = UPNP_DeletePortMapping(urls.controlURL, data.first.servicetype, mapped_port, "UDP", NULL);
     if (result == UPNPCOMMAND_SUCCESS && !ours)
         fprintf(stderr, "recomp netplay: left the router's forward of UDP port %s in place; it now belongs "

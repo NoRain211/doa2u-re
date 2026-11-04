@@ -937,7 +937,9 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
         at += length;
         if (!safeProfilePath(name)) return false;
         if (joiner) {
-            if (name.rfind("UDATA/", 0u) != 0u || std::count(name.begin(), name.end(), '/') < 2) return false;
+            // Files only inside the one save folder, so none can replace the host's title files.
+            const auto depth = std::count(name.begin(), name.end(), '/');
+            if (name.rfind("UDATA/", 0u) != 0u || depth < 2 || (kind == 1u && depth < 3)) return false;
             const std::string top = name.substr(0u, name.find('/', name.find('/', 6u) + 1u));
             if (folder.empty()) folder = top;
             if (top != folder) return false;
