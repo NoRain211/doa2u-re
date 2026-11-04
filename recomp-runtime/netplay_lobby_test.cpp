@@ -13,6 +13,18 @@ static bool cancelled()
     return cancelNow;
 }
 
+// Each side cancels at a fixed point of the exchange from its own thread, so load cannot move the cancel.
+static const RecompNetplay *metHost;
+static bool hostMet()
+{
+    return metHost->peer_port != 0u; // set as the host welcomes the joiner, before any profile arrives
+}
+static const RecompNetplayLobby *welcomed;
+static bool joinerWelcomed()
+{
+    return welcomed->delay != 0xffu; // the host's welcome overwrites the joiner's marker
+}
+
 static void check(const char *name, bool passed)
 {
     if (!passed) {
@@ -112,33 +124,26 @@ int main()
     cancelNow = false;
     std::vector<std::uint8_t> big(RECOMP_NETPLAY_MAX_PROFILE, 7u);
     RecompNetplayProfiles bigJoiner{big.data(), static_cast<std::uint32_t>(big.size()), joinerGot.data(), 0u};
-    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47617u, &offered, &none, 5000u, cancelled); });
-    std::thread watch([&] { // cancel once the host has met the joiner, while the 1 MiB profile is in flight
-        for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        cancelNow = true;
-    });
+    // The host cancels as it meets the joiner, while the 1 MiB profile is in flight.
+    metHost = &host;
+    wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47617u, &offered, &none, 5000u, hostMet); });
     asked = offered;
     const RecompNetplayLobbyResult sentBack =
         recomp_netplay_join(&joiner, "127.0.0.1", 47617u, &asked, &bigJoiner, 5000u, nullptr);
     wait.join();
-    watch.join();
     check("host cancels mid-exchange", hosted == RECOMP_NETPLAY_LOBBY_CANCELLED && !host.peer_left &&
         sentBack == RECOMP_NETPLAY_LOBBY_CANCELLED && joiner.peer_left);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
-    // A joiner cancelling sends the host back.
-    cancelNow = false;
+    // A joiner cancelling as the host's welcome arrives, with its profile in flight, sends the host back.
     wait = std::thread([&] { hosted = recomp_netplay_host(&host, 47618u, &offered, &none, 5000u, nullptr); });
-    watch = std::thread([&] {
-        for (int i = 0; i < 500 && host.peer_port == 0u; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        cancelNow = true;
-    });
     asked = offered;
+    asked.delay = 0xffu;
+    welcomed = &asked;
     check("joiner cancels", recomp_netplay_join(&joiner, "127.0.0.1", 47618u, &asked, &bigJoiner, 5000u,
-        cancelled) == RECOMP_NETPLAY_LOBBY_CANCELLED);
+        joinerWelcomed) == RECOMP_NETPLAY_LOBBY_CANCELLED);
     wait.join();
-    watch.join();
     check("host hears the cancel", hosted == RECOMP_NETPLAY_LOBBY_CANCELLED && host.peer_left);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
