@@ -22,6 +22,10 @@ RecompFunction recomp_fiber_lookup_manual(uint32_t guest_address);
 uint32_t recomp_fiber_thread_context(void);
 void recomp_fiber_thread_restore(uint32_t handle);
 void recomp_fiber_adapter_reset(void);
+/* A guest thread parked inside an XAPI fiber records that fiber, which this
+   adapter frees on reset. Returns the native fiber the thread converted, or
+   native_fiber itself when the adapter did not create it. */
+void *recomp_fiber_adapter_thread_fiber(void *native_fiber);
 const RecompFiberModel *recomp_fiber_adapter_model(void);
 /* Guest fiber contexts and the current fiber. Native fiber handles stay
    with the host; restore finds the parked host fiber by guest handle. */

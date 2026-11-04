@@ -13,8 +13,8 @@ OTHER_BUILD = b"b" * mm.DIGEST
 LAN = socket.inet_aton("192.168.1.20") + struct.pack(">H", 47701)
 
 
-def hosting(name=b"KASUMI", is_open=1, build=BUILD):
-    return mm.header(mm.HOST) + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, LAN)
+def hosting(name=b"KASUMI", is_open=1, build=BUILD, lan=LAN):
+    return mm.header(mm.HOST) + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, lan)
 
 
 def listing(build=BUILD, size=mm.LIST_BYTES, endpoints=False):
@@ -22,8 +22,8 @@ def listing(build=BUILD, size=mm.LIST_BYTES, endpoints=False):
     return (mm.header(mm.LIST) + build + flag).ljust(size, b"\0")
 
 
-def joining(room_id, name=b"AYANE", build=BUILD):
-    return mm.header(mm.JOIN) + mm.JOIN_BODY.pack(room_id, build, len(name), name, LAN)
+def joining(room_id, name=b"AYANE", build=BUILD, lan=LAN):
+    return mm.header(mm.JOIN) + mm.JOIN_BODY.pack(room_id, build, len(name), name, lan)
 
 
 def rooms(answer, entry=mm.ENTRY):
@@ -102,6 +102,19 @@ class MatchmakerTest(unittest.TestCase):
             self.assertEqual((to, answer[5]), (JOINER_AT, mm.GONE))
         self.send(joining(room_id), JOINER_AT, 1.0)
         self.assertEqual(self.send(joining(room_id), ("192.0.2.1", 1), 2.0)[0][0][5], mm.GONE)
+
+    def test_only_private_lan_endpoints_with_a_port_are_passed_on(self):
+        for lan, kept in ((LAN, True), (socket.inet_aton("10.1.2.3") + b"\x01\x02", True),
+                          (socket.inet_aton("169.254.9.9") + b"\x01\x02", True),
+                          (socket.inet_aton("8.8.8.8") + b"\x00\x35", False),
+                          (socket.inet_aton("127.0.0.1") + b"\x01\x02", False),
+                          (socket.inet_aton("192.168.1.20") + bytes(2), False)):
+            self.setUp()
+            self.send(hosting(lan=lan), HOST_AT, 0.0)
+            answers = dict((to, packet) for packet, to in self.send(joining(1, lan=lan), JOINER_AT, 1.0))
+            self.assertEqual(len(answers), 2)
+            for packet in answers.values():
+                self.assertEqual(packet[12:18], lan if kept else bytes(6))
 
     def test_a_repeated_join_answers_again(self):
         room_id, _ = self.host()

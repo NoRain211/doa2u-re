@@ -433,6 +433,8 @@ void recomp_dsound_buffers_pump(void)
 }
 
 #ifndef RECOMP_DSOUND_TEST_CLOCK
+static bool pump_started; /* under the output lock; a failed start retries at the next buffer */
+
 /* Returns false once reset has stopped the pump. */
 static bool pump_pass(void)
 {
@@ -442,6 +444,7 @@ static bool pump_pass(void)
         const uint64_t now = now_ms();
         for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
     }
+    if (!running) pump_started = false; /* the next buffer after a reboot starts another */
     recomp_dsound_output_unlock();
     return running;
 }
@@ -470,7 +473,7 @@ static void *pump_thread(void *unused)
 static void start_pump(void)
 {
 #ifndef RECOMP_DSOUND_TEST_CLOCK
-    static bool pump_started; /* a failed start retries at the next buffer */
+    pump_stopping = false; /* a pump that has not seen a reset yet keeps running */
     if (pump_started || !recomp_audio_output_enabled()) return;
 #ifdef _WIN32
     HANDLE thread = CreateThread(NULL, 0u, pump_thread, NULL, 0u, NULL);

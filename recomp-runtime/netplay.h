@@ -45,7 +45,7 @@ typedef struct RecompNetplayProfiles {
     const uint8_t *mine;
     uint32_t mine_size;   /* at most RECOMP_NETPLAY_MAX_PROFILE */
     uint8_t *theirs;      /* holds RECOMP_NETPLAY_MAX_PROFILE bytes */
-    uint32_t theirs_size; /* set by a successful lobby */
+    uint32_t theirs_size; /* set by a successful lobby; 0 after a failed one */
 } RecompNetplayProfiles;
 
 typedef enum RecompNetplayLobbyResult {
@@ -154,7 +154,7 @@ typedef struct RecompNetplayRoom {
     char heard[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     bool heard_new;
     /* Kept between ticks. */
-    uint64_t heard_ms, sent_ms, echo_at_ms;
+    uint64_t heard_ms, sent_ms, echo_at_ms, heard_line_ms;
     uint32_t echo;
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
@@ -170,8 +170,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     const char *name, bool ready, bool start);
 /* Sends a chat line, cut to RECOMP_NETPLAY_CHAT_BYTES, with the next ticks:
    each tick for 2 s repeats it, and the other side shows it once. The other
-   side drops a line that is not printable ASCII or that
-   recomp_netplay_name_banned refuses. */
+   side takes at most one line a second and drops a line that is not
+   printable ASCII or that recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Forgets the other player as if they went quiet; a host stops answering
    them and lets another player in. */
@@ -198,10 +198,11 @@ void recomp_netplay_match_poll(RecompNetplay *net);
 uint32_t recomp_netplay_suggested_delay(uint32_t rtt_ms);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
-   digest and settings. The first joiner becomes the peer; one with another
-   digest ends the wait with MISMATCH. Returns once both sides hold both
-   profiles. cancelled, when not null, is polled every 20 ms; either side
-   cancelling sends the other a goodbye, which ends its wait too. */
+   digest and settings. The first joiner with the same digest becomes the
+   peer; one with another digest learns it from the answer and is ignored.
+   Returns once both sides hold both profiles. cancelled, when not null, is
+   polled every 20 ms; either side cancelling sends the other a goodbye,
+   which ends its wait too. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNetplayLobby *lobby,
     RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void));
 /* Says hello to the peer of a socket from recomp_netplay_open, or a room's,

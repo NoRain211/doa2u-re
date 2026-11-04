@@ -219,7 +219,8 @@ thread_local bool timer_querying;
 
 VOID CALLBACK drawDuringModalLoop(HWND, UINT, UINT_PTR, DWORD)
 {
-    while (runPacket(*timer_thread, timer_backend, timer_querying)) {
+    // At most one queue's worth, so the modal loop still gets the mouse release.
+    for (int packets = 0; packets < 3 && runPacket(*timer_thread, timer_backend, timer_querying); ++packets) {
     }
 }
 

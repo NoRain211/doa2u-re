@@ -258,6 +258,16 @@ void recomp_fiber_adapter_reset(void)
     converted_thread = false;
 }
 
+void *recomp_fiber_adapter_thread_fiber(void *native_fiber)
+{
+    const RecompHostFiber *host = host_fiber_find_native(native_fiber);
+    if (host == NULL || host->guest_stack_base == 0u) return native_fiber;
+    for (size_t i = 0u; i < RECOMP_FIBER_MAX_COUNT; ++i) {
+        if (host_fibers[i].active && host_fibers[i].guest_stack_base == 0u) return host_fibers[i].native_fiber;
+    }
+    return NULL;
+}
+
 static VOID WINAPI fiber_entry(void *parameter)
 {
     RecompHostFiber *host = parameter;

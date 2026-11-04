@@ -33,6 +33,7 @@ typedef enum RecompSyncTestResult {
     RECOMP_SYNCTEST_SKIP,
 } RecompSyncTestResult;
 
+/* More than 16 modules is fatal. */
 void recomp_synctest_set_modules(const RecompSyncTestModule *modules, size_t count);
 /* The runtime's real state table; defined beside the runtime, not the core. */
 void recomp_synctest_install_default_modules(void);

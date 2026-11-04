@@ -8,6 +8,7 @@ accounts, everything in memory. docs/matchmaking.md describes the packets.
 """
 import argparse
 import asyncio
+import ipaddress
 import os
 import socket
 import struct
@@ -33,6 +34,7 @@ JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, 
 ENTRY = struct.Struct(">IHBB32s")  # room id, age in seconds, delay, name length, name
 ENTRY_AT = struct.Struct(">IHBB32s6s")  # the same and the host's public endpoint, for a list that asks for it
 WITH_ENDPOINTS = 1  # the byte after a list request's digest; older clients send 0 and read ENTRY
+LAN_NETWORKS = [ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
 
 
 def header(kind):
@@ -42,6 +44,16 @@ def header(kind):
 def endpoint(address):
     """An IPv4 address and port as 6 bytes, in network order."""
     return socket.inet_aton(address[0]) + struct.pack(">H", address[1])
+
+
+def lan_endpoint(lan):
+    """A client's advertised LAN endpoint, or zeros (none) unless it is private or link-local with a port.
+
+    The other side punches to it, so a public one would aim that player's packets at any host."""
+    address = ipaddress.IPv4Address(lan[:4])
+    if lan[4:] == b"\0\0" or not any(address in network for network in LAN_NETWORKS):
+        return bytes(6)
+    return lan
 
 
 def peer(public, lan, name):
@@ -104,7 +116,7 @@ class Matchmaker:
                 room_id = self.random_id()
             room = self.rooms[sender] = self.by_id[room_id] = Room(room_id, sender, now)
         room.digest, room.delay, room.open = digest, delay, is_open != 0
-        room.name, room.lan, room.seen = name[:length], lan, now
+        room.name, room.lan, room.seen = name[:length], lan_endpoint(lan), now
         return [(header(HOSTED) + struct.pack(">I", room.id) + endpoint(sender), sender)]
 
     def list(self, digest, endpoints, sender, now):
@@ -136,7 +148,7 @@ class Matchmaker:
         if self.relay_only:
             nowhere = ("0.0.0.0", 0)
             return [(peer(nowhere, bytes(6), name[:length]), room.host), (peer(nowhere, bytes(6), room.name), sender)]
-        return [(peer(sender, lan, name[:length]), room.host), (peer(room.host, room.lan, room.name), sender)]
+        return [(peer(sender, lan_endpoint(lan), name[:length]), room.host), (peer(room.host, room.lan, room.name), sender)]
 
     def relay(self, body, sender, now):
         pair = self.pairs.get(sender)
