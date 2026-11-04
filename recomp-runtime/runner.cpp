@@ -1092,6 +1092,8 @@ static bool safeProfilePath(const std::string &name)
         const std::size_t slash = name.find('/', start);
         const std::string part = name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
         if (part.empty() || part == "." || part == "..") return false;
+        // Windows drops a trailing dot, so "SaveMeta.xbx." would open as SaveMeta.xbx.
+        if (part.back() == '.') return false;
         for (const char c : part)
             if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
         if (first && part != "UDATA" && part != "TDATA") return false;
@@ -1106,9 +1108,11 @@ static bool safeProfilePath(const std::string &name)
     }
 }
 
-// Writes a packProfile blob below root, adding its save names; false for a damaged or unsafe one.
+/* Writes a packProfile blob below root, adding its save names; false for a
+   damaged or unsafe one. A joiner's blob holds one UDATA/<title>/<save>
+   folder and no title saves, since the host's are used. */
 static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std::filesystem::path &root,
-    std::vector<std::string> &names)
+    bool joiner, std::vector<std::string> &names)
 {
     namespace fs = std::filesystem;
     if (size < 64u) return false;
@@ -1123,6 +1127,7 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
     };
     std::error_code error;
     fs::create_directories(root, error);
+    std::string folder;
     for (unsigned entries = 0u; !error && at < body.size(); ++entries) {
         std::uint32_t kind, length, bytes;
         if (entries == 512u || !get(1u, kind) || kind > 1u || !get(2u, length) || length > 200u ||
@@ -1132,6 +1137,12 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
             body.begin() + static_cast<std::ptrdiff_t>(at + length));
         at += length;
         if (!safeProfilePath(name)) return false;
+        if (joiner) {
+            if (name.rfind("UDATA/", 0u) != 0u || std::count(name.begin(), name.end(), '/') < 2) return false;
+            const std::string top = name.substr(0u, name.find('/', name.find('/', 6u) + 1u));
+            if (folder.empty()) folder = top;
+            if (top != folder) return false;
+        }
         const fs::path path = root / fs::path(name);
         if (kind == 0u) {
             fs::create_directories(path, error);
@@ -1141,7 +1152,10 @@ static bool unpackProfile(const std::uint8_t *blob, std::size_t size, const std:
         fs::create_directories(path.parent_path(), error);
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
-        if (path.filename() == "SaveMeta.xbx") names.push_back(saveName(body.data() + at, bytes));
+        std::string file_name = path.filename().string();
+        for (char &c : file_name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        // Windows opens any case of the name, so the filter reads every one.
+        if (file_name == "SAVEMETA.XBX") names.push_back(saveName(body.data() + at, bytes));
         at += bytes;
     }
     return !error;
@@ -1177,8 +1191,8 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
     // The host's blob first; a joiner's profile with the same name, and so the same folder, replaces the host's.
     const std::filesystem::path session = storage / "netplay" / "partition1";
     std::vector<std::string> names[2];
-    if (!unpackProfile(sessionBlobs[0].data(), sessionBlobs[0].size(), session, names[0]) ||
-        !unpackProfile(sessionBlobs[1].data(), sessionBlobs[1].size(), session, names[1])) {
+    if (!unpackProfile(sessionBlobs[0].data(), sessionBlobs[0].size(), session, false, names[0]) ||
+        !unpackProfile(sessionBlobs[1].data(), sessionBlobs[1].size(), session, true, names[1])) {
         std::cerr << "recomp runner: the other player's profile is damaged or unsafe\n";
         return false;
     }
@@ -1261,7 +1275,7 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
-        std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
+        std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
         result = !roomSession && !recomp_netplay_open(&rollback.net, 0u, netplayJoin.substr(0u, colon).c_str(),
                                      static_cast<std::uint16_t>(port))
             ? RECOMP_NETPLAY_LOBBY_SOCKET
