@@ -66,7 +66,7 @@ int main()
 
     recomp_xapi_frame_clock_set_enabled(false);
     check("disabled", !recomp_xapi_frame_clock_enabled());
-    check("host clock resumes", recomp_xapi_performance_counter() > 0u);
+    check("host clock resumes", recomp_xapi_performance_counter() > before);
 
     if (failures != 0) return 1;
     std::puts("PASS frame clock locks guest time to frame boundaries");
