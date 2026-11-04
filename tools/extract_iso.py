@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -23,7 +24,23 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def run_logged(args, log_path, cwd=None, on_line=None):
+def private_pattern(home, user):
+    """The player's home folder, or their user name as any folder, in either slash direction or case."""
+    home = str(home).rstrip("\\/")
+    names = [r"[\\/]".join(map(re.escape, re.split(r"[\\/]", home)))] if home and not home.endswith(":") else []
+    names += [r"(?<=[\\/])" + re.escape(name) for name in (re.split(r"[\\/]", home)[-1], user) if name]
+    return re.compile("(?:" + "|".join(names) + r")(?![\w.-])", re.IGNORECASE) if names else None
+
+
+PRIVATE = private_pattern(os.path.expanduser("~"), os.environ.get("USERNAME") or os.environ.get("USER"))
+
+
+def redact_private(text, pattern=PRIVATE):
+    """Players paste logs into public issues, so their home folder and user name become ~."""
+    return pattern.sub("~", text) if pattern else text
+
+
+def run_logged(args, log_path, cwd=None, on_line=None, redact=True):
     """Run a tool into its log; echo each line, or call on_line instead."""
     if on_line is None:
         print(f"{log_path.stem}... (log: {log_path})", flush=True)
@@ -31,6 +48,8 @@ def run_logged(args, log_path, cwd=None, on_line=None):
         with subprocess.Popen([str(arg) for arg in args], cwd=cwd,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
             for line in process.stdout:
+                if redact:
+                    line = redact_private(line.decode("utf-8", "surrogateescape")).encode("utf-8", "surrogateescape")
                 log.write(line)
                 log.flush()
                 if on_line is None:
@@ -101,7 +120,8 @@ def extract(iso, output, tool):
     output.mkdir(parents=True, exist_ok=False)
     print("Checking ISO hash...", flush=True)
     original_hash = sha256(iso)
-    run_logged([executable, "-l", iso], output / "listing.log")
+    # Redaction could rewrite a disc folder named like the user, and listing_files parses this log.
+    run_logged([executable, "-l", iso], output / "listing.log", redact=False)
     files = listing_files((output / "listing.log").read_text(encoding="utf-8", errors="strict"))
     if shutil.disk_usage(output).free < sum(files.values()):
         raise ValueError("Not enough disk space for the listed files")

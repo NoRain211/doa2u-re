@@ -50,7 +50,10 @@ static RecompNetplaySessionHost host;
    lobby session from the first frame instead, and --replay plays one again.
    Everything a session changes lives here, so ending one is one reset. */
 enum class RollbackMode { Off, Loopback, Udp, Replay };
-enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
+enum : std::uint8_t {
+    LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u,
+    LobbyWidescreen = 8u, LobbySurround = 16u, // the game's logic reads both, so both sides take the host's
+};
 struct RollbackRun {
     RollbackMode mode = RollbackMode::Off;
     bool active = false;
@@ -58,6 +61,7 @@ struct RollbackRun {
     bool lobby = false; // lockstep menus, rollback over live rounds
     bool fromRoom = false; // started from the Versus menu's room, which it returns to
     bool landOnVersus = false; // a room's session walks to Versus character select unseen (driveToVersus)
+    bool inVersus = false;     // landed there; backing out to the main menu ends the session
     bool interrupted = false; // the other player went quiet (stalled)
     std::uint32_t start = 0u, stop = UINT32_MAX, lag = 4u, delay = 0u, player = 0u;
     std::uint32_t frontier = 0u; // first session frame never run
@@ -388,6 +392,7 @@ static void driveToVersus(std::uint32_t frame)
     if (!rollback.landOnVersus) return;
     if (recomp_game_walk_to_versus(frame, true, &rollback.pads[0])) {
         rollback.landOnVersus = false;
+        rollback.inVersus = true;
         std::fprintf(stderr, "recomp netplay: Versus character select from frame %u\n", frame);
         return;
     }
@@ -570,6 +575,13 @@ static void onRollbackFrame(std::uint32_t swap)
     recordReplay();
     bool saved = true;
     if (s.frame == rollback.frontier) {
+        /* Backing out of Versus to the main menu ends the session. Menus run in
+           lockstep, so both sides start this frame from the same confirmed
+           state and leave together, before waiting on each other's pads. */
+        if (rollback.inVersus && recomp_game_at_main_menu()) {
+            std::fprintf(stderr, "recomp netplay: left Versus at frame %u\n", s.frame);
+            endSession("netplay:left-versus");
+        }
         if (rollback.lobby) setWindow(recomp_game_round_live() ? RECOMP_ROLLBACK_WINDOW : 0u);
         if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
             scheduleFrame();
@@ -578,7 +590,7 @@ static void onRollbackFrame(std::uint32_t swap)
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (target != RECOMP_ROLLBACK_NONE) {
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
-            if (!recomp_rollback_ring_load(target))
+            if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost())
                 endSession("rollback:unrestorable");
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
@@ -701,6 +713,8 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
     if (delay > RECOMP_ROLLBACK_WINDOW) return false;
     recomp_skip_intro = (rollback.flags & LobbySkipIntro) != 0u;
     rollback.landOnVersus = (rollback.flags & LobbyVersus) != 0u;
+    recomp_kernel_widescreen = (rollback.flags & LobbyWidescreen) != 0u;
+    recomp_kernel_surround = (rollback.flags & LobbySurround) != 0u;
     rollback.lobby = true;
     rollback.player = player;
     rollback.delay = delay;
@@ -761,7 +775,9 @@ static bool joinLobby(bool hosting, std::uint32_t delay, bool (*cancelled)())
     std::memcpy(lobby.digest, host.digest.data(), sizeof lobby.digest);
     lobby.delay = static_cast<std::uint8_t>(delay);
     lobby.flags = static_cast<std::uint8_t>((host.unlockAll ? LobbyUnlockAll : 0u) |
-        (recomp_skip_intro ? LobbySkipIntro : 0u) | (rollback.landOnVersus ? LobbyVersus : 0u));
+        (recomp_skip_intro ? LobbySkipIntro : 0u) | (rollback.landOnVersus ? LobbyVersus : 0u) |
+        ((recomp_kernel_video_flags() & 0x00010000u) != 0u ? LobbyWidescreen : 0u) |
+        (recomp_kernel_audio_flags() != 0u ? LobbySurround : 0u));
     const std::filesystem::path partition1 = host.disc / ".recomp-storage" / "partition1";
     // Recovery first, so an interrupted save is never sent.
     const std::string own =
@@ -902,6 +918,7 @@ static void endSession(const char *reason)
     sayGoodbye();
     const RecompNetplay socket = rollback.net; // back to the room, so the router's path stays
     rollback = RollbackRun{};
+    recomp_kernel_widescreen = recomp_kernel_surround = -1; // the player's own settings offline
     recomp_save_session = nullptr;
     recomp_program_set_fight_names(nullptr, nullptr, 0u);
     backToVersus = true;
@@ -936,6 +953,7 @@ void recomp_netplay_session_install(bool synctest)
     // The walks to Versus run unseen behind the last notice, and unheard (recomp_game_walk_to_versus).
     recomp_d3d8_set_present_suppressed(rollback.landOnVersus);
     recomp_dsound_buffer_set_output_suppressed(rollback.landOnVersus || backToVersus);
+    recomp_dsound_buffer_set_game_thread_pump(enabled || synctest);
     if (rollback.lobby) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         if (rollback.mode == RollbackMode::Udp) {

@@ -111,6 +111,15 @@ SyncTest.
   `RCPSS` and `RSQRTSS` are table approximations whose bits differ between
   Intel, AMD and the Xbox's CPU, so the runner computes the exact reciprocal
   on every host, within Intel's documented 1.5 * 2^-12 error.
+- The game reads its widescreen (XC_VIDEO) and surround (XC_AUDIO) settings
+  in its own logic: a joiner with either setting different from the host's
+  desynced on frame 1. The lobby sends the host's, and the kernel gives
+  them to the game for the session. Each player keeps their own window and
+  speakers. The presenter fits the game's 4:3 or 16:9 picture into the
+  window with black bars, and a player on stereo speakers hears the 5.1
+  mix folded to stereo. Fights to frame
+  1,800 with the two settings crossed both ways, and with 4x MSAA on one
+  side, kept guest RAM equal.
 
 ## Rollback session
 
@@ -333,9 +342,13 @@ host joined are kept in `.recomp-storage/netplay.txt`, with the
 [matchmaker](matchmaking.md) set under NETPLAY SETTINGS.
 
 HOST ONLINE binds the port, asks the router for a forward on a background
-thread and shows the address to send; a PRIVATE room is never listed on
+thread and keeps the address to send for X to copy; a PRIVATE room is never listed on
 FIND MATCH. JOIN ONLINE takes an address from
-the d-pad; on Windows it also takes the keyboard or the clipboard. In the room each side says its build, profile
+the d-pad; on Windows it also accepts the keyboard and clipboard. The menu never draws a
+player's IP address, so streams do not show one: the editor masks all but the character under the caret, the
+joiner's room says how it joined, and the host's address shows only while
+Y is toggled on and nobody has joined. NETPLAY SETTINGS shows the matchmaker
+address as it was typed. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.
@@ -344,7 +357,7 @@ Once the host's room has a round trip, INPUT DELAY suggests one frame per
 once the other player is in, the host's left/right steps the delay. The
 joiner still takes whatever the host chose.
 
-Once the other player is in, Enter opens a chat line from the keyboard;
+Once the other player is in, Enter or Tab opens a chat line from the keyboard;
 Enter sends it and Esc drops it. While a line is open, the room ignores the
 pad buttons that letters also press. A line holds up to 40 printable ASCII
 characters. Each player can send one line a second, and a line that fails
@@ -398,8 +411,13 @@ and sound output until character select. The battle type menu's fade-out
 select fading in. Game state is unchanged, so both sides still match.
 
 A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
-`rollback:save-mispredicted`, `rollback:unrestorable`, or a lobby that
-fails to connect) goes back to its room. The runner says goodbye, drops the
+`rollback:save-mispredicted`, `rollback:unrestorable`, a lobby that
+fails to connect, or `netplay:left-versus` when a player backs out of
+Versus to the main menu, which both sides see at the start of the same
+lockstep frame) goes back to its room. Two scripted runners matched
+through a local matchmaker; the joiner backed out of character select,
+and both left at frame 4,037 with equal replays and went back to their
+rooms. The runner says goodbye, drops the
 session's state, reboots the game offline the same way and reopens the
 room: the host listens again and the joiner calls the host. Each runner
 keeps one UDP socket from its room through the session and back: the room

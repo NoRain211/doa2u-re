@@ -29,3 +29,8 @@ bool recomp_game_walk_to_versus(uint32_t frame, bool select, RecompInputGamepad 
     else pad->analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
     return false;
 }
+
+bool recomp_game_at_main_menu(void)
+{
+    return *recomp_memory(0x008a56d0u, 1u) == 4u && *recomp_memory(0x00df5dd8u, 1u) == 0u;
+}

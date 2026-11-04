@@ -496,7 +496,6 @@ static void bootGuest()
             recomp_xapi_frame_clock_set_enabled(true);
         recomp_synctest_set_guest_ram(guestRam, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
         recomp_kernel_file_set_synchronous_reads(true);
-        recomp_dsound_buffer_set_game_thread_pump(true);
         recomp_synctest_install_default_modules();
         if (!rollbackEnabled) {
             recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);

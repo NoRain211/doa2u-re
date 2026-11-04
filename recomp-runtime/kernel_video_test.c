@@ -98,6 +98,18 @@ int recomp_kernel_video_test(void)
             surround ? 0x00010002u : 0u);
     }
     _putenv_s("RECOMP_AUDIO_SURROUND", "");
+    /* A netplay session's settings win over the player's. */
+    recomp_kernel_widescreen = recomp_kernel_surround = 1;
+    passed &= expect_u32("session video flags", recomp_kernel_video_flags(), 0x004f0000u);
+    passed &= expect_u32("session audio flags", recomp_kernel_audio_flags(), 0x00010002u);
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "1");
+    _putenv_s("RECOMP_AUDIO_SURROUND", "1");
+    recomp_kernel_widescreen = recomp_kernel_surround = 0;
+    passed &= expect_u32("session 4:3 over the player's 16:9", recomp_kernel_video_flags(), 0x004e0000u);
+    passed &= expect_u32("session stereo over the player's 5.1", recomp_kernel_audio_flags(), 0u);
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    _putenv_s("RECOMP_AUDIO_SURROUND", "");
+    recomp_kernel_widescreen = recomp_kernel_surround = -1;
     recomp_kernel_av_set_saved_data_address(0u);
     get_saved_data = recomp_kernel_video(1u);
     send_option = recomp_kernel_video(2u);

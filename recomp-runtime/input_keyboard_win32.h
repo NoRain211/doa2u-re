@@ -23,6 +23,10 @@ bool recomp_input_keyboard_sampled(uint32_t key);
    them, discards the rest and returns the count; out is not NUL-terminated. */
 void recomp_input_keyboard_char(uint32_t character);
 size_t recomp_input_keyboard_take_text(char *out, size_t capacity);
+/* Whether a text box is open. The SDL window turns on text input only then,
+   as that can show the Steam Deck's on-screen keyboard; Windows ignores it. */
+void recomp_input_keyboard_want_text(bool wanted);
+bool recomp_input_keyboard_text_wanted(void);
 
 #ifdef __cplusplus
 }

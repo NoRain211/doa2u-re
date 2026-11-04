@@ -67,6 +67,7 @@ typedef struct RecompD3dPresenterClearCommand {
 typedef struct RecompD3dPresenterPresentCommand {
     uint32_t effective_flags;
     uint32_t swap_counter;
+    bool widescreen; /* the game drew anamorphic 16:9, else 4:3; a netplay session may differ from the window */
 } RecompD3dPresenterPresentCommand;
 
 /* Fixed-function vertex lighting: directional and point lights. DOA3 also

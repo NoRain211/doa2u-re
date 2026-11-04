@@ -95,6 +95,7 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Xbox Live menus | Stop the game; there is no online service |
+| Online Versus | Rollback netplay from the Versus menu; test build |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
@@ -267,7 +268,8 @@ game C is never patched by hand. Read [bring-up](docs/bring-up.md) and
 When [reporting a bug](https://github.com/NoRain211/doa2u-re/issues), say
 what you did and what happened, and copy the `recomp stop` or crash lines
 from the end of the newest log in `private\play-logs` (or the error from the
-newest `private\build-logs` folder). Remove private paths, and never upload
+newest `private\build-logs` folder). Logs show your home folder and user name
+as `~`; remove any other private paths, and never upload
 game binaries, generated game C, assets, extracted filenames, saves or whole
 logs.
 

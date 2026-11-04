@@ -23,6 +23,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -33,8 +34,23 @@ static class Game
     public static readonly string Root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
     public static readonly string Runner = Path.Combine(Root, @"build\recomp-program-mingw\recomp_program_runner.exe");
     public static string Private(string name) { return Path.Combine(Root, "private", name); }
+    // Players paste logs into public issues, so their home folder and user name become ~.
+    static readonly Regex PrivatePath = PrivatePattern(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.UserName);
     static string[] python;
     static bool pythonFound;
+
+    // Mirrors private_pattern in tools/extract_iso.py.
+    static Regex PrivatePattern(string home, string user)
+    {
+        home = (home ?? "").TrimEnd('\\', '/');
+        var names = new List<string>();
+        if (home.Length > 0 && !home.EndsWith(":")) names.Add(string.Join(@"[\\/]", home.Split('\\', '/').Select(Regex.Escape)));
+        foreach (string name in new[] { home.Split('\\', '/').Last(), user })
+            if (!string.IsNullOrEmpty(name)) names.Add(@"(?<=[\\/])" + Regex.Escape(name));
+        return names.Count == 0 ? null : new Regex("(?:" + string.Join("|", names) + @")(?![\w.-])", RegexOptions.IgnoreCase);
+    }
+
+    public static string RedactPrivate(string text) { return PrivatePath == null ? text : PrivatePath.Replace(text, "~"); }
 
     public static Dictionary<string, object> LoadSettings()
     {
@@ -113,8 +129,8 @@ static class Game
         };
         start.EnvironmentVariables["PYTHONUTF8"] = "1";
         var process = new Process { StartInfo = start };
-        process.OutputDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(e.Data); };
-        process.ErrorDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(e.Data); };
+        process.OutputDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(RedactPrivate(e.Data)); };
+        process.ErrorDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(RedactPrivate(e.Data)); };
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -142,7 +158,7 @@ static class Game
         if (code == 0) return null;
         string[] lines = File.ReadAllLines(log);
         return "The game stopped with exit code " + code + ".\n\n" + string.Join("\n", lines.Skip(Math.Max(0, lines.Length - 20)))
-            + "\n\nFull log: " + log;
+            + "\n\nFull log: " + RedactPrivate(log);
     }
 }
 
@@ -600,7 +616,7 @@ class LauncherForm : Form
         pages[BuildPage].Info = BuildStatus();
         if (code == 0) { notice = "Build complete. Choose START GAME to play"; menu = PlayPage; inPage = false; return; }
         notice = @"Build failed; see private\build.log";
-        MessageBox.Show("The build failed:\n\n" + string.Join("\n", lines.Skip(Math.Max(0, lines.Length - 8))) + "\n\nFull output: " + buildLog, Game.Title);
+        MessageBox.Show("The build failed:\n\n" + string.Join("\n", lines.Skip(Math.Max(0, lines.Length - 8))) + "\n\nFull output: " + Game.RedactPrivate(buildLog), Game.Title);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

@@ -9,7 +9,8 @@ extern "C" {
 
 /* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Reads the
    environment only, so it is valid before initialize and without a device.
-   Keep this in step with the kernel's XC_AUDIO speaker setting. */
+   The game's own setting (XC_AUDIO) may differ in a netplay session; the
+   mix folds it to these speakers. */
 uint32_t recomp_audio_output_speakers(void);
 /* Call on the runtime thread. Initialization is attempted once per process;
    an unavailable device or shutdown leaves guest audio timing unchanged.
