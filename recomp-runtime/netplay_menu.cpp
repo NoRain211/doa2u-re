@@ -63,6 +63,7 @@ struct Menu {
     Screen screen = Screen::Closed;
     std::uint16_t held[RECOMP_INPUT_PORT_COUNT]{};
     std::uint16_t pressed = 0u;
+    std::uint16_t aliased = 0u; // the pressed face buttons that came from the keyboard's Z, X, A, S and Backspace
     unsigned repeat = 0u, frame = 0u;
     bool swallow = false; // after closing, the game waits until every button is up
     int injectA = 0;      // polls of A the game still gets, so LOCAL enters Versus
@@ -74,7 +75,7 @@ struct Menu {
     std::string recent;
     std::string address;
     std::size_t caret = 0u;
-    bool keyboard = false; // a key was typed in this editor, so its pad aliases are ignored
+    bool keyboard = false; // a key was typed in this editor, so the keyboard's pad aliases are ignored
     bool hosting = false, ready = false, starting = false, launched = false, covering = false;
     std::string name, peerAddress;
     RecompNetplay net{};
@@ -279,6 +280,28 @@ int takeLookup()
     return state;
 }
 
+// A late PEER for a stopped join would still pair this socket, and PEER names no room, so the
+// join is dropped with the socket. Returns false when no new socket opens.
+bool forgetJoin()
+{
+    menu.joining = 0u;
+    const RecompNetplayMatch server = menu.net.match;
+    recomp_netplay_close(&menu.net);
+    if (!recomp_netplay_listen(&menu.net, 0u)) {
+        recomp_netplay_close(&menu.net);
+        menu.lookup.reset();
+        menu.screen = Screen::Versus;
+        menu.cursor = 3;
+        menu.message = "NO UDP PORT IS FREE.";
+        return false;
+    }
+    menu.net.match.server_address = server.server_address;
+    menu.net.match.server_port = server.server_port;
+    menu.listOk = false; // the new socket has no list yet
+    menu.listedAt = Clock::time_point{};
+    return true;
+}
+
 // bound: the socket is already listening, handed back by a session. listed: ask the matchmaker to list it.
 void host(bool bound, bool listed)
 {
@@ -418,16 +441,16 @@ void updateFind(std::uint16_t keys)
             menu.lookup.reset();
             menu.screen = Screen::Versus;
             menu.cursor = 3;
+        } else {
+            (void)forgetJoin();
         }
-        menu.joining = 0u;
         menu.quick = false;
         return;
     }
     if (menu.joining != 0u) {
         // The server answers a repeated join again, so a lost answer costs one retry.
         if (now - menu.joinStarted > std::chrono::seconds(3)) {
-            menu.joining = 0u;
-            menu.message = "NO ANSWER FROM THE MATCHMAKER.";
+            if (forgetJoin()) menu.message = "NO ANSWER FROM THE MATCHMAKER.";
         } else if (now - menu.askedAt >= std::chrono::milliseconds(500)) {
             menu.askedAt = now;
             recomp_netplay_match_join(&menu.net, menu.joining, menu.digest.data(), menu.name.c_str());
@@ -623,7 +646,7 @@ std::uint16_t editText(std::string &text, const std::string &characters, std::si
             if (characters.find(c) != std::string::npos && text.size() < max) text.insert(menu.caret++, 1u, c);
         }
     }
-    if (menu.keyboard) keys &= Up | Down | Left | Right; // Z, X, A, S and Backspace are pad buttons too
+    if (menu.keyboard) keys &= ~menu.aliased; // Z, X, A, S and Backspace are pad buttons too
     keys |= typedKeys;
     if ((keys & Left) && menu.caret > 0u) --menu.caret;
     if ((keys & Right) && menu.caret < text.size()) ++menu.caret;
@@ -952,6 +975,7 @@ void onOverlay(const RecompD3dPresenterTarget *target)
         if (directions == 0u || (keys & directions) != 0u) menu.repeat = 0u;
         else if (++menu.repeat >= 18u && (menu.repeat - 18u) % 4u == 0u) keys |= directions;
         update(keys, launch);
+        menu.aliased = 0u;
         if (launch) {
             // The session takes the socket (recomp_netplay_menu_take_launch); the router forward stays for it.
             menu.screen = Screen::Closed;
@@ -1009,6 +1033,11 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
         menu.pressed = 0u;
     } else {
         menu.pressed |= edges;
+        if (port == 0u) { // the keyboard drives port 0 only
+            const auto key = [](std::uint32_t code) { return recomp_input_keyboard_sampled(code); };
+            menu.aliased |= edges & ((key('Z') ? A : 0u) | (key('X') || key(0x08u) ? B : 0u) |
+                                     (key('A') ? X : 0u) | (key('S') ? Y : 0u));
+        }
     }
     *pad = RecompInputGamepad{};
 }
