@@ -145,6 +145,12 @@ static bool thread_fibers_restorable(const void *state, size_t size)
     (void)size;
     return recomp_kernel_thread_fiber_state_restorable(state);
 }
+/* Guest RAM from before a file close still holds the handle the host closed. */
+static bool file_positions_restorable(const void *state, size_t size)
+{
+    (void)size;
+    return recomp_kernel_file_state_restorable(state);
+}
 /* Save storage and its journal live on the host disk, outside the snapshot.
    A replay after a save sees the files the first pass wrote and takes another
    branch, and a rewind into an open transaction would replay its begin and
@@ -198,7 +204,8 @@ void recomp_synctest_install_default_modules(void)
         NULL, thread_fibers_restorable, true};
     table[count++] = (RecompSyncTestModule){"file_positions",
         recomp_kernel_file_state_size(),
-        recomp_kernel_file_state_save, recomp_kernel_file_state_restore};
+        recomp_kernel_file_state_save, recomp_kernel_file_state_restore,
+        NULL, file_positions_restorable, false};
     table[count++] = (RecompSyncTestModule){"allocations", recomp_kernel_memory_state_size(),
         recomp_kernel_memory_state_save, recomp_kernel_memory_state_restore};
     table[count++] = (RecompSyncTestModule){"heap", heap_size(), heap_save, heap_restore};

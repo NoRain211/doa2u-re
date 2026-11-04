@@ -391,7 +391,7 @@ endif()
         target_sources(recomp_kernel PRIVATE win32_compat.c ${RECOMP_FIBER_ASM})
     endif()
     add_executable(recomp_kernel_test kernel_test.c kernel_device_test.c kernel_crypto_test.c
-        kernel_memory_test.c kernel_rtl_test.c kernel_thread_test.c kernel_video_test.c
+        kernel_file_test.c kernel_memory_test.c kernel_rtl_test.c kernel_thread_test.c kernel_video_test.c
         flag_macro_test.c sse_semantics_test.c)
     target_link_libraries(recomp_kernel_test PRIVATE recomp_kernel)
     add_test(NAME recomp-runtime-kernel COMMAND recomp_kernel_test)

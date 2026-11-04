@@ -106,6 +106,8 @@ void recomp_kernel_file_state_save(void *state);
 void recomp_kernel_file_state_restore(const void *state);
 /* True once after a restore found a saved handle the host had closed since. */
 bool recomp_kernel_file_state_lost(void);
+/* False when a saved handle has been closed since, so a restore would lose it. */
+bool recomp_kernel_file_state_restorable(const void *state);
 /* Reads finish inside the guest call instead of on a host worker, so no read
    is in flight at a frame boundary that a rewind may return to. */
 void recomp_kernel_file_set_synchronous_reads(bool enabled);

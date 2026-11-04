@@ -288,6 +288,18 @@ void recomp_kernel_file_state_restore(const void *state)
     next_guest_handle = in->next_guest_handle;
 }
 
+static FileHandleEntry *find_file_handle(uint32_t guest_handle);
+
+bool recomp_kernel_file_state_restorable(const void *state)
+{
+    const FilePositionState *in = state;
+    for (size_t i = 0; i < MAX_FILE_HANDLES; ++i) {
+        if (in->entries[i].active && find_file_handle(in->entries[i].guest_handle) == NULL)
+            return false;
+    }
+    return true;
+}
+
 static RecompSymbolicLinkModel symbolic_links;
 static int symbolic_links_initialized;
 static bool is_profile_path(const char *path);
