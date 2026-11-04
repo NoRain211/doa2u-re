@@ -41,7 +41,9 @@ void recomp_netplay_settings_load(const std::filesystem::path &path, RecompNetpl
         if (!(words >> key >> value)) continue;
         const unsigned long number = std::strtoul(value.c_str(), nullptr, 10);
         std::uint64_t id = 0u;
-        if (key == "delay" && number <= RECOMP_ROLLBACK_WINDOW) settings.delay = static_cast<std::uint32_t>(number);
+        if (key == "delay" && value.find_first_not_of("0123456789") == std::string::npos &&
+            number <= RECOMP_ROLLBACK_WINDOW)
+            settings.delay = static_cast<std::uint32_t>(number);
         else if (key == "port" && number >= 1024u && number <= 65535u) settings.port = static_cast<std::uint32_t>(number);
         else if (key == "recent" && value.size() <= RecompNetplayMaxAddress) settings.recent = value;
         else if (key == "matchmaker" && value.size() <= RecompNetplayMaxMatchmaker) settings.matchmaker = value;
@@ -62,7 +64,7 @@ void recomp_netplay_settings_load(const std::filesystem::path &path, RecompNetpl
     recomp_netplay_settings_save(path, settings);
 }
 
-void recomp_netplay_settings_save(const std::filesystem::path &path, const RecompNetplaySettings &settings)
+bool recomp_netplay_settings_save(const std::filesystem::path &path, const RecompNetplaySettings &settings)
 {
     std::ofstream file(path, std::ios::trunc);
     file << "delay " << settings.delay << "\nport " << settings.port << "\ndisplay "
@@ -77,4 +79,8 @@ void recomp_netplay_settings_save(const std::filesystem::path &path, const Recom
             if (static_cast<unsigned char>(c) < 0x20u || c == 0x7f) c = '?';
         file << "block " << idText(id) << ' ' << shown << '\n';
     }
+    file.close();
+    if (!file.fail()) return true;
+    std::fprintf(stderr, "recomp netplay: cannot save %s\n", path.string().c_str());
+    return false;
 }

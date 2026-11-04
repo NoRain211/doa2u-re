@@ -67,6 +67,7 @@ struct RollbackRun {
     // inflated advantage never reaches the peer's frame sync.
     std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
+    std::chrono::steady_clock::time_point contact{}; // when a stall first saw the other player
     const char *dump = nullptr;
     // Desync checks: the newest check frame hashed but not yet confirmed (0 for none) and its hash,
     // the last frame compared, matches since the last log line and their slowest hash.
@@ -124,7 +125,7 @@ static RecompInputGamepad localPad(std::uint32_t frame)
         else (void)recomp_input_pulse_source_sample(host.pulses, &pad);
         return pad;
     }
-    (void)recomp_input_host_sample(0u, &pad);
+    (void)recomp_input_pulse_source_sample(host.pulses, &pad);
     return pad;
 }
 
@@ -191,8 +192,10 @@ static void stalled(std::chrono::steady_clock::time_point began)
     }
     const auto now = steady_clock::now();
     const bool heard = rollback.net.peer_seen;
+    if (heard && rollback.contact == steady_clock::time_point{}) rollback.contact = now;
     const seconds grace(heard ? 15 : 120);
-    const auto waited = now - began;
+    // Contact heard during this wait starts its 15 s afresh.
+    const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
     if (waited > grace) endSession("rollback:peer-timeout");
     if (waited < seconds(1) || now - notice.shown < milliseconds(100)) return;
     if (!rollback.interrupted && heard)
@@ -268,11 +271,15 @@ static void startReplay(std::uint32_t swap)
 {
     namespace fs = std::filesystem;
     const fs::path folder = host.disc / ".recomp-storage" / "replays";
-    char name[32];
+    char stamp[24], name[32];
     const std::time_t now = std::time(nullptr);
-    std::strftime(name, sizeof name, "%Y%m%d-%H%M%S.dr2r", std::localtime(&now));
+    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
     std::error_code error;
     fs::create_directories(folder, error);
+    // A second session within the same second gets a suffix instead of truncating the first one's replay.
+    std::snprintf(name, sizeof name, "%s.dr2r", stamp);
+    for (unsigned n = 2u; n < 100u && fs::exists(folder / name, error); ++n)
+        std::snprintf(name, sizeof name, "%s-%u.dr2r", stamp, n);
     rollback.replayFile.open(folder / name, std::ios::binary | std::ios::trunc);
     RecompReplayInfo info{};
     std::memcpy(info.digest, rollback.digest.data(), std::min(rollback.digest.size(), sizeof info.digest));
@@ -443,6 +450,7 @@ static void hashCheckFrame()
     const auto began = std::chrono::steady_clock::now();
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
     std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 2u);
+    if (count == SIZE_MAX) recomp_stop(4, "rollback:hash-ranges");
     /* draw_fight_name (program_manual.c) draws the local player's name in
        yellow and the other's in white, so the two sides' 2D draw state
        differs in glyph colors: in the sprite queue g_ui_sprite_queue, which
@@ -643,9 +651,13 @@ static bool readRollbackConfig()
 {
     const char *mode = std::getenv("RECOMP_ROLLBACK");
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
-    const auto number = [](const char *name, std::uint32_t &value) {
-        if (const char *text = std::getenv(name); text != nullptr && *text != '\0')
-            value = static_cast<std::uint32_t>(std::strtoul(text, nullptr, 10));
+    bool valid = true;
+    const auto number = [&valid](const char *name, std::uint32_t &value) {
+        const char *text = std::getenv(name);
+        if (text == nullptr || *text == '\0') return;
+        const char *end = text + std::strlen(text);
+        const auto [stop, error] = std::from_chars(text, end, value);
+        if (error != std::errc{} || stop != end) valid = false;
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
@@ -653,9 +665,9 @@ static bool readRollbackConfig()
     if (std::strcmp(mode, "loopback") == 0) {
         rollback.mode = RollbackMode::Loopback;
         rollback.player = 1u;
-        if (std::getenv("RECOMP_ROLLBACK_FRAMES") == nullptr) rollback.stop = 600u;
+        if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0') rollback.stop = 600u;
         number("RECOMP_ROLLBACK_LAG", rollback.lag);
-        return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+        return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
     }
     // udp:<local port>:<peer host>:<peer port>
     if (std::strncmp(mode, "udp:", 4u) != 0) return false;
@@ -667,7 +679,7 @@ static bool readRollbackConfig()
     const std::string peerHost = spec.substr(hostAt + 1u, portAt - hostAt - 1u);
     number("RECOMP_ROLLBACK_PLAYER", rollback.player);
     number("RECOMP_ROLLBACK_DELAY", rollback.delay);
-    if (localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
+    if (!valid || localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
         rollback.player > 1u || rollback.delay > RECOMP_ROLLBACK_WINDOW)
         return false;
     rollback.mode = RollbackMode::Udp;
@@ -795,9 +807,10 @@ bool recomp_netplay_session_connect(const RecompNetplayLaunch &launch)
         }
     } else {
         const std::size_t colon = launch.join.rfind(':');
-        const unsigned long port =
-            colon == std::string::npos ? 0u : std::strtoul(launch.join.c_str() + colon + 1u, nullptr, 10);
-        if (colon == std::string::npos || colon == 0u || port == 0u || port > 65535u) {
+        const char *end = launch.join.data() + launch.join.size();
+        std::uint32_t port = 0u;
+        if (colon == std::string::npos || colon == 0u ||
+            std::from_chars(launch.join.data() + colon + 1u, end, port).ptr != end || port == 0u || port > 65535u) {
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
@@ -860,7 +873,8 @@ static void startRoomSession()
     if (!recomp_netplay_menu_take_launch(port, delay, join, socket)) return;
     rollback.net = socket;
     rollback.fromRoom = true;
-    // The room's players skip the intro and land on Versus character select.
+    // The room's players skip the intro and land on Versus character select. The
+    // skip stays on, since every later boot is a session or the walk back to the room.
     recomp_skip_intro = true;
     rollback.landOnVersus = true;
     const bool hosting = port != 0u;

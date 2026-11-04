@@ -320,8 +320,9 @@ void (*recomp_kernel_read_hook)(const char *host_path, uint64_t offset);
 /* Private proving runs use these fail-loud checkpoints to interrupt real
    save writes. They are inactive unless explicitly selected in the environment. */
 static unsigned save_write_number;
-/* Opens that may change save storage on disk. The disk is not part of a
-   SyncTest snapshot, so a frame that makes one cannot be replayed. */
+/* Opens, writes and metadata changes that may change save storage on disk.
+   The disk is not part of a SyncTest snapshot, so a frame that makes one
+   cannot be replayed. Attempts count, even rejected ones. */
 static uint32_t profile_mutation_count;
 void (*recomp_kernel_profile_mutation_hook)(void);
 
@@ -1860,6 +1861,7 @@ static bool handle_profile_mutation_information(
 
     const bool profile_path = is_profile_path(entry->host_path);
     *required_save_io = entry->save_write || profile_path;
+    if (profile_path) ++profile_mutation_count;
     if (profile_path && recomp_save_pending() &&
         (!recomp_save_active(current_save_owner()) ||
          (entry->save_owned && entry->save_owner != current_save_owner()))) {
@@ -2209,6 +2211,7 @@ static void bridge_nt_write_file(void)
         }
 
         tracked_handle_seen = 1;
+        if (is_profile_path(file_handles[i].host_path)) ++profile_mutation_count;
         if (!save_write_allowed(&file_handles[i], current_save_owner())) {
             status = RECOMP_STATUS_UNSUCCESSFUL;
             policy = "save-write-owner-rejected";

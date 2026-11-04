@@ -27,6 +27,7 @@ struct RecompNetplaySettings {
 /* Reads path over settings, skipping lines it does not accept, and the
    block list replaces settings'. Without an ID it makes one and saves it. */
 void recomp_netplay_settings_load(const std::filesystem::path &path, RecompNetplaySettings &settings);
-void recomp_netplay_settings_save(const std::filesystem::path &path, const RecompNetplaySettings &settings);
+// False, after a message on stderr, when the file cannot be written.
+bool recomp_netplay_settings_save(const std::filesystem::path &path, const RecompNetplaySettings &settings);
 
 #endif

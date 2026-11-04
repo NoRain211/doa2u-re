@@ -733,9 +733,9 @@ static inline int32_t MMX_CVT_F2I(float v, int truncate)
 #endif
 
 #if !RECOMP_HOST_X86 || defined(RECOMP_PORTABLE_MATH)
-/* No host table matches the Xbox's, and Intel and AMD tables differ, so
-   non-x86 hosts and netplay builds use the exact quotient, within Intel's
-   documented 1.5 * 2^-12 error, the same on every host. */
+/* Only Intel's table gives the guest's bits; AMD's differs and other hosts
+   have none. Non-x86 hosts and netplay builds, which must match on every
+   host, use the exact quotient, within Intel's documented 1.5 * 2^-12 error. */
 static inline float recomp_rcpss(float x)
 {
     return 1.0f / x;

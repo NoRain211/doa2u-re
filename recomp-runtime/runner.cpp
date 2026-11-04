@@ -479,7 +479,7 @@ static void bootGuest()
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!recomp_netplay_session_read_env()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
-                  << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
+                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";
         std::exit(1);
     }
@@ -489,6 +489,7 @@ static void bootGuest()
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
     recomp_kernel_file_set_synchronous_reads(false);
+    recomp_dsound_buffer_set_game_thread_pump(false);
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)

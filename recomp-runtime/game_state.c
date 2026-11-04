@@ -20,7 +20,7 @@ bool recomp_game_walk_to_versus(uint32_t frame, bool select, RecompInputGamepad 
 {
     const uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
                   target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
-    if (state == 4u && (select ? scene != 0u && scene != 2u : scene == 0u && mode == 5u)) return true;
+    if (state == 4u && (select ? scene == 3u : scene == 0u && mode == 5u)) return true;
     const RecompInputGamepad none = {0};
     *pad = none;
     if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "fiber_adapter.h"
+#include "native_fiber.h"
 #include "xbox_memory_layout.h"
 
 #include <stdio.h>
@@ -18,6 +19,7 @@ enum {
 static uint8_t memory[RECOMP_XBOX_RAM_SIZE];
 static int passed = 1;
 static uint32_t entry_count;
+static void *task_native;
 
 static void check(const char *field, uint32_t actual, uint32_t expected)
 {
@@ -43,6 +45,7 @@ static void test_fiber_entry(void)
     const uint32_t esp = recomp_runtime.registers.esp;
     const uint32_t handle = recomp_fiber_adapter_model()->current_handle;
     check("entry parameter", *recomp_memory_u32(esp + 4u), 0x22222222u);
+    task_native = recomp_native_fiber_current();
     for (;;) {
         ++entry_count;
         check("task TLS fiber", *recomp_memory_u32(TLS_BLOCK + 0xcu), handle);
@@ -101,6 +104,10 @@ int main(void)
         check("main TLS fiber", *recomp_memory_u32(TLS_BLOCK + 0xcu), main_fiber);
     }
     check("thread context", recomp_fiber_thread_context(), main_fiber);
+    /* A thread parked in the task resolves to its own fiber, so a reset frees each once. */
+    check("task maps to thread fiber", recomp_fiber_adapter_thread_fiber(task_native) == recomp_native_fiber_current(), 1u);
+    check("thread fiber maps to itself",
+        recomp_fiber_adapter_thread_fiber(recomp_native_fiber_current()) == recomp_native_fiber_current(), 1u);
 
     /* A snapshot rewinds a delete; the parked context resumes in place. */
     void *saved = malloc(recomp_fiber_adapter_state_size());
