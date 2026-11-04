@@ -123,6 +123,20 @@ RecompD3dPresenterError recomp_d3d_presenter_invalidate_textures(
 }
 void recomp_d3d_wait_vblank(void) { ++wait_vblank_count; }
 void recomp_d3d_note_block(uint32_t return_address) { (void)return_address; }
+static bool present_ready, host_wait_polled;
+bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
+{
+    return presenter == &mock_presenter && present_ready;
+}
+/* Swap must wait as a guest until the presenter can take its frame. */
+bool recomp_kernel_wait_host(bool (*done)(void *context), void *context)
+{
+    present_ready = false;
+    host_wait_polled = !done(context);
+    present_ready = true;
+    host_wait_polled &= done(context);
+    return true;
+}
 RecompD3dPresenterError recomp_d3d_presenter_visibility_result(
     RecompD3dPresenter *presenter, uint32_t index, bool *complete, uint32_t *pixels)
 {
@@ -647,7 +661,7 @@ int main(void)
     passed &= expect("swap ABI, counter, pacing and physical storage rotation",
         recomp_runtime.registers.eax == 1u &&
         recomp_runtime.registers.esp == ENTRY_ESP + 8u &&
-        *recomp_memory_u32(DEVICE + 0x2478u) == 1u && wait_present_count == 1u &&
+        *recomp_memory_u32(DEVICE + 0x2478u) == 1u && wait_present_count == 1u && host_wait_polled &&
         submitted.type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
         submitted.data.present.effective_flags == 5u &&
         submitted.data.present.swap_counter == 1u &&

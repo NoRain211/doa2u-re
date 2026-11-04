@@ -228,6 +228,17 @@ class LauncherForm : Form
     static readonly int[] Heights = { 480, 720, 1080, 1440, 2160 };
     static readonly int[] Samples = { 1, 2, 4, 8, 16, 32 };
     const int BuildPage = 4, PlayPage = 5, UpdatePage = 6;
+    const string DiscordUrl = "https://discord.gg/56TGGxZnE3";
+    // The Discord mark in a 24-unit box: one outline of cubic Bezier segments, the eyes cut out below.
+    static readonly float[] DiscordOutline = {
+        20.32f, 4.37f, 18.8f, 3.66f, 17.15f, 3.14f, 15.43f, 2.85f, 15.2f, 3.2f, 14.97f, 3.7f, 14.74f, 4.14f,
+        12.9f, 3.86f, 11.06f, 3.86f, 9.25f, 4.14f, 9.08f, 3.75f, 8.84f, 3.27f, 8.63f, 2.89f,
+        6.9f, 3.18f, 5.26f, 3.7f, 3.67f, 4.4f, 0.53f, 9.05f, -0.32f, 13.58f, 0.1f, 18.06f,
+        2.18f, 19.62f, 4.17f, 20.53f, 6.12f, 21.14f, 6.6f, 20.5f, 7.05f, 19.83f, 7.43f, 19.12f,
+        6.78f, 18.87f, 6.15f, 18.57f, 5.55f, 18.23f, 5.68f, 18.1f, 5.82f, 17.9f, 5.95f, 17.7f,
+        9.88f, 19.5f, 14.13f, 19.5f, 18.01f, 17.7f, 18.13f, 17.9f, 18.26f, 18.1f, 18.45f, 18.23f,
+        17.85f, 18.57f, 17.22f, 18.87f, 16.58f, 19.12f, 16.94f, 19.82f, 17.35f, 20.48f, 17.8f, 21.12f,
+        19.76f, 20.51f, 21.75f, 19.6f, 23.8f, 18.09f, 24.3f, 12.9f, 22.96f, 8.4f, 20.32f, 4.37f };
     // Horizon Bar layout on a 960x540 window: letterbox bars, the settings and page tabs in the bottom one.
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
@@ -258,6 +269,7 @@ class LauncherForm : Form
     bool downHeld;
     Point? drag;
     RectangleF[] tabs;
+    RectangleF discord;
 
     readonly Bitmap background = new Bitmap(W, H);
     readonly Font itemFont = new Font("Arial", 15, FontStyle.Bold | FontStyle.Italic, GraphicsUnit.Pixel);
@@ -269,6 +281,8 @@ class LauncherForm : Form
     readonly Font logoFont = new Font("Arial Black", 30, FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font bigFont = new Font("Arial Black", 54, FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font ultimateFont = new Font("Arial", 21, FontStyle.Bold | FontStyle.Italic, GraphicsUnit.Pixel);
+    readonly Font badgeFont = new Font("Verdana", 11, FontStyle.Bold, GraphicsUnit.Pixel);
+    readonly StringFormat typographic = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoClip };
     readonly StringFormat far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
     readonly StringFormat near = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center };
     readonly StringFormat center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
@@ -459,6 +473,40 @@ class LauncherForm : Form
         return path;
     }
 
+    static GraphicsPath DiscordLogo(float x, float y, float size)
+    {
+        var points = new PointF[DiscordOutline.Length / 2];
+        for (int i = 0; i < points.Length; i++) points[i] = new PointF(DiscordOutline[2 * i], DiscordOutline[2 * i + 1]);
+        var path = new GraphicsPath(FillMode.Alternate);
+        path.AddBeziers(points);
+        path.CloseFigure();
+        path.AddEllipse(5.86f, 10.49f, 4.32f, 4.84f);
+        path.AddEllipse(13.83f, 10.49f, 4.32f, 4.84f);
+        path.Transform(new Matrix(size / 24, 0, 0, size / 24, x, y));
+        return path;
+    }
+
+    // The README's "Join the Discord" badge (shields.io for-the-badge style), right-aligned at right and centred on cy.
+    RectangleF DrawDiscordBadge(Graphics g, float right, float cy)
+    {
+        const string label = "JOIN THE DISCORD";
+        const float h = 28, pad = 10, logo = 16, gap = 7, spacing = 1.2f;
+        float[] advance = label.Select(c => g.MeasureString(c.ToString(), badgeFont, PointF.Empty, typographic).Width + spacing).ToArray();
+        var rect = new RectangleF(right - (pad + logo + gap + advance.Sum() - spacing + pad), cy - h / 2, 0, h);
+        rect.Width = right - rect.X;
+        g.FillRectangle(new SolidBrush(Rgb(88, 101, 242)), rect);
+        g.FillPath(Brushes.White, DiscordLogo(rect.X + pad, cy - logo / 2, logo));
+        float x = rect.X + pad + logo + gap, y = cy - badgeFont.GetHeight(g) / 2;
+        for (int i = 0; i < label.Length; i++) { g.DrawString(label[i].ToString(), badgeFont, Brushes.White, x, y, typographic); x += advance[i]; }
+        return rect;
+    }
+
+    void OpenDiscord()
+    {
+        try { Process.Start(DiscordUrl); }
+        catch (Win32Exception) { notice = "No browser opened; visit " + DiscordUrl; }
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
@@ -467,10 +515,11 @@ class LauncherForm : Form
         g.DrawImage(background, 0, 0);
         Color sand = Rgb(241, 197, 143), dark = Rgb(42, 29, 21), muted = Rgb(191, 178, 165);
 
-        // Top letterbox bar: title and build state on the left, button prompts on the right.
+        // Top letterbox bar: title and build state on the left, button prompts and the Discord badge on the right.
         g.DrawString("DEAD OR ALIVE 2 ULTIMATE  \u00B7  " + (built ? "READY TO PLAY" : "NOT BUILT YET") + (pending != null ? "  \u00B7  UPDATE AVAILABLE" : ""),
             smallFont, new SolidBrush(muted), new RectangleF(Side, 0, 500, TopH), near);
-        float x = W - Side;
+        discord = DrawDiscordBadge(g, W - Side, TopH / 2f);
+        float x = discord.X - 22;
         foreach (var hint in new[] { new[] { "", "CHANGE" }, new[] { "B", "BACK" }, new[] { "A", "SELECT" } })
         {
             float textW = g.MeasureString(hint[1], smallFont).Width;
@@ -726,17 +775,19 @@ class LauncherForm : Form
     {
         // Borderless, so a drag on the top bar moves the window.
         if (drag.HasValue) { Location = new Point(Left + e.X - drag.Value.X, Top + e.Y - drag.Value.Y); return; }
+        Cursor = discord.Contains(e.Location) ? Cursors.Hand : Cursors.Default;
         int m = HitTab(e.X, e.Y), i = HitColumn(e.X, e.Y);
         if (!inPage && m >= 0 && m != menu) { menu = m; Invalidate(); }
         if (inPage && i >= 0 && i != row) { row = i; Invalidate(); }
     }
-    protected override void OnMouseDown(MouseEventArgs e) { if (e.Y < TopH) drag = e.Location; }
+    protected override void OnMouseDown(MouseEventArgs e) { if (e.Y < TopH && !discord.Contains(e.Location)) drag = e.Location; }
     protected override void OnMouseUp(MouseEventArgs e) { drag = null; }
 
     protected override void OnMouseClick(MouseEventArgs e)
     {
         if (build == null) notice = null;
         int x = e.X, m = HitTab(x, e.Y), i = HitColumn(x, e.Y);
+        if (e.Button == MouseButtons.Left && discord.Contains(e.Location)) { OpenDiscord(); Invalidate(); return; }
         if (e.Button == MouseButtons.Right) { Back(); Invalidate(); return; }
         if (m >= 0) { menu = m; inPage = false; Accept(); return; }
         if (i < 0) return;

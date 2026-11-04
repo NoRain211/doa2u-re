@@ -19,7 +19,7 @@
 Sister projects: [DOA3](https://github.com/NoRain211/doa3-re) ·
 [DOAXBV](https://github.com/NoRain211/doaxbv-re)
 
-<a href="https://discord.gg/dUdgUF4A"><img src="https://img.shields.io/badge/Join%20the%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord" height="30"></a>
+<a href="https://discord.gg/56TGGxZnE3"><img src="https://img.shields.io/badge/Join%20the%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord" height="30"></a>
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/norainsrecomps)
 
@@ -76,7 +76,7 @@ keeps running.
 ## Status
 
 > [!WARNING]
-> **0.1.15 Alpha is bring-up software.** Story, Watch and the attract demo play
+> **0.1.17 Alpha is bring-up software.** Story, Watch and the attract demo play
 > in development runs on every stage, but many modes and characters have not
 > been tried. A draw the port cannot render yet stops the game with a message
 > in the log.
@@ -234,9 +234,9 @@ profiles already saved with the unlock keep it.
 To package a release ZIP from a clean checkout:
 
 ```powershell
-python tools/package_test.py 0.1.15-Alpha
-python tools/package_test.py 0.1.15-Alpha --platform macos
-python tools/package_test.py 0.1.15-Alpha --platform linux
+python tools/package_test.py 0.1.17-Alpha
+python tools/package_test.py 0.1.17-Alpha --platform macos
+python tools/package_test.py 0.1.17-Alpha --platform linux
 ```
 
 It zips the files of committed HEAD that building and playing on that platform
