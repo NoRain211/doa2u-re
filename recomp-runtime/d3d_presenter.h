@@ -349,6 +349,9 @@ RecompD3dPresenterError recomp_d3d_presenter_destroy(
 /* Publish queued work without swapping; optionally wait for its completion. */
 RecompD3dPresenterError recomp_d3d_presenter_flush(
     RecompD3dPresenter *presenter, bool wait);
+/* True when a PRESENT would not wait for the host to finish earlier frames.
+   Errors report true, so the PRESENT itself returns them. Never waits. */
+bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter);
 
 /* Synchronous, write-free raster coverage of fixed-function triangles. Ignores
    shading and depth/stencil rejection; zero means no fragment can consume them. */
