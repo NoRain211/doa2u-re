@@ -42,7 +42,7 @@ typedef struct RecompNetplayProfiles {
     const uint8_t *mine;
     uint32_t mine_size;   /* at most RECOMP_NETPLAY_MAX_PROFILE */
     uint8_t *theirs;      /* holds RECOMP_NETPLAY_MAX_PROFILE bytes */
-    uint32_t theirs_size; /* set by a successful lobby */
+    uint32_t theirs_size; /* set by a successful lobby; 0 after a failed one */
 } RecompNetplayProfiles;
 
 typedef enum RecompNetplayLobbyResult {
@@ -120,10 +120,11 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
    printable ASCII or that recomp_netplay_name_banned refuses. */
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Binds port and waits for a joiner's hello, answering each with the host's
-   digest and settings. The first joiner becomes the peer; one with another
-   digest ends the wait with MISMATCH. Returns once both sides hold both
-   profiles. cancelled, when not null, is polled every 20 ms; either side
-   cancelling sends the other a goodbye, which ends its wait too. */
+   digest and settings. The first joiner with the same digest becomes the
+   peer; one with another digest learns it from the answer and is ignored.
+   Returns once both sides hold both profiles. cancelled, when not null, is
+   polled every 20 ms; either side cancelling sends the other a goodbye,
+   which ends its wait too. */
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, uint16_t port,
     const RecompNetplayLobby *lobby, RecompNetplayProfiles *profiles, uint32_t timeout_ms,
     bool (*cancelled)(void));

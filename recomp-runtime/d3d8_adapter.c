@@ -78,6 +78,8 @@ static uint32_t argument(uint32_t entry, uint32_t index)
     return *recomp_memory_u32(entry + 4u + index * 4u);
 }
 
+static void flush(bool wait);
+
 typedef struct D3d8State {
     RecompD3dDeviceState device;
     RecompD3dFrameState frame;
@@ -130,7 +132,7 @@ void recomp_d3d8_state_save(void *state)
     /* A repeated run-ahead frame drops its query, so a pending result belongs to
        the shown frame; polling resolves it later, without stalling on the GPU. */
     if (!gpu_work_suppressed && visibility_capture_pending()) {
-        (void)recomp_d3d_presenter_flush(presenter, true);
+        flush(true);
         (void)visibility_capture_pending();
     }
     D3d8State *out = state;
@@ -226,6 +228,8 @@ void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
 
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
 {
+    /* A hidden frame submits no draws, so drop this one without a GPU wait. */
+    if (gpu_work_suppressed) return false;
     bool covered = true;
     const RecompD3dPresenterError error = recomp_d3d_presenter_draw_coverage(presenter, draw, &covered);
     if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");

@@ -80,9 +80,12 @@ SyncTest.
   straight into guest RAM. Other hosts compare every page with a shadow
   copy. Saves and loads must run while no host thread writes guest RAM, so
   netplay makes file reads synchronous as SyncTest does.
-- Each XAPI fiber keeps its C continuation on a native host stack. Parked
-  fibers are saved with their captured context and live stack, so a rewind
-  restores the C frames as well as the guest registers.
+- Each XAPI fiber keeps its C continuation on a native host stack. On
+  Windows, parked fibers are saved with their captured context and live
+  stack (up to 64 KiB), so a rewind restores the C frames as well as the
+  guest registers. POSIX hosts do not capture them yet: a save with a
+  parked fiber that owns its stack reports itself unrestorable there, and
+  rollback on Linux and macOS is unverified.
 - The other host modules (heap, allocations, threads, files, input, D3D8,
   DirectSound) save and restore their own state.
 - `frame_time_update` (`0xfefc0`) feeds QueryPerformanceCounter time into
@@ -221,7 +224,7 @@ frame's budget, so both sides fall below 60 Hz together.
 In every pair the two sides' guest RAM matched except for one save file's
 times, which the game lists at boot and the host reports from each play
 folder. Players' profiles and save metadata will differ the same way, so
-the lobby must start both sides from the same profile.
+the lobby must start both sides from the same combined profile and save tree.
 
 A temporary hook slept player 1 for 250 ms at frame 300 on localhost with
 input delay 2. Before the grid, player 0 settled a frame ahead (advantages
@@ -332,11 +335,11 @@ joiner to frame 3,000 with matching guest RAM.
 `--netplay-host <port>` waits up to 10 minutes for a joiner, and
 `--netplay-join <host>:<port>` says hello every 100 ms for up to 2 minutes.
 The hello carries the SHA-256 of the joiner's runner executable, and the
-host refuses any other build. That also refuses a Windows and Linux pair,
-whose floating point is unverified. The host answers with its input delay
-(`--netplay-delay`, default 2) and the options that change the simulation
-(`--no-unlock-all`, `--skip-intro`), which the joiner adopts. Both
-messages carry the size of the sender's profile.
+host refuses any other build and keeps waiting. That also refuses a Windows
+and Linux pair, whose floating point is unverified. The host answers with
+its input delay (`--netplay-delay`, default 2) and the options that change
+the simulation (`--no-unlock-all`, `--skip-intro`), which the joiner
+adopts. Both messages carry the size of the sender's profile.
 
 Each side first recovers its own save journal, then packs the profile it
 saved last (`UDATA/<title>/<save>`) into one blob of at most 1 MiB with a
