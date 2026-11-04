@@ -868,6 +868,9 @@ The 5849 GetTickCount boundary reads shared monotonic time and offers bounded
 cooperative scheduler polling. D3D BlockUntilVerticalBlank and its two CRI
 tail aliases use the native shared-vblank service. These platform seams let
 the existing worker modules run; they do not force middleware load status.
+Swap waits for the host to finish earlier frames as a guest wait, so those
+vblank threads keep their 60 Hz refills of CRI's audio rings when the GPU
+falls behind; a host-blocked Swap let the rings replay as echoes (issue #69).
 
 ## Determinism checks
 
