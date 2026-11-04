@@ -273,14 +273,17 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     thread.queue_wait_ms = 0.0;
 }
 
+/* Caller holds thread.mutex. Both publish and Swap's guest wait use this test. */
+bool canPublish(const PresenterThread &thread, bool destroying)
+{
+    return thread.pending < 2 || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
+}
+
 RecompD3dPresenterError publish(PresenterThread &thread, bool destroying)
 {
     const double wait_start_ms = thread.pacing ? clock_ms() : 0.0;
     std::unique_lock<std::mutex> lock(thread.mutex);
-    thread.changed.wait(lock, [&] {
-        return thread.pending < 2 ||
-            (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
-    });
+    thread.changed.wait(lock, [&] { return canPublish(thread, destroying); });
     if (thread.pacing) notePacing(thread, wait_start_ms, clock_ms());
     if (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK) return thread.status;
     thread.packets[thread.open].seal();
@@ -408,7 +411,7 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
 {
     if (validate(presenter) != RECOMP_D3D_PRESENTER_OK) return true;
     std::lock_guard<std::mutex> lock(active_thread->mutex);
-    return active_thread->pending < 2 || active_thread->status != RECOMP_D3D_PRESENTER_OK;
+    return canPublish(*active_thread, false);
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
