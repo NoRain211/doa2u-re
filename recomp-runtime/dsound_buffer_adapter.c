@@ -89,11 +89,19 @@ void recomp_dsound_buffer_state_restore(const void *state)
 }
 
 static bool output_suppressed; /* read and written only under the output lock */
+static bool game_thread_pump;  /* read and written only under the output lock */
 
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
 {
     recomp_dsound_output_lock();
     output_suppressed = suppressed;
+    recomp_dsound_output_unlock();
+}
+
+void recomp_dsound_buffer_set_game_thread_pump(bool only)
+{
+    recomp_dsound_output_lock();
+    game_thread_pump = only;
     recomp_dsound_output_unlock();
 }
 
@@ -430,7 +438,7 @@ static bool pump_pass(void)
 {
     recomp_dsound_output_lock();
     const bool running = !pump_stopping;
-    if (running) {
+    if (running && !game_thread_pump) {
         const uint64_t now = now_ms();
         for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
     }

@@ -22,6 +22,9 @@ void recomp_dsound_buffer_state_save(void *state);
 void recomp_dsound_buffer_state_restore(const void *state);
 /* Hidden run-ahead frames advance the buffers without output. */
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed);
+/* The guest reads play cursors that pumping advances, so a session that must
+   match another runner or a replay pumps only from the game thread. */
+void recomp_dsound_buffer_set_game_thread_pump(bool only);
 #ifdef __cplusplus
 }
 #endif

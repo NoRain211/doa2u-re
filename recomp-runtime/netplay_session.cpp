@@ -917,6 +917,7 @@ void recomp_netplay_session_install(bool synctest)
     // The walks to Versus run unseen behind the last notice, and unheard (recomp_game_walk_to_versus).
     recomp_d3d8_set_present_suppressed(rollback.landOnVersus);
     recomp_dsound_buffer_set_output_suppressed(rollback.landOnVersus || backToVersus);
+    recomp_dsound_buffer_set_game_thread_pump(enabled || synctest);
     if (rollback.lobby) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         if (rollback.mode == RollbackMode::Udp) {
