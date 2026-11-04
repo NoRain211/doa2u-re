@@ -190,8 +190,9 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 
 ## Not done yet
 
-- The default server is not running yet; until it is, FIND MATCH says
-  THE MATCHMAKER CANNOT BE FOUND and hosts are not listed.
+- The default server is one small VM. While it is down, FIND MATCH says
+  THE MATCHMAKER CANNOT BE FOUND and hosts are not listed; JOIN ONLINE by
+  address still works.
 - Punching has only been tested on one machine, not through real routers.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
