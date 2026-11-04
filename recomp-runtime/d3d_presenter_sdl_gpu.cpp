@@ -266,6 +266,8 @@ struct RecompD3dPresenter {
     SDL_GPUShaderFormat shader_format = SDL_GPU_SHADERFORMAT_SPIRV;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
     bool close_requested = false;
+    // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
+    SDL_GPUFence *present_fences[2] = {};
     bool widescreen = false;
     float scale = 1.0f;
     SDL_GPUSampleCount msaa = SDL_GPU_SAMPLECOUNT_1;
@@ -2762,7 +2764,12 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     }
     /* Keep the presented guest frame for GetBackBuffer(-1) once a draw has used it. */
     if (presenter->previous_frame != nullptr) copyGuestBuffer(presenter, presenter->previous_frame);
-    submitCommands(presenter);
+    SDL_GPUFence *fence = presenter->command_buffer != nullptr
+        ? SDL_SubmitGPUCommandBufferAndAcquireFence(presenter->command_buffer) : nullptr;
+    presenter->command_buffer = nullptr;
+    if (presenter->present_fences[0] != nullptr) SDL_ReleaseGPUFence(presenter->device, presenter->present_fences[0]);
+    presenter->present_fences[0] = presenter->present_fences[1];
+    presenter->present_fences[1] = fence;
     ++presenter->present_count;
     if (presenter->draw_log_trigger != nullptr && !presenter->draw_log_active &&
         fileExists(presenter->draw_log_trigger)) {
@@ -2824,6 +2831,9 @@ void releasePresenter(RecompD3dPresenter *presenter)
     flushSegment(presenter);
     submitCommands(presenter);
     SDL_WaitForGPUIdle(presenter->device);
+    for (SDL_GPUFence *fence : presenter->present_fences) {
+        if (fence != nullptr) SDL_ReleaseGPUFence(presenter->device, fence);
+    }
     releaseQuery(presenter, presenter->visibility_active);
     for (VisibilityQuery &query : presenter->visibility_pending) releaseQuery(presenter, query);
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);
@@ -3323,6 +3333,12 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
     releaseQuery(presenter, front);
     presenter->visibility_pending.erase(presenter->visibility_pending.begin());
     return D3D_BACKEND_VISIBILITY_READY;
+}
+
+bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
+{
+    return presenter->present_fences[0] == nullptr ||
+        SDL_QueryGPUFence(presenter->device, presenter->present_fences[0]);
 }
 
 void d3d_backend_report_draw_textures()
