@@ -53,7 +53,10 @@ typedef enum RecompNetplayLobbyResult {
     RECOMP_NETPLAY_LOBBY_CANCELLED, /* by this side, or by the other when peer_left is set */
 } RecompNetplayLobbyResult;
 
-enum { RECOMP_NETPLAY_LISTED_ROOMS = 12u };
+enum {
+    RECOMP_NETPLAY_LISTED_ROOMS = 12u,
+    RECOMP_NETPLAY_TOKEN_BYTES = 8u, /* a socket's nonce and the matchmaker's cookie */
+};
 
 /* One open room from the matchmaker's list. */
 typedef struct RecompNetplayListedRoom {
@@ -82,6 +85,14 @@ typedef struct RecompNetplayMatch {
     uint64_t punch_ms;
     bool relay; /* packets to the peer go through the server, as do its answers */
     bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
+    /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
+    uint8_t nonce[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* The server's proof of this socket's address, zeros until it sends one. */
+    uint8_t cookie[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* The last HOST, JOIN or LEAVE, sent once more when a new cookie answers it. */
+    uint8_t asked[160];
+    size_t asked_size;
+    uint64_t asked_ms;
 } RecompNetplayMatch;
 
 typedef struct RecompNetplay {
@@ -137,6 +148,9 @@ typedef struct RecompNetplayRoom {
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
     uint64_t said_ms;
+    /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
+       packet per packet it sends until it echoes one of this side's clocks. */
+    bool doubted, owed;
 } RecompNetplayRoom;
 
 /* Reads what the other player said and, every 100 ms or every call while
@@ -167,7 +181,8 @@ void recomp_netplay_match_poll(RecompNetplay *net);
 /* Waits on a socket from recomp_netplay_listen, or a room's, for a joiner's
    hello, answering each with the host's
    digest and settings. The first joiner with the same digest becomes the
-   peer; one with another digest learns it from the answer and is ignored.
+   peer; one with another digest learns it from the answer and is ignored. A
+   room's socket, which already has a peer, hears only that peer.
    Returns once both sides hold both profiles. cancelled, when not null, is
    polled every 20 ms; either side cancelling sends the other a goodbye,
    which ends its wait too. */
