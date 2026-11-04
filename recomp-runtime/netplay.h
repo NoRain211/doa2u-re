@@ -81,6 +81,7 @@ typedef struct RecompNetplayMatch {
     bool punching;
     uint64_t punch_ms;
     bool relay; /* packets to the peer go through the server, as do its answers */
+    bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
 } RecompNetplayMatch;
 
 typedef struct RecompNetplay {
