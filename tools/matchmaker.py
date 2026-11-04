@@ -8,6 +8,8 @@ accounts, everything in memory. docs/matchmaking.md describes the packets.
 """
 import argparse
 import asyncio
+import hashlib
+import hmac
 import ipaddress
 import os
 import socket
@@ -17,7 +19,10 @@ import time
 
 MAGIC = b"D2MM"
 VERSION = 2
-HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY = range(1, 10)
+HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY, COOKIE = range(1, 11)
+TOKEN = 8  # a client's nonce and the server's cookie
+ASKED = 6 + 2 * TOKEN  # where a HOST, JOIN, LEAVE or RELAY body starts, after the nonce and cookie
+COOKIE_SECONDS = 60  # a cookie lasts this epoch and the next
 DIGEST = 64  # the runner build's hex SHA-256; rooms only meet the same build
 NAME = 32
 LIST_BYTES = 512  # a list request is padded to this, so no answer outgrows its ask
@@ -55,8 +60,8 @@ def lan_endpoint(lan):
     return lan
 
 
-def peer(public, lan, name):
-    return header(PEER) + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0")
+def peer(nonce, public, lan, name):
+    return header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0")
 
 
 class Room:
@@ -66,8 +71,8 @@ class Room:
 
 
 class Pair:
-    def __init__(self, other, now):
-        self.other, self.used = other, now
+    def __init__(self, other, nonce, now):
+        self.other, self.nonce, self.used = other, nonce, now  # nonce: this end's, which packets to it echo
         self.second, self.count = int(now), 0
 
 
@@ -80,30 +85,45 @@ class Matchmaker:
         self.join_counts = {}  # JOINs per address since the last sweep
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
+        self.secret = os.urandom(32)  # cookies stop working across a restart; clients get new ones
         self.swept = 0.0
         self.joins = self.relayed = self.relayed_bytes = self.over_cap = 0  # since the last status line
 
     def handle(self, data, sender, now):
         """Returns the (packet, endpoint) answers to one packet from sender."""
-        if len(data) < 6 or data[:4] != MAGIC or data[4] != VERSION:
+        if len(data) < 6 + TOKEN or data[:4] != MAGIC or data[4] != VERSION:
             return []
         if now - self.swept >= 1.0:
             self.sweep(now)
-        kind, body = data[5], data[6:]
-        if kind == HOST and len(body) == HOST_BODY.size:
-            return self.host(body, sender, now)
+        kind, nonce, cookie, body = data[5], data[6:6 + TOKEN], data[6 + TOKEN:ASKED], data[ASKED:]
         if kind == LIST and len(data) == LIST_BYTES:
-            return self.list(body[:DIGEST], sender, now)
-        if kind == JOIN and len(body) == JOIN_BODY.size:
-            return self.join(body, sender, now)
+            return self.list(data[6 + TOKEN:6 + TOKEN + DIGEST], sender, nonce, now)
+        sizes = {HOST: len(body) == HOST_BODY.size, JOIN: len(body) == JOIN_BODY.size, LEAVE: not body,
+                 RELAY: len(body) <= MAX_RELAY}
+        if len(data) < ASKED or not sizes.get(kind):
+            return []
+        # A forged sender address never sees its cookie, so nothing it asks for is stored.
+        epoch = int(now // COOKIE_SECONDS)
+        fresh = self.cookie(sender, epoch)
+        refresh = [(header(COOKIE) + nonce + fresh, sender)]
+        if hmac.compare_digest(cookie, fresh):
+            refresh = []
+        elif not hmac.compare_digest(cookie, self.cookie(sender, epoch - 1)):
+            return refresh
+        if kind == HOST:
+            return self.host(body, sender, nonce, now) + refresh
+        if kind == JOIN:
+            return self.join(body, sender, nonce, now) + refresh
         if kind == LEAVE:
             self.remove(self.rooms.get(sender))
-            return []
-        if kind == RELAY and len(body) <= MAX_RELAY:
-            return self.relay(body, sender, now)
-        return []
+            return refresh
+        return self.relay(body, sender, now) + refresh
 
-    def host(self, body, sender, now):
+    def cookie(self, sender, epoch):
+        """The first bytes of an HMAC of the sender's endpoint and a minute's epoch, which only the server can make."""
+        return hmac.new(self.secret, endpoint(sender) + struct.pack(">q", epoch), hashlib.sha256).digest()[:TOKEN]
+
+    def host(self, body, sender, nonce, now):
         digest, delay, is_open, length, name, lan, rtt = HOST_BODY.unpack(body)
         if length > NAME:
             return []
@@ -117,22 +137,22 @@ class Matchmaker:
                 room_id = self.random_id()
             room = self.rooms[sender] = self.by_id[room_id] = Room(room_id, sender, now)
         room.digest, room.delay, room.open = digest, delay, is_open != 0
-        room.name, room.lan, room.seen = name[:length], lan_endpoint(lan), now
+        room.name, room.lan, room.nonce, room.seen = name[:length], lan_endpoint(lan), nonce, now
         room.rtt = rtt  # the host's own HOST to HOSTED in ms, 0 unknown; joiners add theirs for an estimate
-        return [(header(HOSTED) + struct.pack(">I", room.id) + endpoint(sender), sender)]
+        return [(header(HOSTED) + nonce + struct.pack(">I", room.id) + endpoint(sender), sender)]
 
-    def list(self, digest, sender, now):
+    def list(self, digest, sender, nonce, now):
         rooms = sorted((room for room in self.rooms.values()
                         if room.digest == digest and room.open and room.claimed_until <= now and room.host != sender),
                        key=lambda room: room.born)
-        rooms = rooms[:(LIST_BYTES - 7) // ENTRY.size]
-        answer = header(ROOMS) + bytes((len(rooms),))
+        rooms = rooms[:(LIST_BYTES - 7 - TOKEN) // ENTRY.size]
+        answer = header(ROOMS) + nonce + bytes((len(rooms),))
         for room in rooms:
             answer += ENTRY.pack(room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name,
                                  room.rtt)
         return [(answer, sender)]
 
-    def join(self, body, sender, now):
+    def join(self, body, sender, nonce, now):
         room_id, digest, length, name, lan = JOIN_BODY.unpack(body)
         count = self.join_counts[sender[0]] = self.join_counts.get(sender[0], 0) + 1
         if count > JOINS_PER_SECOND:
@@ -141,7 +161,7 @@ class Matchmaker:
         # A joiner asks again until it hears; its own claim answers again.
         claimed = room is not None and room.claimed_until > now and room.claimer != sender
         if length > NAME or room is None or room.digest != digest or not room.open or claimed:
-            return [(header(GONE) + struct.pack(">I", room_id), sender)]
+            return [(header(GONE) + nonce + struct.pack(">I", room_id), sender)]
         if room.claimer != sender or room.claimed_until <= now:
             held = self.claims.get(sender[0])
             if held is not None and held is not room and held.claimer is not None and held.claimer[0] == sender[0]:
@@ -149,16 +169,17 @@ class Matchmaker:
             self.claims[sender[0]] = room
             room.claimed_until, room.claimer = now + CLAIM_SECONDS, sender
             self.joins += 1
-        self.pairs[sender] = Pair(room.host, now)
-        self.pairs[room.host] = Pair(sender, now)
+        self.pairs[sender] = Pair(room.host, nonce, now)
+        self.pairs[room.host] = Pair(sender, room.nonce, now)
         if self.relay_only:
             nowhere = ("0.0.0.0", 0)
-            return [(peer(nowhere, bytes(6), name[:length]), room.host), (peer(nowhere, bytes(6), room.name), sender)]
+            return [(peer(room.nonce, nowhere, bytes(6), name[:length]), room.host),
+                    (peer(nonce, nowhere, bytes(6), room.name), sender)]
         # LAN endpoints only help two players behind one router; anyone else would learn a private address.
         # shortcut: carrier NAT can put two households on one public address; add a LAN probe if that matters.
         same_router = sender[0] == room.host[0]
-        return [(peer(sender, lan_endpoint(lan) if same_router else bytes(6), name[:length]), room.host),
-                (peer(room.host, room.lan if same_router else bytes(6), room.name), sender)]
+        return [(peer(room.nonce, sender, lan_endpoint(lan) if same_router else bytes(6), name[:length]), room.host),
+                (peer(nonce, room.host, room.lan if same_router else bytes(6), room.name), sender)]
 
     def relay(self, body, sender, now):
         pair = self.pairs.get(sender)
@@ -173,8 +194,8 @@ class Matchmaker:
             return []
         pair.used = back.used = now
         self.relayed += 1
-        self.relayed_bytes += 6 + len(body)
-        return [(header(RELAY) + body, pair.other)]
+        self.relayed_bytes += 6 + TOKEN + len(body)
+        return [(header(RELAY) + back.nonce + body, pair.other)]
 
     def remove(self, room):
         if room is not None:
@@ -230,13 +251,14 @@ def probe(host, port, timeout=3.0):
     """Asks a matchmaker for its list; returns the answer's round trip in ms, or None without one."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ask:
         ask.settimeout(timeout)
+        nonce = os.urandom(TOKEN)
         started = time.monotonic()
         try:
-            ask.sendto(header(LIST).ljust(LIST_BYTES, b"\0"), (host, port))
+            ask.sendto((header(LIST) + nonce).ljust(LIST_BYTES, b"\0"), (host, port))
             answer = ask.recv(2048)
         except OSError:  # a timeout, an unknown name, or Windows reporting a closed port
             return None
-        if answer[:6] != header(ROOMS):
+        if answer[:6 + TOKEN] != header(ROOMS) + nonce:
             return None
         return (time.monotonic() - started) * 1000.0
 

@@ -43,12 +43,15 @@ Only in memory, and the log holds only the status counts:
 
 - Each room: a random id, the host's public endpoint as the server sees it,
   the host's LAN endpoint, the build digest, name, input delay, whether
-  its room is empty, the host's last round trip to the server, and when it
-  was first and last heard. A room that
-  is not heard for 20 s is dropped. One address may hold 4 rooms, and the
-  server holds 4,096.
-- Each pair made by a join: the two public endpoints, kept 10 minutes past
-  their last relayed packet.
+  its room is empty, its socket's nonce, the host's last round trip to the
+  server, and when it was first and last heard. A room that is not heard
+  for 20 s is dropped. One address may hold 4 rooms, and the server holds
+  4,096.
+- Each pair made by a join: the two public endpoints and nonces, kept 10
+  minutes past their last relayed packet.
+
+Cookies are not stored; the server makes them again from a random secret
+it picks at start.
 
 The room list shows ids, names, ages, delays and each host's round trip to
 the server, never an endpoint. Endpoints go only to the two players of a
@@ -99,10 +102,13 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 
 ## Packets
 
-Every packet starts with `D2MM`, version 2 and a kind. Numbers are big
+Every packet starts with `D2MM`, version 2, a kind and an 8-byte nonce.
+A client's packets carry its socket's nonce, and HOST, JOIN, LEAVE and
+RELAY then carry the server's 8-byte cookie, zeros before the first. The
+server's packets carry the nonce of the client they go to. Numbers are big
 endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 32 bytes, zero padded after a length byte. Digests are the runner build's
-64 hex characters.
+64 hex characters. The bodies below follow the nonce or cookie.
 
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
@@ -110,7 +116,20 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, oldest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
-| 9 RELAY | either player of a pair | up to 1,200 bytes | the same packet to the other player, up to 250 a second |
+| 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second |
+| 10 COOKIE | server | cookie | the client stores it and sends its last HOST, JOIN or LEAVE again with it |
+
+UDP source addresses can be forged, so neither side takes one on trust.
+The server answers a HOST, JOIN, LEAVE or RELAY without a valid cookie
+with COOKIE only and stores nothing. The cookie is the first 8 bytes of an
+HMAC-SHA256 of the sender's endpoint and the minute, and the server takes
+this minute's and the last one's; a request with the last one's is
+answered and also gets this minute's. Only a client that receives at its
+address learns its cookie, so a forged address cannot fill the room list,
+change or close another player's room, or claim a pair. The runner drops a
+packet from the server's address that does not carry its socket's nonce,
+so a forged PEER cannot send a host elsewhere and a forged RELAY cannot
+end a match or carry pads.
 
 No answer is longer than the packet that asked for it, so a forged sender
 address cannot turn the server into an amplifier. That is why LIST is
@@ -159,12 +178,17 @@ session run the same way over either path.
   oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
-  player as before. After 5 s without an answer, or with no endpoints,
-  the runner relays. A runner that hears a relayed packet relays too, so a
-  path that works one way only still ends with both sides on the relay.
-  The plates show RELAY beside the ping.
+  player as before. A host that takes a player from that player's own
+  room packet, rather than from PEER, sends one room packet for each it
+  receives until the player echoes one of the host's clocks, so a forged
+  room packet draws one packet back. After 5 s without an answer, or
+  with no endpoints, the runner relays. A runner that hears a relayed
+  packet relays too, so a path that works one way only still ends with
+  both sides on the relay. The plates show RELAY beside the ping.
 - A relayed session repeats its pads every 16 ms while it waits, where a
   direct one repeats every 4 ms.
+- STARTING MATCH on a room's socket takes a hello only from the room's
+  player.
 
 Two runners on one machine with a local server: the host was listed, the
 joiner's quick match reached it directly, and both played to frame 1,500

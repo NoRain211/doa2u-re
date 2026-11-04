@@ -11,24 +11,38 @@ JOINER_AT = ("198.51.100.9", 51234)
 BUILD = b"a" * mm.DIGEST
 OTHER_BUILD = b"b" * mm.DIGEST
 LAN = socket.inet_aton("192.168.1.20") + struct.pack(">H", 47701)
+NO_TOKENS = bytes(2 * mm.TOKEN)  # MatchmakerTest.send fills in the sender's nonce and cookie
+
+
+def nonce(sender):
+    """A stand-in for the random nonce of the client socket at sender."""
+    return mm.endpoint(sender) + b"\0\0"
 
 
 def hosting(name=b"KASUMI", is_open=1, build=BUILD, lan=LAN, rtt=0):
-    return mm.header(mm.HOST) + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, lan, rtt)
+    return mm.header(mm.HOST) + NO_TOKENS + mm.HOST_BODY.pack(build, 2, is_open, len(name), name, lan, rtt)
 
 
 def listing(build=BUILD, size=mm.LIST_BYTES):
-    return (mm.header(mm.LIST) + build).ljust(size, b"\0")
+    return (mm.header(mm.LIST) + bytes(mm.TOKEN) + build).ljust(size, b"\0")
 
 
 def joining(room_id, name=b"AYANE", build=BUILD, lan=LAN):
-    return mm.header(mm.JOIN) + mm.JOIN_BODY.pack(room_id, build, len(name), name, lan)
+    return mm.header(mm.JOIN) + NO_TOKENS + mm.JOIN_BODY.pack(room_id, build, len(name), name, lan)
+
+
+def relaying(game=b"pads"):
+    return mm.header(mm.RELAY) + NO_TOKENS + game
+
+
+def relayed(to, game=b"pads"):
+    return mm.header(mm.RELAY) + nonce(to) + game
 
 
 def rooms(answer):
-    count = answer[6]
-    assert len(answer) == 7 + count * mm.ENTRY.size
-    return [mm.ENTRY.unpack_from(answer, 7 + i * mm.ENTRY.size) for i in range(count)]
+    count = answer[6 + mm.TOKEN]
+    assert len(answer) == 7 + mm.TOKEN + count * mm.ENTRY.size
+    return [mm.ENTRY.unpack_from(answer, 7 + mm.TOKEN + i * mm.ENTRY.size) for i in range(count)]
 
 
 class MatchmakerTest(unittest.TestCase):
@@ -37,17 +51,24 @@ class MatchmakerTest(unittest.TestCase):
         self.server = mm.Matchmaker(lambda: next(self.ids))
         self.sent = []
 
-    def send(self, data, sender, now):
+    def send(self, data, sender, now, cookie=None):
+        """Sends data from sender with its nonce and, unless one is given, the server's current cookie."""
+        if len(data) >= mm.ASKED and data[:4] == mm.MAGIC:
+            if cookie is None:
+                cookie = self.server.cookie(sender, int(now // mm.COOKIE_SECONDS))
+            data = data[:6] + nonce(sender) + (data[14:mm.ASKED] if data[5] == mm.LIST else cookie) + data[mm.ASKED:]
         answers = self.server.handle(data, sender, now)
-        # No answer outgrows its ask, so a forged sender gains nothing.
-        for packet, _ in answers:
+        for packet, to in answers:
+            # No answer outgrows its ask, so a forged sender gains nothing.
             self.assertLessEqual(len(packet), len(data))
+            # Each carries its receiver's nonce, so a forged one from elsewhere is ignored.
+            self.assertEqual(packet[6:6 + mm.TOKEN], nonce(to))
         return answers
 
     def host(self, now=0.0, sender=HOST_AT, **fields):
         [(answer, to)] = self.send(hosting(**fields), sender, now)
         self.assertEqual((to, answer[5]), (sender, mm.HOSTED))
-        return struct.unpack_from(">I", answer, 6)[0], answer[10:]
+        return struct.unpack_from(">I", answer, 6 + mm.TOKEN)[0], answer[10 + mm.TOKEN:]
 
     def test_host_learns_its_room_and_public_endpoint(self):
         room_id, public = self.host()
@@ -79,12 +100,12 @@ class MatchmakerTest(unittest.TestCase):
     def test_a_full_list_stays_within_its_ask(self):
         for i in range(13):  # one more than a list holds
             self.host(now=0.0, sender=(f"203.0.113.{i + 1}", 47701))
-        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), (mm.LIST_BYTES - 7) // mm.ENTRY.size)
+        self.assertEqual(len(rooms(self.send(listing(), JOINER_AT, 1.0)[0][0])), (mm.LIST_BYTES - 7 - mm.TOKEN) // mm.ENTRY.size)
 
     def test_join_sends_each_side_the_others_endpoints(self):
         room_id, _ = self.host()
         answers = dict((to, packet) for packet, to in self.send(joining(room_id), JOINER_AT, 1.0))
-        to_host, to_joiner = answers[HOST_AT], answers[JOINER_AT]
+        to_host, to_joiner = (packet[:6] + packet[6 + mm.TOKEN:] for packet in (answers[HOST_AT], answers[JOINER_AT]))
         self.assertEqual(to_host[:6], mm.header(mm.PEER))
         # Behind different routers, neither learns the other's LAN address.
         self.assertEqual(to_host[6:18], mm.endpoint(JOINER_AT) + bytes(6))
@@ -116,7 +137,7 @@ class MatchmakerTest(unittest.TestCase):
             answers = dict((to, packet) for packet, to in self.send(joining(1, lan=lan), same_router, 1.0))
             self.assertEqual(len(answers), 2)
             for packet in answers.values():
-                self.assertEqual(packet[12:18], lan if kept else bytes(6))
+                self.assertEqual(packet[12 + mm.TOKEN:18 + mm.TOKEN], lan if kept else bytes(6))
 
     def test_one_address_holds_one_claim(self):
         first, _ = self.host()
@@ -142,23 +163,40 @@ class MatchmakerTest(unittest.TestCase):
         self.server.relay_only = True
         room_id, _ = self.host()
         for packet, _ in self.send(joining(room_id), JOINER_AT, 1.0):
-            self.assertEqual(packet[6:18], bytes(12))
-        game = mm.header(mm.RELAY) + b"pads"
-        self.assertEqual(self.send(game, JOINER_AT, 2.0), [(game, HOST_AT)])
+            self.assertEqual(packet[6 + mm.TOKEN:18 + mm.TOKEN], bytes(12))
+        self.assertEqual(self.send(relaying(), JOINER_AT, 2.0), [(relayed(HOST_AT), HOST_AT)])
 
     def test_relay_forwards_only_within_a_pair_and_caps_the_rate(self):
         room_id, _ = self.host()
         self.send(joining(room_id), JOINER_AT, 1.0)
-        game = mm.header(mm.RELAY) + b"pads"
-        self.assertEqual(self.send(game, JOINER_AT, 2.0), [(game, HOST_AT)])
-        self.assertEqual(self.send(game, HOST_AT, 2.0), [(game, JOINER_AT)])
-        self.assertEqual(self.send(game, ("192.0.2.1", 1), 2.0), [])
-        forwarded = sum(len(self.send(game, JOINER_AT, 3.5)) for _ in range(mm.RELAY_PER_SECOND + 10))
+        self.assertEqual(self.send(relaying(), JOINER_AT, 2.0), [(relayed(HOST_AT), HOST_AT)])
+        self.assertEqual(self.send(relaying(), HOST_AT, 2.0), [(relayed(JOINER_AT), JOINER_AT)])
+        self.assertEqual(self.send(relaying(), ("192.0.2.1", 1), 2.0), [])
+        forwarded = sum(len(self.send(relaying(), JOINER_AT, 3.5)) for _ in range(mm.RELAY_PER_SECOND + 10))
         self.assertEqual(forwarded, mm.RELAY_PER_SECOND)
+
+    def test_a_sender_without_a_cookie_gets_one_and_nothing_is_stored(self):
+        room_id, _ = self.host()
+        forged = ("192.0.2.1", 1)
+        stale = self.server.cookie(forged, -2)  # two minutes old
+        others = self.server.cookie(HOST_AT, 0)  # the right epoch, but another endpoint's
+        for packet, sender in ((hosting(), forged), (joining(room_id), forged), (joining(room_id), JOINER_AT),
+                               (mm.header(mm.LEAVE) + NO_TOKENS, HOST_AT), (relaying(), JOINER_AT)):
+            for cookie in (bytes(mm.TOKEN), stale, others if sender != HOST_AT else stale):
+                [(answer, to)] = self.send(packet, sender, 1.0, cookie=cookie)
+                self.assertEqual((to, answer[:6], answer[6 + mm.TOKEN:]),
+                                 (sender, mm.header(mm.COOKIE), self.server.cookie(sender, 0)))
+        self.assertEqual(list(self.server.rooms), [HOST_AT])
+        self.assertEqual((self.server.pairs, self.server.claims, self.server.join_counts), ({}, {}, {}))
+        # The cookie it was given lets it in, through the next minute too, with a new cookie then.
+        room_id, _ = self.host(now=55.0)  # a new room; the first expired
+        [(answer, _)] = self.send(joining(room_id), JOINER_AT, 55.0, cookie=bytes(mm.TOKEN))
+        answers = self.send(joining(room_id), JOINER_AT, 61.0, cookie=answer[6 + mm.TOKEN:])
+        self.assertEqual(sorted(packet[5] for packet, _ in answers), [mm.PEER, mm.PEER, mm.COOKIE])
 
     def test_rooms_expire_leave_and_are_capped_per_address(self):
         self.host()
-        self.send(mm.header(mm.LEAVE), HOST_AT, 1.0)
+        self.send(mm.header(mm.LEAVE) + NO_TOKENS, HOST_AT, 1.0)
         self.assertEqual(self.server.rooms, {})
         self.host(now=2.0)
         self.send(listing(), JOINER_AT, 2.0 + mm.ROOM_SECONDS + 1.0)
@@ -168,18 +206,18 @@ class MatchmakerTest(unittest.TestCase):
         self.assertEqual(self.send(hosting(), (HOST_AT[0], 60000), 30.0), [])
 
     def test_garbage_gets_no_answer(self):
-        for packet in (b"", b"D2MM", mm.header(mm.HOST) + b"short", b"XXXX" + bytes((1, mm.LIST)) + bytes(506)):
+        for packet in (b"", b"D2MM", mm.header(mm.HOST) + NO_TOKENS + b"short", mm.header(mm.LEAVE) + b"short",
+                       b"XXXX" + bytes((mm.VERSION, mm.LIST)) + bytes(506), b"D2MM\x01\x03" + bytes(506)):
             self.assertEqual(self.send(packet, JOINER_AT, 0.0), [])
 
     def test_status_counts_without_addresses_and_restarts(self):
         room_id, _ = self.host()
         self.send(joining(room_id), JOINER_AT, 1.0)
         self.send(joining(room_id), JOINER_AT, 1.5)  # a repeat is the same join
-        game = mm.header(mm.RELAY) + b"pads"
         for _ in range(mm.RELAY_PER_SECOND + 2):
-            self.send(game, JOINER_AT, 2.0)
+            self.send(relaying(), JOINER_AT, 2.0)
         line = self.server.status(3.0)
-        self.assertEqual(line, "matchmaker: rooms 1, open 1, pairs 1, joins 1, relayed 250 (2 KiB), over the relay cap 2")
+        self.assertEqual(line, "matchmaker: rooms 1, open 1, pairs 1, joins 1, relayed 250 (4 KiB), over the relay cap 2")
         self.assertNotIn(HOST_AT[0], line)
         self.assertNotIn(JOINER_AT[0], line)
         self.assertTrue(self.server.status(4.0).endswith("joins 0, relayed 0 (0 KiB), over the relay cap 0"))
