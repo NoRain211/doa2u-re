@@ -435,11 +435,14 @@ static void draw()
         title("JOIN ONLINE");
         recomp_overlay_text(60.0f, 132.0f, 2.0f, Gray, "HOST ADDRESS");
         recomp_overlay_rect(56.0f, 154.0f, 528.0f, 44.0f, Panel);
-        recomp_overlay_text(68.0f, 165.0f, 3.0f, White, menu.address.c_str());
+        // Addresses stay off screen, so a stream never shows one; the pad still sees the character it changes.
+        std::string masked(menu.address.size(), '*');
+        if (menu.caret < masked.size()) masked[menu.caret] = menu.address[menu.caret];
+        recomp_overlay_text(68.0f, 165.0f, 3.0f, White, masked.c_str());
         if ((menu.frame / 20u) % 2u == 0u)
             recomp_overlay_rect(68.0f + 18.0f * static_cast<float>(menu.caret), 189.0f, 15.0f, 3.0f, Red);
         if (!menu.recent.empty())
-            recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, ("LAST HOST  " + menu.recent).c_str());
+            recomp_overlay_text(60.0f, 296.0f, 2.0f, Dim, "THE LAST HOST IS FILLED IN.");
         editorHints("A CONNECT   B BACK", "ENTER CONNECT   ESC BACK");
         return;
     }

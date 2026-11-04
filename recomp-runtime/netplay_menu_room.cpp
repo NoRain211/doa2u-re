@@ -50,6 +50,7 @@ void enterRoom(bool hosting)
     menu.message.clear();
     menu.lobby.chat.clear();
     menu.lobby.typing = false;
+    menu.lobby.showAddress = false;
     menu.lobby.checkedIn = Clock::time_point{}; // a host lists its room on the first tick
     char stale[64]; // typed before the room opened, such as a game's Enter
     (void)recomp_input_keyboard_take_text(stale, sizeof stale);
@@ -258,6 +259,8 @@ bool updateRoom(std::uint16_t keys)
         return false;
     }
     const auto now = Clock::now();
+    if (room.joined) menu.lobby.showAddress = false;
+    else if ((keys & Y) && menu.lobby.hosting) menu.lobby.showAddress = !menu.lobby.showAddress;
     if ((keys & Y) && peerAllowed) {
         menu.lobby.muting = !peerMuted();
         menu.lobby.mutedId = room.peer_id;
@@ -337,7 +340,8 @@ void drawRoom()
             recomp_overlay_text(40.0f, 372.0f, 2.0f, White, line.c_str());
         }
     } else if (menu.lobby.hosting) {
-        recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shownAddress()).c_str());
+        const std::string shown = menu.lobby.showAddress ? shownAddress() : "HIDDEN, Y SHOWS IT";
+        recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("YOUR ADDRESS  " + shown).c_str());
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, ("ROUTER  " + routerStatus()).c_str());
         const std::string frames = std::to_string(menu.delay) + " FRAMES";
         std::string delay = "INPUT DELAY  " + (peer ? "< " + frames + " >" : frames);
@@ -350,7 +354,7 @@ void drawRoom()
         const std::string kind = kinds[menu.lobby.listing ? 0 : 1];
         recomp_overlay_text(40.0f, 374.0f, 2.0f, Gray, ("ROOM  " + (peer ? kind : "< " + kind + " >")).c_str());
     } else {
-        recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, ("HOST  " + menu.lobby.peerAddress).c_str());
+        recomp_overlay_text(40.0f, 296.0f, 2.0f, Gray, menu.lobby.found ? "HOST  FOUND ON FIND MATCH" : "HOST  JOINED BY ADDRESS");
         recomp_overlay_text(40.0f, 322.0f, 2.0f, Gray, "INPUT DELAY  SET BY THE HOST");
     }
     if (menu.message.empty()) {

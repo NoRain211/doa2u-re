@@ -329,9 +329,12 @@ host joined are kept in `.recomp-storage/netplay.txt`, with the
 [matchmaker](matchmaking.md) set under NETPLAY SETTINGS.
 
 HOST ONLINE binds the port, asks the router for a forward on a background
-thread and shows the address to send; a PRIVATE room is never listed on
+thread and keeps the address to send for X to copy; a PRIVATE room is never listed on
 FIND MATCH. JOIN ONLINE takes an address from
-the keyboard, the d-pad or the clipboard. In the room each side says its build, profile
+the keyboard, the d-pad or the clipboard. The menu never draws an IP address, so streams do
+not show one: the editor masks all but the character under the caret, the
+joiner's room says how it joined, and the host's address shows only while
+Y is toggled on and nobody has joined. In the room each side says its build, profile
 name and readiness ten times a second; both plates show the names, ready
 states and the round-trip time. Names are checked as in the session lobby,
 and a different build shows on the other player's plate.

@@ -64,7 +64,8 @@ says to forward it by hand, forward UDP 47701 to the host's computer, or use
 FIND MATCH, which gets through most routers and falls back to a relay.
 NETPLAY SETTINGS sets the input delay, the port, the network display in a
 match, blocked players and the matchmaker. In a room Y mutes the other
-player and X twice blocks them.
+player and X twice blocks them. The menu hides IP addresses, so they stay off
+streams; while your room is empty, Y shows your address.
 On Windows, allow the game through the firewall when asked. Enter opens a
 chat line in the room, X copies the host's address, and Ctrl+V pastes one.
 

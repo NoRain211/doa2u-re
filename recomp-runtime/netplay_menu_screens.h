@@ -62,6 +62,7 @@ struct LobbyState {
     bool muting = false;
     std::uint64_t mutedId = 0u;
     Clock::time_point blockAsked; // X asks to block the other player; X again within 3 s blocks
+    bool showAddress = false;     // Y shows the host's own address until someone joins
 };
 
 // FIND MATCH: the listed rooms and a join being asked, which stays set in the joined room.
