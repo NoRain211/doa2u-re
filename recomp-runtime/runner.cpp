@@ -983,7 +983,7 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
-        std::fprintf(stderr, "recomp netplay: joining %s\n", netplayJoin.c_str());
+        std::fprintf(stderr, "recomp netplay: joining the host\n"); // no address: logs end up in public issues
         result = recomp_netplay_join(&rollback.net, netplayJoin.substr(0u, colon).c_str(),
             static_cast<std::uint16_t>(port), &lobby, &profiles, 2u * 60u * 1000u, cancelled);
     }
