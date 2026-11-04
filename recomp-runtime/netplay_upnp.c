@@ -42,11 +42,12 @@ bool recomp_netplay_open_router_port(uint16_t port, char *address, size_t size)
     }
     snprintf(mapped_port, sizeof mapped_port, "%s", text);
     if (found == UPNP_PRIVATEIP_IGD)
-        fprintf(stderr, "recomp netplay: the router forwards UDP port %u, but its own address %s is "
-            "private, so players outside your provider's network cannot reach it\n", (unsigned)port, wan);
+        fprintf(stderr, "recomp netplay: the router forwards UDP port %u, but its own address is "
+            "private, so players outside your provider's network cannot reach it\n", (unsigned)port);
     else {
-        fprintf(stderr, "recomp netplay: the router forwards UDP port %u; the other player joins %s:%u\n",
-            (unsigned)port, wan, (unsigned)port);
+        /* No address: players paste this log into public issues. */
+        fprintf(stderr, "recomp netplay: the router forwards UDP port %u; the other player joins your "
+            "public address on that port\n", (unsigned)port);
         if (size != 0u) snprintf(address, size, "%s:%u", wan, (unsigned)port);
     }
     return true;

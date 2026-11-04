@@ -108,7 +108,7 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | --- | --- | --- | --- |
 | 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint | 2 HOSTED: room id, the host's public endpoint |
 | 3 LIST | anyone | digest, then 1 to ask for endpoints, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and, when asked, the host's public endpoint per room, oldest first |
-| 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public and LAN endpoints and name; or 7 GONE |
+| 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same packet to the other player, up to 250 a second |
 
@@ -117,6 +117,8 @@ address cannot turn the server into an amplifier. That is why LIST is
 padded. A joined room leaves the list for 10 s while the two connect, and
 returns if its host still says it is open. A joiner repeats JOIN every
 0.5 s until it hears, and the server answers its own claim again.
+One address holds one claim at a time, and the server takes at most 10
+JOINs a second from it, so a single address cannot empty the list.
 
 A list entry is 40 bytes, or 46 with the endpoint. Runners before the ping
 send 0 after the digest and read 40-byte entries, and current runners read
@@ -180,7 +182,8 @@ checks punching, a relay without endpoints, and the fallback after 5 s.
 2. Quick match sends LIST, which returns only rooms on the same build,
    pings them and joins the nearest, or the oldest when none answered.
    With none open, the player hosts instead.
-3. JOIN gives both players the other's public and LAN endpoints. Both then
+3. JOIN gives both players the other's public endpoint, and the LAN one
+   when both are behind the same router. Both then
    send room packets to both endpoints for about 5 s. The first that
    answers becomes the peer. Sending first opens each router for the
    other's packets, which works behind most home routers.
