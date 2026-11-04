@@ -386,15 +386,9 @@ static void scheduleFrame()
 }
 
 /* A session started from the Versus menu's room walks to character select.
-   Both sides set the frame's pads the same way from the same guest state.
-   Backing out to the main menu ends it, on both sides in the same frame:
-   menus run in lockstep, so neither side is there on a guess. */
+   Both sides set the frame's pads the same way from the same guest state. */
 static void driveToVersus(std::uint32_t frame)
 {
-    if (rollback.inVersus && !rollback.hidden && recomp_game_at_main_menu()) {
-        std::fprintf(stderr, "recomp netplay: left Versus at frame %u\n", frame);
-        endSession("netplay:left-versus");
-    }
     if (!rollback.landOnVersus) return;
     if (recomp_game_walk_to_versus(frame, true, &rollback.pads[0])) {
         rollback.landOnVersus = false;
@@ -581,6 +575,13 @@ static void onRollbackFrame(std::uint32_t swap)
     recordReplay();
     bool saved = true;
     if (s.frame == rollback.frontier) {
+        /* Backing out of Versus to the main menu ends the session. Menus run in
+           lockstep, so both sides start this frame from the same confirmed
+           state and leave together, before waiting on each other's pads. */
+        if (rollback.inVersus && recomp_game_at_main_menu()) {
+            std::fprintf(stderr, "recomp netplay: left Versus at frame %u\n", s.frame);
+            endSession("netplay:left-versus");
+        }
         if (rollback.lobby) setWindow(recomp_game_round_live() ? RECOMP_ROLLBACK_WINDOW : 0u);
         if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
             scheduleFrame();

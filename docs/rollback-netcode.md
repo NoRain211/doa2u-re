@@ -413,8 +413,11 @@ select fading in. Game state is unchanged, so both sides still match.
 A room session that ends (`rollback:peer-left`, `rollback:peer-timeout`,
 `rollback:save-mispredicted`, `rollback:unrestorable`, a lobby that
 fails to connect, or `netplay:left-versus` when a player backs out of
-Versus to the main menu, which both sides reach in the same lockstep
-frame) goes back to its room. The runner says goodbye, drops the
+Versus to the main menu, which both sides see at the start of the same
+lockstep frame) goes back to its room. Two scripted runners matched
+through a local matchmaker; the joiner backed out of character select,
+and both left at frame 4,037 with equal replays and went back to their
+rooms. The runner says goodbye, drops the
 session's state, reboots the game offline the same way and reopens the
 room: the host listens again and the joiner calls the host. Each runner
 keeps one UDP socket from its room through the session and back: the room
