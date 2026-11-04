@@ -19,7 +19,8 @@ void recomp_input_keyboard_sample(uint8_t keys[RECOMP_INPUT_KEY_COUNT]);
 /* Whether the last sample saw the key, to tell its pad alias from a pad's button. */
 bool recomp_input_keyboard_sampled(uint32_t key);
 /* Typed ASCII characters, including Enter, Backspace and Esc, from WM_CHAR.
-   Up to 64 wait; take moves them out. */
+   Up to 64 wait and later ones are dropped. take copies up to capacity of
+   them, discards the rest and returns the count; out is not NUL-terminated. */
 void recomp_input_keyboard_char(uint32_t character);
 size_t recomp_input_keyboard_take_text(char *out, size_t capacity);
 

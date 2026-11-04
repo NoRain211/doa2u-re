@@ -84,6 +84,7 @@ struct RollbackRun {
     // inflated advantage never reaches the peer's frame sync.
     std::int32_t advantage = 0;
     std::chrono::steady_clock::time_point started;
+    std::chrono::steady_clock::time_point contact{}; // when a stall first saw the other player
     const char *dump = nullptr;
     RecompRollbackSession session;
     RecompNetplay net;
@@ -332,7 +333,7 @@ static RecompInputGamepad localPad(std::uint32_t frame)
         else (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
         return pad;
     }
-    (void)recomp_input_host_sample(0u, &pad);
+    (void)recomp_input_pulse_source_sample(&inputPulses, &pad);
     return pad;
 }
 
@@ -401,8 +402,10 @@ static void stalled(std::chrono::steady_clock::time_point began)
     }
     const auto now = steady_clock::now();
     const bool heard = rollback.net.peer_seen;
+    if (heard && rollback.contact == steady_clock::time_point{}) rollback.contact = now;
     const seconds grace(heard ? 15 : 120);
-    const auto waited = now - began;
+    // Contact heard during this wait starts its 15 s afresh.
+    const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
     if (waited > grace) endSession("rollback:peer-timeout");
     if (waited < seconds(1) || now - noticeShown < milliseconds(100)) return;
     if (!interrupted && heard)
@@ -534,7 +537,7 @@ static bool walkToVersus(std::uint32_t frame, bool select, RecompInputGamepad &p
 {
     const std::uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
                        target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
-    if (state == 4u && (select ? scene != 0u && scene != 2u : scene == 0u && mode == 5u)) return true;
+    if (state == 4u && (select ? scene == 3u : scene == 0u && mode == 5u)) return true;
     pad = RecompInputGamepad{};
     if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;
     if (state != 4u) pad.buttons = RECOMP_INPUT_BUTTON_START;
@@ -682,9 +685,13 @@ static bool readRollbackConfig()
 {
     const char *mode = std::getenv("RECOMP_ROLLBACK");
     if (mode == nullptr || *mode == '\0' || std::strcmp(mode, "0") == 0) return true;
-    const auto number = [](const char *name, std::uint32_t &value) {
-        if (const char *text = std::getenv(name); text != nullptr && *text != '\0')
-            value = static_cast<std::uint32_t>(std::strtoul(text, nullptr, 10));
+    bool valid = true;
+    const auto number = [&valid](const char *name, std::uint32_t &value) {
+        const char *text = std::getenv(name);
+        if (text == nullptr || *text == '\0') return;
+        const char *end = text + std::strlen(text);
+        const auto [stop, error] = std::from_chars(text, end, value);
+        if (error != std::errc{} || stop != end) valid = false;
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
@@ -692,9 +699,9 @@ static bool readRollbackConfig()
     if (std::strcmp(mode, "loopback") == 0) {
         rollback.mode = RollbackMode::Loopback;
         rollback.player = 1u;
-        if (std::getenv("RECOMP_ROLLBACK_FRAMES") == nullptr) rollback.stop = 600u;
+        if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0') rollback.stop = 600u;
         number("RECOMP_ROLLBACK_LAG", rollback.lag);
-        return rollback.lag <= RECOMP_ROLLBACK_WINDOW;
+        return valid && rollback.lag <= RECOMP_ROLLBACK_WINDOW;
     }
     // udp:<local port>:<peer host>:<peer port>
     if (std::strncmp(mode, "udp:", 4u) != 0) return false;
@@ -706,7 +713,7 @@ static bool readRollbackConfig()
     const std::string host = spec.substr(hostAt + 1u, portAt - hostAt - 1u);
     number("RECOMP_ROLLBACK_PLAYER", rollback.player);
     number("RECOMP_ROLLBACK_DELAY", rollback.delay);
-    if (localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
+    if (!valid || localPort == 0u || localPort > 65535u || peerPort == 0u || peerPort > 65535u ||
         rollback.player > 1u || rollback.delay > RECOMP_ROLLBACK_WINDOW)
         return false;
     rollback.mode = RollbackMode::Udp;
@@ -717,6 +724,7 @@ static bool readRollbackConfig()
 // --netplay-host <port> or --netplay-join <host>:<port>, and the host's --netplay-delay.
 static std::uint32_t netplayHostPort = 0u, netplayDelay = 2u;
 static std::string netplayJoin;
+static bool roomSession, ownUnlockAll;
 enum : std::uint8_t { LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u };
 
 // SHA-256 of this runner's executable, so both sides of a lobby run one build.
@@ -952,16 +960,20 @@ static bool joinLobby(const std::filesystem::path &discPath, bool (*cancelled)()
     RecompNetplayLobbyResult result;
     if (hosting) {
         const auto port = static_cast<std::uint16_t>(netplayHostPort);
-        if (recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
+        // A room's host already asked for the forward on the menu's thread; it stays for the session.
+        if (!roomSession && recomp_netplay_open_router_port(port, nullptr, 0u)) std::atexit(recomp_netplay_close_router_port);
         std::fprintf(stderr, "recomp netplay: hosting on UDP port %u; waiting for the other player\n", netplayHostPort);
         result = !roomSession && !recomp_netplay_listen(&rollback.net, port)
             ? RECOMP_NETPLAY_LOBBY_SOCKET
             : recomp_netplay_host(&rollback.net, &lobby, &profiles, 10u * 60u * 1000u, cancelled);
     } else {
         const std::size_t colon = netplayJoin.rfind(':');
-        const unsigned long port = colon == std::string::npos ? 0u : std::strtoul(netplayJoin.c_str() + colon + 1u, nullptr, 10);
+        const char *end = netplayJoin.data() + netplayJoin.size();
+        std::uint32_t port = 0u;
+        const bool parsed = colon != std::string::npos && colon != 0u &&
+            std::from_chars(netplayJoin.data() + colon + 1u, end, port).ptr == end && port != 0u && port <= 65535u;
         // A room's joiner, matched through the relay, may have no address; its socket is handed over.
-        if (!roomSession && (colon == 0u || port == 0u || port > 65535u)) {
+        if (!roomSession && !parsed) {
             std::cerr << "recomp runner: --netplay-join needs <host>:<port>\n";
             return false;
         }
@@ -1089,7 +1101,8 @@ static void startRoomSession()
     netplayJoin = join;
     roomSession = true;
     ownUnlockAll = unlockAll;
-    // The room's players skip the intro and land on Versus character select.
+    // The room's players skip the intro and land on Versus character select. The
+    // skip stays on, since every later boot is a session or the walk back to the room.
     recomp_skip_intro = true;
     landOnVersus = true;
     noticeTitle = "STARTING MATCH";
@@ -1128,6 +1141,7 @@ static void endSession(const char *reason)
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
     recomp_kernel_file_set_synchronous_reads(false);
+    recomp_dsound_buffer_set_game_thread_pump(false);
     recomp_dsound_buffer_set_output_suppressed(false);
     recomp_netplay_menu_return_to_room(socket);
     reboot();
@@ -1324,7 +1338,7 @@ static void bootGuest()
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!rollback.lobby && !readRollbackConfig()) {
         std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
-                  << "with a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
+                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
                   << " frames, and the UDP port must open\n";
         std::exit(1);
     }

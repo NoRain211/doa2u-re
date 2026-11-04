@@ -196,14 +196,19 @@ int main()
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
-    // A different build is refused on both sides.
+    // A different build is refused, and the host waits on for the right one.
     const RecompNetplayLobby other = lobby('b', 2u, 0u);
     wait = std::thread([&] { hosted = hostOn(&host, 47612u, &offered, &none, 5000u, nullptr); });
     asked = other;
     const RecompNetplayLobbyResult refused =
         joinTo(&joiner, 47612u, &asked, &noneJoiner, 5000u, nullptr);
+    recomp_netplay_close(&joiner);
+    asked = offered;
+    const RecompNetplayLobbyResult retried =
+        joinTo(&joiner, 47612u, &asked, &noneJoiner, 5000u, nullptr);
     wait.join();
-    check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && hosted == RECOMP_NETPLAY_LOBBY_MISMATCH);
+    check("mismatch", refused == RECOMP_NETPLAY_LOBBY_MISMATCH && retried == RECOMP_NETPLAY_LOBBY_OK &&
+        hosted == RECOMP_NETPLAY_LOBBY_OK);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);
 
@@ -292,12 +297,16 @@ int main()
     }
     check("chat arrives", hostRoom.heard_new && std::strcmp(hostRoom.heard, "gg, one more?") == 0);
     hostRoom.heard_new = false;
+    // The next line waits out the receiver's second, then is read and dropped as not printable.
     recomp_netplay_room_say(&joinerRoom, "bell\a");
-    for (int i = 0; i < 25; ++i) {
+    const auto bellSaid = std::chrono::steady_clock::now();
+    for (int i = 0; i < 100 && hostRoom.heard_id != joinerRoom.say_id; ++i) {
         recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", true, false);
         recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    check("chat a line a second", hostRoom.heard_id == joinerRoom.say_id &&
+        std::chrono::steady_clock::now() - bellSaid >= std::chrono::milliseconds(900));
     check("chat once, printable only", !hostRoom.heard_new);
     recomp_netplay_close(&host);
     recomp_netplay_close(&joiner);

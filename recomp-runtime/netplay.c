@@ -548,14 +548,19 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->echo_at_ms = now;
         const uint32_t echo = get32(at + 4u), age = get16(at + 8u);
         if (echo != 0u) {
-            room->ping_ms = (uint32_t)now - echo - age;
+            /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
+            const int64_t ping = (int64_t)(int32_t)((uint32_t)now - echo) - (int64_t)age;
+            room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
             room->pinged = true;
         }
         at += 10u;
         const uint32_t id = get32(at);
         const size_t said = at[4];
-        if (id != room->heard_id && said != 0u && said <= RECOMP_NETPLAY_CHAT_BYTES) {
+        /* One line a second; a line held back here comes again in a later repeat. */
+        if (id != room->heard_id && said != 0u && said <= RECOMP_NETPLAY_CHAT_BYTES &&
+            now - room->heard_line_ms >= 1000u) {
             room->heard_id = id;
+            room->heard_line_ms = now;
             char line[RECOMP_NETPLAY_CHAT_BYTES + 1u];
             bool printable = true;
             for (size_t i = 0u; i < said; ++i) printable = printable && at[5u + i] >= 0x20u && at[5u + i] < 0x7fu;
@@ -786,6 +791,7 @@ static bool is_goodbye(const uint8_t *packet, int size)
 RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNetplayLobby *lobby,
     RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void))
 {
+    profiles->theirs_size = 0u;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
     memset(&t, 0, sizeof t);
@@ -810,8 +816,11 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNet
                 }
                 if (theirs > RECOMP_NETPLAY_MAX_PROFILE) continue;
                 send_to(net, from.sin_addr.s_addr, from.sin_port, welcome, welcome_size);
-                if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0)
-                    return RECOMP_NETPLAY_LOBBY_MISMATCH;
+                // Keep waiting, so a stray hello cannot end the lobby; the welcome tells that joiner.
+                if (memcmp(hello.digest, lobby->digest, RECOMP_NETPLAY_DIGEST_BYTES) != 0) {
+                    fprintf(stderr, "recomp netplay: refused a player who runs a different build; still waiting\n");
+                    continue;
+                }
                 net->peer_address = from.sin_addr.s_addr;
                 net->peer_port = from.sin_port;
                 transfer_start(&t, theirs);
@@ -821,9 +830,13 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNet
         }
         const uint64_t now = now_ms();
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
-        if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (now >= deadline) {
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        }
         if (cancelled != NULL && cancelled()) {
             if (t.known) recomp_netplay_send_goodbye(net);
+            profiles->theirs_size = 0u;
             return RECOMP_NETPLAY_LOBBY_CANCELLED;
         }
         wait_readable(net, 20u);
@@ -833,6 +846,7 @@ RecompNetplayLobbyResult recomp_netplay_host(RecompNetplay *net, const RecompNet
 RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, RecompNetplayLobby *lobby,
     RecompNetplayProfiles *profiles, uint32_t timeout_ms, bool (*cancelled)(void))
 {
+    profiles->theirs_size = 0u;
     const uint64_t deadline = now_ms() + timeout_ms;
     Transfer t;
     memset(&t, 0, sizeof t);
@@ -868,9 +882,13 @@ RecompNetplayLobbyResult recomp_netplay_join(RecompNetplay *net, RecompNetplayLo
             next_hello = now + 100u;
         }
         if (transfer_tick(net, &t, now)) return RECOMP_NETPLAY_LOBBY_OK;
-        if (now >= deadline) return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        if (now >= deadline) {
+            profiles->theirs_size = 0u;
+            return RECOMP_NETPLAY_LOBBY_TIMEOUT;
+        }
         if (cancelled != NULL && cancelled()) {
             recomp_netplay_send_goodbye(net);
+            profiles->theirs_size = 0u;
             return RECOMP_NETPLAY_LOBBY_CANCELLED;
         }
         wait_readable(net, 20u);
