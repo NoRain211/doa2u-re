@@ -7,11 +7,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 
 from build_game import ROOT, program_manifest, runner_path, selected_xbe
 import dedication_card
-from extract_iso import sha256
+from extract_iso import redact_private, sha256
 
 RELAUNCH = 4  # runner exit code for XLaunchNewImage of the game's own XBE
 # The archives check_hdd_install (0xf6cc0) expects on Z:, copied there by hdd_install_thread.
@@ -161,7 +162,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     log_path = logs / (uuid.uuid4().hex[:8] + ".log")
     if seconds is None:
         print(f"Play session log={log_path}", flush=True)
-    with log_path.open("x", encoding="utf-8") as log:
+    with log_path.open("x", buffering=1, encoding="utf-8", errors="surrogateescape") as log:
         log.write(f"runner_sha256={sha256(runner)}\nprogram_manifest={receipt['manifest_sha256']}\n")
         log.flush()
         try:
@@ -185,10 +186,15 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             code = RELAUNCH
             # The game's soft reset relaunches its own XBE; a fresh runner is that cold boot.
             while code == RELAUNCH:
-                result = subprocess.run(command,
-                                        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=seconds,
-                                        env=env)
-                code = result.returncode
+                with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      env=env, encoding="utf-8", errors="surrogateescape") as child:
+                    copy = threading.Thread(target=lambda: log.writelines(map(redact_private, child.stdout)))
+                    copy.start()
+                    try:
+                        code = child.wait(timeout=seconds)
+                    finally:
+                        child.kill()  # no-op once it has exited
+                        copy.join()
                 if seconds is not None:
                     break
         except subprocess.TimeoutExpired:
