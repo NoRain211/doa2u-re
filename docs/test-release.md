@@ -68,9 +68,9 @@ NETPLAY SETTINGS sets the input delay, the port, the network display in a
 match, blocked players and the matchmaker. In a room Y mutes the other
 player and X twice blocks them. The menu hides players' IP addresses, so they
 stay off streams; while your room is empty, Y shows your address.
-On Windows, allow the game through the firewall when asked. Enter or Tab
-opens a chat line in the room, X copies the host's address, and Ctrl+V
-pastes one.
+On Windows, allow the game through the firewall when asked. Once the other
+player is in the room, Enter or Tab opens a chat line. X copies the host's
+address, and Ctrl+V pastes one.
 
 Known limits: this is bring-up software. Story, Watch and the attract demo
 play in development runs on every stage, but many modes and characters

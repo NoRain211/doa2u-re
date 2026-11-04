@@ -91,7 +91,8 @@ match, blocked players and the matchmaker. In a room Y mutes the other
 player and X twice blocks them. The menu hides players' IP addresses, so they
 stay off streams; while your room is empty, Y shows your address.
 Type an address from the keyboard, or with the controller (up/down changes
-a character, left/right moves). Enter or Tab opens a chat line in the room.
+a character, left/right moves). Once the other player is in the room, Enter
+or Tab opens a chat line.
 On a Steam Deck in Game Mode, the on-screen keyboard shows only while an
 address or a chat line is being typed. The clipboard works only on Windows
 for now.
