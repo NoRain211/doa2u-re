@@ -93,8 +93,11 @@ static std::vector<std::uint8_t> peerPacket(std::uint16_t port)
 static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int milliseconds, bool &relayed)
 {
     RecompNetplay server, host, joiner;
-    bool opened = recomp_netplay_listen(&server, 47622u) && recomp_netplay_listen(&host, 47620u) &&
-        recomp_netplay_listen(&joiner, 47621u) && recomp_netplay_match_server(&host, "127.0.0.1", 47622u) &&
+    // Every listen runs, even after one fails, so each socket is set before the closes below.
+    const bool listening[3] = {recomp_netplay_listen(&server, 47622u), recomp_netplay_listen(&host, 47620u),
+        recomp_netplay_listen(&joiner, 47621u)};
+    bool opened = listening[0] && listening[1] && listening[2] &&
+        recomp_netplay_match_server(&host, "127.0.0.1", 47622u) &&
         recomp_netplay_match_server(&joiner, "127.0.0.1", 47622u);
     sendFrom(server, 47620u, peerPacket(toHost));
     sendFrom(server, 47621u, peerPacket(toJoiner));
