@@ -471,7 +471,10 @@ static void onOverlay(const RecompD3dPresenterTarget *target)
     bool launch = false;
     {
         std::lock_guard<std::mutex> guard(menu.lock);
-        if (menu.screen == Screen::Closed) return;
+        if (menu.screen == Screen::Closed) {
+            recomp_input_keyboard_want_text(false);
+            return;
+        }
         ++menu.frame;
         std::uint16_t down = 0u;
         for (const std::uint16_t held : menu.held) down |= held;
@@ -483,6 +486,8 @@ static void onOverlay(const RecompD3dPresenterTarget *target)
         else if (++menu.repeat >= 18u && (menu.repeat - 18u) % 4u == 0u) keys |= directions;
         update(keys, launch);
         menu.aliased = 0u;
+        recomp_input_keyboard_want_text(!launch && (menu.screen == Screen::Join || menu.screen == Screen::Matchmaker ||
+            (menu.screen == Screen::Room && menu.lobby.typing)));
         if (launch) {
             // The session takes the socket (recomp_netplay_menu_take_launch); the router forward stays for it.
             menu.screen = Screen::Closed;

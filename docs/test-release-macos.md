@@ -78,8 +78,11 @@ NETPLAY SETTINGS sets the input delay, the port, the network display in a
 match, blocked players and the matchmaker. In a room Y mutes the other
 player and X twice blocks them. The menu hides players' IP addresses, so they
 stay off streams; while your room is empty, Y shows your address.
-Typing, chat and the clipboard work only on Windows for now: enter an
-address with the controller (up/down changes a character, left/right moves).
+Type an address from the keyboard, or with the controller (up/down changes
+a character, left/right moves). Enter or Tab opens a chat line in the room.
+On a Steam Deck in Game Mode, the on-screen keyboard shows only while an
+address or a chat line is being typed. The clipboard works only on Windows
+for now.
 
 Known limits: this is bring-up software. Story, Watch and the attract demo
 play in development runs on every stage, but many modes and characters

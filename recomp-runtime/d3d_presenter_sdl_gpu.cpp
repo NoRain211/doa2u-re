@@ -2344,9 +2344,23 @@ uint32_t virtualKey(SDL_Scancode code)
 
 void pumpEvents(RecompD3dPresenter *presenter)
 {
+    // Text input can show the Steam Deck's keyboard, so it is on only while a text box is open.
+    const bool wanted = recomp_input_keyboard_text_wanted();
+    if (wanted != SDL_TextInputActive(presenter->window))
+        (void)(wanted ? SDL_StartTextInput(presenter->window) : SDL_StopTextInput(presenter->window));
     SDL_PumpEvents();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // The menus read typed text as Windows' WM_CHAR gives it, control keys included.
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            const SDL_Keycode key = event.key.key;
+            const char control = key == SDLK_RETURN || key == SDLK_KP_ENTER ? '\r' : key == SDLK_ESCAPE ? 0x1b
+                : key == SDLK_BACKSPACE ? '\b' : key == SDLK_TAB ? '\t' : 0;
+            if (control != 0) recomp_input_keyboard_char(static_cast<uint32_t>(control));
+        } else if (event.type == SDL_EVENT_TEXT_INPUT) {
+            for (const char *at = event.text.text; *at != '\0'; ++at)
+                recomp_input_keyboard_char(static_cast<unsigned char>(*at)); // takes ASCII only
+        }
         if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) && !event.key.repeat) {
             recomp_input_keyboard_event(virtualKey(event.key.scancode), event.type == SDL_EVENT_KEY_DOWN);
         } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {

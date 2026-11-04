@@ -17,6 +17,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t held[RECOMP_INPUT_KEY_COUNT], pending[RECOMP_INPUT_KEY_COUNT], sampled[RECOMP_INPUT_KEY_COUNT];
 static char text[64];
 static size_t text_size;
+static bool text_wanted;
 
 void recomp_input_keyboard_event(uint32_t key, bool down)
 {
@@ -71,4 +72,19 @@ size_t recomp_input_keyboard_take_text(char *out, size_t capacity)
     text_size = 0u;
     ReleaseSRWLockExclusive(&lock);
     return size;
+}
+
+void recomp_input_keyboard_want_text(bool wanted)
+{
+    AcquireSRWLockExclusive(&lock);
+    text_wanted = wanted;
+    ReleaseSRWLockExclusive(&lock);
+}
+
+bool recomp_input_keyboard_text_wanted(void)
+{
+    AcquireSRWLockExclusive(&lock);
+    const bool wanted = text_wanted;
+    ReleaseSRWLockExclusive(&lock);
+    return wanted;
 }
