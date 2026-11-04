@@ -309,9 +309,19 @@ static bool from_peer(const RecompNetplay *net, const struct sockaddr_in *from)
 
 static uint64_t now_ms(void)
 {
+    /* Monotonic, so a system clock change cannot end a lobby or stall its retries. */
+#ifdef _WIN32
+    static LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+    if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return (uint64_t)(counter.QuadPart / frequency.QuadPart * 1000 +
+        counter.QuadPart % frequency.QuadPart * 1000 / frequency.QuadPart);
+#else
     struct timespec now;
-    if (timespec_get(&now, TIME_UTC) != TIME_UTC) return 0u;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0u;
     return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+#endif
 }
 
 static void wait_readable(const RecompNetplay *net, unsigned milliseconds)
