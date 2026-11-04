@@ -16,7 +16,7 @@ import sys
 import time
 
 MAGIC = b"D2MM"
-VERSION = 1
+VERSION = 2
 HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY = range(1, 10)
 DIGEST = 64  # the runner build's hex SHA-256; rooms only meet the same build
 NAME = 32
@@ -30,11 +30,9 @@ JOINS_PER_SECOND = 10  # per address; a joiner repeats JOIN until it hears
 RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while waiting for the other player
 MAX_RELAY = 1200
 
-HOST_BODY = struct.Struct(">64sBBB32s6s")  # digest, delay, open, name length, name, LAN endpoint
+HOST_BODY = struct.Struct(">64sBBB32s6sH")  # digest, delay, open, name length, name, LAN endpoint, round trip
 JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, LAN endpoint
-ENTRY = struct.Struct(">IHBB32s")  # room id, age in seconds, delay, name length, name
-ENTRY_AT = struct.Struct(">IHBB32s6s")  # the same and the host's public endpoint, for a list that asks for it
-WITH_ENDPOINTS = 1  # the byte after a list request's digest; older clients send 0 and read ENTRY
+ENTRY = struct.Struct(">IHBB32sH")  # room id, age in seconds, delay, name length, name, the host's round trip
 LAN_NETWORKS = [ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
 
 
@@ -95,7 +93,7 @@ class Matchmaker:
         if kind == HOST and len(body) == HOST_BODY.size:
             return self.host(body, sender, now)
         if kind == LIST and len(data) == LIST_BYTES:
-            return self.list(body[:DIGEST], body[DIGEST] == WITH_ENDPOINTS, sender, now)
+            return self.list(body[:DIGEST], sender, now)
         if kind == JOIN and len(body) == JOIN_BODY.size:
             return self.join(body, sender, now)
         if kind == LEAVE:
@@ -106,7 +104,7 @@ class Matchmaker:
         return []
 
     def host(self, body, sender, now):
-        digest, delay, is_open, length, name, lan = HOST_BODY.unpack(body)
+        digest, delay, is_open, length, name, lan, rtt = HOST_BODY.unpack(body)
         if length > NAME:
             return []
         room = self.rooms.get(sender)
@@ -120,20 +118,18 @@ class Matchmaker:
             room = self.rooms[sender] = self.by_id[room_id] = Room(room_id, sender, now)
         room.digest, room.delay, room.open = digest, delay, is_open != 0
         room.name, room.lan, room.seen = name[:length], lan_endpoint(lan), now
+        room.rtt = rtt  # the host's own HOST to HOSTED in ms, 0 unknown; joiners add theirs for an estimate
         return [(header(HOSTED) + struct.pack(">I", room.id) + endpoint(sender), sender)]
 
-    def list(self, digest, endpoints, sender, now):
+    def list(self, digest, sender, now):
         rooms = sorted((room for room in self.rooms.values()
                         if room.digest == digest and room.open and room.claimed_until <= now and room.host != sender),
                        key=lambda room: room.born)
-        entry = ENTRY_AT if endpoints else ENTRY
-        rooms = rooms[:(LIST_BYTES - 7) // entry.size]
+        rooms = rooms[:(LIST_BYTES - 7) // ENTRY.size]
         answer = header(ROOMS) + bytes((len(rooms),))
         for room in rooms:
-            fields = (room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name)
-            if endpoints:  # a listed room is public, so joiners may ping its host
-                fields += (bytes(6) if self.relay_only else endpoint(room.host),)
-            answer += entry.pack(*fields)
+            answer += ENTRY.pack(room.id, min(int(now - room.born), 65535), room.delay, len(room.name), room.name,
+                                 room.rtt)
         return [(answer, sender)]
 
     def join(self, body, sender, now):

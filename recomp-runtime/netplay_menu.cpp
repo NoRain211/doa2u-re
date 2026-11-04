@@ -97,7 +97,7 @@ struct Menu : RecompNetplaySettings {
     int choice = 0;
     std::uint32_t joining = 0u;
     std::vector<std::uint32_t> blockedRooms; // listed rooms of hosts this player blocked, this run
-    Clock::time_point listedAt, joinStarted, askedAt, probedAt;
+    Clock::time_point listedAt, joinStarted, askedAt;
 };
 Menu menu;
 
@@ -382,7 +382,7 @@ void find()
     menu.listOk = menu.quick = false;
     menu.choice = 0;
     menu.joining = 0u;
-    menu.listedAt = menu.probedAt = Clock::time_point{};
+    menu.listedAt = Clock::time_point{};
     menu.message.clear();
     menu.screen = Screen::Find;
 }
@@ -442,8 +442,6 @@ void updateFind(std::uint16_t keys)
     if (match.listed) {
         match.listed = false;
         menu.listOk = true;
-        recomp_netplay_match_probe(&menu.net);
-        menu.probedAt = now; // newly listed rooms get their own second to answer
     }
     if (keys & B) {
         if (menu.joining == 0u) {
@@ -478,15 +476,12 @@ void updateFind(std::uint16_t keys)
     if ((keys & Down) && count > 0) menu.choice = (menu.choice + 1) % count;
     if ((keys & A) && count > 0) askToJoin(rooms[static_cast<std::size_t>(menu.choice)]->id, now);
     if (keys & Y) menu.quick = true;
-    // Quick match takes the open room with the lowest ping once every room answered or a second
-    // passed, the oldest when none answered, or hosts one when none is open.
+    // Quick match takes the open room with the lowest estimated ping, the oldest when no host's
+    // round trip is known, or hosts one when none is open.
     const RecompNetplayListedRoom *nearest = nullptr;
-    bool allPinged = true;
-    for (const RecompNetplayListedRoom *room : rooms) {
-        allPinged = allPinged && room->pinged;
+    for (const RecompNetplayListedRoom *room : rooms)
         if (room->pinged && (nearest == nullptr || room->ping_ms < nearest->ping_ms)) nearest = room;
-    }
-    if (menu.quick && menu.listOk && (allPinged || now - menu.probedAt >= std::chrono::seconds(1))) {
+    if (menu.quick && menu.listOk) {
         menu.quick = false;
         if (count > 0) {
             askToJoin((nearest != nullptr ? nearest : rooms.front())->id, now);
@@ -1050,8 +1045,8 @@ void draw()
             const bool selected = static_cast<int>(i) == menu.choice && menu.joining == 0u;
             if (selected) recomp_overlay_rect(40.0f, y - 10.0f, 560.0f, 37.0f, Red);
             plateName(60.0f, y - 2.0f, rooms[i]->name, selected ? White : Gray);
-            const std::string ping = rooms[i]->pinged ? std::to_string(rooms[i]->ping_ms) : "--";
-            const std::string detail = ping + " MS  DELAY " + std::to_string(rooms[i]->delay) + "  " +
+            const std::string ping = rooms[i]->pinged ? "~" + std::to_string(rooms[i]->ping_ms) + " MS  " : "";
+            const std::string detail = ping + "DELAY " + std::to_string(rooms[i]->delay) + "  " +
                 std::to_string(rooms[i]->age_s / 60u) + " MIN";
             recomp_overlay_text(588.0f - recomp_overlay_text_width(detail.c_str(), 2.0f), y + 2.0f, 2.0f,
                 selected ? White : Gray, detail.c_str());

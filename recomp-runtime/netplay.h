@@ -64,10 +64,9 @@ typedef struct RecompNetplayListedRoom {
     uint32_t age_s;
     uint8_t delay;
     char name[RECOMP_NETPLAY_NAME_BYTES + 1u];
-    /* The host's public endpoint, network order; port 0 when the server sent none. */
-    uint32_t address;
-    uint16_t port;
-    /* From recomp_netplay_match_probe's echo, kept while the room stays listed. */
+    /* An estimate: this socket's LIST to ROOMS round trip plus the host's
+       HOST to HOSTED, which the list carries. Not pinged when the host's is
+       unknown; the list never says where a host is. */
     uint32_t ping_ms;
     bool pinged;
 } RecompNetplayListedRoom;
@@ -78,6 +77,8 @@ typedef struct RecompNetplayMatch {
     uint32_t server_address; /* network order; port 0 means none */
     uint16_t server_port;
     uint32_t room_id; /* this host's listing, once the server answered */
+    uint64_t host_sent_ms, list_sent_ms; /* when the last HOST or LIST went out; 0 once answered */
+    uint16_t host_rtt_ms; /* HOST to HOSTED, said in the next HOST; 0 unknown */
     RecompNetplayListedRoom rooms[RECOMP_NETPLAY_LISTED_ROOMS];
     uint32_t room_count;
     bool listed;  /* a list arrived; the caller clears it */
@@ -186,14 +187,10 @@ bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t 
 void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t delay, bool open,
     const char *name);
 void recomp_netplay_match_list(RecompNetplay *net, const char *digest);
-/* Sends each listed room with an endpoint a ping. A listed host's room ticks
-   echo it, and recomp_netplay_match_poll records the echo as the room's ping. */
-void recomp_netplay_match_probe(RecompNetplay *net);
 /* Asks to join a listed room; again until met or gone. */
 void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char *digest, const char *name);
 void recomp_netplay_match_leave(RecompNetplay *net);
-/* Drains the socket outside a room, keeping only the matchmaker's answers
-   and the listed rooms' pings. */
+/* Drains the socket outside a room, keeping only the matchmaker's answers. */
 void recomp_netplay_match_poll(RecompNetplay *net);
 /* The input delay to suggest for a round trip: none up to 20 ms, then a
    frame per 33 ms rounded up, at most RECOMP_ROLLBACK_WINDOW. */
