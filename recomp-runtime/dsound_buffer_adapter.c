@@ -41,6 +41,7 @@ typedef struct Buffer {
     int32_t distance_volume, center_front, center, pan_front, pan_rear; /* hundredths of dB */
     int32_t doppler;                               /* 4096 per octave */
     RecompHrtfVoice hrtf;
+    uint64_t filled_until_ms; /* when the span the game's last Lock filled finishes playing */
 } Buffer;
 static Buffer buffers[BUFFER_COUNT];
 static void update_3d(Buffer *buffer);
@@ -165,6 +166,12 @@ static uint32_t source_cursor(const Buffer *buffer)
     uint32_t bytes = buffer->model.cursor_bytes;
     if (buffer->format == 0x69u) bytes = bytes / (64u * buffer->channels * 2u) * buffer->align;
     return bytes / buffer->align * buffer->align;
+}
+
+static uint64_t source_ms(const Buffer *buffer, uint32_t bytes)
+{
+    const uint64_t frames = (uint64_t)(bytes / buffer->align) * (buffer->format == 0x69u ? 64u : 1u);
+    return buffer->model.sample_rate ? frames * 1000u / buffer->model.sample_rate : 0u;
 }
 
 /* CVTTSS2SI: NaN and out-of-range values give the integer indefinite. */
@@ -293,6 +300,7 @@ static void reset_output(Buffer *buffer)
     if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
+    buffer->filled_until_ms = 0u;
     /* The backend accepts routing only from its owner thread, so it is set here
        and on every change, never by the pump thread. */
     apply_routing(buffer);
@@ -309,10 +317,14 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
     /* Every game-thread call counts, so a loop started by Play is not capped behind its start. */
     if (!background) game_pump_ms = now;
     if (!buffer->model.playing || !buffer->pcm) return;
-    /* A stalled game cannot refill a ring; past CRI's ~200 ms lead the ring
-       would replay audio already heard, so a long stall goes quiet instead. */
-    if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING) && now > game_pump_ms + 100u)
-        now = game_pump_ms + 100u;
+    /* A stalled game cannot refill a ring: play what its last Lock filled, and
+       at least 100 ms, then go quiet; past that the ring would replay audio
+       already heard. */
+    if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING)) {
+        uint64_t limit = game_pump_ms + 100u;
+        if (buffer->filled_until_ms > limit) limit = buffer->filled_until_ms;
+        if (now > limit) now = limit;
+    }
     if (background && now < buffer->model.last_ms + 10u) return;
     uint32_t offset = 0u;
     uint32_t bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
@@ -701,6 +713,9 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if (bytes > first && !p2) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
         write32(p1, buffer->data + value); write32(n1, first);
         if (p2) { write32(p2, bytes > first ? buffer->data : 0u); write32(n2, bytes - first); }
+        /* A fill that ends at the cursor leaves the whole ring unheard. */
+        const uint32_t ahead = (value + bytes + size - source_cursor(buffer)) % size;
+        if (buffer->model.playing) buffer->filled_until_ms = now + source_ms(buffer, ahead ? ahead : size);
         break;
     }
     case UNLOCK: {
