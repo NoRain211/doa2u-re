@@ -133,6 +133,14 @@
     {
       "sha256": "fa429cf2d67c0218272b52f0c131753eb23995b77ab2236e8cf469062689ff99",
       "reason": "Combiner-word offsets within the runtime's pixel-shader state block in four_tap() of d3d8_draw_adapter.c; structure offsets, not retail bytes."
+    },
+    {
+      "sha256": "456d0dbc55770cd4e34f27689a760f8fc91a684a7862d708105305e6caec5283",
+      "reason": "Hand-built MPEG-1 video packet header (stuffing, STD buffer, PTS and DTS) with payload 'abc' in sfd_format_test.c; synthetic, not retail bytes."
+    },
+    {
+      "sha256": "3f3cf4397ee73087e6acbff0799e127fc2a50e34a86653a4791ad717776190a6",
+      "reason": "Synthetic ADX header (encoding 3, 18-byte frames, 4 bits, stereo, cutoff 500 Hz, 40 samples, the public (c)CRI signature) in adx_decoder_test.c; field layout from public ADX documentation, not retail bytes."
     }
   ],
   "binary_files": [
