@@ -14,12 +14,15 @@ static uint32_t guest_stack[32];
 static uint32_t guest_calls[4], guest_call_count, finished;
 static uint8_t scene[8];
 static char guest_path[16];
+static uint32_t aix_handle; /* 0xa94454: the logo clip's AIX, or 0 */
+static uint8_t aix[2];      /* at 0x4000; byte 1 is its state, 1 while preparing */
 static jmp_buf stopped;
 static int stop_code;
 static char stop_id[64];
 uint32_t *recomp_memory_u32_checked(uint32_t address)
 {
     if (address == XBOX_KERNEL_DATA_BASE + 0x40u) return &tick;
+    if (address == 0x00a94454u) return &aix_handle;
     if (address >= 0xfc0u && address < 0xfc0u + sizeof guest_stack && address % 4u == 0u)
         return &guest_stack[(address - 0xfc0u) / 4u];
     abort();
@@ -28,6 +31,7 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
 {
     if (address >= 0x3000u && address + width <= 0x3000u + sizeof guest_path)
         return (uint8_t *)&guest_path[address - 0x3000u];
+    if (address >= 0x4000u && address + width <= 0x4000u + sizeof aix) return &aix[address - 0x4000u];
     if (address < 0x2000u || address + width > 0x2000u + sizeof scene) abort();
     return &scene[address - 0x2000u];
 }
@@ -50,6 +54,7 @@ void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const c
     (void)line;
     if (guest_call_count == 4u) abort();
     guest_calls[guest_call_count++] = address;
+    if (address == 0x000fa3d0u) aix[1] = 2u; /* a yielded frame lets CRI's server start the AIX */
     recomp_runtime.registers.eax = address == 0x000fa170u ? finished : 0u;
 }
 
@@ -165,11 +170,20 @@ static int test_startup_logo_skip(void)
 {
     RecompFunction function = recomp_lookup_manual(0x000d9300u);
     if (function == NULL) return 0;
+    aix_handle = 0u;
     guest_call_count = 0u;
     recomp_runtime.registers.esp = 0x1000u;
     function();
-    return guest_call_count == 2u && guest_calls[0] == 0x000f9e10u &&
-        guest_calls[1] == 0x000f9a10u && recomp_runtime.registers.esp == 0x1004u;
+    if (!(guest_call_count == 2u && guest_calls[0] == 0x000f9e10u &&
+            guest_calls[1] == 0x000f9a10u && recomp_runtime.registers.esp == 0x1004u)) return 0;
+    /* With 5.1 the clip's AIX must leave its preparing state before the close. */
+    aix_handle = 0x4000u;
+    aix[1] = 1u;
+    guest_call_count = 0u;
+    recomp_runtime.registers.esp = 0x1000u;
+    function();
+    return guest_call_count == 3u && guest_calls[0] == 0x000f9e10u && guest_calls[1] == 0x000fa3d0u &&
+        guest_calls[2] == 0x000f9a10u && recomp_runtime.registers.esp == 0x1004u;
 }
 
 /* Boot's first movie-scene tick ends the opening at once; later ticks wait for the movie. */
