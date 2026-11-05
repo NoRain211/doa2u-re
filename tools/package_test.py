@@ -82,7 +82,9 @@ def git(*args, cwd=ROOT):
 
 
 def bundle(package, prefix, url, digest, top, skip=()):
-    """Copy a pinned upstream ZIP's folder top into the package at prefix, downloading it once into ARTIFACTS."""
+    """Copy a pinned upstream ZIP's folder top, minus paths starting with skip, into the package at prefix.
+
+    Downloads the ZIP once into ARTIFACTS."""
     cached = ARTIFACTS / "downloads" / digest
     if not cached.is_file() or sha256(cached) != digest:
         cached.parent.mkdir(parents=True, exist_ok=True)
@@ -90,8 +92,9 @@ def bundle(package, prefix, url, digest, top, skip=()):
         fetch_verified(url, digest, cached, url.rsplit("/", 1)[1])
     with zipfile.ZipFile(cached) as source:
         for info in source.infolist():
-            if info.filename.startswith(top) and not info.is_dir() and info.filename[len(top):] not in skip:
-                package.writestr(prefix + info.filename[len(top):], source.read(info))
+            path = info.filename[len(top):]
+            if info.filename.startswith(top) and not info.is_dir() and not path.startswith(skip):
+                package.writestr(prefix + path, source.read(info))
 
 
 def shipped(path, platform):
@@ -172,7 +175,8 @@ def main():
             bundle(package, f"{name}/tools/python/", *PYTHON)
             for wheel in WHEELS:
                 bundle(package, f"{name}/tools/python/Lib/site-packages/", *wheel)
-            bundle(package, f"{name}/tools/cmake/", *CMAKE, skip={"bin/cmake-gui.exe"})
+            # The GUI and manuals go unused; the manuals' deep paths could pass Windows' 260 characters.
+            bundle(package, f"{name}/tools/cmake/", *CMAKE, skip=("bin/cmake-gui.exe", "doc/cmake/html/", "man/"))
             with tempfile.TemporaryDirectory() as launchers:
                 build_launchers(Path(launchers))
                 for exe in LAUNCHERS:
