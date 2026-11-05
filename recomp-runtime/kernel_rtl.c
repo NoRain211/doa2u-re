@@ -255,14 +255,98 @@ static void bridge_rtl_equal_string(void)
     kernel_return(3u, (uint32_t)equal);
 }
 
+/* RtlUnicodeStringToAnsiString(PANSI_STRING Dest, PCUNICODE_STRING Source,
+   BOOLEAN Allocate) returns NTSTATUS. The Xbox kernel has no code pages, so
+   each WCHAR keeps its low byte. A short destination takes what fits and
+   reports STATUS_BUFFER_OVERFLOW, as on NT. */
+static void bridge_rtl_unicode_string_to_ansi_string(void)
+{
+    uint32_t destination = kernel_arg(1u);
+    uint32_t source = kernel_arg(2u);
+    uint32_t allocate = kernel_arg(3u) & 0xffu;
+
+    /* shortcut: no pool allocation; DOA2U's only caller, XAPI
+       WideCharToMultiByte, passes FALSE. Allocate if another caller needs it. */
+    if (allocate != 0u) {
+        kernel_return(3u, 0xc0000002u); /* STATUS_NOT_IMPLEMENTED */
+        return;
+    }
+
+    uint32_t length = *recomp_memory_u16(source) / 2u;
+    uint32_t wide = *recomp_memory_u32(source + 4u);
+    uint32_t maximum = *recomp_memory_u16(destination + 2u);
+    uint32_t buffer = *recomp_memory_u32(destination + 4u);
+    uint32_t status = 0u;
+
+    /* NT reports the required length even when the buffer is too short. */
+    *recomp_memory_u16(destination) = (uint16_t)length;
+    if (length >= maximum) {
+        if (maximum == 0u) {
+            kernel_return(3u, 0x80000005u); /* STATUS_BUFFER_OVERFLOW */
+            return;
+        }
+        status = 0x80000005u;
+        length = maximum - 1u;
+    }
+    for (uint32_t i = 0u; i < length; ++i) {
+        *recomp_memory_i8(buffer + i) =
+            (int8_t)*recomp_memory_u16(wide + 2u * i);
+    }
+    *recomp_memory_i8(buffer + length) = 0;
+    *recomp_memory_u16(destination) = (uint16_t)length;
+    kernel_return(3u, status);
+}
+
+/* RtlAnsiStringToUnicodeString(PUNICODE_STRING Dest, PCANSI_STRING Source,
+   BOOLEAN Allocate) is the inverse: each byte widens to a WCHAR. Unlike the
+   narrowing direction, NT refuses a short destination outright. */
+static void bridge_rtl_ansi_string_to_unicode_string(void)
+{
+    uint32_t destination = kernel_arg(1u);
+    uint32_t source = kernel_arg(2u);
+    uint32_t allocate = kernel_arg(3u) & 0xffu;
+
+    /* shortcut: no pool allocation; DOA2U's only caller, XAPI
+       MultiByteToWideChar, passes FALSE. Allocate if another caller needs it. */
+    if (allocate != 0u) {
+        kernel_return(3u, 0xc0000002u); /* STATUS_NOT_IMPLEMENTED */
+        return;
+    }
+
+    uint32_t length = *recomp_memory_u16(source);
+    uint32_t narrow = *recomp_memory_u32(source + 4u);
+    uint32_t maximum = *recomp_memory_u16(destination + 2u);
+    uint32_t buffer = *recomp_memory_u32(destination + 4u);
+
+    /* The WCHARs plus their NUL must fit a USHORT byte count. */
+    if (2u * length + 2u > 0xffffu) {
+        kernel_return(3u, 0xc00000f0u); /* STATUS_INVALID_PARAMETER_2 */
+        return;
+    }
+    *recomp_memory_u16(destination) = (uint16_t)(2u * length);
+    /* Counting the NUL also refuses an odd MaximumLength one byte short. */
+    if (2u * length + 2u > maximum) {
+        kernel_return(3u, 0x80000005u); /* STATUS_BUFFER_OVERFLOW */
+        return;
+    }
+    for (uint32_t i = 0u; i < length; ++i) {
+        *recomp_memory_u16(buffer + 2u * i) =
+            (uint8_t)*recomp_memory_i8(narrow + i);
+    }
+    *recomp_memory_u16(buffer + 2u * length) = 0u;
+    kernel_return(3u, 0u);
+}
+
 RecompFunction recomp_kernel_rtl(uint32_t ordinal)
 {
     switch (ordinal) {
+    case 260u: return bridge_rtl_ansi_string_to_unicode_string;
     case 279u: return bridge_rtl_equal_string;
     case 289u: return bridge_rtl_init_ansi_string;
     case 301u: return bridge_rtl_ntstatus_to_dos_error;
     case 304u: return bridge_rtl_time_fields_to_time;
     case 305u: return bridge_rtl_time_to_time_fields;
+    case 308u: return bridge_rtl_unicode_string_to_ansi_string;
     default: return NULL;
     }
 }
