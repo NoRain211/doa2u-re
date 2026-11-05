@@ -401,6 +401,20 @@ void recomp_sfd_movie_set_volume(RecompSfdMovie *movie, int32_t hundredth_db)
     unlock(&movie->guard);
 }
 
+void recomp_sfd_movie_settle(RecompSfdMovie *movie)
+{
+    for (;;) {
+        lock(&movie->guard);
+        bool full = true;
+        for (uint32_t i = 0u; i < FRAMES; ++i) full &= movie->frames[i].full;
+        const bool settled = movie->failed || ((full || movie->video_done) &&
+            (!movie->sound || movie->header) && (movie->ready || movie->decoded == 0u));
+        unlock(&movie->guard);
+        if (settled) return;
+        pause_ms(1u);
+    }
+}
+
 uint32_t recomp_sfd_movie_subtitle(RecompSfdMovie *movie, uint32_t channel, double now,
     char *text, uint32_t size)
 {

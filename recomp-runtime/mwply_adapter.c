@@ -55,6 +55,13 @@ static double now(void)
     return (double)recomp_xapi_performance_counter() / (double)recomp_xapi_performance_frequency();
 }
 
+/* Under the frame clock the decoder's host progress must not reach the game,
+   or two netplay machines see different movie states. */
+static void settle(void)
+{
+    if (player.movie != NULL && recomp_xapi_frame_clock_enabled()) recomp_sfd_movie_settle(player.movie);
+}
+
 static void close_movie(void)
 {
     recomp_sfd_movie_close(player.movie);
@@ -114,6 +121,7 @@ static void stop(void)
 static void get_status(void)
 {
     handle_argument();
+    settle();
     uint32_t status = player.failed ? 4u : 0u;
     if (player.movie != NULL) {
         static const uint32_t statuses[] = {1u, 2u, 3u, 4u};
@@ -162,6 +170,7 @@ static void set_audio(void)
 static void get_frame(void)
 {
     handle_argument();
+    settle();
     const uint32_t frame = argument(recomp_runtime.registers.esp, 1u);
     uint32_t *words = (uint32_t *)(void *)recomp_memory(frame, FRAME_WORDS * 4u);
     memset(words, 0, FRAME_WORDS * 4u);
@@ -220,6 +229,7 @@ static void set_subtitle_channel(void)
 static void get_subtitle(void)
 {
     handle_argument();
+    settle();
     const uint32_t entry = recomp_runtime.registers.esp;
     const uint32_t text = argument(entry, 1u), size = argument(entry, 2u), info = argument(entry, 3u);
     char cue[RECOMP_SFD_CUE_TEXT];
