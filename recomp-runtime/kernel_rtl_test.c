@@ -9,6 +9,10 @@ enum {
     TEST_ENTRY_ESP = TEST_MEMORY_BASE + 0x100u,
     TEST_TIME = TEST_MEMORY_BASE + 0x200u,
     TEST_FIELDS = TEST_MEMORY_BASE + 0x300u,
+    TEST_WIDE = TEST_MEMORY_BASE + 0x400u,
+    TEST_UNICODE = TEST_MEMORY_BASE + 0x480u,
+    TEST_ANSI = TEST_MEMORY_BASE + 0x488u,
+    TEST_ANSI_BUFFER = TEST_MEMORY_BASE + 0x500u,
 };
 
 /* Expectations were produced outside this translation unit, from a calendar
@@ -131,6 +135,59 @@ static int test_conversion_model(void)
     return passed;
 }
 
+/* The replay camera label goes through WideCharToMultiByte to ordinal 308. */
+static int convert_to_ansi(uint16_t maximum, uint32_t *status)
+{
+    static const char text[] = "LOOK AT ZACK";
+    const uint32_t length = sizeof text - 1u;
+    uint32_t *stack = (uint32_t *)recomp_memory_u32(TEST_ENTRY_ESP);
+
+    for (uint32_t i = 0u; i < length; ++i) {
+        *recomp_memory_u16(TEST_WIDE + 2u * i) = (uint16_t)text[i];
+    }
+    *recomp_memory_u16(TEST_UNICODE) = (uint16_t)(2u * length);
+    *recomp_memory_u16(TEST_UNICODE + 2u) = (uint16_t)(2u * length + 2u);
+    *recomp_memory_u32(TEST_UNICODE + 4u) = TEST_WIDE;
+    *recomp_memory_u16(TEST_ANSI) = 0u;
+    *recomp_memory_u16(TEST_ANSI + 2u) = maximum;
+    *recomp_memory_u32(TEST_ANSI + 4u) = TEST_ANSI_BUFFER;
+    memset(recomp_memory_i8(TEST_ANSI_BUFFER), 0x5a, 32u);
+
+    stack[0] = 0x0010abcdu;
+    stack[1] = TEST_ANSI;
+    stack[2] = TEST_UNICODE;
+    stack[3] = 0xabcdef00u; /* BOOLEAN FALSE with junk above the low byte */
+    recomp_runtime.registers.esp = TEST_ENTRY_ESP;
+    recomp_kernel_rtl(308u)();
+    *status = recomp_runtime.registers.eax;
+    return expect_u32(
+        "to-ansi ESP", recomp_runtime.registers.esp, TEST_ENTRY_ESP + 16u);
+}
+
+static int test_unicode_to_ansi(void)
+{
+    const char *ansi = (const char *)recomp_memory_i8(TEST_ANSI_BUFFER);
+    uint32_t status = 0u;
+    int passed = 1;
+
+    if (recomp_kernel_rtl(308u) == NULL) {
+        return expect_u32("ordinal 308 lookup", 0u, 1u);
+    }
+
+    passed &= convert_to_ansi(32u, &status);
+    passed &= expect_u32("to-ansi status", status, 0u);
+    passed &= expect_u32(
+        "to-ansi text", strcmp(ansi, "LOOK AT ZACK") == 0, 1u);
+    passed &= expect_u32("to-ansi length", *recomp_memory_u16(TEST_ANSI), 12u);
+
+    passed &= convert_to_ansi(5u, &status);
+    passed &= expect_u32("short to-ansi status", status, 0x80000005u);
+    passed &= expect_u32("short to-ansi text", strcmp(ansi, "LOOK") == 0, 1u);
+    passed &= expect_u32(
+        "short to-ansi length", *recomp_memory_u16(TEST_ANSI), 4u);
+    return passed;
+}
+
 int recomp_kernel_rtl_test(void)
 {
     static uint8_t memory[TEST_MEMORY_SIZE];
@@ -150,6 +207,7 @@ int recomp_kernel_rtl_test(void)
     recomp_runtime_init(&region, 1u, NULL, 0u, NULL, 0u);
 
     passed &= test_conversion_model();
+    passed &= test_unicode_to_ansi();
 
     to_time = recomp_kernel_rtl(304u);
     to_fields = recomp_kernel_rtl(305u);

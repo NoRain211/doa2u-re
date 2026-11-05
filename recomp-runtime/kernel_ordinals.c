@@ -117,6 +117,7 @@ static const struct {
     {302u, "RtlRaiseException"},
     {304u, "RtlTimeFieldsToTime"},
     {305u, "RtlTimeToTimeFields"},
+    {308u, "RtlUnicodeStringToAnsiString"},
     {312u, "RtlUnwind"},
     {322u, "XboxHardwareInfo"},
     {323u, "XboxHDKey"},
