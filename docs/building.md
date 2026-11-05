@@ -81,7 +81,7 @@ sudo apt install build-essential cmake ninja-build git python3-venv \
     libshaderc1 libvulkan1 mesa-vulkan-drivers \
     libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
     libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev libpulse-dev \
-    libpipewire-0.3-dev libudev-dev libdbus-1-dev
+    libpipewire-0.3-dev libudev-dev libdbus-1-dev libxtst-dev
 ```
 
 When no `extract-xiso` is on `PATH`, the build downloads upstream's pinned

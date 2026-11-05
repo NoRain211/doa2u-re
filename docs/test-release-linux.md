@@ -20,7 +20,7 @@ What you need (x86-64 Linux; on the Steam Deck, see below):
       sudo apt install libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
           libxi-dev libxss-dev libxkbcommon-dev libwayland-dev \
           libegl-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
-          libudev-dev libdbus-1-dev
+          libudev-dev libdbus-1-dev libxtst-dev
 
 - An internet connection for the first build, your Disc 2 as an Xbox ISO,
   and about 6 GB of free space.
