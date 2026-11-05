@@ -27,7 +27,7 @@
 
 namespace {
 
-constexpr uint32_t kVoiceCount = 256;
+constexpr uint32_t kVoiceCount = RECOMP_AUDIO_OUTPUT_SLOTS;
 constexpr uint32_t kMaxBufferBytes = 160000;
 constexpr uint32_t kMinSampleRate = 1000;
 constexpr uint32_t kMaxSampleRate = 200000;
