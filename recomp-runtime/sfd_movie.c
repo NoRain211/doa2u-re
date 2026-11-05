@@ -168,10 +168,13 @@ static void decode_video(RecompSfdMovie *movie, Frame *slot)
 static bool decode_audio(RecompSfdMovie *movie)
 {
     RecompSfdPacket packet;
-    if (!next_packet(movie, &movie->audio, RECOMP_SFD_AUDIO, &packet) ||
-        movie->adx_have + packet.size > sizeof movie->adx_bytes) return false;
-    memcpy(movie->adx_bytes + movie->adx_have, packet.payload, packet.size);
-    movie->adx_have += packet.size;
+    /* ADX a full ring left undecoded goes first. */
+    if (movie->pcm == NULL || movie->adx_have < RECOMP_ADX_FRAME_BYTES * movie->adx.channels) {
+        if (!next_packet(movie, &movie->audio, RECOMP_SFD_AUDIO, &packet) ||
+            movie->adx_have + packet.size > sizeof movie->adx_bytes) return false;
+        memcpy(movie->adx_bytes + movie->adx_have, packet.payload, packet.size);
+        movie->adx_have += packet.size;
+    }
     uint32_t used = 0u;
     if (movie->pcm == NULL) {
         used = recomp_adx_open(&movie->adx, movie->adx_bytes, movie->adx_have);
@@ -185,7 +188,8 @@ static bool decode_audio(RecompSfdMovie *movie)
     }
     const uint32_t group = RECOMP_ADX_FRAME_BYTES * movie->adx.channels;
     int16_t samples[RECOMP_ADX_FRAME_SAMPLES * RECOMP_ADX_MAX_CHANNELS];
-    for (; used + group <= movie->adx_have; used += group) {
+    for (; used + group <= movie->adx_have &&
+            movie->pcm_count + RECOMP_ADX_FRAME_SAMPLES <= movie->pcm_frames; used += group) {
         const uint32_t count = recomp_adx_decode(&movie->adx, movie->adx_bytes + used, samples);
         if (count == 0u) return false;
         for (uint32_t i = 0u; i < count; ++i) {
@@ -275,6 +279,12 @@ RecompSfdMovie *recomp_sfd_movie_open(const char *host_path, uint32_t audio_slot
     lock_init(&movie->guard);
     movie->slot = audio_slot;
     movie->sound = audio;
+    if (audio) {
+        /* The first call owns the output; the worker must not claim it. */
+        recomp_dsound_output_lock();
+        recomp_audio_output_initialize();
+        recomp_dsound_output_unlock();
+    }
     movie->video.file = fopen(host_path, "rb");
     movie->audio.file = audio ? fopen(host_path, "rb") : NULL;
     movie->stream = plm_buffer_create_with_capacity(1u << 18);

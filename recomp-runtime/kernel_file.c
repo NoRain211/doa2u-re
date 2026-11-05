@@ -731,9 +731,17 @@ static int build_host_path(const char *relative, char *host_path, size_t host_pa
 bool recomp_kernel_disc_host_path(const char *guest_path, char *host_path, size_t host_path_size)
 {
     char normalized[MAX_PATH_LEN];
-    return recomp_disc_root_path != NULL &&
-        normalize_guest_path(guest_path, normalized, sizeof normalized) &&
-        build_host_path(normalized + 2, host_path, host_path_size);
+    if (guest_path == NULL || host_path == NULL || host_path_size == 0u ||
+        recomp_disc_root_path == NULL ||
+        !normalize_guest_path(guest_path, normalized, sizeof normalized) ||
+        !build_host_path(normalized + 2, host_path, host_path_size)) {
+        return false;
+    }
+#ifndef _WIN32
+    /* The guest path is lowercased; the caller opens it without CreateFileA. */
+    recomp_win32_resolve_case(host_path, host_path_size);
+#endif
+    return true;
 }
 
 /* Appends a storage partition's host folder; a save session moves partition 1. */

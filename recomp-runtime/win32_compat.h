@@ -243,6 +243,9 @@ BOOL WriteFile(
 
 BOOL CloseHandle(HANDLE hObject);
 
+/* Replaces each path segment with its on-disk spelling, as CreateFileA does. */
+void recomp_win32_resolve_case(char *path, size_t path_size);
+
 BOOL SetFilePointerEx(
     HANDLE hFile,
     LARGE_INTEGER liDistanceToMove,
