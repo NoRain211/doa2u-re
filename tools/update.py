@@ -80,10 +80,12 @@ def unpack(archive):
         if ROOT / "private" in target.parents and target.exists():
             continue
         data = archive.read(entry)
+        mode = (entry.external_attr >> 16) & 0o777
         # Unchanged files stay untouched, including those of the bundled Python running this.
-        if target.is_file() and target.read_bytes() == data:
+        if (target.is_file() and target.read_bytes() == data
+                and (not mode or (target.stat().st_mode & 0o777) == mode)):
             continue
-        files.append((target, data, (entry.external_attr >> 16) & 0o777))
+        files.append((target, data, mode))
     files.sort(key=lambda file: file[0] == ROOT / "VERSION")
     for target, data, mode in files:
         target.parent.mkdir(parents=True, exist_ok=True)
