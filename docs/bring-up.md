@@ -88,7 +88,9 @@ at +8, and the runner finds that entry through each AFS archive's own
 directory. Track loops seek past
 the entry's start, so they do not repeat the card. At the next Swap the runner
 presents the card through the D3D8 adapter for 10 seconds and then subtracts
-the held time from the guest clock. In Kasumi's Story the track is first read
+the held time from the guest clock. A new press of any pad button or mapped
+key fades the card out early; a button still held from the fight must be
+released first. In Kasumi's Story the track is first read
 after the final KO's white flash, so the card plays just before the ending,
 which carries the staff credits over it.
 

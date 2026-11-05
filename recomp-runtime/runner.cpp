@@ -189,7 +189,23 @@ static void applyStoryFinale()
     }
 }
 
-// Holds the guest at a Swap: 1.5 s fade in, hold, 1.5 s fade out over 10 s.
+// Any pad button or key held now, ignoring thumbsticks and light trigger pressure.
+static bool anyButtonHeld()
+{
+    if (scriptedInputOnly) return false;
+    for (std::uint32_t port = 0; port < RECOMP_INPUT_PORT_COUNT; ++port) {
+        RecompInputGamepad pad{};
+        if (!recomp_input_host_sample(port, &pad)) continue;
+        if (pad.buttons != 0u) return true;
+        for (const std::uint8_t analog : pad.analog_buttons)
+            if (analog >= 0x80u) return true;
+    }
+    return false;
+}
+
+/* Holds the guest at a Swap: 1.5 s fade in, hold, 1.5 s fade out over 10 s.
+   A new button press starts the fade out early; one held from the fight must
+   be released first. */
 static void showCard()
 {
     using namespace std::chrono;
@@ -200,10 +216,16 @@ static void showCard()
     // Guest time stops for the card, so the output pump must not play past it.
     recomp_dsound_output_lock();
     const auto start = steady_clock::now();
+    steady_clock::duration end = total;
+    bool held = true;
     for (auto next = start;;) {
         const auto elapsed = steady_clock::now() - start;
-        if (elapsed >= total) break;
-        const auto edge = std::min<steady_clock::duration>(elapsed, total - elapsed);
+        const bool pressed = anyButtonHeld();
+        // Fade out from the current level: as long as the fade in took so far.
+        if (pressed && !held) end = std::min(end, elapsed + std::min<steady_clock::duration>(elapsed, fade));
+        held = pressed;
+        if (elapsed >= end) break;
+        const auto edge = std::min<steady_clock::duration>(elapsed, end - elapsed);
         const auto level = static_cast<std::uint8_t>(edge >= fade ? 255 : 255 * edge / fade);
         recomp_d3d8_present_card(cardPixels.data(), cardWidth, cardHeight, aspect, level);
         next += microseconds(16667);
