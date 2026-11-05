@@ -278,6 +278,8 @@ static void bridge_rtl_unicode_string_to_ansi_string(void)
     uint32_t buffer = *recomp_memory_u32(destination + 4u);
     uint32_t status = 0u;
 
+    /* NT reports the required length even when the buffer is too short. */
+    *recomp_memory_u16(destination) = (uint16_t)length;
     if (length >= maximum) {
         if (maximum == 0u) {
             kernel_return(3u, 0x80000005u); /* STATUS_BUFFER_OVERFLOW */
@@ -316,6 +318,7 @@ static void bridge_rtl_ansi_string_to_unicode_string(void)
     uint32_t maximum = *recomp_memory_u16(destination + 2u);
     uint32_t buffer = *recomp_memory_u32(destination + 4u);
 
+    *recomp_memory_u16(destination) = (uint16_t)(2u * length);
     if (2u * length >= maximum) {
         kernel_return(3u, 0x80000005u); /* STATUS_BUFFER_OVERFLOW */
         return;
@@ -325,7 +328,6 @@ static void bridge_rtl_ansi_string_to_unicode_string(void)
             (uint8_t)*recomp_memory_i8(narrow + i);
     }
     *recomp_memory_u16(buffer + 2u * length) = 0u;
-    *recomp_memory_u16(destination) = (uint16_t)(2u * length);
     kernel_return(3u, 0u);
 }
 

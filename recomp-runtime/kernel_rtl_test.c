@@ -185,6 +185,13 @@ static int test_unicode_to_ansi(void)
     passed &= expect_u32("short to-ansi text", strcmp(ansi, "LOOK") == 0, 1u);
     passed &= expect_u32(
         "short to-ansi length", *recomp_memory_u16(TEST_ANSI), 4u);
+
+    passed &= convert_to_ansi(0u, &status);
+    passed &= expect_u32("empty to-ansi status", status, 0x80000005u);
+    passed &= expect_u32(
+        "empty to-ansi reports the needed length",
+        *recomp_memory_u16(TEST_ANSI),
+        12u);
     return passed;
 }
 
@@ -243,6 +250,10 @@ static int test_ansi_to_unicode(void)
         "short to-unicode leaves the buffer",
         *recomp_memory_u16(TEST_WIDE),
         0x5a5au);
+    passed &= expect_u32(
+        "short to-unicode reports the needed length",
+        *recomp_memory_u16(TEST_UNICODE),
+        10u);
     return passed;
 }
 
