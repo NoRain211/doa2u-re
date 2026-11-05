@@ -206,6 +206,8 @@ def import_disc(iso, extractor=None):
 
 def build(build_only=False, lift_only=False, iso=None, disassemble=False, extractor=None):
     windows = sys.platform == "win32"
+    if windows and (ROOT / "tools/cmake/bin").is_dir():  # the Windows release ZIP carries CMake
+        os.environ["PATH"] = os.pathsep.join([str(ROOT / "tools/cmake/bin"), os.environ.get("PATH", "")])
     # SDL3's Wayland header step hands the build path to /bin/sh unquoted; spaces survive, these do not.
     if (sys.platform.startswith("linux") and not lift_only
             and set(str(ROOT)) & set("()&;|<>`$'\"\\*?[]!#~{}\n")):

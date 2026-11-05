@@ -36,6 +36,7 @@ static class Game
     public static string Private(string name) { return Path.Combine(Root, "private", name); }
     // Players paste logs into public issues, so their home folder and user name become ~.
     static readonly Regex PrivatePath = PrivatePattern(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.UserName);
+    static readonly string BundledPython = Path.Combine(Root, @"tools\python\python.exe");
     static string[] python;
     static bool pythonFound;
 
@@ -93,13 +94,14 @@ static class Game
         return !string.IsNullOrEmpty(path) && path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(path);
     }
 
-    // Python 3.12 or newer, through the py launcher or PATH; null if there is none.
+    // The release ZIP's bundled Python, else Python 3.12 or newer through the py launcher or PATH; null if there is none.
     public static string[] Python
     {
         get
         {
             if (pythonFound) return python;
             pythonFound = true;
+            if (File.Exists(BundledPython)) return python = new[] { BundledPython };
             foreach (var candidate in new[] { new[] { "py", "-3" }, new[] { "python" } })
             {
                 string args = string.Join(" ", candidate.Skip(1)) + " -c \"import sys; sys.exit(sys.version_info < (3, 12))\"";
@@ -128,6 +130,13 @@ static class Game
             StandardErrorEncoding = Encoding.UTF8
         };
         start.EnvironmentVariables["PYTHONUTF8"] = "1";
+        if (Python[0] == BundledPython)
+        {
+            // An installed Python's settings or user packages must not redirect the bundled one.
+            start.EnvironmentVariables.Remove("PYTHONHOME");
+            start.EnvironmentVariables.Remove("PYTHONPATH");
+            start.EnvironmentVariables["PYTHONNOUSERSITE"] = "1";
+        }
         var process = new Process { StartInfo = start };
         process.OutputDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(RedactPrivate(e.Data)); };
         process.ErrorDataReceived += delegate (object sender, DataReceivedEventArgs e) { if (e.Data != null) onLine(RedactPrivate(e.Data)); };

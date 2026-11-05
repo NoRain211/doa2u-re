@@ -7,12 +7,10 @@ build the game yourself from your own copy of Dead or Alive Ultimate
 
 What you need (Windows 10 or 11, 64-bit):
 
-- Python 3.12 or newer: https://www.python.org/downloads/windows/
-  (tick "Add python.exe to PATH").
-- CMake 3.20 or newer: https://cmake.org/download/ (add it to PATH).
 - An internet connection for the first build (it downloads the llvm-mingw
-  compiler, SDL3, SMAA and the Capstone and Pillow Python packages). No
-  Visual Studio is needed.
+  compiler, SDL3 and SMAA). Nothing else needs installing: this ZIP carries
+  Python 3.12.10 with Capstone and Pillow in tools\python and CMake 4.4.5 in
+  tools\cmake, each with its upstream license files.
 - Your Disc 2 as an Xbox ISO, and about 6 GB of free space on the drive
   holding this folder.
 

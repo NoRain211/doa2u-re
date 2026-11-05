@@ -11,6 +11,9 @@ import tempfile
 import time
 import zipfile
 
+from build_prerequisites import fetch_verified
+from extract_iso import sha256
+
 ROOT = Path(__file__).resolve().parents[1]
 SUBMODULE = "tools/xboxrecomp"
 # A release holds what building and playing need; developer and agent material stays in the repository.
@@ -38,6 +41,18 @@ LIFTER_FILES = {"LICENSE", "NOTICE", "tools/__init__.py", "templates/runtime/rec
 # extract-xiso.exe and its LICENSE.TXT, copied from the DOA3 test package, and
 # dedication-photo.jpg, which run_game.py turns into the staff-roll card.
 ARTIFACTS = ROOT / "private" / "release-assets"
+# The Windows ZIP carries Python with the build's packages, and CMake, so players install nothing (#89).
+# Each is (URL, SHA-256, the archive folder that ships); the wheels are installed by unpacking them.
+PYTHON = ("https://www.nuget.org/api/v2/package/python/3.12.10",
+          "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8", "tools/")
+WHEELS = [("https://files.pythonhosted.org/packages/70/39/2138d890a8e827636b9de9924fbc8527fe83e38b6d26605b30ac55e30ebe/"
+           "capstone-5.0.7-py3-none-win_amd64.whl",
+           "4ab8bcb7da8f221ff45926ca168ca33e76f7237d06fbf3c10780002faa2670e1", ""),
+          ("https://files.pythonhosted.org/packages/5d/7b/25a221d2c761c6a8ae21bfa3874988ff2583e19cf8a27bf2fee358df7942/"
+           "pillow-12.2.0-cp312-cp312-win_amd64.whl",
+           "7f84204dee22a783350679a0333981df803dac21a0190d706a50475e361c93f5", "")]
+CMAKE = ("https://github.com/Kitware/CMake/releases/download/v4.4.5/cmake-4.4.5-windows-x86_64.zip",
+         "326c826486d46a23cf9d5a1c9ee3a567d427bdd02c4a34071937a2a675cff004", "cmake-4.4.5-windows-x86_64/")
 # ZIP name suffix and README for each platform; macOS and Linux build extract-xiso themselves.
 PLATFORMS = {"windows": ("", "docs/test-release.md"),
              "macos": ("-macOS", "docs/test-release-macos.md"),
@@ -64,6 +79,19 @@ def build_launchers(out_dir):
 
 def git(*args, cwd=ROOT):
     return subprocess.check_output(["git", *args], cwd=cwd)
+
+
+def bundle(package, prefix, url, digest, top, skip=()):
+    """Copy a pinned upstream ZIP's folder top into the package at prefix, downloading it once into ARTIFACTS."""
+    cached = ARTIFACTS / "downloads" / digest
+    if not cached.is_file() or sha256(cached) != digest:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.unlink(missing_ok=True)
+        fetch_verified(url, digest, cached, url.rsplit("/", 1)[1])
+    with zipfile.ZipFile(cached) as source:
+        for info in source.infolist():
+            if info.filename.startswith(top) and not info.is_dir() and info.filename[len(top):] not in skip:
+                package.writestr(prefix + info.filename[len(top):], source.read(info))
 
 
 def shipped(path, platform):
@@ -141,6 +169,10 @@ def main():
         if windows:
             for artifact in artifacts[:2]:
                 package.write(ARTIFACTS / artifact, f"{name}/tools/artifacts/{artifact}")
+            bundle(package, f"{name}/tools/python/", *PYTHON)
+            for wheel in WHEELS:
+                bundle(package, f"{name}/tools/python/Lib/site-packages/", *wheel)
+            bundle(package, f"{name}/tools/cmake/", *CMAKE, skip={"bin/cmake-gui.exe"})
             with tempfile.TemporaryDirectory() as launchers:
                 build_launchers(Path(launchers))
                 for exe in LAUNCHERS:
