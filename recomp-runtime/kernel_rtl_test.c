@@ -196,10 +196,10 @@ static int test_unicode_to_ansi(void)
 }
 
 /* XAPI MultiByteToWideChar goes through ordinal 260. */
-static int convert_to_unicode(uint16_t maximum, uint32_t *status)
+static int convert_to_unicode(
+    uint16_t length, uint16_t maximum, uint32_t *status)
 {
     static const char text[] = "ZACK\xe9";
-    const uint32_t length = sizeof text - 1u;
     uint32_t *stack = (uint32_t *)recomp_memory_u32(TEST_ENTRY_ESP);
 
     memcpy(recomp_memory_i8(TEST_ANSI_BUFFER), text, sizeof text);
@@ -232,7 +232,7 @@ static int test_ansi_to_unicode(void)
         return expect_u32("ordinal 260 lookup", 0u, 1u);
     }
 
-    passed &= convert_to_unicode(32u, &status);
+    passed &= convert_to_unicode(5u, 32u, &status);
     passed &= expect_u32("to-unicode status", status, 0u);
     passed &= expect_u32(
         "to-unicode length", *recomp_memory_u16(TEST_UNICODE), 10u);
@@ -244,7 +244,7 @@ static int test_ansi_to_unicode(void)
     }
 
     /* Five characters need twelve bytes with the NUL; ten is refused. */
-    passed &= convert_to_unicode(10u, &status);
+    passed &= convert_to_unicode(5u, 10u, &status);
     passed &= expect_u32("short to-unicode status", status, 0x80000005u);
     passed &= expect_u32(
         "short to-unicode leaves the buffer",
@@ -254,6 +254,22 @@ static int test_ansi_to_unicode(void)
         "short to-unicode reports the needed length",
         *recomp_memory_u16(TEST_UNICODE),
         10u);
+
+    /* Eleven bytes would leave the NUL's high byte outside the buffer. */
+    passed &= convert_to_unicode(5u, 11u, &status);
+    passed &= expect_u32("odd to-unicode status", status, 0x80000005u);
+    passed &= expect_u32(
+        "odd to-unicode leaves the buffer",
+        *recomp_memory_u16(TEST_WIDE),
+        0x5a5au);
+
+    /* 32767 bytes need 65536 with the NUL; NT refuses before touching Length. */
+    passed &= convert_to_unicode(0x7fffu, 0xfffeu, &status);
+    passed &= expect_u32("huge to-unicode status", status, 0xc00000f0u);
+    passed &= expect_u32(
+        "huge to-unicode leaves Length",
+        *recomp_memory_u16(TEST_UNICODE),
+        0x5a5au);
     return passed;
 }
 

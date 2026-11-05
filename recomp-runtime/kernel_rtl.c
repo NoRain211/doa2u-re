@@ -318,8 +318,14 @@ static void bridge_rtl_ansi_string_to_unicode_string(void)
     uint32_t maximum = *recomp_memory_u16(destination + 2u);
     uint32_t buffer = *recomp_memory_u32(destination + 4u);
 
+    /* The WCHARs plus their NUL must fit a USHORT byte count. */
+    if (2u * length + 2u > 0xffffu) {
+        kernel_return(3u, 0xc00000f0u); /* STATUS_INVALID_PARAMETER_2 */
+        return;
+    }
     *recomp_memory_u16(destination) = (uint16_t)(2u * length);
-    if (2u * length >= maximum) {
+    /* Counting the NUL also refuses an odd MaximumLength one byte short. */
+    if (2u * length + 2u > maximum) {
         kernel_return(3u, 0x80000005u); /* STATUS_BUFFER_OVERFLOW */
         return;
     }
