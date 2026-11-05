@@ -41,7 +41,8 @@ typedef struct Buffer {
     int32_t distance_volume, center_front, center, pan_front, pan_rear; /* hundredths of dB */
     int32_t doppler;                               /* 4096 per octave */
     RecompHrtfVoice hrtf;
-    uint64_t filled_until_ms; /* when the span the game's last Lock filled finishes playing */
+    /* When the span the game last filled finishes playing; Unlock commits Lock's estimate. */
+    uint64_t filled_until_ms, locked_until_ms;
 } Buffer;
 static Buffer buffers[BUFFER_COUNT];
 static void update_3d(Buffer *buffer);
@@ -300,7 +301,7 @@ static void reset_output(Buffer *buffer)
     if (!output_suppressed) recomp_audio_output_reset_voice((uint32_t)(buffer - buffers));
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
-    buffer->filled_until_ms = 0u;
+    buffer->filled_until_ms = buffer->locked_until_ms = 0u;
     /* The backend accepts routing only from its owner thread, so it is set here
        and on every change, never by the pump thread. */
     apply_routing(buffer);
@@ -432,6 +433,7 @@ static void update_3d(Buffer *buffer)
         : (int32_t)lrintf(4096.0f * log2f(1.0f - v * 0.0029239766f));
     if (buffer->size && buffer->model.sample_rate != pitch_hz(buffer)) {
         recomp_dsound_buffer_set_frequency(&buffer->model, pitch_hz(buffer), now_ms());
+        buffer->filled_until_ms = buffer->locked_until_ms = 0u; /* timed at the old rate */
     }
 }
 
@@ -713,9 +715,12 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if (bytes > first && !p2) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
         write32(p1, buffer->data + value); write32(n1, first);
         if (p2) { write32(p2, bytes > first ? buffer->data : 0u); write32(n2, bytes - first); }
-        /* A fill that ends at the cursor leaves the whole ring unheard. */
+        /* Only a ring looping the whole buffer is timed; a fill of all of it, or
+           one ending at the cursor, leaves a whole lap unheard. */
         const uint32_t ahead = (value + bytes + size - source_cursor(buffer)) % size;
-        if (buffer->model.playing) buffer->filled_until_ms = now + source_ms(buffer, ahead ? ahead : size);
+        const bool ring = buffer->model.loop_start_bytes == 0u && buffer->model.loop_end_bytes == buffer->model.size_bytes;
+        buffer->locked_until_ms = buffer->model.playing && ring
+            ? now + source_ms(buffer, bytes == size || !ahead ? size : ahead) : 0u;
         break;
     }
     case UNLOCK: {
@@ -724,6 +729,8 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if (!buffer->size || offset < data || offset >= data + buffer->size ||
             size > data + buffer->size - offset || second_size > buffer->size - size ||
             (second_size && (offset + size != data + buffer->size || canonical(second) != data))) result = RECOMP_DSOUND_INVALID_PARAM;
+        else buffer->filled_until_ms = buffer->locked_until_ms;
+        buffer->locked_until_ms = 0u;
         break;
     }
     case PLAY: {
@@ -773,6 +780,7 @@ static void buffer_call(enum Operation operation, uint32_t arguments)
         if (!value) value = buffer->rate;
         if (value < 1000u || value > 200000u) { result = RECOMP_DSOUND_INVALID_PARAM; break; }
         pump(buffer, now, false); buffer->frequency = value;
+        buffer->filled_until_ms = buffer->locked_until_ms = 0u; /* timed at the old rate */
         if (buffer->size) result = recomp_dsound_buffer_set_frequency(&buffer->model, pitch_hz(buffer), now); break;
     case VOLUME: case HEADROOM: {
         int32_t input = (int32_t)value;
