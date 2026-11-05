@@ -175,7 +175,7 @@ def main():
             bundle(package, f"{name}/tools/python/", *PYTHON)
             for wheel in WHEELS:
                 bundle(package, f"{name}/tools/python/Lib/site-packages/", *wheel)
-            # The GUI and manuals go unused; the manuals' deep paths could pass Windows' 260 characters.
+            # The build never runs the GUI or reads the manuals; leaving them out saves 11 MB.
             bundle(package, f"{name}/tools/cmake/", *CMAKE, skip=("bin/cmake-gui.exe", "doc/cmake/html/", "man/"))
             with tempfile.TemporaryDirectory() as launchers:
                 build_launchers(Path(launchers))
