@@ -57,7 +57,8 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual((root / "Launcher.exe").read_text(), "new")
 
     def test_unpack_spares_the_running_bundled_python(self):
-        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "win32"):
             python = update.ROOT / "tools" / "python"
             (python / "DLLs").mkdir(parents=True)
             (python / "python.exe").write_text("same")
