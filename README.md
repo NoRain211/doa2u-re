@@ -55,13 +55,14 @@ keeps running.
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
-  60 fps, including heavy rain-stage fights at 4K.
+  60 fps, including heavy rain-stage fights at 4K. **VRR: On** paces 60 fps
+  evenly on a G-SYNC or FreeSync display, windowed or fullscreen.
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
   own 5.1 surround mix. The intro and story movies play.
 - **Controllers.** Xbox, PlayStation and other SDL3 controllers, and the
   keyboard for player 1.
-- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, an
+- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, VRR, an
   optional intro-movie skip, 5.1 surround and the unlock setting, and remembers them. `DOA2U.exe` plays
   with the same choices. On release ZIPs after 0.1.10, the settings launcher on
   each platform can check GitHub for a newer release and install it from its
@@ -125,7 +126,7 @@ Visual Studio or administrator approval.
    **BUILD GAME** page) and choose **Build**. Wait for **Build complete**
    (about 15 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA and widescreen on **VIDEO SETTINGS**, stereo or
+3. Pick resolution, MSAA, SMAA, widescreen and VRR on **VIDEO SETTINGS**, stereo or
    5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
    **GAMEPLAY** to leave unlocks to play, then choose
    **START GAME**. A controller, the keyboard or the mouse all work. Your
