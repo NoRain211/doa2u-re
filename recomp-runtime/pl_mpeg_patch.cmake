@@ -1,5 +1,6 @@
 # Patches pl_mpeg for the TMPGEnc-encoded Sofdec movies, matching FFmpeg's
-# mpeg12dec.c: DC size codes 9-11 and an intra DC precision the caller sets.
+# mpeg12dec.c: DC size codes 9-11, an intra DC precision the caller sets, and
+# quant matrices reloaded from repeated sequence headers.
 function(_recomp_pl_mpeg_replace var from to expected)
     string(LENGTH "${${var}}" before)
     string(REPLACE "${from}" "" removed "${${var}}")
@@ -25,5 +26,17 @@ function(recomp_patch_pl_mpeg source destination)
 	int intra_dc_precision;]=] 1)
     _recomp_pl_mpeg_replace(text [=[] = 128;]=] [=[] = 128 << self->intra_dc_precision;]=] 9)
     _recomp_pl_mpeg_replace(text [=[block_data[0] <<= (3 + 5);]=] [=[block_data[0] <<= (3 - self->intra_dc_precision + 5);]=] 1)
+    _recomp_pl_mpeg_replace(text [=[	self->mb_width = (self->width + 15) >> 4;]=] [=[	// Consumed; a repeated header only reloads the quant matrices
+	self->start_code = -2;
+	if (self->has_sequence_header) {
+		return TRUE;
+	}
+
+	self->mb_width = (self->width + 15) >> 4;]=] 1)
+    _recomp_pl_mpeg_replace(text [=[			self->start_code = plm_buffer_find_start_code(self->buffer, PLM_START_PICTURE);]=] [=[			do {
+				if (self->start_code != PLM_START_SEQUENCE || !plm_video_decode_sequence_header(self)) {
+					self->start_code = plm_buffer_next_start_code(self->buffer);
+				}
+			} while (self->start_code != PLM_START_PICTURE && self->start_code != -1);]=] 1)
     file(WRITE "${destination}" "${text}")
 endfunction()
