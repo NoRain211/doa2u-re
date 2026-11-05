@@ -16,7 +16,7 @@
 
 namespace {
 
-constexpr uint32_t kVoiceCount = 256;
+constexpr uint32_t kVoiceCount = RECOMP_AUDIO_OUTPUT_SLOTS;
 /* The ring bounds memory; the time budget bounds latency, so voices that
    submit millisecond pieces are not dropped after a few milliseconds. */
 constexpr uint32_t kQueueSize = 128;

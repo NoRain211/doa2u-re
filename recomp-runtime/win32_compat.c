@@ -82,7 +82,7 @@ void SetLastError(DWORD err)
     last_error = err;
 }
 
-static void resolve_case_insensitive(char *path, size_t path_size)
+void recomp_win32_resolve_case(char *path, size_t path_size)
 {
     if (!path || path[0] == '\0') return;
     if (access(path, F_OK) == 0) return;
@@ -200,7 +200,7 @@ static void normalize_path(const char *in, char *out, size_t out_size)
     }
     out[j] = '\0';
 
-    resolve_case_insensitive(out, out_size);
+    recomp_win32_resolve_case(out, out_size);
 }
 
 static void set_last_error_from_errno(void)

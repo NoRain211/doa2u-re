@@ -453,7 +453,7 @@ int main()
 
     auto submitted = submitted_buffers;
     const auto invalid_before = dropped_buffers;
-    recomp_audio_output_submit(256, pcm, sizeof pcm, 8000, 1, 16, 0);
+    recomp_audio_output_submit(RECOMP_AUDIO_OUTPUT_SLOTS, pcm, sizeof pcm, 8000, 1, 16, 0);
     recomp_audio_output_submit(0, nullptr, sizeof pcm, 8000, 1, 16, 0);
     recomp_audio_output_submit(0, pcm, 160001, 8000, 1, 16, 0);
     recomp_audio_output_submit(0, pcm, sizeof pcm, 999, 1, 16, 0);
@@ -563,7 +563,7 @@ int main()
         !recomp_audio_output_set_reverb(&invalid) &&
         !recomp_audio_output_set_voice_routing(10, 1, invalid_matrix, mono_wet) &&
         !recomp_audio_output_set_voice_routing(10, 2, silent, silent) &&
-        !recomp_audio_output_set_voice_routing(256, 1, mono_dry, silent) &&
+        !recomp_audio_output_set_voice_routing(RECOMP_AUDIO_OUTPUT_SLOTS, 1, mono_dry, silent) &&
         recomp_audio_output_ready() && effect_parameter_calls == 1);
     invalid = reverb_parameters;
     invalid.reflections = 1001;

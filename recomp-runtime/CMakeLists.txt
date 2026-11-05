@@ -191,6 +191,12 @@ add_test(NAME recomp-runtime-xbox-adpcm COMMAND recomp_xbox_adpcm_test)
 add_executable(recomp_movie_color_test movie_color_model.c movie_color_model_test.c)
 add_test(NAME recomp-runtime-movie-color COMMAND recomp_movie_color_test)
 
+add_executable(recomp_adx_decoder_test adx_decoder.c adx_decoder_test.c)
+add_test(NAME recomp-runtime-adx-decoder COMMAND recomp_adx_decoder_test)
+
+add_executable(recomp_sfd_format_test sfd_format.c sfd_format_test.c)
+add_test(NAME recomp-runtime-sfd-format COMMAND recomp_sfd_format_test)
+
 add_executable(recomp_dsound_hrtf_test dsound_hrtf.c dsound_hrtf_test.c)
 if(NOT MSVC)
     target_link_libraries(recomp_dsound_hrtf_test PRIVATE m)
@@ -514,7 +520,7 @@ if(RECOMP_PROGRAM_DIR)
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        xbox_adpcm.c
+        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp
@@ -570,6 +576,14 @@ if(RECOMP_PROGRAM_DIR)
     endif()
     recomp_use_sdl3(recomp_program_runner)
     target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")
+    # Sofdec movies decode their MPEG-1 video with pl_mpeg (MIT; see NOTICE),
+    # patched for TMPGEnc's 11-bit intra DC.
+    file(DOWNLOAD https://raw.githubusercontent.com/phoboslab/pl_mpeg/c871f2be022ece7ef4f64230b4fb8e1fb9eb6023/pl_mpeg.h
+        "${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg_upstream.h"
+        EXPECTED_HASH SHA256=3a8cb30c83c2a1147719c30fe0c8b93da2987aa43140077c575b39aaa75fc2c9)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/pl_mpeg_patch.cmake")
+    recomp_patch_pl_mpeg("${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg_upstream.h" "${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg/pl_mpeg.h")
+    set_source_files_properties(sfd_movie.c PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/pl_mpeg")
 
     # Settings launcher for launcher.sh. SteamOS has no compiler, so it is built
     # beside the runner rather than on first use like the macOS launcher.

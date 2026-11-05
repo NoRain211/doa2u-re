@@ -65,6 +65,8 @@ RecompFunction recomp_lookup_kernel(uint32_t guest_address);
 
 /* Filesystem root supplied by the runner for disc-file resolution. */
 extern const char *recomp_disc_root_path;
+/* Host path of a D: path on the game disc; false for other devices. */
+bool recomp_kernel_disc_host_path(const char *guest_path, char *host_path, size_t host_path_size);
 
 /* Each subsystem exposes one of these; kernel_dispatch.c chains them. */
 RecompFunction recomp_kernel_config(uint32_t ordinal);

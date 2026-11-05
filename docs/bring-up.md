@@ -874,6 +874,23 @@ Swap waits for the host to finish earlier frames as a guest wait, so those
 vblank threads keep their 60 Hz refills of CRI's audio rings when the GPU
 falls behind; a host-blocked Swap let the rings replay as echoes (issue #69).
 
+Movies no longer run CRI's Sofdec player. Its MPEG decoder ran on CRI's file
+server thread, and one decode burst held every other guest thread, the audio
+refills included, for up to 250 ms. `mwply_adapter.c` binds the fifteen player
+calls the game makes (creation, the function table at `0x7c6430`, frames,
+conversion, audio switch and volume, subtitles) and plays the file on a host
+thread (`sfd_movie.c`). Every disc SFD is an MPEG-1 program stream with
+MPEG-1 video, standard unencrypted ADX audio and a CRITAGS subtitle block in
+private stream 2; pl_mpeg decodes the video, `adx_decoder.c` the audio, which
+plays on host output slot 256. The four DOA2 movies are TMPGEnc encodes that
+code intra DC at 11 bits and say so only in a `TMPGEXS` user-data tag;
+`pl_mpeg_patch.cmake` patches the fetched pl_mpeg to decode them as FFmpeg's
+`mpeg12dec.c` does. Frames are due on the guest clock from the
+first status poll that finds the first frame decoded, and late frames are
+dropped as Sofdec drops them. `mwPlyInitSfdFx` still runs as guest code, since
+it also sets up the ADX library the music uses. The surround movie soundtrack
+(`ninja.aix`), music and voices still stream through CRI's ADX library.
+
 ## Determinism checks
 
 Rollback replays frames, so a replayed frame must reproduce the first pass

@@ -2695,9 +2695,129 @@
     "tag": "CRI_MIDDLEWARE"
   },
   {
+    "start": "0x0030C680",
+    "name": "mwply_set_subtitle_channel",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "set_subtitle_channel"
+  },
+  {
+    "start": "0x0030CCB0",
+    "name": "mwply_get_subtitle",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "get_subtitle"
+  },
+  {
+    "start": "0x0030CD50",
+    "name": "mwPlyFxCnvFrmARGB8888",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "convert_frame"
+  },
+  {
+    "start": "0x0030D380",
+    "name": "mwPlyFxSetOutBufSize",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "set_output_size"
+  },
+  {
+    "start": "0x0030D830",
+    "name": "mwPlyRelCurFrm",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "release_frame"
+  },
+  {
+    "start": "0x0030DE60",
+    "name": "mwPlyGetCurFrm",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "get_frame"
+  },
+  {
+    "start": "0x0030DFF0",
+    "name": "mwPlyGetStat",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "get_status"
+  },
+  {
+    "start": "0x0030E0E0",
+    "name": "mwPlySetOutVol",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "set_volume"
+  },
+  {
+    "start": "0x0030E1A0",
+    "name": "mwPlySetAudioSw",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "set_audio"
+  },
+  {
+    "start": "0x0030E210",
+    "name": "mwPlyGetAdxtHn",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "get_adx_handle"
+  },
+  {
+    "start": "0x0030F290",
+    "name": "mwPlyDestroy",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "destroy"
+  },
+  {
+    "start": "0x0030F370",
+    "name": "mwPlyCreateSofdec",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "create"
+  },
+  {
     "start": "0x00319600",
     "name": "noop",
     "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x0031B7D0",
+    "name": "mwSfdStop",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "stop"
+  },
+  {
+    "start": "0x0031B820",
+    "name": "mwSfdPause",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "set_pause"
+  },
+  {
+    "start": "0x0031BBB0",
+    "name": "mwPlyStartFname",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/mwply_adapter.c",
+    "symbol": "start_file"
   },
   {
     "start": "0x003352A4",
