@@ -107,6 +107,7 @@ static const struct {
     {255u, "PsCreateSystemThreadEx"},
     {258u, "PsTerminateSystemThread"},
     {259u, "PsThreadObjectType"},
+    {260u, "RtlAnsiStringToUnicodeString"},
     {269u, "RtlCompareMemoryUlong"},
     {277u, "RtlEnterCriticalSection"},
     {279u, "RtlEqualString"},

@@ -188,6 +188,64 @@ static int test_unicode_to_ansi(void)
     return passed;
 }
 
+/* XAPI MultiByteToWideChar goes through ordinal 260. */
+static int convert_to_unicode(uint16_t maximum, uint32_t *status)
+{
+    static const char text[] = "ZACK\xe9";
+    const uint32_t length = sizeof text - 1u;
+    uint32_t *stack = (uint32_t *)recomp_memory_u32(TEST_ENTRY_ESP);
+
+    memcpy(recomp_memory_i8(TEST_ANSI_BUFFER), text, sizeof text);
+    *recomp_memory_u16(TEST_ANSI) = (uint16_t)length;
+    *recomp_memory_u16(TEST_ANSI + 2u) = (uint16_t)(length + 1u);
+    *recomp_memory_u32(TEST_ANSI + 4u) = TEST_ANSI_BUFFER;
+    *recomp_memory_u16(TEST_UNICODE) = 0x5a5au;
+    *recomp_memory_u16(TEST_UNICODE + 2u) = maximum;
+    *recomp_memory_u32(TEST_UNICODE + 4u) = TEST_WIDE;
+    memset(recomp_memory_i8(TEST_WIDE), 0x5a, 32u);
+
+    stack[0] = 0x0010abcdu;
+    stack[1] = TEST_UNICODE;
+    stack[2] = TEST_ANSI;
+    stack[3] = 0xabcdef00u; /* BOOLEAN FALSE with junk above the low byte */
+    recomp_runtime.registers.esp = TEST_ENTRY_ESP;
+    recomp_kernel_rtl(260u)();
+    *status = recomp_runtime.registers.eax;
+    return expect_u32(
+        "to-unicode ESP", recomp_runtime.registers.esp, TEST_ENTRY_ESP + 16u);
+}
+
+static int test_ansi_to_unicode(void)
+{
+    static const uint16_t expected[] = {'Z', 'A', 'C', 'K', 0xe9u, 0u};
+    uint32_t status = 0u;
+    int passed = 1;
+
+    if (recomp_kernel_rtl(260u) == NULL) {
+        return expect_u32("ordinal 260 lookup", 0u, 1u);
+    }
+
+    passed &= convert_to_unicode(32u, &status);
+    passed &= expect_u32("to-unicode status", status, 0u);
+    passed &= expect_u32(
+        "to-unicode length", *recomp_memory_u16(TEST_UNICODE), 10u);
+    for (uint32_t i = 0u; i < sizeof expected / sizeof expected[0]; ++i) {
+        passed &= expect_u32(
+            "to-unicode text",
+            *recomp_memory_u16(TEST_WIDE + 2u * i),
+            expected[i]);
+    }
+
+    /* Five characters need twelve bytes with the NUL; ten is refused. */
+    passed &= convert_to_unicode(10u, &status);
+    passed &= expect_u32("short to-unicode status", status, 0x80000005u);
+    passed &= expect_u32(
+        "short to-unicode leaves the buffer",
+        *recomp_memory_u16(TEST_WIDE),
+        0x5a5au);
+    return passed;
+}
+
 int recomp_kernel_rtl_test(void)
 {
     static uint8_t memory[TEST_MEMORY_SIZE];
@@ -208,6 +266,7 @@ int recomp_kernel_rtl_test(void)
 
     passed &= test_conversion_model();
     passed &= test_unicode_to_ansi();
+    passed &= test_ansi_to_unicode();
 
     to_time = recomp_kernel_rtl(304u);
     to_fields = recomp_kernel_rtl(305u);
