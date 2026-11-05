@@ -45,6 +45,10 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+#include <timeapi.h>
+#ifndef PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION
+#define PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION 0x4
+#endif
 #endif
 
 static RecompInputPulseSource inputPulses;
@@ -534,6 +538,16 @@ static void bootGuest()
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(recomp_netplay_session_set_vibration);
     if (first) {
+#ifdef _WIN32
+        /* Guest frame waits that lost a 15.6 ms scheduler tick dropped frames on
+           a power-managed handheld (issue #69): ask for a 1 ms tick, keep Windows
+           from throttling the process, and run the game thread above normal. */
+        timeBeginPeriod(1u);
+        PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+            PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION, 0u};
+        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif
         std::atexit(recomp_netplay_session_exit);
         std::atexit(recomp_input_host_stop_vibration);
         std::atexit(recomp_d3d8_shutdown);

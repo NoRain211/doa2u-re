@@ -572,7 +572,7 @@ if(RECOMP_PROGRAM_DIR)
     target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
         recomp_portable_math libminiupnpc-static)
     if(WIN32)
-        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
+        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 winmm ws2_32)
     endif()
     recomp_use_sdl3(recomp_program_runner)
     target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")
