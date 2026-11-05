@@ -23,6 +23,9 @@ RecompSfdState recomp_sfd_movie_poll(RecompSfdMovie *movie, double now);
 bool recomp_sfd_movie_take_frame(RecompSfdMovie *movie, double now,
     const uint8_t **pixels, uint32_t *width, uint32_t *height);
 void recomp_sfd_movie_set_volume(RecompSfdMovie *movie, int32_t hundredth_db);
+/* Waits until the decoder can run no further ahead, so the answers that
+   follow depend on the caller's clock alone (netplay and replays). */
+void recomp_sfd_movie_settle(RecompSfdMovie *movie);
 /* Copies the subtitle shown at now on channel into text; returns its length or 0. */
 uint32_t recomp_sfd_movie_subtitle(RecompSfdMovie *movie, uint32_t channel, double now,
     char *text, uint32_t size);
