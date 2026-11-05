@@ -76,6 +76,18 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual((python / "DLLs" / "_ssl.pyd.old").read_text(), "old")
             self.assertFalse((python / "python.exe.old").exists())
 
+    def test_unpack_reapplies_a_changed_mode_outside_windows(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "linux"), mock.patch.object(Path, "chmod") as chmod:
+            (update.ROOT / "build_game.sh").write_text("same")
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as writer:
+                info = zipfile.ZipInfo("DOA2U-2/build_game.sh")
+                info.external_attr = 0o100755 << 16
+                writer.writestr(info, "same")
+            update.unpack(zipfile.ZipFile(data))
+            chmod.assert_called_once_with(0o755)
+
     def test_unsafe_entry_stops_before_any_write(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
             with self.assertRaises(ValueError):

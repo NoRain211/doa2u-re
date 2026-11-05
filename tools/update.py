@@ -82,8 +82,9 @@ def unpack(archive):
         data = archive.read(entry)
         mode = (entry.external_attr >> 16) & 0o777
         # Unchanged files stay untouched, including those of the bundled Python running this.
+        # Windows has no mode bits beyond read-only, so only other systems compare modes.
         if (target.is_file() and target.read_bytes() == data
-                and (not mode or (target.stat().st_mode & 0o777) == mode)):
+                and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode)):
             continue
         files.append((target, data, mode))
     files.sort(key=lambda file: file[0] == ROOT / "VERSION")
