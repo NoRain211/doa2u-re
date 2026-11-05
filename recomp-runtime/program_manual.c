@@ -68,9 +68,18 @@ static void skip_startup_logo(void)
 {
     /* 0xd9300 plays movie 0 (the logo clip) until it ends or a pad button is
        pressed. Keep its movie setup and teardown, including the guest's
-       display-variant selection, but omit the playback wait. void/ret 0. */
-    const uint32_t movie = 0u;
+       display-variant selection, but omit the playback wait. With 5.1 on,
+       movie_open also starts the clip's AIX soundtrack (0xa94454); closing it
+       while it still prepares (state byte +1 == 1) leaves CRI's audio server
+       on freed handles, so yield those frames as the original's loop did.
+       void/ret 0. */
+    const uint32_t movie = 0u, frames = 1u;
     kernel_call_guest(0x000f9e10u, &movie, 1u);
+    for (unsigned waited = 0u; waited < 120u; ++waited) {
+        const uint32_t aix = *recomp_memory_u32(0x00a94454u);
+        if (aix == 0u || *recomp_memory(aix + 1u, 1u) != 1u) break;
+        kernel_call_guest(0x000fa3d0u, &frames, 1u); /* task_yield */
+    }
     kernel_call_guest(0x000f9a10u, NULL, 0u);
     recomp_runtime.registers.esp += 4u;
 }
