@@ -17,7 +17,7 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertFalse(shipped("recomp-runtime/overlay_d3d11.cpp", "macos"))
         # Windows builds the SDL_GPU presenter as its Vulkan renderer.
         for name in ("d3d_presenter_sdl_gpu.cpp", "d3d_presenter_inline.cpp", "d3d_shader_compiler.cpp",
-                     "overlay_sdl_gpu.cpp"):
+                     "d3d_shader_compiler.h", "overlay_sdl_gpu.cpp"):
             self.assertTrue(shipped(f"recomp-runtime/{name}", "windows"), name)
         self.assertFalse(shipped("build_game.sh", "windows"))
         self.assertTrue(shipped("docs/building.md", "macos"))
