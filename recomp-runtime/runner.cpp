@@ -11,6 +11,8 @@
 #include "input_pulse_source.h"
 #include "netplay_menu.h"
 #include "netplay_session.h"
+#include "overlay_text.h"
+#include "quit_prompt.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -58,13 +60,39 @@ static bool scriptedInputOnly;
 static bool guestRamWriteWatch;
 static std::uint8_t *guestRam;
 
+static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
+{
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    RecompOverlayText text;
+    recomp_overlay_clear(&text);
+    switch (recomp_quit_prompt_filter(port, gamepad, static_cast<std::uint64_t>(now))) {
+    case RECOMP_QUIT_OPENED:
+        recomp_overlay_set_title(&text, "Quit to the desktop?");
+        recomp_overlay_set_hint(&text, "A quit   B keep playing");
+        recomp_overlay_publish(&text);
+        break;
+    case RECOMP_QUIT_CANCELLED:
+        recomp_overlay_publish(&text);
+        break;
+    case RECOMP_QUIT_CHOSEN:
+        recomp_stop(0, "player-quit");
+        break;
+    case RECOMP_QUIT_NONE:
+        break;
+    }
+}
+
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     bool present = false;
     if (recomp_netplay_session_pad(port, gamepad, &present)) return present;
     if (port != 0u) {
         const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
-        if (sampled) recomp_netplay_menu_filter(port, gamepad);
+        if (sampled) {
+            quitPrompt(port, gamepad);
+            recomp_netplay_menu_filter(port, gamepad);
+        }
         return sampled;
     }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
@@ -75,7 +103,10 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
     }
-    if (sampled) recomp_netplay_menu_filter(0u, gamepad);
+    if (sampled) {
+        quitPrompt(0u, gamepad);
+        recomp_netplay_menu_filter(0u, gamepad);
+    }
     return recomp_netplay_session_back_pad(gamepad) || sampled;
 }
 
