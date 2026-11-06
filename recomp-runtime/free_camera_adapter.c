@@ -105,6 +105,7 @@ static const double MAX_STEP_SECONDS = 0.1;
 
 static struct {
     int enabled;              /* -1 until RECOMP_FREE_CAMERA is read */
+    bool online;              /* this boot plays an online session, a synctest or a replay */
     bool active, started;
     bool toggle_held, freeze_held, overlay_held, cycle_held, reset_held, aim_held, step_held, shot_held;
     bool r3_held;             /* the right stick's click, last sample */
@@ -154,14 +155,22 @@ static bool enabled(void)
 static void capture(uint32_t port, RecompInputGamepad *g, uint16_t stick_clicks);
 static void frozen_frame(uint32_t frame);
 static void hint_panel(void);
+static void set_active(bool active);
 
-bool recomp_free_camera_install(void)
+bool recomp_free_camera_install(bool online)
 {
     if (!enabled()) return false;
-    recomp_input_host_set_capture_hook(capture);
-    recomp_fiber_set_switch_hook(recomp_scene_freeze_switch);
-    recomp_scene_freeze_set_frame_hook(frozen_frame);
-    return true;
+    /* The camera and the freeze change one game's memory or timing only, so
+       an online session would desync; a reboot into one drops them. */
+    state.online = online;
+    if (online) {
+        set_active(false);
+        fprintf(stderr, "recomp free camera: off for this session\n");
+    }
+    recomp_input_host_set_capture_hook(online ? NULL : capture);
+    recomp_fiber_set_switch_hook(online ? NULL : recomp_scene_freeze_switch);
+    recomp_scene_freeze_set_frame_hook(online ? NULL : frozen_frame);
+    return !online;
 }
 
 static float stick(int16_t value)
@@ -487,5 +496,5 @@ static void camera_build(void)
 
 RecompFunction recomp_free_camera_lookup_manual(uint32_t guest_address)
 {
-    return guest_address == CAMERA_BUILD && enabled() ? camera_build : NULL;
+    return guest_address == CAMERA_BUILD && enabled() && !state.online ? camera_build : NULL;
 }
