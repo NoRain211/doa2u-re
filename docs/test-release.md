@@ -22,7 +22,7 @@ Build (once, about 15 minutes):
    On FAT32 or exFAT drives, common on USB sticks, the play folder holds a
    copy of the disc instead of hardlinks, so allow about 4 GB more space.
 2. Open Launcher.exe and drag your Disc 2 ISO onto it, or choose it on the
-   BUILD GAME page, then choose Build. The ISO is only read.
+   BUILD GAME page; the build starts at once. The ISO is only read.
 3. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
    The launcher shows the elapsed time and the build's latest message; keep
