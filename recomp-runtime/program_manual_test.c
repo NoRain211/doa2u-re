@@ -106,6 +106,7 @@ RecompFunction recomp_mwply_lookup_manual(uint32_t address)
     return NULL;
 }
 
+void sub_000244F0(void) {}
 RecompFunction recomp_free_camera_lookup_manual(uint32_t address)
 {
     (void)address;

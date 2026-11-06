@@ -90,6 +90,11 @@ bool recomp_skip_intro;
 static char fight_names[2][16];
 static uint32_t fight_local_side;
 static bool fight_names_set;
+static uint16_t side_profiles[2][16]; /* UTF-16, as the game names profiles */
+static bool side_profiles_set;
+static uint8_t profile_slot[0x12140u];
+
+extern void sub_000244F0(void);
 
 void recomp_program_manual_reset(void)
 {
@@ -108,6 +113,58 @@ void recomp_program_set_fight_names(const char *side0, const char *side1, uint32
         fight_names_set |= length != 0u;
     }
     fight_local_side = local_side;
+}
+
+void recomp_program_set_side_profiles(const char *side0, const char *side1)
+{
+    const char *names[2] = {side0, side1};
+    side_profiles_set = false;
+    for (unsigned side = 0u; side < 2u; ++side) {
+        unsigned length = 0u;
+        for (const unsigned char *c = (const unsigned char *)names[side]; c != NULL && *c != 0u;) {
+            const unsigned more = *c >= 0xf0u ? 3u : *c >= 0xe0u ? 2u : *c >= 0xc0u ? 1u : 0u;
+            uint32_t code = more == 0u ? *c : *c & (0x7fu >> (more + 1u));
+            ++c;
+            for (unsigned i = 0u; i < more && (*c & 0xc0u) == 0x80u; ++i) code = code << 6 | (*c++ & 0x3fu);
+            if (length + (code >= 0x10000u ? 3u : 2u) > 16u) break;
+            if (code >= 0x10000u) {
+                side_profiles[side][length++] = (uint16_t)(0xd800u + ((code - 0x10000u) >> 10));
+                code = 0xdc00u + (code & 0x3ffu);
+            }
+            side_profiles[side][length++] = (uint16_t)code;
+        }
+        side_profiles[side][length] = 0u;
+        side_profiles_set |= length != 0u;
+    }
+}
+
+static void clear_main_profile(void)
+{
+    /* 0x244f0 profile_main_clear points the current profile data (*0x87cfa8)
+       at defaults. Netplay boots no profile, so every port played the default
+       controller settings (20 bytes per port at +0x1e: free buttons, type,
+       vibration, analog command). Read each side's own profile into side
+       slot 1 with profile_read_into_struct (0x24010, cdecl name, profile, 0,
+       0; EAX 0 on success) and give its controller 1 settings to that side's
+       port. Both peers read the same files, so their guests stay alike. */
+    sub_000244F0();
+    const uint32_t slot = 0x007cb660u + sizeof profile_slot; /* g_profile_slots[1] */
+    uint8_t layouts[2][0x14];
+    bool found[2] = {false, false};
+    memcpy(profile_slot, recomp_memory(slot, sizeof profile_slot), sizeof profile_slot);
+    for (unsigned side = 0u; side < 2u; ++side) {
+        if (side_profiles[side][0] == 0u) continue;
+        const uint32_t name = slot + 0x12118u; /* the slot's own name field */
+        memcpy(recomp_memory(name, sizeof side_profiles[side]), side_profiles[side], sizeof side_profiles[side]);
+        const uint32_t args[4] = {name, slot, 0u, 0u};
+        kernel_call_guest(0x00024010u, args, 4u);
+        found[side] = recomp_runtime.registers.eax == 0u;
+        if (found[side]) memcpy(layouts[side], recomp_memory(slot + 0xf200u + 0x1eu, 0x14u), 0x14u);
+    }
+    memcpy(recomp_memory(slot, sizeof profile_slot), profile_slot, sizeof profile_slot);
+    const uint32_t data = *recomp_memory_u32(0x0087cfa8u);
+    for (unsigned side = 0u; side < 2u; ++side)
+        if (found[side]) memcpy(recomp_memory(data + 0x1eu + side * 0x14u, 0x14u), layouts[side], 0x14u);
 }
 
 static void draw_fight_name(void)
@@ -185,6 +242,7 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (recomp_skip_intro && guest_address == 0x000d9300u) return skip_startup_logo;
     if (recomp_skip_intro && guest_address == 0x00069180u) return movie_scene_tick;
     if (fight_names_set && guest_address == 0x0012b460u) return draw_fight_name;
+    if (side_profiles_set && guest_address == 0x000244f0u) return clear_main_profile;
     if (guest_address == 0x002bab9du) return launch_new_image;
     if (guest_address == 0x00336dfeu) return crt_fmod_intrinsic;
     if (guest_address == 0x002bd531u) return host_kernel_init_segment;

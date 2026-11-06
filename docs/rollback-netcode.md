@@ -499,6 +499,13 @@ neither machine's other pads reach the game. Saves go to
 each session starts and filled with the host's blob and then the joiner's,
 so both sides start alike and neither player's own profile changes. Two
 profiles with the same save folder collide, and the joiner's wins. The
+session loads no profile and plays the game's default settings, but each
+player keeps their own controller: when the game sets up those defaults
+(`profile_main_clear`), both sides read each player's profile from the
+session folder and give its controller 1 settings (button type or free
+buttons, vibration and analog command) to that player's port. With the
+joiner's profile on Type C, two scripted runners gave port 2 Type C and
+port 1 the host's Type A, and matched guest RAM through frame 1,800. The
 cached archives in partitions 3 to
 5 stay shared; `run_game.py` prepares them the same way on every machine.
 During a session the host reports no file times, which differ between

@@ -760,6 +760,8 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
         else if (same) fight[side] = tag + " " + fight[side];
     }
     recomp_program_set_fight_names(fight[0].c_str(), fight[1].c_str(), player);
+    recomp_program_set_side_profiles(names[0].empty() ? nullptr : names[0].front().c_str(),
+        names[1].empty() ? nullptr : names[1].front().c_str());
     return true;
 }
 
@@ -921,6 +923,7 @@ static void endSession(const char *reason)
     recomp_kernel_widescreen = recomp_kernel_surround = -1; // the player's own settings offline
     recomp_save_session = nullptr;
     recomp_program_set_fight_names(nullptr, nullptr, 0u);
+    recomp_program_set_side_profiles(nullptr, nullptr);
     backToVersus = true;
     recomp_netplay_menu_return_to_room(socket);
     host.reboot();
