@@ -3,8 +3,8 @@
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
 //     anti-aliasing, SMAA, widescreen, the intro skip and 5.1 surround,
-//     remembers them in private\launcher.json, then plays. An ISO dropped on it
-//     opens the build page with that disc chosen.
+//     remembers them in private\launcher.json, then plays. An ISO dropped on it,
+//     or chosen on the build page, starts the build.
 //   DOA2U.exe (PLAY_ONLY) plays with the saved settings.
 // Adapted from committed DOA3 tools/launcher.cs at 6c782d5: its Horizon Bar menu
 // over the generated castle-bridge backdrop (tools/launcher-background.jpg); no retail art is used.
@@ -673,7 +673,7 @@ class LauncherForm : Form
             {
                 if (build != null) { notice = "Wait for the build to finish"; return; }
                 using (var dialog = new OpenFileDialog { Title = "Dead or Alive Ultimate Disc 2 ISO", Filter = "Xbox ISO|*.iso|All files|*.*" })
-                    if (dialog.ShowDialog() == DialogResult.OK) { gameSource = dialog.FileName; r.Info = SourceName(); }
+                    if (dialog.ShowDialog() == DialogResult.OK) UseDisc(dialog.FileName);
             }
             else if (r.Action == "build") StartBuild();
             else if (r.Action == "update") Update(false);
@@ -713,14 +713,14 @@ class LauncherForm : Form
     protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); if (e.KeyCode == Keys.Down) downHeld = false; }
     protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); downHeld = false; }
 
-    // A dropped ISO becomes the game disc and selects Build.
+    // A dropped or chosen ISO becomes the game disc and starts the build.
     void UseDisc(string path)
     {
         if (build != null) { notice = "Wait for the build to finish"; return; }
         gameSource = path;
         chooseGame.Info = SourceName();
         menu = BuildPage; inPage = true; row = 1;
-        notice = SourceName() + ". Press Build";
+        StartBuild();
     }
 
     static string Dropped(DragEventArgs e)
