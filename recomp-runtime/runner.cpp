@@ -11,6 +11,7 @@
 #include "input_pulse_source.h"
 #include "netplay_menu.h"
 #include "netplay_session.h"
+#include "overlay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -532,6 +533,7 @@ static void bootGuest()
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
+    recomp_d3d_perf_hook = recomp_overlay_perf;
     recomp_netplay_session_install(recomp_synctest_enabled());
     /* The free camera and the scene freeze run only with RECOMP_FREE_CAMERA=1,
        and never online; off, input samples and task switches go unhooked. */

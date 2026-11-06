@@ -41,6 +41,8 @@ extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 /* Optional host hook that draws over a shown frame, into target, just
    before its Present. */
 extern void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
+/* Like the overlay hook, drawn first; the runner's frame rate readout. */
+extern void (*recomp_d3d_perf_hook)(const RecompD3dPresenterTarget *target);
 /* Optional host hook at the frame boundary: guest state is final and the
    frame-locked clock has already advanced. SyncTest snapshots here. */
 extern void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
