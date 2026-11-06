@@ -28,8 +28,8 @@ PROGRAM_EBP = 0
 FUNCTIONS = ROOT / "tools/doa2u/functions"
 # Seconds and output lines each step took in the validated build; they pace the progress bar.
 # The build starts every generated file at once, so the compile advances by time alone.
-STEPS = {"xbe-parser": (5, 253), "disasm": (1440, 33), "lift": (315, 55),
-         "configure": (30, 20), "build": (245, 0)}
+STEPS = {"xbe-parser": (5, 253), "disasm": (1440, 33), "lift": (160, 55),
+         "configure": (30, 20), "build": (225, 0)}
 LABELS = {"xbe-parser": "Reading the executable", "disasm": "Disassembling",
           "lift": "Translating to C", "configure": "Configuring", "build": "Compiling"}
 

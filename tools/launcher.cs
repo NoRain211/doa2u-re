@@ -311,7 +311,7 @@ class LauncherForm : Form
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
-        var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 15 minutes", Action = "build" };
+        var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 10 minutes", Action = "build" };
         pages = new[] {
             new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing and screen shape", Rows = PageRows(resolution, msaa, smaa, screen) },
             new Page { Name = "AUDIO SETTINGS", Info = "Chooses stereo or 5.1 surround", Rows = PageRows(surround) },
