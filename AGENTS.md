@@ -8,7 +8,7 @@ and `docs/bring-up.md` before starting a game lift or runner.
 
 `recomp-runtime/` contains the shared core, kernel host, runner and synthetic
 tests. `recomp_lookup_manual()` binds XAPI kernel lifetime and the initial
-D3D8 5849 device, frame and state APIs to the shared D3D11 presenter.
+D3D8 5849 device, frame and state APIs to the shared semantic presenter.
 DirectSound 5849 owns native device/buffer lifetime and PCM output.
 Effects-image download owns decoded maps/state and binds native I3DL2 reverb.
 XAPI fibers run on native Windows fibers through `fiber_adapter.c`.
@@ -22,8 +22,11 @@ convention and object layout. DOA3 and DOAXBV bindings are references only.
 
 Keep D3D8 device models callable as plain functions. Replace statically linked
 D3D8 at the API boundary and send semantic commands to a host presenter.
-Follow the sister projects' D3D11 presentation seam; do not build an NV2A
-emulator. Replace library code wholesale; decompile only game-owned logic.
+The presenter translates those commands to host GPU APIs; the NV2A stays
+unemulated. SDL_GPU (Vulkan, Direct3D 12, Metal) is the long-term backend on
+every platform: build new graphics work there, and keep the Direct3D 11
+backend as the Windows fallback until SDL_GPU matches it, then remove it.
+Replace library code wholesale; decompile only game-owned logic.
 Document temporary seams beside their manual lookup.
 
 ## Ghidra
