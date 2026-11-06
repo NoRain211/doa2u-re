@@ -26,9 +26,13 @@ Build (once, about 10 minutes):
    The launcher shows the elapsed time and the build's latest message; keep
    it open until it finishes.
 
-Play: open Launcher.exe, pick resolution, MSAA, SMAA and widescreen on VIDEO
-SETTINGS, stereo or 5.1 on AUDIO SETTINGS and the intro skip on MOVIES, then
-choose START GAME. A controller, the keyboard (arrows, Enter, Esc) or the
+Play: open Launcher.exe, pick resolution, MSAA, SMAA, widescreen, the
+renderer and VRR on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the
+intro skip on MOVIES and the unlocks and free camera on GAMEPLAY, then
+choose START GAME. Direct3D 11 is the default renderer; Vulkan is an
+alternative to try if it stutters. VRR works with Direct3D 11 only; turn it
+on only for a G-SYNC or FreeSync display. A controller, the keyboard
+(arrows, Enter, Esc) or the
 mouse all work. It remembers your choices, and DOA2U.exe plays with the same
 choices. Widescreen
 uses the game's own 16:9 camera and menus. The first
@@ -36,8 +40,10 @@ launch copies about 700 MB of the game's disc archives into its hard-disk
 cache, which takes a few seconds. Saves and the cache live in
 private\play-disc. Start + Back + both triggers resets the game.
 
-Every character and costume is unlocked, and the game saves the unlocks
-to your profile.
+With Unlocks on Everything (the default), every character and costume is
+unlocked, and the game saves the unlocks to your profile. Earn offers only
+the default characters and costumes; a profile saved with Everything keeps
+them.
 
 Controls: the first connected controller (Xbox, PlayStation and other
 controllers SDL3 supports). The keyboard drives player 1:
