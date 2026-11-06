@@ -927,9 +927,12 @@ static void stage1_mask(uint32_t device, const RecompD3dVertexLayout *layout, ui
     RecompD3dPresenterDrawCommand mask = {0};
     attach_texture(device, 1u, &mask);
     if (!mask.has_texture) return;
+    /* Leon's Story ending (0x1aa820) reads its mask at UV0 through TEXTURE1, COUNT2. */
+    const bool transformed = !kill_only && stage[1][28] == 0u && stage[1][21] == 2u &&
+        layout->texcoord_count != 0u && !layout->pretransformed;
     if ((kill_only ? layout->texcoord_count == 0u || stage[1][28] != 0u
-                   : layout->texcoord_count != 2u || stage[1][28] != 1u) ||
-        stage[1][21] != 0u || stage[1][20] != 0u ||
+                   : !transformed && (layout->texcoord_count != 2u || stage[1][28] != 1u)) ||
+        (!transformed && stage[1][21] != 0u) || stage[1][20] != 0u ||
         mask.texture.linear || mask.palette_bytes != NULL || stage[1][3] != 2u || stage[1][4] != 2u ||
         stage[1][9] != 0u || stage[1][10] != 0u || (stage[1][11] != 0u && stage[1][11] != 4u) ||
         (mask.texture.mip_levels > 1u && stage[1][5] != 1u && stage[1][5] != 2u))
@@ -937,6 +940,13 @@ static void stage1_mask(uint32_t device, const RecompD3dVertexLayout *layout, ui
             layout->texcoord_count, stage[1][28], stage[1][21], mask.texture.format_byte,
             mask.texture.linear, mask.palette_bytes != NULL, stage[1][3], stage[1][4], stage[1][5],
             stage[1][11]);
+    if (transformed) {
+        recomp_guest_load(draw->reflection_stage1_transform, device + 0xd20u,
+            sizeof draw->reflection_stage1_transform);
+        for (uint32_t i = 0u; i < 16u; ++i)
+            if (!isfinite(draw->reflection_stage1_transform[i])) recomp_stop(2, "d3d8:texture-transform");
+        draw->stage1_mask_transform = true;
+    }
     draw->reflection_texture = mask.texture;
     draw->reflection_bytes = mask.texture_bytes;
     draw->reflection_byte_count = mask.texture_byte_count;
@@ -1165,9 +1175,11 @@ static bool fixed_stages(uint32_t device, const RecompD3dVertexLayout *layout,
         const uint32_t final[6] = {stage[1][12], stage[1][14], stage[1][15],
             stage[1][16], stage[1][18], stage[1][19]};
         draw->modulate_texture_factor = recomp_d3d_texture_factor_modulate_selected(final, stage[2][12]);
-        /* Stage 1 keeps CURRENT color and modulates its alpha by TFACTOR or
-           by its own texture (FUN_0027be10, FUN_0027c400). */
-        const bool stage1_alpha = !draw->has_reflection && stage[1][12] == 2u && stage[1][14] == 1u &&
+        /* Stage 1 keeps CURRENT color, through SELECTARG1 or SELECTARG2, and
+           modulates its alpha by TFACTOR or by its own texture (FUN_0027be10,
+           FUN_0027c400, FUN_001aa820). */
+        const bool stage1_alpha = !draw->has_reflection &&
+            ((stage[1][12] == 2u && stage[1][14] == 1u) || (stage[1][12] == 3u && stage[1][15] == 1u)) &&
             stage[1][16] == 4u && stage[1][19] == 1u && stage[2][12] == 1u &&
             ((stage[1][18] == 3u && !alpha_tfactor && (stage[1][11] == 0u || stage[1][11] == 4u)) ||
              stage[1][18] == 2u);
@@ -1184,13 +1196,14 @@ static bool fixed_stages(uint32_t device, const RecompD3dVertexLayout *layout,
             projected_stages(device, (const uint32_t (*)[32])stage, draw);
         else if (stage[1][12] != 1u && !draw->modulate_texture_factor && !draw->has_reflection && !stage1_alpha)
             recomp_stop(2, "d3d8:draw-texture-stages:%u,%u,%u/%u,%u,%u:%u,%u,%u/%u,%u,%u:%u,%u:"
-                "s2=%u,%u/%u,%u:s3=%u:t2=%u:addr=%u,%u,%u,%u:kill=%u,%u:tc=%x,%x,%x,%x:tc2=%x,%x,%x",
+                "s2=%u,%u/%u,%u:s3=%u:t2=%u:addr=%u,%u,%u,%u:kill=%u,%u:tc=%x,%x,%x,%x:tc2=%x,%x,%x:ret=%08x",
                 stage[0][12], stage[0][14], stage[0][15], stage[0][16], stage[0][18], stage[0][19],
                 stage[1][12], stage[1][14], stage[1][15], stage[1][16], stage[1][18], stage[1][19],
                 stage[2][12], stage[2][16], stage[2][14], stage[2][15], stage[2][18], stage[2][19],
                 stage[3][12], *recomp_memory_u32(device + 0xf90u) != 0u, stage[0][0], stage[0][1],
                 stage[1][0], stage[1][1], stage[0][11], stage[1][11], stage[0][21], stage[0][28],
-                stage[1][21], stage[1][28], stage[2][21], stage[2][28], stage[3][21]);
+                stage[1][21], stage[1][28], stage[2][21], stage[2][28], stage[3][21],
+                *recomp_memory_u32(recomp_runtime.registers.esp));
     }
     return true;
 }

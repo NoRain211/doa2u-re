@@ -234,11 +234,12 @@ int buildDrawShaderSource(
         "#endif\n"
         /* Fixed function adds specular after the texture stages, textured or not. */
         "    if (directional_flags.w > 0.5f) shaded.rgb += input.lit_specular;\n"
-        /* A stage-1 mask; z > 1.5 adds its ALPHAKILL, and z > 2.5 only kills. */
+        /* A stage-1 mask; z 2 adds its ALPHAKILL, z 3 only kills, and z 4
+           multiplies at transformed UV0. */
         "    if (reflection_flags.z > 0.5f) {\n"
         "        float mask = alpha_mask.SampleBias(mask_sampler, input.reflection_coord, reflection_flags.w).a;\n"
-        "        if (reflection_flags.z > 1.5f && mask == 0.0f) discard;\n"
-        "        if (reflection_flags.z < 2.5f) shaded.a *= mask;\n"
+        "        if (reflection_flags.z > 1.5f && reflection_flags.z < 3.5f && mask == 0.0f) discard;\n"
+        "        if (reflection_flags.z < 2.5f || reflection_flags.z > 3.5f) shaded.a *= mask;\n"
         "    }\n"
         /* Table fog per pixel: x 1 linear, 2 exp, 3 exp2; y end or density, z 1/(end - start). */
         "    if (table_fog.x > 0.5f) {\n"
@@ -289,10 +290,13 @@ int buildDrawShaderSource(
               "    output.texcoord2 = input.texcoord2;\n"
               "    output.texcoord3 = input.texcoord3;\n"
             : layout.texcoord_count == 2u ? "    output.texcoord1 = input.texcoord1;\n" : "",
-        /* z > 2.5: a kill-only stage-1 mask reads UV0. */
+        /* z 3: a kill-only stage-1 mask reads UV0; z 4 reads UV0 through TEXTURE1 (COUNT2). */
         layout.texcoord_count == 2u
-            ? "    if (reflection_flags.z > 0.5f) output.reflection_coord = reflection_flags.z > 2.5f ? input.texcoord : input.texcoord1;\n"
-            : has_texcoord ? "    if (reflection_flags.z > 2.5f) output.reflection_coord = input.texcoord;\n" : "",
+            ? "    if (reflection_flags.z > 0.5f) output.reflection_coord = reflection_flags.z > 3.5f\n"
+              "        ? mul(float4(input.texcoord, 1, 0), reflection_transform1).xy\n"
+              "        : reflection_flags.z > 2.5f ? input.texcoord : input.texcoord1;\n"
+            : has_texcoord ? "    if (reflection_flags.z > 2.5f) output.reflection_coord = reflection_flags.z > 3.5f\n"
+                             "        ? mul(float4(input.texcoord, 1, 0), reflection_transform1).xy : input.texcoord;\n" : "",
         has_texcoord && !layout.pretransformed
             ? (has_normal
                 /* Mesh-UV reflections (x == 2) may pair with stage-0 texgen. */
@@ -802,7 +806,10 @@ bool recomp_d3d_draw_constants(
         fog[7] = draw.fog_depth[1];
     }
     if (draw.stage1_alpha_mask)
-        constants_out[138] = draw.stage1_kill_only ? 3.0f : draw.stage1_alpha_kill ? 2.0f : 1.0f;
+        constants_out[138] = draw.stage1_mask_transform ? 4.0f
+            : draw.stage1_kill_only ? 3.0f : draw.stage1_alpha_kill ? 2.0f : 1.0f;
+    if (draw.stage1_mask_transform)
+        std::memcpy(constants_out + 140 + 192 * 4 + 364, draw.reflection_stage1_transform, 64u);
     if (draw.bump_env) {
         float *bump = constants_out + 140 + 192 * 4 + 380;
         std::memcpy(bump, draw.bump_matrices, sizeof draw.bump_matrices);

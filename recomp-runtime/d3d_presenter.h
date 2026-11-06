@@ -243,6 +243,8 @@ typedef struct RecompD3dPresenterDrawCommand {
     bool stage1_alpha_kill;
     /* The stage-1 texture only applies its ALPHAKILL, at UV0; alpha is not multiplied. */
     bool stage1_kill_only;
+    /* The stage-1 mask reads UV0 through reflection_stage1_transform (TEXTURE1, COUNT2). */
+    bool stage1_mask_transform;
     /* Storage aliases the current guest backbuffer, whose pixels are host-owned. */
     bool texture_is_backbuffer;
     /* GetBackBuffer(-1): the frame Present last showed, not the one in progress. */
