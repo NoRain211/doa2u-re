@@ -91,7 +91,8 @@ for now.
 Known limits: this is bring-up software. Story, Watch and the attract demo
 play in development runs on every stage, but many modes and characters
 have not been tried. A draw the port cannot render yet stops the game, and the log
-says why. The Xbox Live menus stop the game, as there is no online service.
+says why. DOA ONLINE finds no Xbox Live account; choosing to make one
+quits to the desktop, as the Xbox would leave for its Dashboard.
 Online play is a test: Windows, Linux and macOS players have not played
 each other yet. If FIND MATCH cannot reach the matchmaker, JOIN ONLINE by
 address still works.

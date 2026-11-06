@@ -14,6 +14,7 @@ static uint32_t guest_stack[32];
 static uint32_t guest_calls[4], guest_call_count, finished;
 static uint8_t scene[8];
 static char guest_path[16];
+static uint32_t launch_reason; /* at 0x3100: the launch data's first field */
 static uint32_t aix_handle; /* 0xa94454: the logo clip's AIX, or 0 */
 static uint8_t aix[2];      /* at 0x4000; byte 1 is its state, 1 while preparing */
 static jmp_buf stopped;
@@ -23,6 +24,7 @@ uint32_t *recomp_memory_u32_checked(uint32_t address)
 {
     if (address == XBOX_KERNEL_DATA_BASE + 0x40u) return &tick;
     if (address == 0x00a94454u) return &aix_handle;
+    if (address == 0x3100u) return &launch_reason;
     if (address >= 0xfc0u && address < 0xfc0u + sizeof guest_stack && address % 4u == 0u)
         return &guest_stack[(address - 0xfc0u) / 4u];
     abort();
@@ -217,21 +219,25 @@ static int test_boot_opening_skip(void)
     return 1;
 }
 
-/* Only the game's own relaunch asks the launcher for a fresh runner. */
+/* Only the game's own relaunch asks the launcher for a fresh runner; a chosen
+   Dashboard ends the game normally and an error Dashboard still fails. */
 static int test_launch_new_image(void)
 {
     RecompFunction function = recomp_lookup_manual(0x002bab9du);
     if (function == NULL) return 0;
-    const struct { const char *path; int code; const char *id; } cases[] = {
-        {"D:\\DOA2.xbe", 4, "xapi:relaunch-title"},
-        {"D:\\doa1.xbe", 2, "xapi:launch-new-image:d:\\doa1.xbe"},
-        {NULL, 2, "xapi:launch-new-image:dashboard"},
+    const struct { const char *path; uint32_t reason; int code; const char *id; } cases[] = {
+        {"D:\\DOA2.xbe", 0u, 4, "xapi:relaunch-title"},
+        {"D:\\doa1.xbe", 0u, 2, "xapi:launch-new-image:d:\\doa1.xbe"},
+        {NULL, 7u, 0, "xapi:dashboard"},
+        {NULL, 1u, 2, "xapi:launch-new-image:dashboard"},
     };
-    for (unsigned i = 0u; i < 3u; ++i) {
+    for (unsigned i = 0u; i < 4u; ++i) {
         memset(guest_path, 0, sizeof guest_path);
         if (cases[i].path != NULL) strcpy(guest_path, cases[i].path);
         recomp_runtime.registers.esp = 0x1000u;
         *recomp_memory_u32(0x1004u) = cases[i].path != NULL ? 0x3000u : 0u;
+        *recomp_memory_u32(0x1008u) = 0x3100u;
+        *recomp_memory_u32(0x3100u) = cases[i].reason;
         if (setjmp(stopped) == 0) {
             function();
             return 0;

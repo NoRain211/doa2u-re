@@ -80,6 +80,10 @@ first tick; attract replays and story movies still play. The game's soft reset
 relaunches its own XBE through XLaunchNewImage (`0x2bab9d`); the runner exits
 with code 4 and `run_game.py` starts a fresh runner, so the relaunch boots
 like a cold start without its launch data.
+A null path opens the Dashboard: the Live menus' account and network prompts
+and the save-space prompts do this when the player answers Yes. The runner
+ends normally there (`xapi:dashboard`, code 0), as the desktop stands in for
+the Dashboard. A launch with reason 1 (error) still stops with code 2.
 
 The optional dedication card (`RECOMP_DEDICATION_CARD`, set by `run_game.py`
 from `private/dedication.bmp`) starts on the first guest read of the staff
