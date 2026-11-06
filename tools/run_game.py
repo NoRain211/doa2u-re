@@ -81,8 +81,8 @@ def saved_settings():
         options["resolution"] = saved["height"]
     if saved.get("msaa") in (1, 2, 4, 8, 16, 32):
         options["msaa"] = saved["msaa"]
-    for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("skipIntro", "skip_intro"),
-                        ("surround", "surround"), ("unlockAll", "unlock_all")):
+    for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("vrr", "vrr"),
+                        ("skipIntro", "skip_intro"), ("surround", "surround"), ("unlockAll", "unlock_all")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     return options
@@ -99,7 +99,7 @@ def open_launcher():
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
-        skip_intro=False, unlock_all=True, surround=None):
+        skip_intro=False, unlock_all=True, surround=None, vrr=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -109,7 +109,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     env = os.environ.copy()
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
                         ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
-                        ("RECOMP_AUDIO_SURROUND", surround)):
+                        ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr)):
         if value is not None:
             env[name] = str(int(value))
     if resolution is not None:
@@ -220,6 +220,8 @@ if __name__ == "__main__":
                         help="Apply SMAA Ultra after MSAA resolve")
     parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
                         help="Output 5.1 through the game's own surround mix")
+    parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
+                        help="Present for a G-SYNC or FreeSync display (Direct3D 11)")
     parser.add_argument("--input-start-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-a-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-buttons-pulse-at", type=int, nargs=2, action="append", default=[],
@@ -252,7 +254,7 @@ if __name__ == "__main__":
                              pick("resolution", args.resolution), args.story_finale,
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
-                             pick("surround", args.surround)))
+                             pick("surround", args.surround), pick("vrr", args.vrr)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)
