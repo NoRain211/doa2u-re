@@ -626,8 +626,8 @@ if(RECOMP_PROGRAM_DIR)
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp
-        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
-        free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c cpu_costume.c
+        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c cpu_costume.c
+        free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c
         host_diagnostics.cpp)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
