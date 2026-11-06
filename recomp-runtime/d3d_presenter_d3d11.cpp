@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
 #include <dxgi1_6.h>
@@ -284,6 +285,11 @@ struct RecompD3dPresenter {
     ID3D11Buffer *draw_vertex_buffer = nullptr;
     ID3D11Buffer *draw_index_buffer = nullptr;
     ID3D11Buffer *draw_constant_buffer = nullptr;
+    /* D3D11.1 ring of per-draw constants, bound by offset; null falls back to
+       draw_constant_buffer, which renames on every draw. */
+    ID3D11DeviceContext1 *context1 = nullptr;
+    ID3D11Buffer *constant_ring = nullptr;
+    UINT constant_ring_used = 0u;
     RasterStateEntry raster_states[kRasterStateSlots]{};
     uint32_t raster_state_count = 0u, next_raster_state_slot = 0u;
     UINT draw_vertex_capacity = 0u;
@@ -480,6 +486,8 @@ void releaseGraphics(RecompD3dPresenter *presenter)
     for (auto &entry : presenter->raster_states) releaseCom(entry.state);
     presenter->raster_state_count = presenter->next_raster_state_slot = 0u;
     releaseCom(presenter->draw_constant_buffer);
+    releaseCom(presenter->constant_ring);
+    releaseCom(presenter->context1);
     releaseCom(presenter->draw_index_buffer);
     releaseCom(presenter->draw_vertex_buffer);
     for (uint32_t i = 0u; i < presenter->draw_pipeline_count; ++i) {
@@ -566,6 +574,61 @@ void releasePresenter(RecompD3dPresenter *presenter)
         UnregisterClassW(kWindowClassName, presenter->instance);
         presenter->owns_window_class = false;
     }
+}
+
+/* Each draw's constants take one slot, a multiple of 16 constants as
+   VSSetConstantBuffers1 requires. */
+constexpr UINT kConstantSlotBytes = (kRecompD3dDrawConstantFloats * sizeof(float) + 255u) & ~255u;
+constexpr UINT kConstantRingBytes = 1u << 24;
+
+/* A discard per draw renames the whole constant buffer every time; AMD's D3D11
+   driver stalls on that at a thousand or more draws a frame (issue #69). */
+void createConstantRing(RecompD3dPresenter *presenter)
+{
+    D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
+    if (FAILED(presenter->context->QueryInterface(IID_PPV_ARGS(&presenter->context1))) ||
+        FAILED(presenter->device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &options, sizeof options)) ||
+        !options.ConstantBufferOffsetting || !options.MapNoOverwriteOnDynamicConstantBuffer) {
+        releaseCom(presenter->context1);
+        return;
+    }
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth = kConstantRingBytes;
+    desc.Usage = D3D11_USAGE_DYNAMIC;
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(presenter->device->CreateBuffer(&desc, nullptr, &presenter->constant_ring)))
+        releaseCom(presenter->context1);
+    presenter->constant_ring_used = kConstantRingBytes;
+}
+
+/* Writes a draw's constants and binds them to the vertex, geometry and pixel stages. */
+bool bindDrawConstants(RecompD3dPresenter *presenter, const float *constants)
+{
+    const UINT size = kRecompD3dDrawConstantFloats * sizeof(float);
+    ID3D11Buffer *buffer = presenter->constant_ring != nullptr
+        ? presenter->constant_ring : presenter->draw_constant_buffer;
+    const bool wrap = presenter->constant_ring == nullptr ||
+        presenter->constant_ring_used + kConstantSlotBytes > kConstantRingBytes;
+    if (wrap) presenter->constant_ring_used = 0u;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(presenter->context->Map(buffer, 0u,
+            wrap ? D3D11_MAP_WRITE_DISCARD : D3D11_MAP_WRITE_NO_OVERWRITE, 0u, &mapped)))
+        return false;
+    std::memcpy(static_cast<uint8_t *>(mapped.pData) + presenter->constant_ring_used, constants, size);
+    presenter->context->Unmap(buffer, 0u);
+    if (presenter->constant_ring == nullptr) {
+        presenter->context->VSSetConstantBuffers(0u, 1u, &buffer);
+        presenter->context->GSSetConstantBuffers(0u, 1u, &buffer);
+        presenter->context->PSSetConstantBuffers(0u, 1u, &buffer);
+        return true;
+    }
+    const UINT first = presenter->constant_ring_used / 16u, count = kConstantSlotBytes / 16u;
+    presenter->context1->VSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
+    presenter->context1->GSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
+    presenter->context1->PSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
+    presenter->constant_ring_used += kConstantSlotBytes;
+    return true;
 }
 
 bool createWindow(RecompD3dPresenter *presenter)
@@ -1550,6 +1613,7 @@ bool ensureSharedDrawState(RecompD3dPresenter *presenter)
     if (FAILED(result)) {
         return false;
     }
+    createConstantRing(presenter);
 
     /* Zero-initialized draw commands keep the original linear/wrap sampler. */
     D3D11_SAMPLER_DESC sampler_desc{};
@@ -1661,23 +1725,6 @@ bool ensureDynamicBuffer(
         return false;
     }
     capacity = size;
-    return true;
-}
-
-bool uploadBuffer(
-    RecompD3dPresenter *presenter,
-    ID3D11Buffer *buffer,
-    const void *source,
-    size_t size)
-{
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-
-    if (FAILED(presenter->context->Map(
-            buffer, 0u, D3D11_MAP_WRITE_DISCARD, 0u, &mapped))) {
-        return false;
-    }
-    std::memcpy(mapped.pData, source, size);
-    presenter->context->Unmap(buffer, 0u);
     return true;
 }
 
@@ -2743,11 +2790,7 @@ RecompD3dPresenterError submitDraw(
     if (!uploadRing(presenter, &presenter->draw_index_buffer,
             presenter->draw_index_capacity, presenter->draw_index_used,
             upload_indices, index_size, D3D11_BIND_INDEX_BUFFER, index_offset) ||
-        !uploadBuffer(
-            presenter,
-            presenter->draw_constant_buffer,
-            draw_constants,
-            sizeof draw_constants)) {
+        !bindDrawConstants(presenter, draw_constants)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
 
@@ -2759,13 +2802,8 @@ RecompD3dPresenterError submitDraw(
         presenter->draw_index_buffer, DXGI_FORMAT_R16_UINT, index_offset);
     presenter->context->IASetPrimitiveTopology(topology);
     presenter->context->VSSetShader(pipeline->vertex_shader, nullptr, 0u);
-    presenter->context->VSSetConstantBuffers(
-        0u, 1u, &presenter->draw_constant_buffer);
     presenter->context->GSSetShader(geometry_line ? pipeline->geometry_shader : nullptr, nullptr, 0u);
-    presenter->context->GSSetConstantBuffers(0u, 1u, &presenter->draw_constant_buffer);
     presenter->context->PSSetShader(pipeline->pixel_shader, nullptr, 0u);
-    presenter->context->PSSetConstantBuffers(
-        0u, 1u, &presenter->draw_constant_buffer);
     const bool volume = draw.texture.volume_depth != 0u;
     ID3D11ShaderResourceView *views[] = {volume ? nullptr : texture_view, mask_view, bump_view,
         volume ? texture_view : nullptr};
