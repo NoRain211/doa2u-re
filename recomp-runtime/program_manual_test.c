@@ -111,6 +111,11 @@ RecompFunction recomp_free_camera_lookup_manual(uint32_t address)
     (void)address;
     return NULL;
 }
+RecompFunction recomp_cpu_costume_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
 
 static int test_fmod(void)
 {

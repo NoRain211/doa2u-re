@@ -102,11 +102,14 @@ final class LauncherView: NSView {
                      ["Everything", "Earn"], boolSetting("unlockAll", true) ? 0 : 1)
     let freeCamera = Row("Free Camera", "In game, F1 or a right-stick click flies the camera", ["Off", "On"],
                          boolSetting("freeCamera", false) ? 1 : 0)
+    let cpuCostumes = Row("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", ["Default", "Random"],
+                          boolSetting("randomCpuCostumes", false) ? 1 : 0)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
-        Page(name: "GAMEPLAY", info: "Chooses the unlocks and whether the free camera is allowed", rows: [unlock, freeCamera]),
+        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes and whether the free camera is allowed",
+             rows: [unlock, cpuCostumes, freeCamera]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
@@ -155,6 +158,7 @@ final class LauncherView: NSView {
             "checkUpdates": checkAtStart.index == 1,
             "unlockAll": unlock.index == 0,
             "freeCamera": freeCamera.index == 1,
+            "randomCpuCostumes": cpuCostumes.index == 1,
         ]
     }
 

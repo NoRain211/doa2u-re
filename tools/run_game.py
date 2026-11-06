@@ -83,7 +83,7 @@ def saved_settings():
         options["msaa"] = saved["msaa"]
     for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("vrr", "vrr"), ("skipIntro", "skip_intro"),
                         ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan"),
-                        ("freeCamera", "free_camera")):
+                        ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     return options
@@ -100,7 +100,8 @@ def open_launcher():
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
-        skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None):
+        skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None,
+        random_cpu_costumes=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -111,7 +112,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
                         ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
                         ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr),
-                        ("RECOMP_FREE_CAMERA", free_camera)):
+                        ("RECOMP_FREE_CAMERA", free_camera), ("RECOMP_RANDOM_CPU_COSTUMES", random_cpu_costumes)):
         if value is not None:
             env[name] = str(int(value))
     if resolution is not None:
@@ -229,6 +230,8 @@ if __name__ == "__main__":
                         help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
                         help="Present for a G-SYNC or FreeSync display (Direct3D 11)")
+    parser.add_argument("--random-cpu-costumes", action=argparse.BooleanOptionalAction, default=None,
+                        help="Dress CPU opponents in random unlocked costumes (offline)")
     parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,
                         help="Windows: render through Vulkan (SDL_GPU) instead of Direct3D 11")
     parser.add_argument("--free-camera", action=argparse.BooleanOptionalAction, default=None,
@@ -266,7 +269,8 @@ if __name__ == "__main__":
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
                              pick("surround", args.surround), pick("vrr", args.vrr),
-                             bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera)))
+                             bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
+                             pick("random_cpu_costumes", args.random_cpu_costumes)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)
