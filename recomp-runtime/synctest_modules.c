@@ -8,6 +8,7 @@
 #include "fiber_adapter.h"
 #include "input_adapter.h"
 #include "kernel_abi.h"
+#include "mwply_adapter.h"
 #include "program_manual.h"
 #include "runtime.h"
 #include "save_transaction.h"
@@ -251,6 +252,7 @@ void recomp_synctest_install_default_modules(void)
 void recomp_reset_runtime_modules(void)
 {
     recomp_kernel_file_reset();
+    recomp_mwply_reset(); /* a session can end mid-movie */
     /* Before the memory reset: these free their guest pool allocations. */
     recomp_dsound_api_reset();
     recomp_d3d8_reset_keeping_window();
@@ -261,6 +263,7 @@ void recomp_reset_runtime_modules(void)
     recomp_kernel_video_reset();
     xbox_HeapReset();
     recomp_program_manual_reset();
+    recomp_program_lookup_reset();
     recomp_input_adapter_reset();
     recomp_xapi_frame_clock_reset();
 }
