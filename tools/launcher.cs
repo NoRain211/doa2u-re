@@ -355,7 +355,7 @@ class LauncherForm : Form
     }
     string BuildStatus()
     {
-        return built ? "Built. Build again after an update" : "Not built yet: choose your Disc 2 ISO, then Build";
+        return built ? "Built. Build again after an update" : "Not built yet: choose or drop your Disc 2 ISO";
     }
 
     string UpdateStatus()
@@ -375,7 +375,8 @@ class LauncherForm : Form
     void Update(bool quiet)
     {
         if (updating) return;
-        if (build != null) { notice = "Wait for the build to finish"; return; }
+        // A quiet start-up check only reads, so it may run beside a build started from a dropped ISO.
+        if (build != null && !quiet) { notice = "Wait for the build to finish"; return; }
         if (!Updater.Available) { notice = UpdateStatus(); return; }
         bool install = pending != null;
         if (!quiet) notice = install ? "Downloading " + pending : "Checking for updates";
