@@ -51,8 +51,9 @@ play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
 Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
-on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS and the intro skip on
-MOVIES, then choose START GAME. A controller, the mouse or touch work; on the
+on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the intro skip on
+MOVIES and the unlocks and free camera on GAMEPLAY, then choose START GAME.
+A controller, the mouse or touch work; on the
 keyboard, arrows move, Enter selects and Esc goes back. It saves the choices
 and starts the game.
 ./run_game.sh plays again with the saved choices. The
