@@ -8,6 +8,7 @@
 #include "d3d_light_model.h"
 #include "d3d_vertex_shader_model.h"
 #include "kernel_abi.h"
+#include "scene_freeze_adapter.h"
 #include "stop_report.h"
 
 #include <float.h>
@@ -1562,6 +1563,13 @@ static bool projected_add_stages(uint32_t device)
         stage[32u + 28u] == 0x20000u;
 }
 
+static uint32_t draw_submitted;
+
+uint32_t recomp_d3d8_draw_submitted(void)
+{
+    return draw_submitted;
+}
+
 static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     uint32_t stride, uint32_t index_address)
 {
@@ -1798,7 +1806,15 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
         draw->line_width = line_width();
         draw->line_antialias = state->edge_antialias != 0u;
     } else if (primitive == 2u) expanded = widen_lines(program || !layout.pretransformed, draw);
-    recomp_d3d8_submit(&command);
+    /* The free camera's clean view leaves out the game's 2D overlay (life
+       bars, timer, names, menus): fixed-function draws already in screen
+       space. Screen-space effect passes run a pixel shader and are kept. The
+       left-out draws still count, so the scene freeze's history of drawing
+       tasks does not change. */
+    if (!(layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u &&
+            recomp_scene_freeze_overlay_hidden()))
+        recomp_d3d8_submit(&command);
+    ++draw_submitted;
     free(sequential);
     free(expanded);
     free(packed);

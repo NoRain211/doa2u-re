@@ -6,6 +6,7 @@
 #include "d3d8_draw_adapter.h"
 #include "dsound_api_adapter.h"
 #include "fiber_adapter.h"
+#include "free_camera_adapter.h"
 #include "input_adapter.h"
 #include "kernel_abi.h"
 #include "mwply_adapter.h"
@@ -199,5 +200,7 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (function == NULL) function = recomp_input_lookup_manual(guest_address);
     /* CRI Sofdec: movies decode on a host thread (mwply_adapter.c). */
     if (function == NULL) function = recomp_mwply_lookup_manual(guest_address);
+    /* The free camera wraps the camera build, only while it is allowed. */
+    if (function == NULL) function = recomp_free_camera_lookup_manual(guest_address);
     return function;
 }

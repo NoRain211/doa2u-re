@@ -2,9 +2,9 @@
 // Windows launcher, built twice by tools/package_test.py with the C# compiler
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
-//     anti-aliasing, SMAA, widescreen, the renderer, VRR, the intro skip and 5.1 surround,
-//     remembers them in private\launcher.json, then plays. An ISO dropped on it,
-//     or chosen on the build page, starts the build.
+//     anti-aliasing, SMAA, widescreen, the renderer, VRR, the intro skip, 5.1 surround and
+//     the free camera, remembers them in private\launcher.json, then plays. An ISO
+//     dropped on it, or chosen on the build page, starts the build.
 //   DOA2U.exe (PLAY_ONLY) plays with the saved settings.
 // Adapted from committed DOA3 tools/launcher.cs at 6c782d5: its Horizon Bar menu
 // over the generated castle-bridge backdrop (tools/launcher-background.jpg); no retail art is used.
@@ -252,7 +252,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, intro, unlock, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, intro, unlock, freeCamera, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -318,6 +318,7 @@ class LauncherForm : Form
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
+        freeCamera = Choice("Free Camera", "In game, F1 or a right-stick click flies the camera", new[] { "Off", "On" }, Game.Bool(settings, "freeCamera", false), 0);
         gameSource = Game.Str(settings, "game_source", null);
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
@@ -327,7 +328,7 @@ class LauncherForm : Form
             new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape, renderer and VRR", Rows = PageRows(resolution, msaa, smaa, screen, renderer, vrr) },
             new Page { Name = "AUDIO SETTINGS", Info = "Chooses stereo or 5.1 surround", Rows = PageRows(surround) },
             new Page { Name = "MOVIES", Info = "Plays or skips the logo and opening movies at boot", Rows = PageRows(intro) },
-            new Page { Name = "GAMEPLAY", Info = "Offers every character and costume, or leaves them to earn through play", Rows = PageRows(unlock) },
+            new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks and whether the free camera is allowed", Rows = PageRows(unlock, freeCamera) },
             new Page { Name = "BUILD GAME", Info = BuildStatus(), Rows = new[] { chooseGame, buildRow, new Row { Label = "Exit", Info = "Returns to the menu", Action = "back" } } },
             new Page { Name = "START GAME", Info = "Saves these settings and starts the game", Rows = new Row[0], Action = "play" },
             new Page { Name = "UPDATE", Info = UpdateStatus(), Rows = PageRows(updateRow, checkAtStart) },
@@ -425,7 +426,7 @@ class LauncherForm : Form
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index == 1 }, { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
-            { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
+            { "freeCamera", freeCamera.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }

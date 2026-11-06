@@ -44,6 +44,11 @@ bool recomp_fiber_adapter_state_restorable(const void *state);
 /* Compares the guest-visible fiber model and slot bookkeeping. Host stack
    bytes hold dead locals and are not part of the simulation. */
 bool recomp_fiber_adapter_state_equal(const void *left, const void *right, size_t size);
+/* Consulted on each SwitchToFiber between two known fibers, with the running
+   fiber and the target. Returning true declines the switch: the call returns
+   at once, as if the target had run and switched straight back. */
+typedef bool (*RecompFiberSwitchHook)(uint32_t outgoing_handle, uint32_t target_handle);
+void recomp_fiber_set_switch_hook(RecompFiberSwitchHook hook);
 
 #ifdef __cplusplus
 }
