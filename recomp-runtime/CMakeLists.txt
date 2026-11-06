@@ -33,6 +33,19 @@ if(WIN32)
         add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
             copy_if_different "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:${target}>")
     endfunction()
+    # The Vulkan renderer compiles its HLSL with shaderc at run time. LWJGL's
+    # build is one self-contained DLL (BSD-3-Clause and Apache-2.0; see NOTICE).
+    set(_shaderc_jar "${CMAKE_CURRENT_BINARY_DIR}/lwjgl-shaderc-3.4.3-natives-windows.jar")
+    file(DOWNLOAD https://repo1.maven.org/maven2/org/lwjgl/lwjgl-shaderc/3.4.3/lwjgl-shaderc-3.4.3-natives-windows.jar
+        "${_shaderc_jar}"
+        EXPECTED_HASH SHA256=e8e631d007b36edf1440cb4d42654a9b5c03bcb91b9c333c6a81ec6a3911f8bc)
+    file(ARCHIVE_EXTRACT INPUT "${_shaderc_jar}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/shaderc"
+        PATTERNS windows/x64/org/lwjgl/shaderc/shaderc.dll)
+    set(RECOMP_SHADERC_DLL "${CMAKE_CURRENT_BINARY_DIR}/shaderc/windows/x64/org/lwjgl/shaderc/shaderc.dll")
+    function(recomp_use_shader_compiler target)
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
+            copy_if_different "${RECOMP_SHADERC_DLL}" "$<TARGET_FILE_DIR:${target}>")
+    endfunction()
 else()
     # macOS builds need SDL3 (brew install sdl3). Linux uses the system SDL3,
     # or builds it when RECOMP_FETCH_SDL3 is on, as build_game.py asks (Ubuntu
@@ -329,7 +342,8 @@ add_test(NAME recomp-runtime-unpaced COMMAND "${CMAKE_COMMAND}" -E env
 add_executable(recomp_d3d_capture_test d3d_presenter_capture_test.cpp d3d_presenter_capture.cpp)
 add_test(NAME recomp-runtime-d3d-capture COMMAND recomp_d3d_capture_test)
 # The draw shader and constants are shared; the rest of the presenter is
-# Direct3D 11 on Windows and SDL_GPU elsewhere.
+# Direct3D 11 on Windows and SDL_GPU elsewhere. Windows also builds the SDL_GPU
+# presenter as its Vulkan renderer.
 set(RECOMP_PRESENTER_SHARED d3d_draw_shader.cpp d3d_vertex_program.cpp d3d_draw_model.c
     d3d_texture_model.c d3d_vblank.cpp)
 if(WIN32)
@@ -338,14 +352,22 @@ if(WIN32)
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 recomp_keyboard)
+    set(_sdl_gpu_presenter recomp_d3d_presenter_vulkan)
 else()
-    add_library(recomp_d3d_presenter STATIC
-        d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp
-        ${RECOMP_PRESENTER_SHARED})
-    target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(recomp_d3d_presenter PUBLIC recomp_keyboard)
-    recomp_use_sdl3(recomp_d3d_presenter)
-    recomp_use_shader_compiler(recomp_d3d_presenter)
+    set(_sdl_gpu_presenter recomp_d3d_presenter)
+endif()
+add_library(${_sdl_gpu_presenter} STATIC
+    d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp
+    ${RECOMP_PRESENTER_SHARED})
+target_include_directories(${_sdl_gpu_presenter} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_keyboard)
+if(WIN32)
+    # Tests and the runner tell the inline SDL_GPU presenter from the Direct3D 11 one.
+    target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)
+    target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3)
+else()
+    recomp_use_sdl3(${_sdl_gpu_presenter})
+    recomp_use_shader_compiler(${_sdl_gpu_presenter})
 endif()
 add_executable(recomp_d3d_presenter_test d3d_presenter_thread_test.cpp xapi_clock.cpp d3d_card_model.c)
 target_link_libraries(recomp_d3d_presenter_test PRIVATE recomp_d3d_presenter)
@@ -356,6 +378,17 @@ endif()
 if(WIN32 OR SDL3_FOUND)
     add_test(NAME recomp-runtime-d3d-presenter COMMAND recomp_d3d_presenter_test)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES TIMEOUT 60)
+endif()
+if(WIN32)
+    add_executable(recomp_d3d_presenter_vulkan_test d3d_presenter_thread_test.cpp xapi_clock.cpp d3d_card_model.c)
+    target_link_libraries(recomp_d3d_presenter_vulkan_test PRIVATE recomp_d3d_presenter_vulkan)
+    recomp_use_sdl3(recomp_d3d_presenter_vulkan_test)
+    recomp_use_shader_compiler(recomp_d3d_presenter_vulkan_test)
+    add_test(NAME recomp-runtime-d3d-presenter-vulkan COMMAND recomp_d3d_presenter_vulkan_test)
+    # The two presenter tests share the GPU; side by side they pass their timeouts.
+    set_tests_properties(recomp-runtime-d3d-presenter-vulkan PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77
+        RESOURCE_LOCK gpu)
+    set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES RESOURCE_LOCK gpu)
 endif()
 
 add_executable(recomp_program_abi_call_test program_abi_call_test.c)
@@ -537,7 +570,8 @@ if(RECOMP_PROGRAM_DIR)
     # runner, the Makefile generator would start them only after every library.
     add_library(recomp_program_objects OBJECT "${_missing_source}" ${_program_sources})
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
-    add_executable(recomp_program_runner runner.cpp program_adapters.c program_manual.c
+    # Both Windows renderers link these once-compiled runner objects.
+    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c
@@ -548,7 +582,7 @@ if(RECOMP_PROGRAM_DIR)
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
-        host_diagnostics.cpp $<TARGET_OBJECTS:recomp_program_objects>)
+        host_diagnostics.cpp)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
     set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
@@ -581,7 +615,7 @@ if(RECOMP_PROGRAM_DIR)
     string(SHA256 _netplay_build "${_netplay_version}\n${_manifest_sha256}\n${_xbe_sha256}\n")
     message(STATUS "Netplay build ${_netplay_build} (${_netplay_version})")
     # RECOMP_PORTABLE_MATH gives every host the same transcendentals and RCPSS/RSQRTSS.
-    foreach(_target recomp_program_runner recomp_program_objects)
+    foreach(_target recomp_runner_objects recomp_program_objects)
         target_compile_definitions(${_target} PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
         if(MSVC)
             # /MP compiles the large generated chunks side by side inside one project.
@@ -596,13 +630,28 @@ if(RECOMP_PROGRAM_DIR)
         # The lifter writes conditions as if ((a == b)); clang would warn on every one.
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
-    target_link_libraries(recomp_program_runner PRIVATE recomp_kernel recomp_xbe recomp_d3d_presenter recomp_audio
-        recomp_portable_math libminiupnpc-static)
+    set(_runner_libraries recomp_kernel recomp_xbe recomp_audio recomp_portable_math libminiupnpc-static)
     if(WIN32)
-        target_link_libraries(recomp_program_runner PRIVATE dbghelp user32 ws2_32)
+        list(APPEND _runner_libraries dbghelp user32 ws2_32)
     endif()
+    # The presenter only lends its headers here; each runner links its own.
+    target_link_libraries(recomp_runner_objects PRIVATE ${_runner_libraries} recomp_d3d_presenter)
+    if(TARGET SDL3::SDL3)
+        target_link_libraries(recomp_runner_objects PRIVATE SDL3::SDL3)
+    endif()
+    target_include_directories(recomp_runner_objects PRIVATE "${_derived_dir}")
+    add_executable(recomp_program_runner
+        $<TARGET_OBJECTS:recomp_runner_objects> $<TARGET_OBJECTS:recomp_program_objects>)
+    target_link_libraries(recomp_program_runner PRIVATE ${_runner_libraries} recomp_d3d_presenter)
     recomp_use_sdl3(recomp_program_runner)
-    target_include_directories(recomp_program_runner PRIVATE "${_derived_dir}")
+    if(WIN32)
+        # The Vulkan renderer: the same runner with the SDL_GPU presenter.
+        add_executable(recomp_program_runner_vulkan
+            $<TARGET_OBJECTS:recomp_runner_objects> $<TARGET_OBJECTS:recomp_program_objects>)
+        target_link_libraries(recomp_program_runner_vulkan PRIVATE ${_runner_libraries} recomp_d3d_presenter_vulkan)
+        recomp_use_sdl3(recomp_program_runner_vulkan)
+        recomp_use_shader_compiler(recomp_program_runner_vulkan)
+    endif()
     # Sofdec movies decode their MPEG-1 video with pl_mpeg (MIT; see NOTICE),
     # patched for TMPGEnc's 11-bit intra DC.
     file(DOWNLOAD https://raw.githubusercontent.com/phoboslab/pl_mpeg/c871f2be022ece7ef4f64230b4fb8e1fb9eb6023/pl_mpeg.h

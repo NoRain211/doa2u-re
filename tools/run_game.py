@@ -82,7 +82,7 @@ def saved_settings():
     if saved.get("msaa") in (1, 2, 4, 8, 16, 32):
         options["msaa"] = saved["msaa"]
     for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("skipIntro", "skip_intro"),
-                        ("surround", "surround"), ("unlockAll", "unlock_all")):
+                        ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     return options
@@ -99,7 +99,7 @@ def open_launcher():
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
-        skip_intro=False, unlock_all=True, surround=None):
+        skip_intro=False, unlock_all=True, surround=None, vulkan=False):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -138,8 +138,11 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     if receipt["recipe"]["xbe_sha256"] != sha256(selected) or program_manifest(generated) != (
             receipt["manifest_sha256"], receipt["ebp_count"]):
         raise ValueError("Game or generated sources differ from the build receipt")
-    runner = runner_path(ROOT)
-    if sha256(runner) != receipt["runner_sha256"]:
+    runner = runner_path(ROOT, vulkan)
+    expected = receipt.get("vulkan_runner_sha256" if vulkan and sys.platform == "win32" else "runner_sha256")
+    if expected is None:
+        raise ValueError("This build has no Vulkan renderer; build the game again")
+    if sha256(runner) != expected:
         raise ValueError("Runner differs from its successful build receipt")
     # A finale run clears Story, so it keeps its unlocks out of the player's saves.
     disc = ROOT / ("private/probe-disc" if isolated or story_finale else "private/play-disc")
@@ -220,6 +223,8 @@ if __name__ == "__main__":
                         help="Apply SMAA Ultra after MSAA resolve")
     parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
                         help="Output 5.1 through the game's own surround mix")
+    parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,
+                        help="Windows: render through Vulkan (SDL_GPU) instead of Direct3D 11")
     parser.add_argument("--input-start-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-a-pulse-at", type=int, action="append", default=[])
     parser.add_argument("--input-buttons-pulse-at", type=int, nargs=2, action="append", default=[],
@@ -252,7 +257,7 @@ if __name__ == "__main__":
                              pick("resolution", args.resolution), args.story_finale,
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
-                             pick("surround", args.surround)))
+                             pick("surround", args.surround), bool(pick("vulkan", args.vulkan))))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

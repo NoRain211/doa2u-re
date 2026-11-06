@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-/* The presenter backend for macOS (Metal) and Linux (Vulkan), through
-   SDL_GPU. It follows the Direct3D 11 backend (d3d_presenter_d3d11.cpp) call
+/* The presenter backend for macOS (Metal), and Linux and Windows (Vulkan),
+   through SDL_GPU. It follows the Direct3D 11 backend (d3d_presenter_d3d11.cpp) call
    for call: the same draw shader and constants (d3d_draw_shader.cpp), target
    sizes, declines and resource lifetimes. Where SDL_GPU lacks a Direct3D 11
    feature this file says so: widened lines are expanded on the CPU instead of
@@ -18,7 +18,9 @@
 #include <SDL3/SDL.h>
 
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <array>

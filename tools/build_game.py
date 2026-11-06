@@ -129,10 +129,11 @@ def use_windows_newlines(generated):
             path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
 
 
-def runner_path(root=ROOT):
-    """The Windows runner builds with llvm-mingw in its own folder, so an old MSVC cache cannot clash."""
+def runner_path(root=ROOT, vulkan=False):
+    """The Windows runner builds with llvm-mingw in its own folder, so an old MSVC cache cannot clash.
+    Windows also builds a Vulkan runner; elsewhere the one runner already renders through SDL_GPU."""
     if sys.platform == "win32":
-        return root / "build/recomp-program-mingw/recomp_program_runner.exe"
+        return root / f"build/recomp-program-mingw/recomp_program_runner{'_vulkan' if vulkan else ''}.exe"
     return root / "build/recomp-program/recomp_program_runner"
 
 
@@ -299,11 +300,15 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                 f"-DRECOMP_PROGRAM_EBP_EXPECTED={receipt['ebp_count']}"], logs / "configure.log")
     # Linux builds the settings launcher beside the runner; SteamOS has no compiler.
     targets = ["recomp_program_runner"] + (["recomp_launcher"] if sys.platform.startswith("linux") else [])
+    if windows:
+        targets.append("recomp_program_runner_vulkan")
     # Generated chunks are large; outside Windows more jobs than this can exhaust memory.
     jobs = str(os.cpu_count() or 4) if windows else str(min(4, os.cpu_count() or 1))
     progress.run(["cmake", "--build", build_dir, "--parallel", jobs,
                 "--target", *targets], logs / "build.log")
     receipt["runner_sha256"] = sha256(runner_path())
+    if windows:
+        receipt["vulkan_runner_sha256"] = sha256(runner_path(vulkan=True))
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
 

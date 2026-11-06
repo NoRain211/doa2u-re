@@ -2,7 +2,7 @@
 // Windows launcher, built twice by tools/package_test.py with the C# compiler
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
-//     anti-aliasing, SMAA, widescreen, the intro skip and 5.1 surround,
+//     anti-aliasing, SMAA, widescreen, the renderer, the intro skip and 5.1 surround,
 //     remembers them in private\launcher.json, then plays. An ISO dropped on it
 //     opens the build page with that disc chosen.
 //   DOA2U.exe (PLAY_ONLY) plays with the saved settings.
@@ -243,7 +243,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, surround, intro, unlock, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, screen, renderer, surround, intro, unlock, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -304,6 +304,7 @@ class LauncherForm : Form
             Names = new[] { "Off", "2x", "4x", "8x", "16x", "32x" }, Index = savedMsaa < 0 ? Samples.Length - 1 : savedMsaa, Default = Samples.Length - 1 };
         smaa = Choice("SMAA", "Smooths edges with SMAA Ultra after MSAA", new[] { "Off", "On" }, Game.Bool(settings, "smaa", true), 1);
         screen = Choice("Screen", "16:9 uses the game's own widescreen camera and menus", new[] { "4:3", "16:9" }, Game.Bool(settings, "widescreen", true), 1);
+        renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "Direct3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
@@ -313,7 +314,7 @@ class LauncherForm : Form
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
         var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 10 minutes", Action = "build" };
         pages = new[] {
-            new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing and screen shape", Rows = PageRows(resolution, msaa, smaa, screen) },
+            new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape and renderer", Rows = PageRows(resolution, msaa, smaa, screen, renderer) },
             new Page { Name = "AUDIO SETTINGS", Info = "Chooses stereo or 5.1 surround", Rows = PageRows(surround) },
             new Page { Name = "MOVIES", Info = "Plays or skips the logo and opening movies at boot", Rows = PageRows(intro) },
             new Page { Name = "GAMEPLAY", Info = "Offers every character and costume, or leaves them to earn through play", Rows = PageRows(unlock) },
@@ -412,7 +413,7 @@ class LauncherForm : Form
     {
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
-            { "widescreen", screen.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
+            { "widescreen", screen.Index == 1 }, { "vulkan", renderer.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
     }
 
