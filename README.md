@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus, MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (also widened to 16:10 or ultrawide), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -95,7 +95,7 @@ keeps running.
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
-| Native 16:9 widescreen, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
+| Native 16:9 widescreen, 16:10 and ultrawide, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
@@ -222,10 +222,20 @@ accepts the registry path as its first argument. Names outside
 ```powershell
 python tools/run_game.py --play --resolution 2160 --widescreen --msaa 32 --smaa
 python tools/run_game.py --play --no-widescreen --msaa 1 --no-smaa
+python tools/run_game.py --play --resolution 1440 --screen 3440:1440
 ```
 
 The game picks its own 16:9 camera and menu layouts from the dashboard video
-setting, and the presenter shows that image at 16:9. MSAA resolves before
+setting, and the presenter shows that image at 16:9.
+`--screen W:H` (`RECOMP_D3D_WIDESCREEN=W:H`), from 4:3 to 4:1, keeps that
+widescreen mode in another shape: the runner widens the game's projection to
+it, so the 3D view fills the screen at the same height, and the presenter
+keeps the 16:9 HUD and menus in their shape in the screen's center. The
+launcher's **16:10** and **Ultrawide** (the primary monitor's own shape)
+choices set it. Online sessions and replays render 16:9, fitted with black
+bars, as both sides must compute the same frames. Above 480p the window
+fills the screen borderless in any shape, with black bars around a picture
+of another shape. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3,

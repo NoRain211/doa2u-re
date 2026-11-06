@@ -16,6 +16,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_sdl_gpu.h"
 #include "screenshot.h"
+#include "widescreen.h"
 
 #include <SDL3/SDL.h>
 
@@ -273,6 +274,7 @@ struct RecompD3dPresenter {
     // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
     SDL_GPUFence *present_fences[2] = {};
     bool widescreen = false;
+    uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;
     SDL_GPUSampleCount msaa = SDL_GPU_SAMPLECOUNT_1;
     uint32_t msaa_count = 1u;
@@ -357,7 +359,7 @@ bool immediate_present;
 uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
 {
     return static_cast<uint32_t>(presenter->widescreen
-        ? (height * 16u + 8u) / 9u
+        ? (height * presenter->aspect_w + presenter->aspect_h - 1u) / presenter->aspect_h
         : (height * 4u + 1u) / 3u);
 }
 
@@ -2777,7 +2779,8 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height) &&
         swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
         // The picture keeps the game's aspect, which a netplay session may set apart from the window's.
-        const float source_aspect = present.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+        const float source_aspect = present.aspect > 0.0f ? present.aspect
+            : presenter->widescreen ? static_cast<float>(presenter->aspect_w) / presenter->aspect_h : 4.0f / 3.0f;
         int x = 0, y = 0, width = static_cast<int>(swap_width), height = static_cast<int>(swap_height);
         if (static_cast<float>(swap_width) / swap_height > source_aspect) {
             width = static_cast<int>(swap_height * source_aspect + 0.5f);
@@ -3037,7 +3040,10 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     }
     created->config = *config;
     created->owner_thread = std::this_thread::get_id();
-    created->widescreen = envFlag("RECOMP_D3D_WIDESCREEN");
+    unsigned aspect_w = 16u, aspect_h = 9u;
+    created->widescreen = recomp_widescreen(&aspect_w, &aspect_h);
+    created->aspect_w = aspect_w;
+    created->aspect_h = aspect_h;
     created->performance_counter = envFlag("RECOMP_PERF_COUNTER");
     created->draw_log_trigger = std::getenv("RECOMP_D3D_DRAW_LOG");
     created->smaa = envFlag("RECOMP_D3D_SMAA");

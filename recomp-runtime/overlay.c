@@ -184,6 +184,6 @@ void recomp_overlay_submit(const RecompD3dPresenterTarget *target, float display
 
 float recomp_overlay_display_aspect(void)
 {
-    return recomp_kernel_video_flags() & 0x00010000u ? 16.0f / 9.0f : 4.0f / 3.0f;
+    return recomp_kernel_video_flags() & 0x00010000u ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
 }
 

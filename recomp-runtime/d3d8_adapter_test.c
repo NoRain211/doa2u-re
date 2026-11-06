@@ -232,6 +232,7 @@ RecompD3dPresenterError recomp_d3d_presenter_destroy(
 
 static uint32_t saved_display, freed_display;
 uint32_t recomp_kernel_av_get_saved_data_address(void) { return saved_display; }
+float recomp_kernel_widescreen_aspect(void) { return 16.0f / 9.0f; }
 void recomp_kernel_av_set_saved_data_address(uint32_t address) { saved_display = address; }
 uint32_t recomp_kernel_allocate_contiguous(
     uint32_t size, uint32_t highest_address, uint32_t alignment, uint32_t protect)

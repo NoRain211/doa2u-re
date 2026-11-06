@@ -172,6 +172,8 @@ extern int recomp_kernel_widescreen;
 extern int recomp_kernel_surround;
 uint32_t recomp_kernel_video_flags(void);
 uint32_t recomp_kernel_audio_flags(void);
+/* Width over height of a widescreen frame: RECOMP_D3D_WIDESCREEN's shape. */
+float recomp_kernel_widescreen_aspect(void);
 
 /* Plain RTL models used by their import adapters. */
 uint32_t recomp_kernel_ntstatus_to_dos_error(uint32_t status);

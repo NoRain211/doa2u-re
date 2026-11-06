@@ -18,7 +18,7 @@ float recomp_overlay_text_width(const char *text, float scale);
 /* Draws the queued shapes into target, shown at display_aspect (width / height),
    and empties the queue. */
 void recomp_overlay_submit(const RecompD3dPresenterTarget *target, float display_aspect);
-/* 16:9 when RECOMP_D3D_WIDESCREEN asks for the game's wide mode, else 4:3. */
+/* The game's widescreen shape (recomp_kernel_widescreen_aspect) in its wide mode, else 4:3. */
 float recomp_overlay_display_aspect(void);
 
 #ifdef __cplusplus

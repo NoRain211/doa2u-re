@@ -1,5 +1,7 @@
 #include "kernel_abi.h"
+#include "widescreen.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,6 +109,25 @@ int recomp_kernel_video_test(void)
     recomp_kernel_widescreen = recomp_kernel_surround = 0;
     passed &= expect_u32("session 4:3 over the player's 16:9", recomp_kernel_video_flags(), 0x004e0000u);
     passed &= expect_u32("session stereo over the player's 5.1", recomp_kernel_audio_flags(), 0u);
+    /* A W:H shape is widescreen in that shape offline; a session keeps 16:9. */
+    recomp_kernel_widescreen = -1;
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "16:10");
+    passed &= expect_u32("a shape is widescreen", recomp_kernel_video_flags(), 0x004f0000u);
+    passed &= expect_u32("16:10 shape", fabsf(recomp_kernel_widescreen_aspect() - 1.6f) < 1e-6f, 1u);
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "5:1");
+    passed &= expect_u32("a shape beyond 4:1 is 16:9",
+        fabsf(recomp_kernel_widescreen_aspect() - 16.0f / 9.0f) < 1e-6f, 1u);
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "64:27");
+    recomp_kernel_widescreen = 1;
+    passed &= expect_u32("a session keeps 16:9", fabsf(recomp_kernel_widescreen_aspect() - 16.0f / 9.0f) < 1e-6f, 1u);
+    float scale[2];
+    recomp_widescreen_2d_scale(64.0f / 27.0f, 640.0f, 100.0f, 300.0f, scale);
+    passed &= expect_u32("ultrawide pillarboxes the 2D layer",
+        fabsf(scale[0] - 0.75f) < 1e-6f && scale[1] == 1.0f, 1u);
+    recomp_widescreen_2d_scale(1.6f, 640.0f, 100.0f, 300.0f, scale);
+    passed &= expect_u32("16:10 letterboxes the 2D layer", scale[0] == 1.0f && fabsf(scale[1] - 0.9f) < 1e-6f, 1u);
+    recomp_widescreen_2d_scale(64.0f / 27.0f, 640.0f, 0.0f, 640.0f, scale);
+    passed &= expect_u32("a full-width quad fills the screen", scale[0] == 1.0f && scale[1] == 1.0f, 1u);
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
     _putenv_s("RECOMP_AUDIO_SURROUND", "");
     recomp_kernel_widescreen = recomp_kernel_surround = -1;

@@ -117,7 +117,8 @@ SyncTest.
   them to the game for the session. Each player keeps their own window and
   speakers. The presenter fits the game's 4:3 or 16:9 picture into the
   window with black bars, and a player on stereo speakers hears the 5.1
-  mix folded to stereo. Fights to frame
+  mix folded to stereo. A 16:10 or ultrawide player gets the 16:9 picture
+  too, as the shape changes projections in hashed guest RAM. Fights to frame
   1,800 with the two settings crossed both ways, and with 4x MSAA on one
   side, kept guest RAM equal.
 
