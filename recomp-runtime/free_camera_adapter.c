@@ -302,12 +302,12 @@ static void capture(uint32_t port, RecompInputGamepad *g, uint16_t stick_clicks)
     state.freeze_held = freeze;
     const bool paused = recomp_scene_freeze_active();
 
-    const bool overlay = (state.active || paused) && (KEY(H) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_BLACK)));
+    const bool overlay = (state.active || paused) && (KEY(H) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_WHITE)));
     if (overlay && !state.overlay_held) recomp_scene_freeze_set_overlay_hidden(!recomp_scene_freeze_overlay_hidden());
     state.overlay_held = overlay;
 
     /* A step press moves one frame; held, it steps every frame after a while. */
-    const bool step = (state.active || paused) && (KEY(PERIOD) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_WHITE)));
+    const bool step = (state.active || paused) && (KEY(PERIOD) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_BLACK)));
     const uint64_t now = SDL_GetTicks();
     if (step && !state.step_held) { recomp_scene_freeze_step(); state.step_since = now; }
     else if (step && now - state.step_since >= STEP_REPEAT_AFTER_MS) recomp_scene_freeze_step();

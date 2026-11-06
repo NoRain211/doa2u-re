@@ -237,9 +237,10 @@ static void read_pad(SDL_Gamepad *host, RecompInputGamepad *gamepad)
     gamepad->analog_buttons[RECOMP_INPUT_ANALOG_B] = button_pressure(host, SDL_GAMEPAD_BUTTON_EAST);
     gamepad->analog_buttons[RECOMP_INPUT_ANALOG_X] = button_pressure(host, SDL_GAMEPAD_BUTTON_WEST);
     gamepad->analog_buttons[RECOMP_INPUT_ANALOG_Y] = button_pressure(host, SDL_GAMEPAD_BUTTON_NORTH);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_BLACK] =
-        button_pressure(host, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    /* White sits left of Black on the Xbox pad, as Q is left of W. */
     gamepad->analog_buttons[RECOMP_INPUT_ANALOG_WHITE] =
+        button_pressure(host, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_BLACK] =
         button_pressure(host, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
     /* SDL triggers are 0..32767; the guest expects 0..255. */
     gamepad->analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] =
