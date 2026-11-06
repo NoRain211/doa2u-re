@@ -84,7 +84,8 @@ bool loadShaderc()
     bind(shaderc.result_release, shaderc_result_release);
 #else
 #ifdef _WIN32
-    HMODULE library = LoadLibraryA("shaderc.dll");
+    // Only the pinned copy beside the runner; never the working directory or PATH.
+    HMODULE library = LoadLibraryExA("shaderc.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     if (library == nullptr) {
         std::fprintf(stderr, "recomp shaders: the Vulkan renderer needs shaderc.dll beside the runner; "
             "build the game again\n");

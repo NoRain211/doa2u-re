@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus, MSAA up to 32x and SMAA Ultra. Water
+  widescreen camera and menus, MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -91,7 +91,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
 | Native 16:9 widescreen, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
-| Vulkan renderer on Windows | Working, chosen in the launcher; MSAA stops at 8x |
+| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |

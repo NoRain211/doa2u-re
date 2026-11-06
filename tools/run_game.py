@@ -139,9 +139,11 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             receipt["manifest_sha256"], receipt["ebp_count"]):
         raise ValueError("Game or generated sources differ from the build receipt")
     runner = runner_path(ROOT, vulkan)
-    expected = receipt.get("vulkan_runner_sha256" if vulkan and sys.platform == "win32" else "runner_sha256")
+    use_vulkan = vulkan and sys.platform == "win32"
+    expected = receipt.get("vulkan_runner_sha256" if use_vulkan else "runner_sha256")
     if expected is None:
-        raise ValueError("This build has no Vulkan renderer; build the game again")
+        raise ValueError("This build has no Vulkan renderer; build the game again" if use_vulkan
+                         else "This build has no runner; build the game again")
     if sha256(runner) != expected:
         raise ValueError("Runner differs from its successful build receipt")
     # A finale run clears Story, so it keeps its unlocks out of the player's saves.

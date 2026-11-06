@@ -16,8 +16,9 @@ Both presenters build their draw shaders from one HLSL source
 (`recomp-runtime/d3d_draw_shader.cpp`), so a shading fix reaches every
 platform. Windows builds a second runner, `recomp_program_runner_vulkan.exe`,
 with the SDL_GPU presenter; the launcher's Renderer setting picks it, and the
-build fetches LWJGL's `shaderc.dll` for it. The differences listed below apply
-to it too. The macOS and Linux host layer comes from the sister projects
+build fetches LWJGL's `shaderc.dll` for it. The rendering differences listed
+below apply to it too; it keeps XAudio2. The macOS and Linux host layer comes
+from the sister projects
 [doaxbv-re](https://github.com/NoRain211/doaxbv-re) and
 [doa3-re](https://github.com/NoRain211/doa3-re).
 

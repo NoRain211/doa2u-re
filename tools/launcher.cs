@@ -304,7 +304,7 @@ class LauncherForm : Form
             Names = new[] { "Off", "2x", "4x", "8x", "16x", "32x" }, Index = savedMsaa < 0 ? Samples.Length - 1 : savedMsaa, Default = Samples.Length - 1 };
         smaa = Choice("SMAA", "Smooths edges with SMAA Ultra after MSAA", new[] { "Off", "On" }, Game.Bool(settings, "smaa", true), 1);
         screen = Choice("Screen", "16:9 uses the game's own widescreen camera and menus", new[] { "4:3", "16:9" }, Game.Bool(settings, "widescreen", true), 1);
-        renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "Direct3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
+        renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);

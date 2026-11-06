@@ -335,6 +335,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                     patch("run_game.prepare_disc") as prepare:
                 with self.assertRaisesRegex(ValueError, "Runner differs"):
                     run(1)
+                del receipt["runner_sha256"]
+                (root / "private/program/receipt.json").write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, "has no runner"):
+                    run(1)
                 if os.name == "nt":
                     # A build from before the Vulkan renderer asks for a rebuild.
                     with self.assertRaisesRegex(ValueError, "no Vulkan renderer"):
