@@ -26,10 +26,10 @@ WINDOWS_ONLY = {"tools/launcher.cs", *(f"recomp-runtime/{name}" for name in (
     "audio_output_xaudio2.cpp", "audio_output_xaudio2_test.cpp", "audio_output_xaudio2_host_test.cpp",
     "audio_xtalk_xapo.cpp", "audio_xtalk_xapo.h", "audio_capture_xapo.cpp", "audio_capture_xapo.h",
     "audio_capture_xapo_test.cpp", "xaudio2_reverb.h", "xaudio2_reverb_test.cpp",
-    "d3d_presenter_d3d11.cpp", "d3d_presenter_thread.cpp"))}
+    "d3d_presenter_d3d11.cpp", "d3d_presenter_thread.cpp", "overlay_d3d11.cpp", "overlay_d3d11.h"))}
+# The SDL_GPU presenter ships everywhere: Windows builds it as its Vulkan renderer.
 POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md", *(f"recomp-runtime/{name}" for name in (
     "audio_output_sdl.cpp", "audio_output_sdl_test.cpp", "audio_reverb.cpp", "audio_reverb.h",
-    "d3d_presenter_sdl_gpu.cpp", "d3d_presenter_inline.cpp", "d3d_shader_compiler.cpp", "d3d_shader_compiler.h",
     "win32_compat.c", "win32_compat_test.c", "fiber_switch_arm64.S", "fiber_switch_x86_64.S"))}
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
