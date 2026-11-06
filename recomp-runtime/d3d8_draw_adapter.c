@@ -927,12 +927,13 @@ static void stage1_mask(uint32_t device, const RecompD3dVertexLayout *layout, ui
     RecompD3dPresenterDrawCommand mask = {0};
     attach_texture(device, 1u, &mask);
     if (!mask.has_texture) return;
-    /* Leon's Story ending (0x1aa820) reads its mask at UV0 through TEXTURE1, COUNT2. */
+    /* Leon's Story ending (0x1aa820) reads its mask at UV0 through TEXTURE1, COUNT2,
+       without ALPHAKILL; the shader's transformed mode does not discard. */
     const bool transformed = !kill_only && stage[1][28] == 0u && stage[1][21] == 2u &&
         layout->texcoord_count != 0u && !layout->pretransformed;
     if ((kill_only ? layout->texcoord_count == 0u || stage[1][28] != 0u
                    : !transformed && (layout->texcoord_count != 2u || stage[1][28] != 1u)) ||
-        (!transformed && stage[1][21] != 0u) || stage[1][20] != 0u ||
+        (!transformed && stage[1][21] != 0u) || (transformed && stage[1][11] != 0u) || stage[1][20] != 0u ||
         mask.texture.linear || mask.palette_bytes != NULL || stage[1][3] != 2u || stage[1][4] != 2u ||
         stage[1][9] != 0u || stage[1][10] != 0u || (stage[1][11] != 0u && stage[1][11] != 4u) ||
         (mask.texture.mip_levels > 1u && stage[1][5] != 1u && stage[1][5] != 2u))

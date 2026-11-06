@@ -1641,6 +1641,11 @@ static int stage1_transform_tests(void)
     CHECK(submits == 1u && draw->stage1_alpha_mask && draw->stage1_mask_transform &&
         !draw->stage1_alpha_kill && !draw->stage1_kill_only && draw->reflection_address_u == 3u &&
         draw->reflection_stage1_transform[0] == 0.5f && draw->reflection_stage1_transform[8] == 0.25f);
+    /* The transformed mask has no ALPHAKILL path, so a kill stops. */
+    set_stage(1u, 11u, 4u);
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
+    CHECK(submits == 1u && strncmp(stop_reason, "d3d8:stage1-mask:", 17) == 0);
+    set_stage(1u, 11u, 0u);
     /* Without the transform, a UV0 mask that multiplies alpha is still unsupported. */
     set_stage(1u, 21u, 0u);
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
