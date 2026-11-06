@@ -145,8 +145,9 @@ pinned lifter and extractor; use the release ZIP.
 
 **Controls:** the first connected controller, or the keyboard for player 1:
 arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
-X/Y, Q/W are White/Black and E/R are the triggers. Hold Back for two seconds
-to quit to the desktop: A quits, B keeps playing.
+X/Y, Q/W are White/Black and E/R are the triggers.
+
+Hold Back for two seconds to quit to the desktop: A quits, B keeps playing.
 
 ## Build from source
 
