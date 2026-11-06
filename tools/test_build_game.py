@@ -58,12 +58,12 @@ class BuildTests(unittest.TestCase):
         total = sum(seconds for seconds, _ in STEPS.values())
         self.assertEqual(build_fraction(plan, 0, 0, 0), 0)
         # Half the lift's output after the parser and disassembly.
-        self.assertAlmostEqual(build_fraction(plan, 2, 27, 0), (5 + 1440 + 315 * 27 / 55) / total)
+        self.assertAlmostEqual(build_fraction(plan, 2, 27, 0), (5 + 1440 + 160 * 27 / 55) / total)
         # A silent, slow disassembly moves by time but stops short of its end.
         self.assertAlmostEqual(build_fraction(plan, 1, 0, 10**6), (5 + 1440 * 0.95) / total)
         self.assertAlmostEqual(build_fraction(plan, 1, 500, 0), (5 + 1440 * 0.99) / total)
         self.assertEqual(build_fraction(plan, len(plan), 0, 0), 1)
-        self.assertEqual(build_fraction(["configure", "build"], 1, 0, 0), 30 / 275)
+        self.assertEqual(build_fraction(["configure", "build"], 1, 0, 0), 30 / 255)
         # The compiler's up-front file list does not move the bar.
         self.assertEqual(build_fraction(["build"], 0, 109, 0), 0)
         self.assertAlmostEqual(build_fraction(["build"], 0, 0, 10**6), 0.95)

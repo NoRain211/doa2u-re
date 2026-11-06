@@ -124,7 +124,7 @@ Visual Studio or administrator approval.
    extract it into a new folder with a short path, such as `C:\DOA2U`.
 2. Open `Launcher.exe` and drag your Disc 2 ISO onto it (or choose it on the
    **BUILD GAME** page); the build starts at once. Wait for **Build complete**
-   (about 15 minutes). The build stops unless it reproduces the exact program
+   (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
 3. Pick resolution, MSAA, SMAA, widescreen and VRR on **VIDEO SETTINGS**, stereo or
    5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on

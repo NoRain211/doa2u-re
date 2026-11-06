@@ -14,7 +14,7 @@ What you need (Windows 10 or 11, 64-bit):
 - Your Disc 2 as an Xbox ISO, and about 6 GB of free space on the drive
   holding this folder.
 
-Build (once, about 15 minutes):
+Build (once, about 10 minutes):
 
 1. Extract this ZIP to a folder with a short path, for example C:\DOA2U.
    On FAT32 or exFAT drives, common on USB sticks, the play folder holds a
