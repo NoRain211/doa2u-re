@@ -16,6 +16,10 @@ static uint8_t scene[8];
 static char guest_path[16];
 static uint32_t aix_handle; /* 0xa94454: the logo clip's AIX, or 0 */
 static uint8_t aix[2];      /* at 0x4000; byte 1 is its state, 1 while preparing */
+static uint8_t stage_table[0x6e2500u - 0x6e22a0u]; /* list modes, row count and entries */
+static uint8_t stage_rows[32];                     /* at 0xdf5f10 */
+static uint8_t stage_tag_match;                    /* at 0x87d49d */
+static uint8_t kernel_page[0x20];                  /* reserved page +0xc00 */
 static jmp_buf stopped;
 static int stop_code;
 static char stop_id[64];
@@ -29,6 +33,14 @@ uint32_t *recomp_memory_u32_checked(uint32_t address)
 }
 uint8_t *recomp_memory(uint32_t address, size_t width)
 {
+    if (address >= 0x6e22a0u && address + width <= 0x6e22a0u + sizeof stage_table)
+        return &stage_table[address - 0x6e22a0u];
+    if (address >= 0xdf5f10u && address + width <= 0xdf5f10u + sizeof stage_rows) return &stage_rows[address - 0xdf5f10u];
+    if (address == 0x87d49du && width == 1u) return &stage_tag_match;
+    if (address >= XBOX_KERNEL_DATA_BASE + 0xc00u && address + width <= XBOX_KERNEL_DATA_BASE + 0xc00u + sizeof kernel_page)
+        return &kernel_page[address - XBOX_KERNEL_DATA_BASE - 0xc00u];
+    if (address >= 0xfc0u && address + width <= 0xfc0u + sizeof guest_stack)
+        return (uint8_t *)guest_stack + (address - 0xfc0u);
     if (address >= 0x3000u && address + width <= 0x3000u + sizeof guest_path)
         return (uint8_t *)&guest_path[address - 0x3000u];
     if (address >= 0x4000u && address + width <= 0x4000u + sizeof aix) return &aix[address - 0x4000u];
@@ -244,6 +256,43 @@ static int test_launch_new_image(void)
     return 1;
 }
 
+/* Stage select lists the regular stages, then Tengu's boss stage, then Random;
+   the tag list is unchanged. Row lookups go both ways through the new entry. */
+static uint32_t call_cdecl(uint32_t address, uint32_t a, uint32_t b)
+{
+    RecompFunction function = recomp_lookup_manual(address);
+    if (function == NULL) return 0xdeadu;
+    recomp_runtime.registers.esp = 0x1000u;
+    guest_stack[(0x1004u - 0xfc0u) / 4u] = a;
+    guest_stack[(0x1008u - 0xfc0u) / 4u] = b;
+    function();
+    return recomp_runtime.registers.esp == 0x1004u ? recomp_runtime.registers.eax : 0xbeefu;
+}
+
+static int test_stage_select(void)
+{
+    uint8_t *modes = &stage_table[4], *entries = &stage_table[0x10];
+    modes[2] = 0x10u; modes[3] = 5u; modes[4] = 0u; modes[5] = 0x15u; /* tag: 16-20, regular: 0-20 */
+    for (unsigned i = 0u; i < 0x15u; ++i) memset(entries + i * 0x18u + 1u, (int)(i + 30u), 3u);
+    entries[0x15u * 0x18u] = 1u;
+    memset(entries + 0x15u * 0x18u + 1u, 0xff, 3u);
+    if (call_cdecl(0x001354a0u, 2u, 0u) != 23u || stage_table[0xa] != 23u ||
+        stage_rows[20] != 20u || stage_rows[21] != 0x16u || stage_rows[22] != 0x15u) return 0;
+    if (call_cdecl(0x00135510u, 21u, 0u) != 18u || call_cdecl(0x00135510u, 3u, 1u) != 33u ||
+        call_cdecl(0x00135510u, 40u, 0u) != 0xffu) return 0; /* past the end clamps to Random */
+    if (call_cdecl(0x00135410u, 21u, 0u) != XBOX_KERNEL_DATA_BASE + 0xc00u ||
+        kernel_page[4] != 61u || kernel_page[8] != 14u || kernel_page[12] != 36u) return 0;
+    if (call_cdecl(0x00135410u, 22u, 0u) != 0x6e22b0u + 0x15u * 0x18u) return 0;
+    guest_path[0] = 9;
+    if (call_cdecl(0x00135580u, 18u, 0x3000u) != 21u || guest_path[0] != 1) return 0;
+    if (call_cdecl(0x00135580u, 0xffu, 0x3000u) != 0u || guest_path[0] != 0) return 0;
+    if (call_cdecl(0x001354a0u, 1u, 0u) != 6u || stage_rows[4] != 20u || stage_rows[5] != 0x15u) return 0;
+    stage_tag_match = 1u;
+    if (call_cdecl(0x001354a0u, 2u, 0u) != 6u) return 0;
+    stage_tag_match = 0u;
+    return 1;
+}
+
 int main(void)
 {
     /* The movie skips are opt-in. */
@@ -256,7 +305,7 @@ int main(void)
     if (recomp_lookup_manual(0x0012b460u) != NULL) return 1;
     recomp_skip_intro = true;
     if (!test_fmod() || !test_startup_legal_skip() || !test_startup_logo_skip() ||
-        !test_boot_opening_skip() || !test_launch_new_image()) return 1;
+        !test_boot_opening_skip() || !test_launch_new_image() || !test_stage_select()) return 1;
     RecompFunction init_segment = recomp_lookup_manual(0x002bd531u);
     if (init_segment == NULL) return 1;
     recomp_runtime.registers.esp = 0x1000u;

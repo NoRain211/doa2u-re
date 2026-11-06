@@ -720,6 +720,16 @@ come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.
 
+Stage Select also offers Tengu's boss stage (issue #117). Its list
+(`stage_select_build_rows`, `0x1354a0`) copies a run of 24-byte entries
+from `0x6e22b0` into rows at `0xdf5f10` and appends Random; every other read
+goes through `0x135410`, `0x135510` and `0x135580`. `program_manual.c`
+replaces those four and adds stage 18 (the Miyama his story fight loads)
+before Random in the regular list, with the game's unused Miyama name (61)
+and thumbnails (14, 36). Its entry sits in the reserved kernel page at
+`0x03ff0c00`, since other data follows the table. Random's pick
+(`0x135700`) can then choose it too. The tag list stays as it was.
+
 ## Input API contract
 
 `input_adapter.c` binds 5849 XInitDevices, device enumeration/changes,
