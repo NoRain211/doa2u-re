@@ -73,6 +73,14 @@ static uint32_t visibility_scale[VISIBILITY_TESTS];
 static uint32_t visibility_value[VISIBILITY_TESTS];
 static uint8_t visibility_pending_result[VISIBILITY_TESTS];
 static uint8_t visibility_valid[VISIBILITY_TESTS];
+/* InsertCallback callbacks wait for the second following Swap. The guest
+   skips a test while its callback is pending, so the GPU may run a frame
+   behind instead of every poll waiting for it (issue #118), and guest state
+   stays on a fixed schedule for rollback. */
+enum { PENDING_CALLBACKS = 64u, CALLBACK_SWAPS = 2u };
+typedef struct PendingCallback { uint32_t callback, context, swaps; } PendingCallback;
+static PendingCallback pending_callbacks[PENDING_CALLBACKS];
+static uint32_t pending_callback_count;
 
 static uint32_t argument(uint32_t entry, uint32_t index)
 {
@@ -94,6 +102,8 @@ typedef struct D3d8State {
     uint32_t visibility_value[VISIBILITY_TESTS];
     uint8_t visibility_pending_result[VISIBILITY_TESTS];
     uint8_t visibility_valid[VISIBILITY_TESTS];
+    PendingCallback pending_callbacks[PENDING_CALLBACKS];
+    uint32_t pending_callback_count;
 } D3d8State;
 
 size_t recomp_d3d8_state_size(void)
@@ -150,6 +160,8 @@ void recomp_d3d8_state_save(void *state)
     memcpy(out->visibility_pending_result, visibility_pending_result,
         sizeof out->visibility_pending_result);
     memcpy(out->visibility_valid, visibility_valid, sizeof out->visibility_valid);
+    memcpy(out->pending_callbacks, pending_callbacks, sizeof out->pending_callbacks);
+    out->pending_callback_count = pending_callback_count;
 }
 
 void recomp_d3d8_state_restore(const void *state)
@@ -168,6 +180,8 @@ void recomp_d3d8_state_restore(const void *state)
     memcpy(visibility_pending_result, in->visibility_pending_result,
         sizeof visibility_pending_result);
     memcpy(visibility_valid, in->visibility_valid, sizeof visibility_valid);
+    memcpy(pending_callbacks, in->pending_callbacks, sizeof pending_callbacks);
+    pending_callback_count = in->pending_callback_count;
 }
 
 static void load(void *destination, uint32_t address, size_t size)
@@ -276,6 +290,8 @@ void recomp_d3d8_shutdown(void)
     memset(visibility_value, 0, sizeof visibility_value);
     memset(visibility_pending_result, 0, sizeof visibility_pending_result);
     memset(visibility_valid, 0, sizeof visibility_valid);
+    memset(pending_callbacks, 0, sizeof pending_callbacks);
+    pending_callback_count = 0u;
 }
 
 void recomp_d3d8_reset_keeping_window(void)
@@ -666,6 +682,20 @@ static bool present_ready(void *unused)
     return recomp_d3d_presenter_present_ready(presenter);
 }
 
+static void run_due_callbacks(void)
+{
+    uint32_t kept = 0u;
+    for (uint32_t i = 0u; i < pending_callback_count; ++i) {
+        PendingCallback entry = pending_callbacks[i];
+        if (--entry.swaps != 0u) {
+            pending_callbacks[kept++] = entry;
+            continue;
+        }
+        kernel_call_guest(entry.callback, &entry.context, 1u);
+    }
+    pending_callback_count = kept;
+}
+
 static void swap(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -703,6 +733,7 @@ static void swap(void)
     *recomp_memory_u32(DEVICE + 0x1de4u) = result.command.data.present.swap_counter;
     for (uint32_t i = 0; i < 2u; ++i) store(color_header(i), &device_state.color[i], sizeof device_state.color[i]);
     *recomp_memory_u32(DEVICE + FRAME_COUNTER) = result.command.data.present.swap_counter;
+    run_due_callbacks();
     if (recomp_d3d_present_hook != NULL) recomp_d3d_present_hook(result.command.data.present.swap_counter);
     recomp_runtime.registers.eax = result.command.data.present.swap_counter;
     recomp_runtime.registers.esp = entry + 8u;
@@ -796,15 +827,17 @@ static void block_on_fence(void)
 /* D3DDevice_InsertCallback (0x349e10, stdcall type, callback, context).
    Queued commands own their bytes and the host GPU never writes guest memory,
    so the READ (0) and WRITE (1) conditions already hold here. The cdecl
-   callback runs at once on the calling thread instead of the GPU interrupt. */
+   callback runs on the calling thread at a later Swap (run_due_callbacks)
+   instead of the GPU interrupt. */
 static void insert_callback(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
     const uint32_t type = argument(entry, 0u), callback = argument(entry, 1u);
-    uint32_t context = argument(entry, 2u);
     recomp_d3d8_require_device();
     if (type > 1u || callback == 0u) recomp_stop(2, "d3d8:insert-callback:%u", type);
-    kernel_call_guest(callback, &context, 1u);
+    if (pending_callback_count == PENDING_CALLBACKS) recomp_stop(2, "d3d8:insert-callback-full");
+    pending_callbacks[pending_callback_count++] =
+        (PendingCallback){callback, argument(entry, 2u), CALLBACK_SWAPS};
     recomp_runtime.registers.esp = entry + 16u;
 }
 

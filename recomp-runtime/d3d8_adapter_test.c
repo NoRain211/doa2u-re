@@ -821,10 +821,18 @@ int main(void)
     passed &= expect("a repeated run-ahead frame keeps its visibility test off the GPU",
         submit_count == prior_submits && recomp_runtime.registers.eax == 0u);
     arguments[0] = 1u; arguments[1] = 0x276b50u; arguments[2] = 0x11u;
+    dispatched = 0u;
     passed &= call(0x349e10u, arguments, 3u, NULL);
-    passed &= expect("callback runs as cdecl with its context",
+    passed &= expect("callback waits with the stdcall ABI",
+        dispatched == 0u && recomp_runtime.registers.esp == ENTRY_ESP + 16u &&
+        recomp_runtime.registers.eax == EAX_SENTINEL);
+    arguments[0] = 0u;
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= expect("callback skips the next swap", dispatched == 0u);
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= expect("callback runs as cdecl with its context on the second swap",
         dispatched == 0x276b50u && dispatched_context == 0x11u && dispatched_return == 0u &&
-        recomp_runtime.registers.esp == ENTRY_ESP + 16u && recomp_runtime.registers.eax == EAX_SENTINEL);
+        recomp_runtime.registers.esp == ENTRY_ESP + 8u);
     arguments[0] = 2u;
     passed &= call(0x349e10u, arguments, 3u, "d3d8:insert-callback:2");
     arguments[0] = 0x11u; arguments[1] = OUTPUT; arguments[2] = 0u;
