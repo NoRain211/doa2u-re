@@ -35,8 +35,8 @@ Sister projects: [DOA3](https://github.com/NoRain211/doa3-re) ·
 The DOA2 game executable on Ultimate's second disc is lifted to C with a
 static recompiler, then linked against a hand-written runtime that replaces
 the Xbox kernel imports and the game's Direct3D 8, DirectSound and input
-libraries (XDK build 5849) with native Windows equivalents: Direct3D 11,
-XAudio2 and SDL3. On macOS and Linux the same runtime renders through SDL_GPU
+libraries (XDK build 5849) with native Windows equivalents: Direct3D 11 or
+Vulkan, XAudio2 and SDL3. On macOS and Linux the same runtime renders through SDL_GPU
 (Metal or Vulkan) and plays through SDL3 audio. The rest of the game still runs
 as generated code. The plan
 is to replace game logic with readable, hand-written source while the game
@@ -50,8 +50,8 @@ keeps running.
   Apple Silicon and Intel Macs, Linux PCs and the Steam Deck, from the same
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
-- **Native renderer.** Direct3D 11 at 480p to 4K, the game's own 16:9
-  widescreen camera and menus, MSAA up to 32x and SMAA Ultra. Water
+- **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
+  widescreen camera and menus, MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -93,6 +93,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
 | Native 16:9 widescreen, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
+| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
@@ -126,7 +127,7 @@ Visual Studio or administrator approval.
    **BUILD GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen and VRR on **VIDEO SETTINGS**, stereo or
+3. Pick resolution, MSAA, SMAA, widescreen, the renderer and VRR on **VIDEO SETTINGS**, stereo or
    5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
    **GAMEPLAY** to leave unlocks to play, then choose
    **START GAME**. A controller, the keyboard or the mouse all work. Your

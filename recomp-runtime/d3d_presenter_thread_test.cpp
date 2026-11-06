@@ -3,12 +3,19 @@
 #include "d3d_card_model.h"
 #include "d3d_draw_model.h"
 
+/* Direct3D 11 runs on its own window thread; SDL_GPU (macOS, Linux and the
+   Windows Vulkan build) runs inline on the caller's. */
+#if defined(_WIN32) && !defined(RECOMP_PRESENTER_SDL_GPU)
+#define RECOMP_TEST_D3D11
+#else
+#include <SDL3/SDL.h>
+#endif
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
 #include "win32_compat.h"
-#include <SDL3/SDL.h>
 #include <stdlib.h>
 
 /* The SDL_GPU backend: _putenv_s with an empty value removes the variable. */
@@ -75,7 +82,7 @@ static bool destroy(RecompD3dPresenter *&presenter)
     return passed && presenter == nullptr;
 }
 
-#ifdef _WIN32
+#ifdef RECOMP_TEST_D3D11
 static HWND presenterWindow()
 {
     HWND window = nullptr;
@@ -1862,7 +1869,7 @@ static bool testClose(bool idle)
 {
     RecompD3dPresenter *presenter = nullptr;
     if (!expect("create close", recomp_d3d_presenter_create(&config, &presenter))) return false;
-#ifndef _WIN32
+#ifndef RECOMP_TEST_D3D11
     /* SDL delivers a close to the presenter's own thread at its next present. */
     SDL_Event quit{};
     quit.type = SDL_EVENT_QUIT;
@@ -1947,14 +1954,14 @@ static bool testVisibility()
     bool complete = true;
     uint32_t pixels[2]{};
     passed &= expect("queued result", recomp_d3d_presenter_visibility_result(presenter, 7u, &complete, &pixels[0]));
-#ifdef _WIN32
+#ifdef RECOMP_TEST_D3D11
     // The render thread publishes nothing before the flush.
     passed &= !complete;
 #endif
     passed &= expect("unknown index", recomp_d3d_presenter_visibility_result(presenter, 9u, &complete, &pixels[0]),
         RECOMP_D3D_PRESENTER_INVALID_ARGUMENT);
     passed &= expect("publish visibility", recomp_d3d_presenter_flush(presenter, false));
-#ifdef _WIN32
+#ifdef RECOMP_TEST_D3D11
     passed &= expect("wait for visibility", recomp_d3d_presenter_flush(presenter, true));
     complete = false;
     passed &= expect("index 7 resolves before the wait returns",
@@ -1975,7 +1982,7 @@ static bool testVisibility()
         passed &= complete;
     }
     passed &= pixels[0] == 160u * 240u && pixels[1] == 320u * 240u;
-#ifdef _WIN32
+#ifdef RECOMP_TEST_D3D11
     // An END the worker cannot match to a BEGIN fails the presenter.
     passed &= expect("unbegun end", recomp_d3d_presenter_submit(presenter, &end));
     passed &= expect("unbegun end fails", recomp_d3d_presenter_flush(presenter, true),
@@ -2286,7 +2293,7 @@ static bool testCard()
 
 static bool testScaledMsaaDepthBias()
 {
-#ifndef _WIN32
+#ifndef RECOMP_TEST_D3D11
     /* Lavapipe (Linux CI) evaluates the position at each sample when a shader
        runs per sample, so this exact-edge test moves; Metal and RADV pass it. */
     if (std::getenv("RECOMP_TEST_SOFTWARE_VULKAN") != nullptr) {
@@ -2756,7 +2763,7 @@ static bool testWidescreenAntialiasing(bool smaa, bool msaa, unsigned height = 4
         RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
         present.data.present = {5u,1u};
         passed &= expect("AA present", d3d_backend_submit(presenter, &present));
-#ifdef _WIN32
+#ifdef RECOMP_TEST_D3D11
         RECT rect{};
         const unsigned client_height = (std::min)(height, static_cast<unsigned>(GetSystemMetrics(SM_CYSCREEN)));
         passed &= GetClientRect(presenterWindow(), &rect) &&
@@ -2902,6 +2909,17 @@ static bool testResampledMsaaTarget()
 
 int main()
 {
+#if defined(_WIN32) && !defined(RECOMP_TEST_D3D11)
+    // Hosted Windows CI has no Vulkan driver; ctest counts this as a skip.
+    SDL_GPUDevice *vulkan = SDL_InitSubSystem(SDL_INIT_VIDEO)
+        ? SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr) : nullptr;
+    if (vulkan == nullptr) {
+        std::printf("SKIP no Vulkan device: %s\n", SDL_GetError());
+        return 77;
+    }
+    SDL_DestroyGPUDevice(vulkan);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+#endif
     recomp_d3d_presenter_set_immediate_present(false);
     if (!testResampledMsaaTarget() ||
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||

@@ -12,6 +12,9 @@
 
 #ifdef RECOMP_SHADERC_LINKED
 #include <shaderc/shaderc.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -23,7 +26,8 @@ namespace {
 
 /* shaderc's C API, which has been stable since its first release. Linux loads
    it at run time, so one build runs on distributions that name the library
-   differently; macOS links Homebrew's. */
+   differently; Windows loads the shaderc.dll the build copies beside the
+   runner; macOS links Homebrew's. */
 using Compiler = void *;
 using Options = void *;
 using Result = void *;
@@ -79,6 +83,20 @@ bool loadShaderc()
     bind(shaderc.result_length, shaderc_result_get_length);
     bind(shaderc.result_release, shaderc_result_release);
 #else
+#ifdef _WIN32
+    // Only the pinned copy beside the runner; never the working directory or PATH.
+    HMODULE library = LoadLibraryExA("shaderc.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    if (library == nullptr) {
+        std::fprintf(stderr, "recomp shaders: the Vulkan renderer needs shaderc.dll beside the runner; "
+            "build the game again\n");
+        return false;
+    }
+    const auto symbol = [library](auto &slot, const char *name) {
+        slot = reinterpret_cast<std::remove_reference_t<decltype(slot)>>(
+            reinterpret_cast<void *>(GetProcAddress(library, name)));
+        return slot != nullptr;
+    };
+#else
     // SteamOS and Fedora ship libshaderc_shared; Debian and Ubuntu name it libshaderc.
     void *library = nullptr;
     for (const char *name : {"libshaderc_shared.so.1", "libshaderc_shared.so", "libshaderc.so.1"}) {
@@ -94,6 +112,7 @@ bool loadShaderc()
         slot = reinterpret_cast<std::remove_reference_t<decltype(slot)>>(dlsym(library, name));
         return slot != nullptr;
     };
+#endif
     if (!symbol(shaderc.compiler_initialize, "shaderc_compiler_initialize") ||
         !symbol(shaderc.options_initialize, "shaderc_compile_options_initialize") ||
         !symbol(shaderc.options_release, "shaderc_compile_options_release") ||

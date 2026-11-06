@@ -275,11 +275,12 @@ extern "C" void recomp_audio_output_initialize(void)
         return;
     }
     HRESULT error = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(error)) {
+    // The Vulkan renderer's SDL window already made this thread single-threaded; XAudio2 runs in either.
+    if (FAILED(error) && error != RPC_E_CHANGED_MODE) {
         disableOutput("CoInitializeEx", error);
         return;
     }
-    com_initialized = true;
+    com_initialized = SUCCEEDED(error);
     error = XAudio2Create(&engine, 0, XAUDIO2_DEFAULT_PROCESSOR);
     if (FAILED(error)) {
         disableOutput("XAudio2Create", error);
