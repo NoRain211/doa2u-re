@@ -112,10 +112,9 @@ around bright surfaces as on the Xbox, which reads more strongly on a sharp
 On macOS and Linux, including the Steam Deck, follow
 [building on macOS and Linux](docs/building.md) instead.
 
-**Requirements:** Windows 10/11 x64,
-[Python 3.12 or newer](https://www.python.org/downloads/windows/) on PATH,
-[CMake 3.20 or newer](https://cmake.org/download/) on PATH,
-internet access for the first build, and your Disc 2 ISO with about 6 GB free.
+**Requirements:** Windows 10/11 x64, internet access for the first build, and
+your Disc 2 ISO with about 6 GB free. The ZIP carries Python (with Capstone and
+Pillow) and CMake, so there is nothing to install.
 The build downloads the pinned [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
 compiler (190 MB) into `tools\llvm-mingw` and checks its SHA-256; it needs no
 Visual Studio or administrator approval.

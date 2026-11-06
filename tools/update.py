@@ -79,13 +79,21 @@ def unpack(archive):
         # private/ holds the player's files; a release only adds ones they lack.
         if ROOT / "private" in target.parents and target.exists():
             continue
-        files.append((target, archive.read(entry), (entry.external_attr >> 16) & 0o777))
+        data = archive.read(entry)
+        mode = (entry.external_attr >> 16) & 0o777
+        # Unchanged files stay untouched, including those of the bundled Python running this.
+        # Windows has no mode bits beyond read-only, so only other systems compare modes.
+        if (target.is_file() and target.read_bytes() == data
+                and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode)):
+            continue
+        files.append((target, data, mode))
     files.sort(key=lambda file: file[0] == ROOT / "VERSION")
     for target, data, mode in files:
         target.parent.mkdir(parents=True, exist_ok=True)
-        # A running exe can be renamed but not overwritten; main() removes the old one next time.
+        # A running exe or loaded DLL can be renamed but not overwritten; main() removes the old one next time.
         old = target.with_name(target.name + ".old")
-        swap = target.suffix == ".exe" and target.parent == ROOT and target.exists()
+        swap = (target.suffix in (".exe", ".dll", ".pyd") and target.exists()
+                and (target.parent == ROOT or ROOT / "tools" / "python" in target.parents))
         if swap:
             target.replace(old)
         try:
@@ -101,7 +109,7 @@ def unpack(archive):
 def main(argv):
     if len(argv) != 1 or argv[0] not in ("check", "install"):
         sys.exit("usage: update.py check|install")
-    for old in ROOT.glob("*.exe.old"):
+    for old in [*ROOT.glob("*.exe.old"), *ROOT.glob("tools/python/**/*.old")]:
         try:
             old.unlink()
         except OSError:

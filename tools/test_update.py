@@ -56,6 +56,39 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual((root / "VERSION").read_text(), "2")
             self.assertEqual((root / "Launcher.exe").read_text(), "new")
 
+    def test_unpack_spares_the_running_bundled_python(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "win32"):
+            python = update.ROOT / "tools" / "python"
+            (python / "DLLs").mkdir(parents=True)
+            (python / "python.exe").write_text("same")
+            (python / "DLLs" / "_ssl.pyd").write_text("old")
+            real_write = Path.write_bytes
+
+            def locked(path, data):
+                if path.exists() and python in path.parents:
+                    raise PermissionError("in use")
+                return real_write(path, data)
+
+            with mock.patch.object(Path, "write_bytes", locked):
+                update.unpack(archive({"DOA2U-2/tools/python/python.exe": "same",
+                                       "DOA2U-2/tools/python/DLLs/_ssl.pyd": "new"}))
+            self.assertEqual((python / "DLLs" / "_ssl.pyd").read_text(), "new")
+            self.assertEqual((python / "DLLs" / "_ssl.pyd.old").read_text(), "old")
+            self.assertFalse((python / "python.exe.old").exists())
+
+    def test_unpack_reapplies_a_changed_mode_outside_windows(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "linux"), mock.patch.object(Path, "chmod") as chmod:
+            (update.ROOT / "build_game.sh").write_text("same")
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as writer:
+                info = zipfile.ZipInfo("DOA2U-2/build_game.sh")
+                info.external_attr = 0o100755 << 16
+                writer.writestr(info, "same")
+            update.unpack(zipfile.ZipFile(data))
+            chmod.assert_called_once_with(0o755)
+
     def test_unsafe_entry_stops_before_any_write(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
             with self.assertRaises(ValueError):
