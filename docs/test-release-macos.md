@@ -49,8 +49,10 @@ first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache live in
 private/play-disc. Start + Back + both triggers resets the game.
 
-Every character and costume is unlocked, and the game saves the unlocks
-to your profile.
+With Unlocks on Everything (the default), every character and costume is
+unlocked, and the game saves the unlocks to your profile. Earn offers only
+the default characters and costumes; a profile saved with Everything keeps
+them.
 
 Controls: the first connected controller (Xbox, PlayStation and other
 controllers SDL3 supports). The keyboard drives player 1:
