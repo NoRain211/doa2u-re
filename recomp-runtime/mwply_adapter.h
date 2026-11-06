@@ -6,6 +6,8 @@
 
 /* Native replacement for the CRI Sofdec (MWSFD) player calls the game makes. */
 RecompFunction recomp_mwply_lookup_manual(uint32_t address);
+/* Closes any movie and forgets the player, for a reboot. */
+void recomp_mwply_reset(void);
 
 #endif
 

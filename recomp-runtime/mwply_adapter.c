@@ -243,6 +243,12 @@ static void get_subtitle(void)
     finish(length != 0u);
 }
 
+void recomp_mwply_reset(void)
+{
+    close_movie();
+    player = (Player){0};
+}
+
 RecompFunction recomp_mwply_lookup_manual(uint32_t address)
 {
     switch (address) {
