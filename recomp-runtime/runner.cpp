@@ -11,8 +11,6 @@
 #include "input_pulse_source.h"
 #include "netplay_menu.h"
 #include "netplay_session.h"
-#include "overlay_text.h"
-#include "quit_prompt.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -23,7 +21,9 @@
 extern "C" {
 #include "kernel_abi.h"
 #include "native_fiber.h"
+#include "overlay_text.h"
 #include "program_manual.h"
+#include "quit_prompt.h"
 #include "stop_report.h"
 RecompFunction recomp_program_lookup(std::uint32_t address);
 }
