@@ -1617,6 +1617,42 @@ static int effect_tests(void)
     return 0;
 }
 
+/* Leon's Story ending (FUN_001aa820): stage 0 MODULATE(TEXTURE, DIFFUSE), stage 1
+   SELECTARG2(CURRENT) color and MODULATE(TEXTURE, CURRENT) alpha at UV0 through
+   TEXTURE1, COUNT2. */
+static int stage1_transform_tests(void)
+{
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected stop: %s\n", stop_reason); return 1; }
+    initialize();
+    *recomp_memory_u32(0x3553f8u) = 0u;
+    *recomp_memory_u32(DEVICE + 0xf88u) = 0x7000u;
+    *recomp_memory_u32(DEVICE + 0xf8cu) = 0x7000u;
+    const float texture1[16] = {0.5f,0,0,0, 0,1,0,0, 0.25f,0,1,0, 0,0,0,1};
+    recomp_guest_store(DEVICE + 0xd20u, texture1, sizeof texture1);
+    set_stage(0u, 12u, 4u); set_stage(0u, 14u, 2u); set_stage(0u, 15u, 0u);
+    set_stage(0u, 16u, 4u); set_stage(0u, 18u, 2u); set_stage(0u, 19u, 0u);
+    set_stage(1u, 0u, 3u); set_stage(1u, 1u, 3u);
+    set_stage(1u, 12u, 3u); set_stage(1u, 14u, 2u); set_stage(1u, 15u, 1u);
+    set_stage(1u, 16u, 4u); set_stage(1u, 18u, 2u); set_stage(1u, 19u, 1u);
+    set_stage(1u, 21u, 2u);
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x142u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 24u);
+    const RecompD3dPresenterDrawCommand *draw = &submitted.data.draw;
+    CHECK(submits == 1u && draw->stage1_alpha_mask && draw->stage1_mask_transform &&
+        !draw->stage1_alpha_kill && !draw->stage1_kill_only && draw->reflection_address_u == 3u &&
+        draw->reflection_stage1_transform[0] == 0.5f && draw->reflection_stage1_transform[8] == 0.25f);
+    /* The transformed mask has no ALPHAKILL path, so a kill stops. */
+    set_stage(1u, 11u, 4u);
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
+    CHECK(submits == 1u && strncmp(stop_reason, "d3d8:stage1-mask:", 17) == 0);
+    set_stage(1u, 11u, 0u);
+    /* Without the transform, a UV0 mask that multiplies alpha is still unsupported. */
+    set_stage(1u, 21u, 0u);
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
+    CHECK(submits == 1u && strncmp(stop_reason, "d3d8:stage1-mask:", 17) == 0);
+    return 0;
+}
+
 /* The stage effect's bump pass (FUN_0027ffc0 definition, FUN_002807f0 state). */
 static int bump_tests(void)
 {
@@ -1959,7 +1995,8 @@ int main(void)
 {
     initialize();
     if (pixel_tests() || draw_tests() || line_tests() || quad_tests() || point_tests() || lighting_tests() || filter_tests() || bright_tests() ||
-        distortion_tests() || factor_tests() || position_texgen_tests() || effect_tests() || program_tests() || bump_tests() ||
+        distortion_tests() || factor_tests() || position_texgen_tests() || effect_tests() ||
+        stage1_transform_tests() || program_tests() || bump_tests() ||
         volume_tests() || reflection_inverse_tests() || reflection_coverage_tests() || frame_buffer_tests() || depth_bias_tests()) return 1;
     puts("PASS D3D8 pixel lifecycle/constants and semantic draw ABI/snapshots");
     return 0;

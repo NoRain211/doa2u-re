@@ -1925,8 +1925,9 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     }
     if (draw.stage1_alpha_mask) {
         if (draw.has_alpha_mask || draw.has_reflection || draw.program_count || draw.distortion ||
-            draw.four_tap_filter || (draw.stage1_kill_only ? layout.texcoord_count == 0u
-                : layout.texcoord_count != 2u)) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+            draw.four_tap_filter || (draw.stage1_kill_only || draw.stage1_mask_transform
+                ? layout.texcoord_count == 0u : layout.texcoord_count != 2u))
+            return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
         mask = reflectionLookup(draw.reflection_texture, draw.reflection_bytes, draw.reflection_byte_count);
         if (mask == nullptr || texture == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }

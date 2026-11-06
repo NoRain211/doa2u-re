@@ -2628,8 +2628,9 @@ RecompD3dPresenterError submitDraw(
     }
     if (draw.stage1_alpha_mask) {
         if (draw.has_alpha_mask || draw.has_reflection || draw.program_count || draw.distortion ||
-            draw.four_tap_filter || (draw.stage1_kill_only ? layout.texcoord_count == 0u
-                : layout.texcoord_count != 2u)) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+            draw.four_tap_filter || (draw.stage1_kill_only || draw.stage1_mask_transform
+                ? layout.texcoord_count == 0u : layout.texcoord_count != 2u))
+            return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
         RecompD3dPresenterDrawCommand mask{};
         mask.texture = draw.reflection_texture;
         mask.texture_bytes = draw.reflection_bytes;
