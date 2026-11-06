@@ -571,11 +571,13 @@ class LauncherForm : Form
             var valueRect = new RectangleF(left + 26, ValueY, colW - 30, ValueH);
             if (r.Names == null) { g.DrawString(Verb(r.Action), itemFont, new SolidBrush(sand), new RectangleF(left + 12, ValueY, colW - 16, ValueH), near); continue; }
             string value = r.Names[r.Index].ToUpperInvariant();
+            // Eight columns leave little room; a value too wide for its column drops to the smaller font.
+            Font font = g.MeasureString(value, menuFont).Width > colW - 40 ? itemFont : menuFont;
             float cy = ValueY + ValueH / 2f;
             Color arrow = selected ? sand : Rgb(241, 197, 143, 130);
             Arrow(g, left + 19, cy, -1, 0, arrow);
-            Arrow(g, left + 30 + g.MeasureString(value, menuFont).Width, cy, 1, 0, arrow);
-            g.DrawString(value, menuFont, new SolidBrush(selected ? Color.White : Rgb(232, 222, 212)), valueRect, near);
+            Arrow(g, left + 30 + g.MeasureString(value, font).Width, cy, 1, 0, arrow);
+            g.DrawString(value, font, new SolidBrush(selected ? Color.White : Rgb(232, 222, 212)), valueRect, near);
         }
 
         // Page tabs along the bottom, the current one underlined in sunset gold.
