@@ -2,8 +2,8 @@
 
 The free camera takes over the game's camera and flies it anywhere in the
 scene, for screenshots or a closer look at the fighters and stages. It is off
-by default. Turn on **Free camera** in the launcher (the **FREE CAMERA** page
-of `Launcher.exe`), pass `--free-camera` to `tools/run_game.py`, or set
+by default. Turn on **Free camera** in the launcher (the **GAMEPLAY** page),
+pass `--free-camera` to `tools/run_game.py`, or set
 `RECOMP_FREE_CAMERA=1` before the runner starts. Then, in a fight or a
 cutscene, press **F1** or **`** (backquote), or click the right stick, to take
 the camera; press again to give it back. The controls are the DOA3 port's,
