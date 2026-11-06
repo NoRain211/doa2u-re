@@ -705,6 +705,16 @@ still read in place. A read issued by the main game thread still pauses
 frames until it finishes, as it would on hardware. Reads at the handle
 cursor and close both wait until no read on that handle is in flight.
 
+Stage Select also offers Tengu's boss stage (issue #117). Its list
+(`stage_select_build_rows`, `0x1354a0`) copies a run of 24-byte entries
+from `0x6e22b0` into rows at `0xdf5f10` and appends Random; every other read
+goes through `0x135410`, `0x135510` and `0x135580`. `program_manual.c`
+replaces those four and adds stage 18 (the Miyama his story fight loads)
+before Random in the regular list, with the game's unused Miyama name (61)
+and thumbnails (14, 36). Its entry sits in the reserved kernel page at
+`0x03ff0c00`, since other data follows the table. Random's pick
+(`0x135700`) can then choose it too. The tag list stays as it was.
+
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start
@@ -719,16 +729,6 @@ them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
 come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.
-
-Stage Select also offers Tengu's boss stage (issue #117). Its list
-(`stage_select_build_rows`, `0x1354a0`) copies a run of 24-byte entries
-from `0x6e22b0` into rows at `0xdf5f10` and appends Random; every other read
-goes through `0x135410`, `0x135510` and `0x135580`. `program_manual.c`
-replaces those four and adds stage 18 (the Miyama his story fight loads)
-before Random in the regular list, with the game's unused Miyama name (61)
-and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. Random's pick
-(`0x135700`) can then choose it too. The tag list stays as it was.
 
 ## Input API contract
 
