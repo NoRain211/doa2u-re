@@ -431,13 +431,11 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.terminate(nil)
     }
 
-    // Other settings save on play; Check At Start must also hold after a plain quit.
-    func keepCheckSetting() {
-        let check = view.checkAtStart.index == 1
-        guard !launched, check != boolSetting("checkUpdates", true) else { return }
-        settings["checkUpdates"] = check
+    // Settings hold after a plain quit too, so the game plays with them later.
+    func keepSettings() {
+        guard !launched else { return }
         try? FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: settingsURL)
+        try? JSONSerialization.data(withJSONObject: view.chosen, options: [.prettyPrinted, .sortedKeys]).write(to: settingsURL)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool { !view.waitForInstall() }
@@ -447,13 +445,13 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        keepCheckSetting()
+        keepSettings()
         if !launched { exit(1) }
     }
 
     // AppKit exits 0 after terminate, so a Dock or Cmd-Q quit would start the game.
     func applicationWillTerminate(_ notification: Notification) {
-        keepCheckSetting()
+        keepSettings()
         exit(launched ? 0 : 1)
     }
 }

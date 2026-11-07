@@ -664,11 +664,8 @@ class LauncherForm : Form
             using (var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + build.Id) { UseShellExecute = false, CreateNoWindow = true }))
                 kill.WaitForExit();
         }
-        // Other settings save with a build or play; Check At Start must also hold after a plain exit.
-        var saved = Game.LoadSettings();
-        if (Game.Bool(saved, "checkUpdates", true) == (checkAtStart.Index == 1)) return;
-        saved["checkUpdates"] = checkAtStart.Index == 1;
-        try { Game.SaveSettings(saved); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        // Settings hold after a plain exit too, so DOA2U.exe plays with them.
+        try { Game.SaveSettings(Settings()); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     static int Clamp(int value, int max) { return Math.Min(Math.Max(value, 0), max); }

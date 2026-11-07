@@ -532,7 +532,8 @@ int main(int argc, char **argv)
         if (result < 0) launcher.draw();
     }
 
-    if (result == 0) {
+    // Settings hold after a plain exit too, so the game plays with them later.
+    {
         settings.height = kHeights[launcher.choice[RESOLUTION]];
         settings.msaa = kSamples[launcher.choice[MSAA]];
         settings.smaa = launcher.choice[SMAA] != 0;
@@ -551,12 +552,8 @@ int main(int argc, char **argv)
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
-            result = 1;
+            if (result == 0) result = 1;
         }
-    } else if ((launcher.choice[CHECK_UPDATES] != 0) != settings.check_updates) {
-        // Other settings save on play; Check At Start must also hold after a plain exit.
-        settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
-        saveSettings(settings_path, settings);
     }
     SDL_DestroyTexture(launcher.background);
     // Only a check can still be running here; stop it rather than leave it behind.
