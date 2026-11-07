@@ -106,7 +106,9 @@ RecompFunction recomp_mwply_lookup_manual(uint32_t address)
     return NULL;
 }
 
+/* Link stub for the generated profile_main_clear that clear_main_profile wraps. */
 void sub_000244F0(void) {}
+
 RecompFunction recomp_free_camera_lookup_manual(uint32_t address)
 {
     (void)address;
