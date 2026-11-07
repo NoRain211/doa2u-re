@@ -264,6 +264,15 @@ float recomp_d3d8_content_aspect(void)
     return content_widescreen ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
 }
 
+static void fit_scissor(RecompD3dPresenterDrawCommand *draw, const float center[2], const float scale[2])
+{
+    if (!draw->has_scissor) return;
+    for (uint32_t i = 0u; i < 4u; ++i) {
+        const float edge = center[i % 2u] + ((float)draw->scissor[i] - center[i % 2u]) * scale[i % 2u];
+        draw->scissor[i] = (int32_t)(i < 2u ? floorf(edge) : ceilf(edge));
+    }
+}
+
 void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
 {
     const float aspect = recomp_d3d8_content_aspect();
@@ -291,12 +300,32 @@ void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
     const float center[2] = {
         whole ? width * 0.5f : draw->viewport[0] + draw->viewport[2] * 0.5f,
         whole ? (float)draw->target.color.height * 0.5f : draw->viewport[1] + draw->viewport[3] * 0.5f};
-    if (draw->has_scissor) {
-        for (uint32_t i = 0u; i < 4u; ++i) {
-            const float edge = center[i % 2u] + ((float)draw->scissor[i] - center[i % 2u]) * scale[i % 2u];
-            draw->scissor[i] = (int32_t)(i < 2u ? floorf(edge) : ceilf(edge));
-        }
+    fit_scissor(draw, center, scale);
+}
+
+/* A 3D view drawn into part of the screen (the character select portrait)
+   belongs to a 16:9 menu panel, so it moves with the panel toward the center.
+   It keeps its size, as its projection already has the screen's shape, and
+   the scissor fits like the panel's. Program draws carry the viewport in c58
+   (scale) and c59 (offset). */
+void recomp_d3d8_fit_3d_viewport(RecompD3dPresenterDrawCommand *draw)
+{
+    const float aspect = recomp_d3d8_content_aspect();
+    if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen || draw->viewport[2] <= 0.0f)
+        return;
+    const float size[2] = {(float)draw->target.color.width, (float)draw->target.color.height};
+    const float center[2] = {size[0] * 0.5f, size[1] * 0.5f};
+    float scale[2];
+    recomp_widescreen_2d_scale(aspect, size[0], draw->viewport[0], draw->viewport[0] + draw->viewport[2], scale);
+    if (scale[0] == 1.0f && scale[1] == 1.0f) return;
+    for (uint32_t axis = 0u; axis < 2u; ++axis) {
+        const float extent = draw->viewport[axis + 2u];
+        const float shift = (draw->viewport[axis] + extent * 0.5f - center[axis]) * (scale[axis] - 1.0f);
+        draw->viewport[axis] += shift;
+        if (draw->program_count != 0u && extent > 0.0f)
+            draw->program_constants[59][axis] += shift * 2.0f * fabsf(draw->program_constants[58][axis]) / extent;
     }
+    fit_scissor(draw, center, scale);
 }
 
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size)
