@@ -88,6 +88,12 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 RecompFunction recomp_fiber_lookup_manual(uint32_t address)
 {
     (void)address;
@@ -107,11 +113,6 @@ RecompFunction recomp_mwply_lookup_manual(uint32_t address)
 }
 
 RecompFunction recomp_free_camera_lookup_manual(uint32_t address)
-{
-    (void)address;
-    return NULL;
-}
-RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
 {
     (void)address;
     return NULL;
