@@ -10,10 +10,10 @@
 #include "input_adapter.h"
 #include "kernel_abi.h"
 #include "mwply_adapter.h"
-#include "stage_select.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
 #include "stop_report.h"
+#include "stage_select.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>

@@ -195,12 +195,12 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
-add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
-add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
 
 add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)
+add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
+add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
 
 add_executable(recomp_d3d8_state_test d3d8_state_adapter.c d3d8_state_adapter_test.c
     d3d_light_model.c d3d_vertex_shader_model.c d3d_render_state_model.c)
@@ -618,13 +618,13 @@ if(RECOMP_PROGRAM_DIR)
     add_library(recomp_program_objects OBJECT "${_missing_source}" ${_program_sources})
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
-    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c stage_select.c
+    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c
+        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp
