@@ -177,11 +177,16 @@ static void launch_new_image(void)
         if (name[i] == '\0') break;
     }
     if (strcmp(name, "d:\\doa2.xbe") == 0) recomp_stop(4, "xapi:relaunch-title");
-    /* A null path opens the Dashboard. Each game caller is the player's Yes
-       (Live account and network prompts, save-space prompts; issue #5), and
-       the desktop stands in for the Dashboard. Reason 1 (error) stays a stop. */
-    if (path == 0u && (data == 0u || *recomp_memory_u32(data) != 1u)) recomp_stop(0, "xapi:dashboard");
-    recomp_stop(2, "xapi:launch-new-image:%s", path == 0u ? "dashboard" : name);
+    if (path == 0u) {
+        /* A null path opens the Dashboard. Each game caller is the player's
+           Yes (Live account and network prompts, save-space prompts; issue
+           #5), and the desktop stands in for the Dashboard. */
+        enum { XLD_LAUNCH_DASHBOARD_ERROR = 1u };
+        const uint32_t reason = data == 0u ? 0u : *recomp_memory_u32(data);
+        if (reason != XLD_LAUNCH_DASHBOARD_ERROR) recomp_stop(0, "xapi:dashboard");
+        recomp_stop(2, "xapi:launch-new-image:dashboard");
+    }
+    recomp_stop(2, "xapi:launch-new-image:%s", name);
 }
 
 RecompFunction recomp_lookup_manual(uint32_t guest_address)
