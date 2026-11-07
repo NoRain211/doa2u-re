@@ -145,7 +145,9 @@ pinned lifter and extractor; use the release ZIP.
 
 **Controls:** the first connected controller, or the keyboard for player 1:
 arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
-X/Y, Q/W are White/Black and E/R are the triggers.
+X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
+a readout of the frame rate, the average frame time and the slowest frame of
+the last second; it starts off.
 
 ## Build from source
 

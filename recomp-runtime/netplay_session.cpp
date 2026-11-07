@@ -943,7 +943,7 @@ bool recomp_netplay_session_enabled()
 
 void recomp_netplay_session_install(bool synctest)
 {
-    recomp_d3d_overlay_hook = nullptr;
+    recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = nullptr;
     const bool enabled = recomp_netplay_session_enabled();
     if (enabled) {
         // Rollback input lives in the session, outside the saved state.
@@ -958,7 +958,7 @@ void recomp_netplay_session_install(bool synctest)
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         if (rollback.mode == RollbackMode::Udp) {
             rollback.networkDisplay = recomp_netplay_menu_display(storage);
-            recomp_d3d_overlay_hook = drawSessionOverlay;
+            recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = drawSessionOverlay;
         }
     } else if (!enabled && !synctest) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";

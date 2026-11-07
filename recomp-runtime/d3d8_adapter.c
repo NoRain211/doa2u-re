@@ -38,7 +38,7 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
-void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
+void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool content_widescreen; /* the game's D3DPRESENTFLAG_WIDESCREEN at CreateDevice */
 static bool gpu_work_suppressed;
@@ -53,6 +53,9 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
     gpu_work_suppressed = suppressed;
 }
 void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
+/* Counts host draws for the first-draw log only. It stays out of the saved
+   state: the F3 readout draws on shown frames alone, so SyncTest's replayed
+   frames would count differently. */
 static uint32_t submitted_draws;
 /* The host keeps one main color target across Swap and Reset (which clears
    only depth). It still holds the frame Present last showed, and the pixels
@@ -95,7 +98,6 @@ typedef struct D3d8State {
     RecompD3dDeviceState device;
     RecompD3dFrameState frame;
     RecompD3dRenderStateModel render;
-    uint32_t submitted_draws;
     bool back_buffer_displayed;
     bool back_buffer_saved;
     bool display_mode_pending;
@@ -152,7 +154,6 @@ void recomp_d3d8_state_save(void *state)
     out->device = device_state;
     out->frame = frame_state;
     recomp_d3d8_render_state_save(&out->render);
-    out->submitted_draws = submitted_draws;
     out->back_buffer_displayed = back_buffer_displayed;
     out->back_buffer_saved = back_buffer_saved;
     out->display_mode_pending = display_mode_pending;
@@ -172,7 +173,6 @@ void recomp_d3d8_state_restore(const void *state)
     device_state = in->device;
     frame_state = in->frame;
     recomp_d3d8_render_state_restore(&in->render);
-    submitted_draws = in->submitted_draws;
     back_buffer_displayed = in->back_buffer_displayed;
     back_buffer_saved = in->back_buffer_saved;
     display_mode_pending = in->display_mode_pending;
@@ -749,10 +749,15 @@ static void swap(void)
     /* The wait also moves guest time, so a hidden frame keeps it; under the
        frame clock it never sleeps. */
     recomp_d3d_wait_present();
-    if (!present_suppressed && recomp_d3d_overlay_hook != NULL) {
+    if (!present_suppressed) {
         RecompD3dPresenterTarget target;
-        resolve_target(color_header(0u), 0u, &target);
-        recomp_d3d_overlay_hook(&target);
+        bool resolved = false;
+        for (unsigned i = 0u; i < RECOMP_D3D_OVERLAY_HOOKS; ++i) {
+            if (recomp_d3d_overlay_hooks[i] == NULL) continue;
+            if (!resolved) resolve_target(color_header(0u), 0u, &target);
+            resolved = true;
+            recomp_d3d_overlay_hooks[i](&target);
+        }
     }
     result.command.data.present.aspect = recomp_d3d8_content_aspect();
     /* A host wait for the GPU here would stall every guest thread, including

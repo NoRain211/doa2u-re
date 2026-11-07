@@ -517,7 +517,7 @@ void recomp_netplay_menu_install(const std::filesystem::path &storage, const std
     menu.digest.resize(RECOMP_NETPLAY_DIGEST_BYTES, '0');
     menu.ownName = std::move(ownName);
     menu.aspect = recomp_overlay_display_aspect();
-    recomp_d3d_overlay_hook = onOverlay;
+    recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = onOverlay;
 }
 
 void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
