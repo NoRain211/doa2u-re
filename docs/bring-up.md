@@ -696,8 +696,12 @@ queued work, as the SDK's fence kick does. No guest report slot is written.
 Indices beyond the SDK's 64 report pages, an End without Begin, and a
 requested report timestamp stop explicitly.
 InsertCallback (`0x349e10`, stdcall type/callback/context) calls its cdecl
-callback immediately: captured commands own their bytes and the host GPU
-never writes guest memory, so READ and WRITE conditions already hold.
+callback at the second following Swap: captured commands own their bytes and
+the host GPU never writes guest memory, so READ and WRITE conditions already
+hold. The game skips a flare test while its callback is pending, so the host
+GPU can run a frame behind. Calling it at once made every next-frame poll spin
+until the GPU finished (issue #118: about 6 ms of each frame at 3x on a fast
+PC). Pending callbacks are part of the D3D8 rollback state.
 
 ## Game tasks
 
