@@ -60,8 +60,12 @@ def seed_hdd_cache(disc):
     Copies, not hardlinks: the installer reopens a stale file with CREATE_ALWAYS.
     """
     cache = disc / ".recomp-storage/partition5"
+    # Extracted discs name the folder DOA2; match any case so Linux finds it.
+    folder = next((entry for entry in disc.iterdir() if entry.name.lower() == "doa2" and entry.is_dir()), None)
+    if folder is None:
+        return
     for name in HDD_ARCHIVES:
-        source, target = disc / "doa2" / name, cache / name
+        source, target = folder / name, cache / name
         if not source.is_file() or (target.is_file() and target.stat().st_size == source.stat().st_size):
             continue
         cache.mkdir(parents=True, exist_ok=True)
