@@ -420,14 +420,6 @@ bool immediatePresent(const RecompD3dPresenter *presenter)
     return immediate_present && !presenter->vrr;
 }
 
-/* The swap chain always matches the window, so DWM never stretches it out of
-   shape; a main target of another size is drawn into it by the presenter. */
-bool scalesToWindow(const RecompD3dPresenter *presenter)
-{
-    return mainWidth(presenter) != windowWidth(presenter) ||
-        mainHeight(presenter) != windowHeight(presenter);
-}
-
 /* The largest rectangle of the picture's aspect centered in a width x height
    window; the rest of the screen stays black. */
 D3D11_VIEWPORT fitViewport(float aspect, UINT width, UINT height)
@@ -3565,11 +3557,34 @@ RecompD3dPresenterError submitPresent(
        unconditionally meant the throttled path was never actually throttled:
        every frame was retired immediately and only the blocking behaviour
        changed. Pace to one refresh unless immediate presenting is asked for. */
+    /* The swap chain follows the window, also a maximized or resized 480 one,
+       so DWM never stretches it out of shape. */
+    DXGI_SWAP_CHAIN_DESC chain{};
+    RECT client{};
+    presenter->swap_chain->GetDesc(&chain);
+    if (GetClientRect(presenter->window, &client) && client.right > 0 && client.bottom > 0 &&
+        (static_cast<UINT>(client.right) != chain.BufferDesc.Width ||
+            static_cast<UINT>(client.bottom) != chain.BufferDesc.Height)) {
+        presenter->context->ClearState();
+        releaseCom(presenter->present_target_view);
+        presenter->context->Flush();
+        chain.BufferDesc.Width = static_cast<UINT>(client.right);
+        chain.BufferDesc.Height = static_cast<UINT>(client.bottom);
+        ID3D11Texture2D *back_buffer = nullptr;
+        const bool resized = SUCCEEDED(presenter->swap_chain->ResizeBuffers(0u,
+                chain.BufferDesc.Width, chain.BufferDesc.Height, DXGI_FORMAT_UNKNOWN, chain.Flags)) &&
+            SUCCEEDED(presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer))) &&
+            SUCCEEDED(presenter->device->CreateRenderTargetView(
+                back_buffer, nullptr, &presenter->present_target_view));
+        releaseCom(back_buffer);
+        if (!resized) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
     // A picture of another size or aspect than the window is drawn into it, with black bars.
     const float window_aspect = presenter->widescreen
         ? static_cast<float>(presenter->aspect_w) / presenter->aspect_h : 4.0f / 3.0f;
     const float shown = present.aspect > 0.0f ? present.aspect : window_aspect;
-    const bool drawn = scalesToWindow(presenter) || std::fabs(shown - window_aspect) > 0.001f;
+    const bool drawn = chain.BufferDesc.Width != mainWidth(presenter) ||
+        chain.BufferDesc.Height != mainHeight(presenter) || std::fabs(shown - window_aspect) > 0.001f;
     if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
