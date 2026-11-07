@@ -7,6 +7,8 @@
 enum {
     RECOMP_INPUT_PORT_COUNT = 4u,
     RECOMP_INPUT_ANALOG_BUTTON_COUNT = 8u,
+    /* Host menus and prompts count an analog button above this as pressed. */
+    RECOMP_INPUT_ANALOG_DOWN = 0x40u,
 };
 
 typedef struct RecompInputGamepad {

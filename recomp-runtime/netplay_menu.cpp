@@ -57,7 +57,7 @@ static std::uint16_t keysOf(const RecompInputGamepad &pad)
     if (pad.thumb_lx > 16000) keys |= Right;
     const std::uint16_t face[4] = {A, B, X, Y};
     for (unsigned i = 0u; i < 4u; ++i)
-        if (pad.analog_buttons[i] > 0x40u) keys |= face[i];
+        if (pad.analog_buttons[i] > RECOMP_INPUT_ANALOG_DOWN) keys |= face[i];
     if ((pad.buttons & 0x20u) != 0u) keys |= B; // Back
     return keys;
 }
@@ -517,7 +517,7 @@ void recomp_netplay_menu_install(const std::filesystem::path &storage, const std
     menu.digest.resize(RECOMP_NETPLAY_DIGEST_BYTES, '0');
     menu.ownName = std::move(ownName);
     menu.aspect = recomp_overlay_display_aspect();
-    recomp_d3d_overlay_hook = onOverlay;
+    recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = onOverlay;
 }
 
 void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)

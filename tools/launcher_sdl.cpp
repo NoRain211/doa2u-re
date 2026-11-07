@@ -30,7 +30,7 @@ const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
 // One row per Item, in Item order: its label and how many values it cycles through.
 struct Row { const char *label; int count; };
 const Row kRows[] = {
@@ -41,6 +41,7 @@ const Row kRows[] = {
     {"OUTPUT", 2},
     {"INTRO MOVIES", 2},
     {"UNLOCKS", 2},
+    {"CPU COSTUMES", 2},
     {"FREE CAMERA", 2},
     {"UPDATE", 2},
     {"CHECK AT START", 2},
