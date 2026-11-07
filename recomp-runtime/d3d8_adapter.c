@@ -78,7 +78,7 @@ static uint8_t visibility_valid[VISIBILITY_TESTS];
    behind instead of every poll waiting for it (issue #118), and guest state
    stays on a fixed schedule for rollback. */
 enum { PENDING_CALLBACKS = 64u, CALLBACK_SWAPS = 2u };
-typedef struct PendingCallback { uint32_t callback, context, swaps; } PendingCallback;
+typedef struct PendingCallback { uint32_t callback, context, due_swap; } PendingCallback;
 static PendingCallback pending_callbacks[PENDING_CALLBACKS];
 static uint32_t pending_callback_count;
 
@@ -682,19 +682,15 @@ static bool present_ready(void *unused)
     return recomp_d3d_presenter_present_ready(presenter);
 }
 
-static void run_due_callbacks(void)
+static void run_due_callbacks(uint32_t swap_counter)
 {
     uint32_t kept = 0u;
-    const uint32_t due = pending_callback_count; /* a callback's own inserts wait for the next Swap */
-    for (uint32_t i = 0u; i < due; ++i) {
+    /* A callback may append more; those are due at a later Swap and are kept. */
+    for (uint32_t i = 0u; i < pending_callback_count; ++i) {
         PendingCallback entry = pending_callbacks[i];
-        if (--entry.swaps != 0u) {
-            pending_callbacks[kept++] = entry;
-            continue;
-        }
-        kernel_call_guest(entry.callback, &entry.context, 1u);
+        if ((int32_t)(swap_counter - entry.due_swap) < 0) pending_callbacks[kept++] = entry;
+        else kernel_call_guest(entry.callback, &entry.context, 1u);
     }
-    for (uint32_t i = due; i < pending_callback_count; ++i) pending_callbacks[kept++] = pending_callbacks[i];
     pending_callback_count = kept;
 }
 
@@ -735,7 +731,7 @@ static void swap(void)
     *recomp_memory_u32(DEVICE + 0x1de4u) = result.command.data.present.swap_counter;
     for (uint32_t i = 0; i < 2u; ++i) store(color_header(i), &device_state.color[i], sizeof device_state.color[i]);
     *recomp_memory_u32(DEVICE + FRAME_COUNTER) = result.command.data.present.swap_counter;
-    run_due_callbacks();
+    run_due_callbacks(result.command.data.present.swap_counter);
     if (recomp_d3d_present_hook != NULL) recomp_d3d_present_hook(result.command.data.present.swap_counter);
     recomp_runtime.registers.eax = result.command.data.present.swap_counter;
     recomp_runtime.registers.esp = entry + 8u;
@@ -839,7 +835,7 @@ static void insert_callback(void)
     if (type > 1u || callback == 0u) recomp_stop(2, "d3d8:insert-callback:%u", type);
     if (pending_callback_count == PENDING_CALLBACKS) recomp_stop(2, "d3d8:insert-callback-full");
     pending_callbacks[pending_callback_count++] =
-        (PendingCallback){callback, argument(entry, 2u), CALLBACK_SWAPS};
+        (PendingCallback){callback, argument(entry, 2u), frame_state.swap_counter + CALLBACK_SWAPS};
     recomp_runtime.registers.esp = entry + 16u;
 }
 
