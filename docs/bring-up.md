@@ -709,7 +709,7 @@ Stage Select also offers Tengu's boss stage (issue #117). Its list
 (`stage_select_build_rows`, `0x1354a0`) writes one-byte entry numbers into
 rows at `0xdf5f10`, indexing the 24-byte entries at `0x6e22b0`, and appends
 Random; every other read goes through `0x135410`, `0x135510` and
-`0x135580`. `program_manual.c`
+`0x135580`. `stage_select.c`
 replaces those four and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
