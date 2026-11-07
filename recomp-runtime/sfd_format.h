@@ -2,6 +2,7 @@
 #define DOA2U_RECOMP_SFD_FORMAT_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /* Sofdec SFD: an MPEG-1 program stream with MPEG-1 video on 0xE0, ADX on
    0xC0 and CRI's own records (SofdecStream, CRITAGS) in private stream 2. */
@@ -26,6 +27,10 @@ typedef struct RecompSfdCue {
 /* Reads the SUBTITLE cues of a CRITAGS block found in bytes (private-stream
    payloads in file order). Returns the cues stored, at most capacity. */
 uint32_t recomp_sfd_subtitles(const uint8_t *bytes, uint32_t size, RecompSfdCue *cues, uint32_t capacity);
+
+/* True when the SofdecStream record in bytes (private-stream payloads in file
+   order) marks its video for Sofdec's own color table (DOA2.xbe 0x30da60). */
+bool recomp_sfd_sofdec_colors(const uint8_t *bytes, uint32_t size);
 
 #endif
 

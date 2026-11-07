@@ -1,5 +1,48 @@
 #include "movie_color_model.h"
 
+/* Sofdec's luma curve (DOA2.xbe 0x325a20): it darkens, so mid grey 128 shows as 80. */
+static int sofdec_luma(int i)
+{
+    if (i < 16) return 3 * (i / 2) + (i & 1);
+    if (i < 176) return 24 + (i - 16) / 2;
+    if (i < 192) return 104 + (i - 176);
+    return 120 + 2 * (i - 192);
+}
+
+/* Its chroma curve: within 24 of neutral a third of the offset is kept, so near-grey stays grey. */
+static int sofdec_chroma(int i)
+{
+    if (i < 104) return i * 120 / 104;
+    if (i > 152) return 136 + (i - 152) * 119 / 103;
+    return i >= 128 ? 128 + (i - 128) / 3 : 128 - (128 - i) / 3;
+}
+
+void recomp_movie_color_sofdec_table(int16_t table[RECOMP_MOVIE_COLOR_TABLE_ENTRIES])
+{
+    /* Sofdec's RGB-to-YUV matrix, inverted by cofactors in 1/64 steps as 0x325d00 does. */
+    static const double m[9] = {
+        77 / 256.0, 150 / 256.0, 29 / 256.0, -44 / 256.0, -87 / 256.0, 131 / 256.0,
+        131 / 256.0, -110 / 256.0, -21 / 256.0};
+    const double r = 1.0 / ((m[7] * m[3] * m[2] + m[6] * m[5] * m[1] + m[8] * m[4] * m[0]) -
+        (m[6] * m[4] * m[2] + m[8] * m[3] * m[1] + m[7] * m[5] * m[0]));
+    const double inverse[9] = {
+        (m[8] * m[4] - m[7] * m[5]) * r * 64.0, (m[8] * m[1] - m[7] * m[2]) * r * -64.0,
+        (m[5] * m[1] - m[4] * m[2]) * r * 64.0, (m[8] * m[3] - m[6] * m[5]) * r * -64.0,
+        (m[8] * m[0] - m[6] * m[2]) * r * 64.0, (m[5] * m[0] - m[3] * m[2]) * r * -64.0,
+        (m[7] * m[3] - m[6] * m[4]) * r * 64.0, (m[7] * m[0] - m[6] * m[1]) * r * -64.0,
+        (m[4] * m[0] - m[3] * m[1]) * r * 64.0};
+    for (int i = 0; i < 256; ++i) {
+        const double in[3] = {sofdec_luma(i), sofdec_chroma(i) - 128, sofdec_chroma(i) - 128};
+        for (int plane = 0; plane < 3; ++plane) {
+            int16_t *entry = table + plane * 1024 + i * 4;
+            /* B, G, R, A; the luma entry carries the opaque alpha. The cast truncates as _ftol does. */
+            for (int channel = 0; channel < 3; ++channel)
+                entry[channel] = (int16_t)(in[plane] * inverse[(2 - channel) * 3 + plane] + 0.5);
+            entry[3] = plane == 0 ? 0x3fc0 : 0;
+        }
+    }
+}
+
 static bool span_fits(size_t capacity, size_t stride, size_t row_bytes, uint32_t rows)
 {
     return rows != 0u && row_bytes != 0u && stride >= row_bytes &&

@@ -635,7 +635,7 @@ if(RECOMP_PROGRAM_DIR)
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c stage_select.c
+        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c

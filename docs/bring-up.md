@@ -940,9 +940,14 @@ private stream 2; pl_mpeg decodes the video, `adx_decoder.c` the audio, which
 plays on host output slot 256. The four DOA2 movies are TMPGEnc encodes that
 code intra DC at 11 bits and say so only in a `TMPGEXS` user-data tag;
 `pl_mpeg_patch.cmake` patches the fetched pl_mpeg to decode them as FFmpeg's
-`mpeg12dec.c` does. Frames are due on the guest clock from the
-first status poll that finds the first frame decoded, and late frames are
-dropped as Sofdec drops them. `mwPlyInitSfdFx` still runs as guest code, since
+`mpeg12dec.c` does. A stream whose SofdecStream video entry holds 1 and 3
+at bytes 0x20-0x21, as the boot opening's two do, converts through Sofdec's
+own table (`movie_color_model.c`, built as `0x3261e0` builds it), which darkens
+and turns near-grey color grey; BT.601 showed the opening's storm green
+(issue #131). The other movies convert as BT.601. Frames are due on the
+guest clock from the first status poll that finds the first frame decoded,
+and late frames are dropped as Sofdec drops them. `mwPlyInitSfdFx` still runs
+as guest code, since
 it also sets up the ADX library the music uses. The surround movie soundtrack
 (`ninja.aix`), music and voices still stream through CRI's ADX library.
 

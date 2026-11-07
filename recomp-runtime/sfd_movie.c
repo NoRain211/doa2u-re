@@ -3,6 +3,7 @@
 #include "adx_decoder.h"
 #include "audio_output.h"
 #include "dsound_buffer_adapter.h"
+#include "movie_color_model.h"
 #include "sfd_format.h"
 
 #include <math.h>
@@ -60,6 +61,8 @@ struct RecompSfdMovie {
     plm_buffer_t *stream;
     plm_video_t *decoder;
     RecompAdxDecoder adx;
+    int16_t colors[RECOMP_MOVIE_COLOR_TABLE_ENTRIES];
+    bool colors_checked, sofdec_colors;
     uint8_t adx_bytes[1u << 16];
     uint32_t adx_have;
     int16_t *pcm;
@@ -150,8 +153,26 @@ static void decode_video(RecompSfdMovie *movie, Frame *slot)
         unlock(&movie->guard);
         return;
     }
-    plm_frame_to_bgra(frame, slot->pixels, (int)frame->width * 4);
-    for (size_t i = 3u; i < (size_t)frame->width * frame->height * 4u; i += 4u) slot->pixels[i] = 0xffu;
+    /* Streams whose header asks for it (the opening's storm) use Sofdec's own
+       darker table, which greys near-neutral color; the rest are BT.601. The
+       header record precedes the first video packet. */
+    if (!movie->colors_checked) {
+        movie->colors_checked = true;
+        movie->sofdec_colors = recomp_sfd_sofdec_colors(movie->records, movie->records_size);
+        if (movie->sofdec_colors) recomp_movie_color_sofdec_table(movie->colors);
+    }
+    if (movie->sofdec_colors) {
+        const RecompMoviePlane planes[3] = {
+            {frame->y.data, (size_t)frame->y.width * frame->y.height, frame->y.width},
+            {frame->cb.data, (size_t)frame->cb.width * frame->cb.height, frame->cb.width},
+            {frame->cr.data, (size_t)frame->cr.width * frame->cr.height, frame->cr.width}};
+        recomp_movie_color_convert(planes, frame->width, frame->height, movie->colors,
+            RECOMP_MOVIE_COLOR_TABLE_ENTRIES, slot->pixels, (size_t)frame->width * frame->height * 4u,
+            (size_t)frame->width * 4u);
+    } else {
+        plm_frame_to_bgra(frame, slot->pixels, (int)frame->width * 4);
+        for (size_t i = 3u; i < (size_t)frame->width * frame->height * 4u; i += 4u) slot->pixels[i] = 0xffu;
+    }
     lock(&movie->guard);
     if (movie->decoded == 0u) {
         movie->fps = plm_video_get_framerate(movie->decoder);

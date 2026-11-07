@@ -120,6 +120,20 @@ int main(void)
             RECOMP_MOVIE_COLOR_TABLE_ENTRIES, output, SIZE_MAX, 16u));
     }
     for (unsigned i = 0u; i < sizeof output; ++i) CHECK(output[i] == 0xa5u);
+
+    /* Pixels through Sofdec's own table, as its converter shows them: mid grey
+       darkens, a slightly green grey turns grey, the Team NINJA red stays red. */
+    {
+        static const uint8_t yuv[4][3] = {{128, 128, 128}, {235, 128, 128}, {150, 118, 116}, {117, 86, 211}};
+        static const uint8_t bgra[4][4] = {{80, 80, 80, 255}, {206, 206, 206, 255}, {85, 94, 85, 255}, {23, 30, 177, 255}};
+        recomp_movie_color_sofdec_table(table);
+        for (unsigned i = 0u; i < 4u; ++i) {
+            const RecompMoviePlane pixel[3] = {{&yuv[i][0], 1u, 1u}, {&yuv[i][1], 1u, 1u}, {&yuv[i][2], 1u, 1u}};
+            CHECK(recomp_movie_color_convert(pixel, 1u, 1u, table,
+                RECOMP_MOVIE_COLOR_TABLE_ENTRIES, output, 4u, 4u));
+            CHECK(memcmp(output, bgra[i], 4u) == 0);
+        }
+    }
     puts("Movie color: synthetic table and span checks passed");
     return 0;
 }
