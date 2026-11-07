@@ -165,13 +165,14 @@ static void movie_scene_tick(void)
 
 /* Stage Select (issue #117). The game keeps 24-byte stage entries at 0x6e22b0:
    +0 Random flag, +1..3 the stage id per variant, +4 the name label, +8 and
-   +0xc the 4:3 and wide thumbnails. 0x1354a0 lists a mode's entries as rows
-   at 0xdf5f10 and appends Random (entry 0x15); rows are read only through
-   0x135410, 0x135510 and 0x135580. These replace all four to add Tengu's
-   boss stage (id 18, the Miyama his story fights use) before Random in the
-   regular list. Other data follows the table, so its entry lives in the
-   reserved kernel page. Labels 61, 14 and 36 are the game's unused Miyama
-   name and thumbnails. */
+   +0xc the 4:3 and wide thumbnails. 0x1354a0 lists a mode's entry numbers as
+   byte rows at 0xdf5f10 and appends Random (entry 0x15); the extra row ends
+   at 0xdf5f26, short of the next data the game uses (0xdf5f30). Rows are
+   read only through 0x135410, 0x135510 and 0x135580. These replace all four
+   to add Tengu's boss stage (id 18, the Miyama his story fights use) before
+   Random in the regular list. Other data follows the table, so its entry
+   lives in the reserved kernel page. Labels 61, 14 and 36 are the game's
+   unused Miyama name and thumbnails. */
 enum {
     STAGE_ENTRIES = 0x006e22b0u,
     STAGE_ENTRY_SIZE = 0x18u,

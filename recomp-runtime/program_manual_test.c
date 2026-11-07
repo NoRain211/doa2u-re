@@ -256,8 +256,6 @@ static int test_launch_new_image(void)
     return 1;
 }
 
-/* Stage select lists the regular stages, then Tengu's boss stage, then Random;
-   the tag list is unchanged. Row lookups go both ways through the new entry. */
 static uint32_t call_cdecl(uint32_t address, uint32_t a, uint32_t b)
 {
     RecompFunction function = recomp_lookup_manual(address);
@@ -269,28 +267,38 @@ static uint32_t call_cdecl(uint32_t address, uint32_t a, uint32_t b)
     return recomp_runtime.registers.esp == 0x1004u ? recomp_runtime.registers.eax : 0xbeefu;
 }
 
+/* Stage select lists the regular stages, then Tengu's boss stage, then Random;
+   the tag list is unchanged. Row lookups go both ways through the new entry. */
 static int test_stage_select(void)
 {
+    const char *failed = NULL;
     uint8_t *modes = &stage_table[4], *entries = &stage_table[0x10];
     modes[2] = 0x10u; modes[3] = 5u; modes[4] = 0u; modes[5] = 0x15u; /* tag: 16-20, regular: 0-20 */
     for (unsigned i = 0u; i < 0x15u; ++i) memset(entries + i * 0x18u + 1u, (int)(i + 30u), 3u);
     entries[0x15u * 0x18u] = 1u;
     memset(entries + 0x15u * 0x18u + 1u, 0xff, 3u);
     if (call_cdecl(0x001354a0u, 2u, 0u) != 23u || stage_table[0xa] != 23u ||
-        stage_rows[20] != 20u || stage_rows[21] != 0x16u || stage_rows[22] != 0x15u) return 0;
-    if (call_cdecl(0x00135510u, 21u, 0u) != 18u || call_cdecl(0x00135510u, 3u, 1u) != 33u ||
-        call_cdecl(0x00135510u, 40u, 0u) != 0xffu) return 0; /* past the end clamps to Random */
-    if (call_cdecl(0x00135410u, 21u, 0u) != XBOX_KERNEL_DATA_BASE + 0xc00u ||
-        kernel_page[4] != 61u || kernel_page[8] != 14u || kernel_page[12] != 36u) return 0;
-    if (call_cdecl(0x00135410u, 22u, 0u) != 0x6e22b0u + 0x15u * 0x18u) return 0;
+        stage_rows[20] != 20u || stage_rows[21] != 0x16u || stage_rows[22] != 0x15u) failed = "regular rows";
+    else if (call_cdecl(0x00135510u, 21u, 0u) != 18u || call_cdecl(0x00135510u, 3u, 1u) != 33u ||
+        call_cdecl(0x00135510u, 40u, 0u) != 0xffu) failed = "row stage"; /* past the end clamps to Random */
+    else if (call_cdecl(0x00135410u, 21u, 0u) != XBOX_KERNEL_DATA_BASE + 0xc00u ||
+        kernel_page[4] != 61u || kernel_page[5] != 0u || kernel_page[8] != 14u || kernel_page[9] != 0u ||
+        kernel_page[12] != 36u || kernel_page[13] != 0u) failed = "Miyama entry";
+    else if (call_cdecl(0x00135410u, 22u, 0u) != 0x6e22b0u + 0x15u * 0x18u) failed = "Random entry";
+    if (failed != NULL) {
+        fprintf(stderr, "FAIL stage select: %s\n", failed);
+        return 0;
+    }
     guest_path[0] = 9;
-    if (call_cdecl(0x00135580u, 18u, 0x3000u) != 21u || guest_path[0] != 1) return 0;
-    if (call_cdecl(0x00135580u, 0xffu, 0x3000u) != 0u || guest_path[0] != 0) return 0;
-    if (call_cdecl(0x001354a0u, 1u, 0u) != 6u || stage_rows[4] != 20u || stage_rows[5] != 0x15u) return 0;
+    if (call_cdecl(0x00135580u, 18u, 0x3000u) != 21u || guest_path[0] != 1) failed = "find Miyama";
+    else if (call_cdecl(0x00135580u, 0xffu, 0x3000u) != 0u || guest_path[0] != 0) failed = "find missing";
+    else if (call_cdecl(0x001354a0u, 1u, 0u) != 6u || stage_rows[4] != 20u || stage_rows[5] != 0x15u)
+        failed = "short list";
     stage_tag_match = 1u;
-    if (call_cdecl(0x001354a0u, 2u, 0u) != 6u) return 0;
+    if (failed == NULL && call_cdecl(0x001354a0u, 2u, 0u) != 6u) failed = "tag list";
     stage_tag_match = 0u;
-    return 1;
+    if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
+    return failed == NULL;
 }
 
 int main(void)
