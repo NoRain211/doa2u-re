@@ -150,7 +150,7 @@ or an ultrawide such as 64:27). Every widescreen view builds its projection with
 1 / (9/16) from the pooled constant 0x3c2cec; FUN_00039710 and FUN_00192010
 read the same constant as unrelated thresholds, so it stays. The manual
 lookup wraps 0x34280 and replaces exactly that aspect with the shape, which
-keeps the vertical field of view and widens or narrows the view. The D3D8
+keeps the vertical field of view and widens or narrows the view.
 Culling has its own view cone: `camera_setup_view_cone` (0x34E10) stores the
 tan, sin and cos of the horizontal half angle at 0x879BF4, 0x877C6C and
 0x87D228 from the same 9/16, and `camera_query_view_cone` (0x36490) returns

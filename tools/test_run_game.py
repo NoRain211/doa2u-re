@@ -60,9 +60,7 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                 with patch("run_game.ROOT", root):
                     saved = saved_settings()
                 if last:
-                    # The last choice, 32:9, is wider than 16:9.
-                    width, height = map(int, saved.pop("widescreen").split(":"))
-                    self.assertGreater(width * 9, height * 16)
+                    self.assertEqual(saved.pop("widescreen"), "32:9")  # the last Screen choice
                 self.assertEqual(saved, expected)
 
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
