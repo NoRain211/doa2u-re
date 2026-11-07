@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
+#include <SDL3/SDL.h>
 
 enum { MAX_QUADS = 8192u, FVF_XYZRHW_DIFFUSE = 0x44u };
 
@@ -199,13 +199,11 @@ void recomp_overlay_perf(const RecompD3dPresenterTarget *target)
     const bool down = recomp_input_host_key(RECOMP_INPUT_HOST_KEY_F3);
     if (down && !held) shown = !shown;
     held = down;
-    struct timespec now;
-    timespec_get(&now, TIME_UTC);
-    const double ms = (double)now.tv_sec * 1e3 + (double)now.tv_nsec / 1e6;
+    const double ms = (double)SDL_GetTicksNS() / 1e6; /* monotonic, so clock changes cannot skew it */
     if (last_ms != 0.0 && ms - last_ms > slowest_ms) slowest_ms = ms - last_ms;
     last_ms = ms;
-    if (window_ms == 0.0) window_ms = ms;
-    ++frames;
+    if (window_ms == 0.0) window_ms = ms; /* the first Swap opens the window */
+    else ++frames;
     if (ms - window_ms >= 1000.0) {
         snprintf(line, sizeof line, "%.0f FPS  %.1f MS  MAX %.1f",
             frames * 1000.0 / (ms - window_ms), (ms - window_ms) / frames, slowest_ms);

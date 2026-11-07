@@ -86,7 +86,6 @@ typedef struct D3d8State {
     RecompD3dDeviceState device;
     RecompD3dFrameState frame;
     RecompD3dRenderStateModel render;
-    uint32_t submitted_draws;
     bool back_buffer_displayed;
     bool back_buffer_saved;
     bool display_mode_pending;
@@ -141,7 +140,6 @@ void recomp_d3d8_state_save(void *state)
     out->device = device_state;
     out->frame = frame_state;
     recomp_d3d8_render_state_save(&out->render);
-    out->submitted_draws = submitted_draws;
     out->back_buffer_displayed = back_buffer_displayed;
     out->back_buffer_saved = back_buffer_saved;
     out->display_mode_pending = display_mode_pending;
@@ -159,7 +157,6 @@ void recomp_d3d8_state_restore(const void *state)
     device_state = in->device;
     frame_state = in->frame;
     recomp_d3d8_render_state_restore(&in->render);
-    submitted_draws = in->submitted_draws;
     back_buffer_displayed = in->back_buffer_displayed;
     back_buffer_saved = in->back_buffer_saved;
     display_mode_pending = in->display_mode_pending;
