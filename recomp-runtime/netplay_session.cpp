@@ -20,6 +20,7 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
+#include "netplay_guest.h"
 #include "program_manual.h"
 #include "stop_report.h"
 }
@@ -457,7 +458,7 @@ static void hashCheckFrame()
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
     std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 3u);
     if (count == SIZE_MAX) recomp_stop(4, "rollback:hash-ranges");
-    /* draw_fight_name (program_manual.c) draws the local player's name in
+    /* draw_fight_name (netplay_guest.c) draws the local player's name in
        yellow and the other's in white, so the two sides' 2D draw state
        differs in glyph colors: in the sprite queue g_ui_sprite_queue, which
        ui_draw_lists_reset (0xae300) empties each frame and ui_draw_sprite
@@ -759,9 +760,13 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
         if (names[side].empty()) fight[side] = tag;
         else if (same) fight[side] = tag + " " + fight[side];
     }
-    recomp_program_set_fight_names(fight[0].c_str(), fight[1].c_str(), player);
-    recomp_program_set_side_profiles(names[0].empty() ? nullptr : names[0].front().c_str(),
-        names[1].empty() ? nullptr : names[1].front().c_str());
+    recomp_netplay_guest_set_fight_names(fight[0].c_str(), fight[1].c_str(), player);
+    std::u16string profiles[2];
+    for (unsigned side = 0u; side < 2u; ++side)
+        if (!names[side].empty()) profiles[side] = recomp_netplay_utf16(names[side].front());
+    static_assert(sizeof(char16_t) == sizeof(std::uint16_t));
+    recomp_netplay_guest_set_side_profiles(reinterpret_cast<const std::uint16_t *>(profiles[0].c_str()),
+        reinterpret_cast<const std::uint16_t *>(profiles[1].c_str()));
     return true;
 }
 
@@ -922,8 +927,8 @@ static void endSession(const char *reason)
     rollback = RollbackRun{};
     recomp_kernel_widescreen = recomp_kernel_surround = -1; // the player's own settings offline
     recomp_save_session = nullptr;
-    recomp_program_set_fight_names(nullptr, nullptr, 0u);
-    recomp_program_set_side_profiles(nullptr, nullptr);
+    recomp_netplay_guest_set_fight_names(nullptr, nullptr, 0u);
+    recomp_netplay_guest_set_side_profiles(nullptr, nullptr);
     backToVersus = true;
     recomp_netplay_menu_return_to_room(socket);
     host.reboot();

@@ -15,6 +15,8 @@
 
 // The save name on a profile's SaveMeta.xbx "Name=" line (UTF-16), as UTF-8.
 std::string recomp_netplay_profile_name(const std::uint8_t *bytes, std::size_t size);
+// A UTF-8 name as UTF-16, the form the game gives a profile's name.
+std::u16string recomp_netplay_utf16(const std::string &name);
 // The profile this player saved last, as UDATA/<title>/<save>, or empty without one.
 std::string recomp_netplay_latest_profile(const std::filesystem::path &root);
 // The name on the profile this player saved last, or empty without one.

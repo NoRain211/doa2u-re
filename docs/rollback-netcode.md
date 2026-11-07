@@ -286,7 +286,7 @@ side finds the desync too, shows DESYNC DETECTED for 2 s and ends the session
 matching checks the log says so, with the slowest check.
 
 The fight HUD draws the local player's name in yellow and the other's in
-white (`draw_fight_name`, `program_manual.c`), so the two sides' 2D draw
+white (`draw_fight_name`, `netplay_guest.c`), so the two sides' 2D draw
 state differs in those glyphs' colors. They sit in the sprite queue
 `g_ui_sprite_queue` (`0x88eed8`), which `ui_draw_sprite` (`0xb1060`)
 fills below `0x89bed9` and `ui_draw_lists_reset` (`0xae300`) empties each
