@@ -231,12 +231,12 @@ setting, and the presenter shows that image at 16:9.
 widescreen mode in another shape: the runner widens the game's projection to
 it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
-launcher's **16:10** and **Ultrawide** (the primary monitor's own shape)
-choices set it. Online sessions and replays use the host's 4:3 or 16:9 mode,
-fitted with black bars, as both sides must compute the same frames. Above
-480p the Direct3D 11 window fills the screen borderless in any shape, with
-black bars around a picture of another shape; the SDL_GPU window is
-resizable and fits the picture the same way. MSAA resolves before
+launcher's **16:10**, **Ultrawide** (the primary monitor's own shape) and
+**32:9** choices set it. Online sessions and replays use the host's 4:3 or
+16:9 mode, fitted with black bars, as both sides must compute the same
+frames. Above 480p the Direct3D 11 window fills the screen borderless in
+any shape, with black bars around a picture of another shape; the SDL_GPU
+window is resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3,

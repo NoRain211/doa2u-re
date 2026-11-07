@@ -60,7 +60,7 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                 with patch("run_game.ROOT", root):
                     saved = saved_settings()
                 if last:
-                    # Ultrawide saves the primary monitor's own shape, at least 21:9.
+                    # The last choice, 32:9, is wider than 16:9.
                     width, height = map(int, saved.pop("widescreen").split(":"))
                     self.assertGreater(width * 9, height * 16)
                 self.assertEqual(saved, expected)
@@ -231,7 +231,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})
-                for screen, expected in (("16:10", "16:10"), ("3440:1440", "3440:1440"), ("4:3", False),
+                for screen, expected in (("16:10", "16:10"), ("32:9", "32:9"), ("3440:1440", "3440:1440"), ("4:3", False),
                                          ("16:9", "16:9"), ("5:1", True), ("wide", True)):
                     settings.write_text(json.dumps({"widescreen": True, "screen": screen}), encoding="utf-8")
                     self.assertEqual(saved_settings(), {"widescreen": expected}, screen)

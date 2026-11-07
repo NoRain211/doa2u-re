@@ -140,8 +140,8 @@ accepts that flag at creation and Reset. The game's existing camera and UI
 branches select their 16:9 behavior, and the presenter sizes the window to
 match. No game matrices or guest code are patched for 16:9.
 
-A `W:H` value keeps the widescreen bit and renders that shape (16:10, or an
-ultrawide such as 64:27). Every widescreen view builds its projection with
+A `W:H` value keeps the widescreen bit and renders that shape (16:10, 32:9,
+or an ultrawide such as 64:27). Every widescreen view builds its projection with
 0x34280 (cdecl matrix, fov, aspect, near, far, offset, scale), passing aspect
 1 / (9/16) from the pooled constant 0x3c2cec; FUN_00039710 and FUN_00192010
 read the same constant as unrelated thresholds, so it stays. The manual

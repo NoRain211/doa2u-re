@@ -89,7 +89,7 @@ static class Game
         return s.TryGetValue(key, out v) && v is string ? (string)v : fallback;
     }
 
-    // "4:3", "16:9", "16:10" or an ultrawide "W:H"; settings saved before
+    // "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"; settings saved before
     // 16:10 hold only a widescreen flag.
     public static string ScreenShape(Dictionary<string, object> s)
     {
@@ -250,7 +250,7 @@ class LauncherForm : Form
 {
     static readonly int[] Heights = { 480, 720, 1080, 1440, 2160 };
     static readonly int[] Samples = { 1, 2, 4, 8, 16, 32 };
-    static readonly string[] Screens = { "4:3", "16:9", "16:10", "Ultrawide" };
+    static readonly string[] Screens = { "4:3", "16:9", "16:10", "Ultrawide", "32:9" };
     const int BuildPage = 4, PlayPage = 5, UpdatePage = 6;
     const string DiscordUrl = "https://discord.gg/56TGGxZnE3";
     // The Discord mark in a 24-unit box: one outline of cubic Bezier segments, the eyes cut out below.

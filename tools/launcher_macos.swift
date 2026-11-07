@@ -14,7 +14,7 @@ let settingsURL = root.appendingPathComponent("private/launcher.json")
 
 let heights = [480, 720, 1080, 1440, 2160]
 let samples = [1, 2, 4, 8]
-let screens = ["4:3", "16:9", "16:10", "Ultrawide"]
+let screens = ["4:3", "16:9", "16:10", "Ultrawide", "32:9"]
 
 var settings: [String: Any] = [:]
 if let data = try? Data(contentsOf: settingsURL),
@@ -27,7 +27,7 @@ func intSetting(_ key: String, _ fallback: Int) -> Int {
 func boolSetting(_ key: String, _ fallback: Bool) -> Bool {
     (settings[key] as? NSNumber)?.boolValue ?? fallback
 }
-// "4:3", "16:9", "16:10" or an ultrawide "W:H"; settings saved before 16:10
+// "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"; settings saved before 16:10
 // hold only a widescreen flag.
 func screenSetting() -> String {
     settings["screen"] as? String ?? (boolSetting("widescreen", true) ? "16:9" : "4:3")
