@@ -36,7 +36,9 @@ void recomp_cpu_costume_install(bool online)
 {
     const char *value = getenv("RECOMP_RANDOM_CPU_COSTUMES");
     enabled = !online && value != NULL && strcmp(value, "1") == 0;
-    seed = (uint32_t)time(NULL) | 1u;
+    struct timespec now;
+    timespec_get(&now, TIME_UTC); /* nanoseconds, so quick reboots still differ */
+    seed = ((uint32_t)now.tv_sec * 2654435761u ^ (uint32_t)now.tv_nsec) | 1u;
 }
 
 static uint32_t hash_bytes(uint32_t hash, const uint8_t *bytes, uint32_t size)
