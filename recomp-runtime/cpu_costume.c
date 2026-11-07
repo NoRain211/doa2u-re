@@ -52,8 +52,11 @@ uint8_t recomp_cpu_costume_group(uint32_t run_seed, const uint8_t *run, uint32_t
 static uint8_t call_byte(uint32_t function, uint32_t a, uint32_t b, uint32_t c, uint32_t d, unsigned count)
 {
     const uint32_t arguments[4] = {a, b, c, d};
+    const uint32_t eax = recomp_runtime.registers.eax; /* the game's pick, which every return keeps */
     kernel_call_guest(function, arguments, count);
-    return (uint8_t)recomp_runtime.registers.eax;
+    const uint8_t value = (uint8_t)recomp_runtime.registers.eax;
+    recomp_runtime.registers.eax = eax;
+    return value;
 }
 
 static bool wears_player_costume(uint8_t character, uint8_t costume)
@@ -93,7 +96,6 @@ static void fighter_costume(void)
             return;
         }
     }
-    recomp_runtime.registers.eax = result;
 }
 
 RecompFunction recomp_cpu_costume_lookup_manual(uint32_t guest_address)
