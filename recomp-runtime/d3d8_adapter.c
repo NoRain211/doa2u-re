@@ -52,6 +52,9 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
     gpu_work_suppressed = suppressed;
 }
 void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
+/* Counts host draws for the first-draw log only. It stays out of the saved
+   state: the F3 readout draws on shown frames alone, so SyncTest's replayed
+   frames would count differently. */
 static uint32_t submitted_draws;
 /* The host keeps one main color target across Swap and Reset (which clears
    only depth). It still holds the frame Present last showed, and the pixels
