@@ -57,7 +57,7 @@ static std::uint16_t keysOf(const RecompInputGamepad &pad)
     if (pad.thumb_lx > 16000) keys |= Right;
     const std::uint16_t face[4] = {A, B, X, Y};
     for (unsigned i = 0u; i < 4u; ++i)
-        if (pad.analog_buttons[i] > 0x40u) keys |= face[i];
+        if (pad.analog_buttons[i] > RECOMP_INPUT_ANALOG_DOWN) keys |= face[i];
     if ((pad.buttons & 0x20u) != 0u) keys |= B; // Back
     return keys;
 }

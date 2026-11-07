@@ -70,10 +70,10 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
     case RECOMP_QUIT_OPENED:
         recomp_overlay_set_title(&text, "Quit to the desktop?");
         recomp_overlay_set_hint(&text, "A quit   B keep playing");
-        recomp_overlay_publish(&text);
+        recomp_overlay_publish(RECOMP_OVERLAY_QUIT_PROMPT, &text);
         break;
     case RECOMP_QUIT_CANCELLED:
-        recomp_overlay_publish(&text);
+        recomp_overlay_publish(RECOMP_OVERLAY_QUIT_PROMPT, &text);
         break;
     case RECOMP_QUIT_CHOSEN:
         recomp_stop(0, "player-quit");
@@ -83,15 +83,21 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
     }
 }
 
+// A host pad goes through the quit prompt, then the netplay menu. The open
+// prompt owns the pads, so the room cannot inject its A behind it.
+static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
+{
+    quitPrompt(port, sampled ? gamepad : nullptr);
+    if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
+}
+
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     bool present = false;
     if (recomp_netplay_session_pad(port, gamepad, &present)) return present;
     if (port != 0u) {
         const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
-        quitPrompt(port, sampled ? gamepad : nullptr);
-        // The open prompt owns the pads, so the room cannot inject its A behind it.
-        if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
+        filterHostPad(port, gamepad, sampled);
         return sampled;
     }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
@@ -102,8 +108,7 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
     }
-    quitPrompt(0u, sampled ? gamepad : nullptr);
-    if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(0u, gamepad);
+    filterHostPad(0u, gamepad, sampled);
     return recomp_netplay_session_back_pad(gamepad) || sampled;
 }
 

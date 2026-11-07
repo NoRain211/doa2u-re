@@ -5,7 +5,7 @@
 #include <string.h>
 
 enum {
-    BUTTON_BACK = 0x0020u, HOLD_MS = 2000u, ANALOG_DOWN = 0x40u, ANALOG_A = 0u, ANALOG_B = 1u,
+    BUTTON_BACK = 0x0020u, HOLD_MS = 2000u, ANALOG_A = 0u, ANALOG_B = 1u,
     STICK_IDLE = 7849, /* XInput's left-stick dead zone */
 };
 
@@ -18,7 +18,7 @@ static bool pad_idle(const RecompInputGamepad *pad)
 {
     if (pad->buttons != 0u) return false;
     for (unsigned i = 0u; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; ++i)
-        if (pad->analog_buttons[i] > ANALOG_DOWN) return false;
+        if (pad->analog_buttons[i] > RECOMP_INPUT_ANALOG_DOWN) return false;
     const int sticks[4] = {pad->thumb_lx, pad->thumb_ly, pad->thumb_rx, pad->thumb_ry};
     for (unsigned i = 0u; i < 4u; ++i)
         if (sticks[i] > STICK_IDLE || sticks[i] < -STICK_IDLE) return false;
@@ -49,9 +49,9 @@ RecompQuitEvent recomp_quit_prompt_filter(uint32_t port, RecompInputGamepad *pad
             memset(back_held, 0, sizeof back_held);
         }
     } else if (!latched[port]) {
-        if (pad->analog_buttons[ANALOG_A] > ANALOG_DOWN) {
+        if (pad->analog_buttons[ANALOG_A] > RECOMP_INPUT_ANALOG_DOWN) {
             event = RECOMP_QUIT_CHOSEN;
-        } else if (pad->analog_buttons[ANALOG_B] > ANALOG_DOWN) {
+        } else if (pad->analog_buttons[ANALOG_B] > RECOMP_INPUT_ANALOG_DOWN) {
             open = false;
             latched[port] = true;
             event = RECOMP_QUIT_CANCELLED;
