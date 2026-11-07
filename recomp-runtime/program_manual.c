@@ -113,27 +113,43 @@ static void build_projection(void)
 
 extern void sub_00034E10(void);
 extern void sub_00036490(void);
+extern void sub_0026C2E0(void);
+extern void sub_00279D60(void);
+extern void sub_0027A070(void);
+extern void sub_0027A430(void);
+extern void sub_00280460(void);
 
 /* Camera setup (0x34E10) and a camera query (0x36490) take the horizontal
    half angle the game culls against from that same 9/16 at 0x3c2cec; left
    at 16:9, a wider screen culls whatever lies outside its middle 16:9. The
    shape goes in for these calls only, as other code reads 9/16 as a threshold;
-   neither call reaches that code. */
-static void with_screen_shape(void (*body)(void))
+   neither call reaches that code. Mirror cameras (0x26c2e0, 0x279d60,
+   0x27a070, 0x27a430, 0x280460, every reader of 0x877ea0) build their
+   projection and cone from the back buffer's 720/480 there instead. At 32:9
+   Koku An's mirrored floor covered only the middle 42% and smeared its edge
+   texels over the rest (issue #139), so they get the shape too; 16:9 keeps
+   the game's 1.5. */
+static void with_screen_float(uint32_t address, float shaped, void (*body)(void))
 {
-    uint8_t *nine_sixteenths = recomp_memory(0x003c2cecu, sizeof(float));
-    const float aspect = recomp_kernel_widescreen_aspect();
+    uint8_t *slot = recomp_memory(address, sizeof(float));
     float saved;
-    memcpy(&saved, nine_sixteenths, sizeof saved);
-    if ((recomp_kernel_video_flags() & 0x00010000u) != 0u && aspect != 16.0f / 9.0f) {
-        const float shape = 1.0f / aspect;
-        memcpy(nine_sixteenths, &shape, sizeof shape);
-    }
+    memcpy(&saved, slot, sizeof saved);
+    if ((recomp_kernel_video_flags() & 0x00010000u) != 0u && recomp_kernel_widescreen_aspect() != 16.0f / 9.0f)
+        memcpy(slot, &shaped, sizeof shaped);
     body();
-    memcpy(nine_sixteenths, &saved, sizeof saved);
+    memcpy(slot, &saved, sizeof saved);
 }
-static void camera_setup(void) { with_screen_shape(sub_00034E10); }
-static void camera_query(void) { with_screen_shape(sub_00036490); }
+static void camera_setup(void) { with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), sub_00034E10); }
+static void camera_query(void) { with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), sub_00036490); }
+static void with_mirror_shape(void (*body)(void))
+{
+    with_screen_float(0x00877ea0u, recomp_kernel_widescreen_aspect(), body);
+}
+static void water_mirror_camera(void) { with_mirror_shape(sub_0026C2E0); }
+static void floor_mirror_camera(void) { with_mirror_shape(sub_00279D60); }
+static void floor_mirror_camera_at(void) { with_mirror_shape(sub_0027A070); }
+static void floor_mirror_render(void) { with_mirror_shape(sub_0027A430); }
+static void plane_mirror_camera(void) { with_mirror_shape(sub_00280460); }
 
 void recomp_program_manual_reset(void)
 {
@@ -205,6 +221,11 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (guest_address == 0x00034280u) return build_projection;
     if (guest_address == 0x00034e10u) return camera_setup;
     if (guest_address == 0x00036490u) return camera_query;
+    if (guest_address == 0x0026c2e0u) return water_mirror_camera;
+    if (guest_address == 0x00279d60u) return floor_mirror_camera;
+    if (guest_address == 0x0027a070u) return floor_mirror_camera_at;
+    if (guest_address == 0x0027a430u) return floor_mirror_render;
+    if (guest_address == 0x00280460u) return plane_mirror_camera;
     RecompFunction function = recomp_d3d8_resource_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_state_lookup_manual(guest_address);

@@ -21,6 +21,7 @@ static jmp_buf stopped;
 static int stop_code;
 static char stop_id[64];
 static float nine_sixteenths = 0.5625f, seen_shape; /* 0x3c2cec */
+static float back_buffer_shape = 1.5f, seen_reflection; /* 0x877ea0 */
 static uint32_t video_flags;
 static float screen_aspect = 16.0f / 9.0f;
 uint32_t *recomp_memory_u32_checked(uint32_t address)
@@ -38,6 +39,7 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
         return (uint8_t *)&guest_path[address - 0x3000u];
     if (address >= 0x4000u && address + width <= 0x4000u + sizeof aix) return &aix[address - 0x4000u];
     if (address == 0x003c2cecu && width == sizeof nine_sixteenths) return (uint8_t *)&nine_sixteenths;
+    if (address == 0x00877ea0u && width == sizeof back_buffer_shape) return (uint8_t *)&back_buffer_shape;
     if (address < 0x2000u || address + width > 0x2000u + sizeof scene) abort();
     return &scene[address - 0x2000u];
 }
@@ -140,16 +142,22 @@ float recomp_kernel_widescreen_aspect(void) { return screen_aspect; }
 void sub_00034280(void) {}
 void sub_00034E10(void) { seen_shape = nine_sixteenths; }
 void sub_00036490(void) { seen_shape = nine_sixteenths; }
+void sub_0026C2E0(void) { seen_reflection = back_buffer_shape; }
+void sub_00279D60(void) { seen_reflection = back_buffer_shape; }
+void sub_0027A070(void) { seen_reflection = back_buffer_shape; }
+void sub_0027A430(void) { seen_reflection = back_buffer_shape; }
+void sub_00280460(void) { seen_reflection = back_buffer_shape; }
 
-/* The culling view sees the screen's shape during the call; the shared 9/16 comes back after. */
+/* The culling views see the screen's shape during the call; the shared values come back after. */
 static int test_culling_shape(void)
 {
-    const struct { uint32_t flags; float aspect, seen; } cases[] = {
-        {0x004e0000u, 32.0f / 9.0f, 0.5625f},     /* 4:3 mode reads 3/4 elsewhere */
-        {0x004f0000u, 16.0f / 9.0f, 0.5625f},
-        {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f},
+    const struct { uint32_t flags; float aspect, seen, reflection; } cases[] = {
+        {0x004e0000u, 32.0f / 9.0f, 0.5625f, 1.5f},     /* 4:3 mode reads 3/4 elsewhere */
+        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 1.5f},
+        {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f, 32.0f / 9.0f},
     };
     const uint32_t wrapped[] = {0x00034e10u, 0x00036490u};
+    const uint32_t mirrors[] = {0x0026c2e0u, 0x00279d60u, 0x0027a070u, 0x0027a430u, 0x00280460u};
     for (unsigned i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
         video_flags = cases[i].flags;
         screen_aspect = cases[i].aspect;
@@ -157,6 +165,11 @@ static int test_culling_shape(void)
             seen_shape = 0.0f;
             recomp_lookup_manual(wrapped[j])();
             if (fabsf(seen_shape - cases[i].seen) > 1e-7f || nine_sixteenths != 0.5625f) return 0;
+        }
+        for (unsigned j = 0u; j < sizeof mirrors / sizeof mirrors[0]; ++j) {
+            seen_reflection = 0.0f;
+            recomp_lookup_manual(mirrors[j])();
+            if (seen_reflection != cases[i].reflection || back_buffer_shape != 1.5f) return 0;
         }
     }
     video_flags = 0u;
