@@ -31,14 +31,29 @@ const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
 
 enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
-const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "UNLOCKS", "CPU COSTUMES", "FREE CAMERA", "UPDATE", "CHECK AT START"};
+// One row per Item, in Item order: its label and how many values it cycles through.
+struct Row { const char *label; int count; };
+const Row kRows[] = {
+    {"RESOLUTION", static_cast<int>(std::size(kHeights))},
+    {"MSAA", static_cast<int>(std::size(kSamples))},
+    {"SMAA", 2},
+    {"SCREEN", static_cast<int>(std::size(kScreens))},
+    {"OUTPUT", 2},
+    {"INTRO MOVIES", 2},
+    {"UNLOCKS", 2},
+    {"CPU COSTUMES", 2},
+    {"FREE CAMERA", 2},
+    {"UPDATE", 2},
+    {"CHECK AT START", 2},
+};
+static_assert(std::size(kRows) == ITEM_COUNT, "kRows needs one row per Item");
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
     {"VIDEO SETTINGS", "Sets resolution, anti-aliasing and screen shape", {RESOLUTION, MSAA, SMAA, WIDESCREEN}},
     {"AUDIO SETTINGS", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"MOVIES", "Plays or skips the logo and opening movies at boot", {SKIP_INTRO}},
-    {"GAMEPLAY", "Chooses the unlocks, CPU costumes and whether the free camera is allowed", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA}},
+    {"GAMEPLAY", "Chooses the unlocks and whether the free camera is allowed", {UNLOCKS, FREE_CAMERA}},
     {"START GAME", "Saves these settings and starts the game", {}},
     {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
     {"EXIT", "Closes the launcher", {}},
@@ -55,7 +70,6 @@ struct Settings {
     bool skip_intro = false;
     bool check_updates = true;
     bool unlock_all = true;
-    bool random_cpu_costumes = false;
     bool free_camera = false;
 };
 
@@ -94,7 +108,6 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "checkUpdates", value)) settings.check_updates = value == "true";
     if (jsonValue(text, "unlockAll", value)) settings.unlock_all = value == "true";
     if (jsonValue(text, "freeCamera", value)) settings.free_camera = value == "true";
-    if (jsonValue(text, "randomCpuCostumes", value)) settings.random_cpu_costumes = value == "true";
     return settings;
 }
 
@@ -109,8 +122,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
          << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
          << ",\n  \"surround\": " << (settings.surround ? "true" : "false")
-         << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false")
-         << ",\n  \"randomCpuCostumes\": " << (settings.random_cpu_costumes ? "true" : "false") << "\n}\n";
+         << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
 
@@ -163,16 +175,14 @@ struct Launcher {
         case SKIP_INTRO: return choice[item] ? "SKIP" : "PLAY";
         case UPDATE: return update != nullptr ? "WORKING" : pending.empty() ? "CHECK" : "INSTALL";
         case UNLOCKS: return choice[item] ? "EARN" : "EVERYTHING";
-        case CPU_COSTUMES: return choice[item] ? "RANDOM" : "DEFAULT";
         default: return choice[item] ? "ON" : "OFF";
         }
     }
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2,
-            static_cast<int>(std::size(kScreens)), 2, 2, 2, 2, 2, 2, 2};
-        choice[item] = (choice[item] + counts[item] + step) % counts[item];
+        const int count = kRows[item].count;
+        choice[item] = (choice[item] + count + step) % count;
     }
 
     // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
@@ -322,7 +332,7 @@ struct Launcher {
             const bool selected = in_page && static_cast<int>(i) == row;
             if (selected) fill({left, kLabelY - 6, column, kValueY + kValueH + 10 - kLabelY}, kGold, 45);
             if (i > 0) fill({left, kLabelY - 2, 1, kValueY + kValueH + 2 - kLabelY}, kWhite, 36);
-            text(left + 8, kLabelY, kLabels[item], selected ? kWhite : Color{198, 182, 166});
+            text(left + 8, kLabelY, kRows[item].label, selected ? kWhite : Color{198, 182, 166});
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
@@ -419,7 +429,6 @@ int main(int argc, char **argv)
     launcher.choice[CHECK_UPDATES] = settings.check_updates ? 1 : 0;
     if (settings.check_updates) launcher.startUpdate(true);
     launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
-    launcher.choice[CPU_COSTUMES] = settings.random_cpu_costumes ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
 
     int result = -1;
@@ -533,7 +542,6 @@ int main(int argc, char **argv)
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
         settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
         settings.unlock_all = launcher.choice[UNLOCKS] == 0;
-        settings.random_cpu_costumes = launcher.choice[CPU_COSTUMES] != 0;
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
