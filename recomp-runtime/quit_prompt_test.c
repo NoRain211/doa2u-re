@@ -45,7 +45,8 @@ int main(void)
     expect("B stays hidden until released", step(0u, 0u, 0, 1, 4050u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[1] == 0u);
     step(0u, 0x20u, 0, 1, 4060u, &pad);
-    expect("Back held from the cancel does not reopen it", step(0u, 0x20u, 0, 1, 6100u, &pad) == RECOMP_QUIT_NONE);
+    expect("Back held from the cancel does not reopen it", step(0u, 0x20u, 0, 1, 6100u, &pad) == RECOMP_QUIT_NONE &&
+        pad.buttons == 0u);
     memset(&pad, 0, sizeof pad);
     pad.thumb_lx = 20000;
     recomp_quit_prompt_filter(0u, &pad, 6110u);
@@ -57,10 +58,10 @@ int main(void)
     step(3u, 0x20u, 0, 0, 6200u, &pad);
     recomp_quit_prompt_filter(3u, NULL, 6300u);
     expect("an unplugged pad's hold starts over", step(3u, 0x20u, 0, 0, 8300u, &pad) == RECOMP_QUIT_NONE);
-    step(2u, 0u, 0, 0, 4990u, &pad);
-    step(2u, 0x20u, 0, 0, 5000u, &pad);
-    expect("any pad opens it", step(2u, 0x20u, 0, 0, 7000u, &pad) == RECOMP_QUIT_OPENED);
-    step(2u, 0u, 0, 0, 7010u, &pad);
-    expect("A quits", step(2u, 0u, 1, 0, 7020u, &pad) == RECOMP_QUIT_CHOSEN);
+    step(2u, 0u, 0, 0, 8400u, &pad);
+    step(2u, 0x20u, 0, 0, 8500u, &pad);
+    expect("any pad opens it", step(2u, 0x20u, 0, 0, 10500u, &pad) == RECOMP_QUIT_OPENED);
+    step(2u, 0u, 0, 0, 10510u, &pad);
+    expect("A quits", step(2u, 0u, 1, 0, 10520u, &pad) == RECOMP_QUIT_CHOSEN);
     return failures == 0 ? 0 : 1;
 }
