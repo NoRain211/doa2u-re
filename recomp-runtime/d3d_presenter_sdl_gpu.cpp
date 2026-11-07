@@ -2351,6 +2351,7 @@ uint32_t virtualKey(SDL_Scancode code)
     case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return 0x10u;
     case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return 0x11u;
     case SDL_SCANCODE_F1: return 0x70u;
+    case SDL_SCANCODE_F3: return 0x72u;
     case SDL_SCANCODE_F12: return 0x7bu;
     case SDL_SCANCODE_PERIOD: return 0xbeu;
     case SDL_SCANCODE_GRAVE: return 0xc0u;
@@ -3099,9 +3100,15 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     }
     // Steam sets these in Game Mode and on the Deck, where gamescope would only letterbox a window.
     const bool steam = envFlag("SteamTenfoot") || envFlag("SteamDeck");
+#ifdef _WIN32
+    // As the D3D11 renderer, a scaled picture fills the screen borderless; 480 stays windowed.
+    const bool fullscreen = steam || created->scale > 1.0f;
+#else
+    const bool fullscreen = steam;
+#endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (std::getenv("RECOMP_HEADLESS") != nullptr) flags |= SDL_WINDOW_HIDDEN;
-    else if (steam) flags |= SDL_WINDOW_FULLSCREEN;
+    else if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
     created->window = SDL_CreateWindow(unpacedRun() ? "DOA2U Recomp (unpaced)" : "DOA2U Recomp",
         static_cast<int>(window_width), static_cast<int>(window_height), flags);
     if (created->window == nullptr) return fail("window");

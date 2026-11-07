@@ -186,4 +186,3 @@ float recomp_overlay_display_aspect(void)
 {
     return recomp_kernel_video_flags() & 0x00010000u ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
 }
-

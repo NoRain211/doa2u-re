@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10 or ultrawide, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10, ultrawide or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -67,7 +67,7 @@ keeps running.
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the renderer, VRR, an
-  optional intro-movie skip, 5.1 surround, the unlock setting and the free camera, and remembers them. `DOA2U.exe` plays
+  optional intro-movie skip, 5.1 surround, the unlock setting, random CPU costumes and the free camera, and remembers them. `DOA2U.exe` plays
   with the same choices. On release ZIPs after 0.1.10, the settings launcher on
   each platform can check GitHub for a newer release and install it from its
   **UPDATE** page; **Check At Start** turns the start-up check off.
@@ -94,14 +94,15 @@ keeps running.
 | Story, Ayane and Gen Fu | Stages 1-6 cleared without a stop in scripted runs; the Tengu fight was lost each time |
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
+| Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
-| Native 16:9 widescreen, 16:10 and ultrawide, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
+| Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo on Direct3D 11 |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
-| Xbox Live menus | Stop the game; there is no online service |
+| Xbox Live menus | Report no account; **Yes** quits to the desktop in place of the Dashboard |
 | Online Versus | Rollback netplay from the Versus menu; test build |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
@@ -145,7 +146,12 @@ pinned lifter and extractor; use the release ZIP.
 
 **Controls:** the first connected controller, or the keyboard for player 1:
 arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
-X/Y, Q/W are White/Black and E/R are the triggers.
+X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
+a readout of the frame rate, the average frame time and the slowest frame of
+the last second; it starts off.
+
+Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
+playing.
 
 ## Build from source
 
@@ -248,6 +254,11 @@ At first launch `run_game.py` builds an image from
 `--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
 off the automatic character and costume unlock, so unlocks come from play;
 profiles already saved with the unlock keep it.
+
+`--random-cpu-costumes`, or **CPU Costumes: Random** on the **GAMEPLAY** page,
+dresses CPU opponents in Story, Time Attack, Survival and Team in random
+unlocked costumes where the game would give their first one. Story's special
+picks, such as a costume about to unlock, stay. It stays off online.
 
 To package a release ZIP from a clean checkout:
 

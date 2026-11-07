@@ -195,10 +195,14 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
+add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
+add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
 
 add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)
+add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
+add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
 
 add_executable(recomp_d3d8_state_test d3d8_state_adapter.c d3d8_state_adapter_test.c
     d3d_light_model.c d3d_vertex_shader_model.c d3d_render_state_model.c)
@@ -423,8 +427,17 @@ if(WIN32)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES RESOURCE_LOCK gpu)
 endif()
 
+if(WIN32 OR SDL3_FOUND)
+    add_executable(recomp_perf_overlay_test perf_overlay.c perf_overlay_test.c)
+    recomp_use_sdl3(recomp_perf_overlay_test)
+    add_test(NAME recomp-runtime-perf-overlay COMMAND recomp_perf_overlay_test)
+endif()
 add_executable(recomp_free_camera_test free_camera.c free_camera_test.c)
 add_test(NAME recomp-runtime-free-camera COMMAND recomp_free_camera_test)
+add_executable(recomp_quit_prompt_test quit_prompt.c quit_prompt_test.c)
+add_test(NAME recomp-runtime-quit-prompt COMMAND recomp_quit_prompt_test)
+add_executable(recomp_overlay_text_test overlay_text.c overlay_text_test.c)
+add_test(NAME recomp-runtime-overlay-text COMMAND recomp_overlay_text_test)
 add_executable(recomp_scene_freeze_test scene_freeze.c scene_freeze_test.c)
 add_test(NAME recomp-runtime-scene-freeze COMMAND recomp_scene_freeze_test)
 add_executable(recomp_screenshot_test screenshot.c screenshot_test.c)
@@ -616,18 +629,18 @@ if(RECOMP_PROGRAM_DIR)
     add_library(recomp_program_objects OBJECT "${_missing_source}" ${_program_sources})
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
-    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
+    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c netplay_guest.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
-        d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c
+        d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c
+        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp
+        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
-        free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c
+        free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
