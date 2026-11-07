@@ -101,7 +101,7 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
-| Xbox Live menus | Stop the game; there is no online service |
+| Xbox Live menus | Report no account; **Yes** quits to the desktop in place of the Dashboard |
 | Online Versus | Rollback netplay from the Versus menu; test build |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |

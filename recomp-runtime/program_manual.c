@@ -190,13 +190,23 @@ static void launch_new_image(void)
        launcher to start a fresh runner. shortcut: launch data is dropped, so
        the relaunch boots like a cold start; carry it if a caller needs it. */
     const uint32_t path = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
+    const uint32_t data = *recomp_memory_u32(recomp_runtime.registers.esp + 8u);
     char name[16] = "";
     for (uint32_t i = 0u; path != 0u && i + 1u < sizeof name; ++i) {
         name[i] = (char)tolower(*recomp_memory(path + i, 1u));
         if (name[i] == '\0') break;
     }
     if (strcmp(name, "d:\\doa2.xbe") == 0) recomp_stop(4, "xapi:relaunch-title");
-    recomp_stop(2, "xapi:launch-new-image:%s", path == 0u ? "dashboard" : name);
+    if (path == 0u) {
+        /* A null path opens the Dashboard. Each game caller is the player's
+           Yes (Live account and network prompts, save-space prompts; issue
+           #5), and the desktop stands in for the Dashboard. */
+        enum { XLD_LAUNCH_DASHBOARD_ERROR = 1u };
+        const uint32_t reason = data == 0u ? 0u : *recomp_memory_u32(data);
+        if (reason != XLD_LAUNCH_DASHBOARD_ERROR) recomp_stop(0, "xapi:dashboard");
+        recomp_stop(2, "xapi:launch-new-image:dashboard");
+    }
+    recomp_stop(2, "xapi:launch-new-image:%s", name);
 }
 
 RecompFunction recomp_lookup_manual(uint32_t guest_address)
