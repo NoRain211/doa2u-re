@@ -196,6 +196,12 @@ every 100 ms with an opaque WAITING FOR OPPONENT panel and a countdown
 If pads arrive in time the session goes on where it stopped; the log names
 the frame where the other player went quiet and how long they were gone.
 A save waiting for the other player's pads shows the same panel.
+Shorter hitches in a live round are logged once per second when the second
+had one: the time this side waited for the other player's pads after its
+frame was due, its own slowest frame, and frames frame sync held back so the
+other side could catch up. A slow second with long waits points at the other
+machine; a slow frame here points at this one. Both renderers also log a draw
+shader built during play, outside the boot precompile, with how long it took.
 Freezing the joiner's process for 6 s in the menus held the host on the
 panel, and the session then played on into a live round with identical
 guest RAM at frame 4,400; killing the joiner ended the host's session 15 s
