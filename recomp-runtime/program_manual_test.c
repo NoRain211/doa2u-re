@@ -230,13 +230,14 @@ static int test_launch_new_image(void)
         {"D:\\doa1.xbe", 0u, 2, "xapi:launch-new-image:d:\\doa1.xbe"},
         {NULL, 7u, 0, "xapi:dashboard"},
         {NULL, 1u, 2, "xapi:launch-new-image:dashboard"},
+        {NULL, UINT32_MAX, 0, "xapi:dashboard"}, /* no launch data */
     };
-    for (unsigned i = 0u; i < 4u; ++i) {
+    for (unsigned i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
         memset(guest_path, 0, sizeof guest_path);
         if (cases[i].path != NULL) strcpy(guest_path, cases[i].path);
         recomp_runtime.registers.esp = 0x1000u;
         *recomp_memory_u32(0x1004u) = cases[i].path != NULL ? 0x3000u : 0u;
-        *recomp_memory_u32(0x1008u) = 0x3100u;
+        *recomp_memory_u32(0x1008u) = cases[i].reason == UINT32_MAX ? 0u : 0x3100u;
         *recomp_memory_u32(0x3100u) = cases[i].reason;
         if (setjmp(stopped) == 0) {
             function();
