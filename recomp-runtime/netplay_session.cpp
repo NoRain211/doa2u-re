@@ -761,12 +761,13 @@ static bool enterSession(std::uint8_t delay, std::uint32_t player)
         else if (same) fight[side] = tag + " " + fight[side];
     }
     recomp_netplay_guest_set_fight_names(fight[0].c_str(), fight[1].c_str(), player);
-    std::u16string profiles[2];
-    for (unsigned side = 0u; side < 2u; ++side)
-        if (!names[side].empty()) profiles[side] = recomp_netplay_utf16(names[side].front());
-    static_assert(sizeof(char16_t) == sizeof(std::uint16_t));
-    recomp_netplay_guest_set_side_profiles(reinterpret_cast<const std::uint16_t *>(profiles[0].c_str()),
-        reinterpret_cast<const std::uint16_t *>(profiles[1].c_str()));
+    std::uint16_t profiles[2][16] = {}; // the setter keeps 15 units
+    for (unsigned side = 0u; side < 2u; ++side) {
+        if (names[side].empty()) continue;
+        const std::u16string wide = recomp_netplay_utf16(names[side].front());
+        std::copy_n(wide.begin(), std::min<std::size_t>(wide.size(), 15u), profiles[side]);
+    }
+    recomp_netplay_guest_set_side_profiles(profiles[0], profiles[1]);
     return true;
 }
 
