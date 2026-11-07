@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (also widened to 16:10 or ultrawide), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10 or ultrawide, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -232,10 +232,11 @@ widescreen mode in another shape: the runner widens the game's projection to
 it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
 launcher's **16:10** and **Ultrawide** (the primary monitor's own shape)
-choices set it. Online sessions and replays render 16:9, fitted with black
-bars, as both sides must compute the same frames. Above 480p the window
-fills the screen borderless in any shape, with black bars around a picture
-of another shape. MSAA resolves before
+choices set it. Online sessions and replays use the host's 4:3 or 16:9 mode,
+fitted with black bars, as both sides must compute the same frames. Above
+480p the Direct3D 11 window fills the screen borderless in any shape, with
+black bars around a picture of another shape; the SDL_GPU window is
+resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3,

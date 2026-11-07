@@ -256,9 +256,14 @@ void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
     if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen) return;
     const float width = (float)draw->target.color.width;
     float left = INFINITY, right = -INFINITY;
-    for (uint32_t i = 0u; i < draw->vertex_count; ++i) {
+    /* An indexed draw may share its buffer, so only the vertices it uses count. */
+    const uint16_t *indices = draw->index_count != 0u ? draw->index_bytes : NULL;
+    const uint32_t count = indices != NULL ? draw->index_count : draw->vertex_count;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const uint32_t vertex = indices != NULL ? indices[i] : i;
+        if (vertex >= draw->vertex_count) continue;
         float x;
-        memcpy(&x, (const uint8_t *)draw->vertex_bytes + (size_t)i * draw->vertex_stride, sizeof x);
+        memcpy(&x, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof x);
         if (!isfinite(x)) continue;
         left = fminf(left, x);
         right = fmaxf(right, x);

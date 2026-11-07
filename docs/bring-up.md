@@ -150,9 +150,9 @@ keeps the vertical field of view and widens or narrows the view. The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
-backdrops) keep filling it. Netplay sessions and replays hash guest RAM,
-which holds the projections, so they keep 16:9 (`recomp_kernel_widescreen`
-set by the session).
+backdrops) keep filling it. The projections live in guest RAM, which netplay
+sessions hash and replays must recompute exactly, so both keep 16:9: the
+session or replay sets `recomp_kernel_widescreen` from the host's flags.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability

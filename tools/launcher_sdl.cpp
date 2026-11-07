@@ -322,8 +322,9 @@ struct Launcher {
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
-            text(left + 20, kValueY, value, selected ? kWhite : Color{232, 222, 212}, 2);
-            text(left + 24 + value.size() * 16, kValueY + 4, ">", arrow);
+            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // ULTRAWIDE fits only small
+            text(left + 20, kValueY + (scale == 2 ? 0 : 4), value, selected ? kWhite : Color{232, 222, 212}, scale);
+            text(left + 24 + value.size() * 8 * scale, kValueY + 4, ">", arrow);
         }
 
         // Page tabs along the bottom, the current one underlined in sunset gold.
