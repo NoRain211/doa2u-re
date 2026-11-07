@@ -123,6 +123,7 @@ void join(bool bound)
 
 static void leaveRoom()
 {
+    recomp_netplay_room_leave(&menu.net);
     if (menu.lobby.hosting) recomp_netplay_match_leave(&menu.net);
     recomp_netplay_close(&menu.net);
     menu.lookup.reset();
@@ -241,6 +242,17 @@ bool updateRoom(std::uint16_t keys)
 {
     RecompNetplayRoom &room = menu.lobby.room;
     recomp_netplay_room_tick(&menu.net, &room, menu.digest.data(), menu.name.c_str(), menu.lobby.ready, menu.lobby.starting);
+    if (room.left) {
+        room.left = false;
+        if (!menu.lobby.hosting) {
+            leaveRoom();
+            menu.message = "THE HOST CLOSED THE ROOM.";
+            return false;
+        }
+        menu.lobby.starting = false;
+        menu.lobby.chat.clear();
+        menu.message = shownName(room.name) + " LEFT THE ROOM.";
+    }
     if (room.refused) {
         room.refused = false;
         if (!menu.lobby.hosting) { // a host says nothing to a blocked joiner
