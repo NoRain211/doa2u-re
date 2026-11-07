@@ -200,8 +200,10 @@ Shorter hitches in a live round are logged once per second when the second
 had one: the time this side waited for the other player's pads after its
 frame was due, its own slowest frame, and frames frame sync held back so the
 other side could catch up. A slow second with long waits points at the other
-machine; a slow frame here points at this one. Both renderers also log a draw
-shader built during play, outside the boot precompile, with how long it took.
+machine; a slow frame here points at this one, and it includes any frames run
+again after a rewind, since the player sees them as one late frame. Both
+renderers log each draw shader they build with how long it took: D3D11 only
+outside its boot precompile, SDL_GPU at boot too.
 Freezing the joiner's process for 6 s in the menus held the host on the
 panel, and the session then played on into a live round with identical
 guest RAM at frame 4,400; killing the joiner ended the host's session 15 s

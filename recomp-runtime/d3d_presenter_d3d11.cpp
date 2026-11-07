@@ -1431,9 +1431,10 @@ bool compileDrawShader(
         0u,
         blob,
         &errors);
-    // A compile on the render worker holds up the frame that needed it.
+    // A compile on the render worker holds up the frame that needed it; the hash names its cache file.
     if (!precompiling) {
-        std::fprintf(stderr, "recomp d3d presenter: compiled draw shader %s in %.1f ms\n", entry_point,
+        std::fprintf(stderr, "recomp d3d presenter: %s draw shader %s %016llx in %.1f ms\n",
+            FAILED(result) ? "failed to compile" : "compiled", target, static_cast<unsigned long long>(hash),
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compile_start).count());
     }
     if (FAILED(result)) {

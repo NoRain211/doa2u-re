@@ -416,9 +416,11 @@ static void measureHitch(std::chrono::steady_clock::time_point entered)
     RollbackRun &r = rollback;
     const steady_clock::time_point left = steady_clock::now();
     const bool live = r.session.window != 0u;
+    // frameLeft is only set after a live wait, so a round's last frame counts as its window closes.
+    if (r.frameLeft != steady_clock::time_point{})
+        r.slowestFrameMs = std::max(r.slowestFrameMs, duration<double, std::milli>(entered - r.frameLeft).count());
     if (live && r.frameLeft != steady_clock::time_point{}) {
-        r.slowestFrameMs = std::max({r.slowestFrameMs, r.lateMs,
-            duration<double, std::milli>(entered - r.frameLeft).count()});
+        r.slowestFrameMs = std::max(r.slowestFrameMs, r.lateMs);
         r.peerWaitMs += r.blockedMs;
         r.longestWaitMs = std::max(r.longestWaitMs, r.blockedMs);
     }
