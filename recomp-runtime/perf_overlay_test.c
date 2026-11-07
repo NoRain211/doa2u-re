@@ -47,7 +47,8 @@ int main(void)
     }
     const char *line = recomp_perf_meter_frame(&meter, 1100.0, false);
     expect("a second of frames is reported", line != NULL && strcmp(line, "48 FPS  20.8 MS  MAX 60.0") == 0);
-    expect("the line stays until the next second", recomp_perf_meter_frame(&meter, 1150.0, false) == line);
+    line = recomp_perf_meter_frame(&meter, 1150.0, false);
+    expect("the line stays until the next second", line != NULL && strcmp(line, "48 FPS  20.8 MS  MAX 60.0") == 0);
     expect("F3 again hides it", recomp_perf_meter_frame(&meter, 1170.0, true) == NULL);
     recomp_perf_meter_frame(&meter, 1190.0, false);
     expect("and F3 shows it again", recomp_perf_meter_frame(&meter, 1210.0, true) != NULL);
