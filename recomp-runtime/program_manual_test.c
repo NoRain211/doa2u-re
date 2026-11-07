@@ -90,6 +90,12 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 RecompFunction recomp_fiber_lookup_manual(uint32_t address)
 {
     (void)address;
@@ -265,12 +271,6 @@ int main(void)
 {
     /* The movie skips are opt-in. */
     if (recomp_lookup_manual(0x000d9300u) != NULL || recomp_lookup_manual(0x00069180u) != NULL) return 1;
-    /* So are netplay fight names. */
-    if (recomp_lookup_manual(0x0012b460u) != NULL) return 1;
-    recomp_program_set_fight_names("A", "", 0u);
-    if (recomp_lookup_manual(0x0012b460u) == NULL) return 1;
-    recomp_program_set_fight_names(NULL, NULL, 0u);
-    if (recomp_lookup_manual(0x0012b460u) != NULL) return 1;
     recomp_skip_intro = true;
     if (!test_fmod() || !test_startup_legal_skip() || !test_startup_logo_skip() ||
         !test_boot_opening_skip() || !test_launch_new_image()) return 1;

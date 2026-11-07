@@ -43,6 +43,24 @@ std::string recomp_netplay_profile_name(const std::uint8_t *bytes, std::size_t s
     return line.rfind("Name=", 0u) == 0u ? line.substr(5u) : std::string();
 }
 
+std::u16string recomp_netplay_utf16(const std::string &name)
+{
+    std::u16string wide;
+    for (std::size_t i = 0u; i < name.size();) {
+        const unsigned char lead = static_cast<unsigned char>(name[i++]);
+        const unsigned more = lead >= 0xf0u ? 3u : lead >= 0xe0u ? 2u : lead >= 0xc0u ? 1u : 0u;
+        std::uint32_t code = more == 0u ? lead : lead & (0x7fu >> (more + 1u));
+        for (unsigned k = 0u; k < more && i < name.size() && (name[i] & 0xc0) == 0x80; ++k)
+            code = code << 6 | (name[i++] & 0x3fu);
+        if (code >= 0x10000u) {
+            wide += static_cast<char16_t>(0xd800u + ((code - 0x10000u) >> 10));
+            code = 0xdc00u + (code & 0x3ffu);
+        }
+        wide += static_cast<char16_t>(code);
+    }
+    return wide;
+}
+
 std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
 {
     namespace fs = std::filesystem;
