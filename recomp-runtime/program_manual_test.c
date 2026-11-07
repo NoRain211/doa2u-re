@@ -20,6 +20,9 @@ static uint8_t aix[2];      /* at 0x4000; byte 1 is its state, 1 while preparing
 static jmp_buf stopped;
 static int stop_code;
 static char stop_id[64];
+static float nine_sixteenths = 0.5625f, seen_shape; /* 0x3c2cec */
+static uint32_t video_flags;
+static float screen_aspect = 16.0f / 9.0f;
 uint32_t *recomp_memory_u32_checked(uint32_t address)
 {
     if (address == XBOX_KERNEL_DATA_BASE + 0x40u) return &tick;
@@ -34,6 +37,7 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= 0x3000u && address + width <= 0x3000u + sizeof guest_path)
         return (uint8_t *)&guest_path[address - 0x3000u];
     if (address >= 0x4000u && address + width <= 0x4000u + sizeof aix) return &aix[address - 0x4000u];
+    if (address == 0x003c2cecu && width == sizeof nine_sixteenths) return (uint8_t *)&nine_sixteenths;
     if (address < 0x2000u || address + width > 0x2000u + sizeof scene) abort();
     return &scene[address - 0x2000u];
 }
@@ -131,9 +135,34 @@ RecompFunction recomp_cpu_costume_lookup_manual(uint32_t address)
     return NULL;
 }
 
-uint32_t recomp_kernel_video_flags(void) { return 0u; }
-float recomp_kernel_widescreen_aspect(void) { return 16.0f / 9.0f; }
+uint32_t recomp_kernel_video_flags(void) { return video_flags; }
+float recomp_kernel_widescreen_aspect(void) { return screen_aspect; }
 void sub_00034280(void) {}
+void sub_00034E10(void) { seen_shape = nine_sixteenths; }
+void sub_00036490(void) { seen_shape = nine_sixteenths; }
+
+/* The culling view sees the screen's shape during the call; the shared 9/16 comes back after. */
+static int test_culling_shape(void)
+{
+    const struct { uint32_t flags; float aspect, seen; } cases[] = {
+        {0x004e0000u, 32.0f / 9.0f, 0.5625f},     /* 4:3 mode reads 3/4 elsewhere */
+        {0x004f0000u, 16.0f / 9.0f, 0.5625f},
+        {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f},
+    };
+    const uint32_t wrapped[] = {0x00034e10u, 0x00036490u};
+    for (unsigned i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
+        video_flags = cases[i].flags;
+        screen_aspect = cases[i].aspect;
+        for (unsigned j = 0u; j < 2u; ++j) {
+            seen_shape = 0.0f;
+            recomp_lookup_manual(wrapped[j])();
+            if (fabsf(seen_shape - cases[i].seen) > 1e-7f || nine_sixteenths != 0.5625f) return 0;
+        }
+    }
+    video_flags = 0u;
+    screen_aspect = 16.0f / 9.0f;
+    return 1;
+}
 
 static int test_fmod(void)
 {
@@ -278,7 +307,7 @@ int main(void)
     if (recomp_lookup_manual(0x000d9300u) != NULL || recomp_lookup_manual(0x00069180u) != NULL) return 1;
     recomp_skip_intro = true;
     if (!test_fmod() || !test_startup_legal_skip() || !test_startup_logo_skip() ||
-        !test_boot_opening_skip() || !test_launch_new_image()) return 1;
+        !test_boot_opening_skip() || !test_launch_new_image() || !test_culling_shape()) return 1;
     RecompFunction init_segment = recomp_lookup_manual(0x002bd531u);
     if (init_segment == NULL) return 1;
     recomp_runtime.registers.esp = 0x1000u;

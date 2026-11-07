@@ -28,7 +28,7 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
-const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
+const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE", "32:9"};
 
 enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
 // One row per Item, in Item order: its label and how many values it cycles through.
@@ -65,7 +65,7 @@ struct Settings {
     int height = 0;
     int msaa = 8;
     bool smaa = true;
-    std::string screen = "16:9"; // "4:3", "16:9", "16:10" or an ultrawide "W:H"
+    std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"
     bool surround = false;
     bool skip_intro = false;
     bool check_updates = true;

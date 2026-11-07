@@ -144,13 +144,20 @@ accepts that flag at creation and Reset. The game's existing camera and UI
 branches select their 16:9 behavior, and the presenter sizes the window to
 match. No game matrices or guest code are patched for 16:9.
 
-A `W:H` value keeps the widescreen bit and renders that shape (16:10, or an
-ultrawide such as 64:27). Every widescreen view builds its projection with
+A `W:H` value keeps the widescreen bit and renders that shape (16:10, 32:9,
+or an ultrawide such as 64:27). Every widescreen view builds its projection with
 0x34280 (cdecl matrix, fov, aspect, near, far, offset, scale), passing aspect
 1 / (9/16) from the pooled constant 0x3c2cec; FUN_00039710 and FUN_00192010
 read the same constant as unrelated thresholds, so it stays. The manual
 lookup wraps 0x34280 and replaces exactly that aspect with the shape, which
-keeps the vertical field of view and widens or narrows the view. The D3D8
+keeps the vertical field of view and widens or narrows the view.
+Culling has its own view cone: `camera_setup_view_cone` (0x34E10) stores the
+tan, sin and cos of the horizontal half angle at 0x879BF4, 0x877C6C and
+0x87D228 from the same 9/16, and `camera_query_view_cone` (0x36490) returns
+it for a camera slot. At 16:9 a wider shape culled objects outside the
+middle 16:9, so they popped in at the sides. The manual lookup puts the
+shape's height over width in 0x3c2cec for those two calls only and restores
+it; neither reaches the threshold readers. The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,

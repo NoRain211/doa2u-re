@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--widescreen", action=argparse.BooleanOptionalAction, default=None,
                         help="Use the game's native 16:9 camera and menus")
     parser.add_argument("--screen", type=screen_shape, metavar="W:H",
-                        help="Widescreen in this shape, such as 16:10 or 21:9 (4:3 to 4:1); 4:3 turns it off")
+                        help="Widescreen in this shape, such as 16:10, 21:9 or 32:9 (4:3 to 4:1); 4:3 turns it off")
     parser.add_argument("--resolution", type=int, choices=(480, 720, 1080, 1440, 2160),
                         help="Render height: 480p, 720p, 1080p, 1440p or 4K; width follows aspect ratio")
     parser.add_argument("--msaa", type=int, choices=(1, 2, 4, 8, 16, 32),

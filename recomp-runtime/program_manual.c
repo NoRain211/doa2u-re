@@ -111,6 +111,30 @@ static void build_projection(void)
     sub_00034280();
 }
 
+extern void sub_00034E10(void);
+extern void sub_00036490(void);
+
+/* Camera setup (0x34E10) and a camera query (0x36490) take the horizontal
+   half angle the game culls against from that same 9/16 at 0x3c2cec; left
+   at 16:9, a wider screen culls whatever lies outside its middle 16:9. The
+   shape goes in for these calls only, as other code reads 9/16 as a threshold;
+   neither call reaches that code. */
+static void with_screen_shape(void (*body)(void))
+{
+    uint8_t *nine_sixteenths = recomp_memory(0x003c2cecu, sizeof(float));
+    const float aspect = recomp_kernel_widescreen_aspect();
+    float saved;
+    memcpy(&saved, nine_sixteenths, sizeof saved);
+    if ((recomp_kernel_video_flags() & 0x00010000u) != 0u && aspect != 16.0f / 9.0f) {
+        const float shape = 1.0f / aspect;
+        memcpy(nine_sixteenths, &shape, sizeof shape);
+    }
+    body();
+    memcpy(nine_sixteenths, &saved, sizeof saved);
+}
+static void camera_setup(void) { with_screen_shape(sub_00034E10); }
+static void camera_query(void) { with_screen_shape(sub_00036490); }
+
 void recomp_program_manual_reset(void)
 {
     boot_opening_pending = true;
@@ -179,6 +203,8 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (guest_address == 0x002b8a24u) return get_tick_count;
     if (guest_address == 0x00381331u) return xnet_startup;
     if (guest_address == 0x00034280u) return build_projection;
+    if (guest_address == 0x00034e10u) return camera_setup;
+    if (guest_address == 0x00036490u) return camera_query;
     RecompFunction function = recomp_d3d8_resource_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_state_lookup_manual(guest_address);
