@@ -15,10 +15,6 @@ extern "C" {
    costumes (issue #116). Off online, where both games must agree. */
 void recomp_cpu_costume_install(bool online);
 RecompFunction recomp_cpu_costume_lookup_manual(uint32_t guest_address);
-/* The costume group for one opponent of a run: the same inputs give the same
-   group, so every lookup in a run agrees. */
-uint8_t recomp_cpu_costume_group(uint32_t seed, const uint8_t *run, uint32_t run_size,
-    uint8_t character, uint8_t index, uint8_t groups);
 
 #ifdef __cplusplus
 }

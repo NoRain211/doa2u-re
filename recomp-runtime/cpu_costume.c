@@ -36,16 +36,24 @@ void recomp_cpu_costume_install(bool online)
 {
     const char *value = getenv("RECOMP_RANDOM_CPU_COSTUMES");
     enabled = !online && value != NULL && strcmp(value, "1") == 0;
-    if (seed == 0u) seed = (uint32_t)time(NULL) | 1u;
+    seed = (uint32_t)time(NULL) | 1u;
 }
 
-uint8_t recomp_cpu_costume_group(uint32_t run_seed, const uint8_t *run, uint32_t run_size,
-    uint8_t character, uint8_t index, uint8_t groups)
+static uint32_t hash_bytes(uint32_t hash, const uint8_t *bytes, uint32_t size)
 {
-    uint32_t hash = 2166136261u ^ run_seed; /* FNV-1a */
-    for (uint32_t i = 0u; i < run_size; ++i) hash = (hash ^ run[i]) * 16777619u;
-    hash = (hash ^ character) * 16777619u;
-    hash = (hash ^ index) * 16777619u;
+    for (uint32_t i = 0u; i < size; ++i) hash = (hash ^ bytes[i]) * 16777619u; /* FNV-1a */
+    return hash;
+}
+
+/* The same run, character and index give the same group, so every lookup in a
+   run agrees. */
+static uint8_t run_group(uint8_t character, uint8_t index, uint8_t groups)
+{
+    uint32_t hash = 2166136261u ^ seed;
+    hash = hash_bytes(hash, recomp_memory(OPPONENT_LIST, 7u), 7u);
+    hash = hash_bytes(hash, recomp_memory(TEAM_LIST, 16u), 16u);
+    const uint8_t key[2] = {character, index};
+    hash = hash_bytes(hash, key, 2u);
     return groups == 0u ? 0u : (uint8_t)(hash % groups);
 }
 
@@ -85,10 +93,7 @@ static void fighter_costume(void)
     if (picked != call_byte(COSTUME_ID, character, 0u, 0u, 0u, 4u) &&
         picked != call_byte(COSTUME_ID, character, 1u, 0u, 0u, 4u)) return;
     const uint8_t groups = call_byte(UNLOCKED_GROUPS, character, 0u, 0u, 0u, 2u);
-    uint8_t run[7u + 16u];
-    memcpy(run, recomp_memory(OPPONENT_LIST, 7u), 7u);
-    memcpy(run + 7u, recomp_memory(TEAM_LIST, 16u), 16u);
-    const uint8_t first = recomp_cpu_costume_group(seed, run, sizeof run, character, index, groups);
+    const uint8_t first = run_group(character, index, groups);
     for (uint8_t step = 0u; step < groups; ++step) {
         const uint8_t costume = call_byte(COSTUME_ID, character, (uint8_t)((first + step) % groups), 0u, 0u, 4u);
         if (!wears_player_costume(character, costume)) {
