@@ -44,7 +44,7 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             build_launchers(root)
             self.assertTrue((root / "DOA2U.exe").is_file())
             (root / "private").mkdir()
-            for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, widescreen=True, vrr=True,
+            for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, vrr=True,
                                                 skip_intro=True, surround=True, unlock_all=False, vulkan=True,
                                                 free_camera=True)),
                                    (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False, vrr=False,
@@ -58,7 +58,12 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                                         env=env, capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 with patch("run_game.ROOT", root):
-                    self.assertEqual(saved_settings(), expected)
+                    saved = saved_settings()
+                if last:
+                    # Ultrawide saves the primary monitor's own shape, at least 21:9.
+                    width, height = map(int, saved.pop("widescreen").split(":"))
+                    self.assertGreater(width * 9, height * 16)
+                self.assertEqual(saved, expected)
 
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
     def test_launcher_held_down_enters_a_page_without_changing_a_value(self):
@@ -226,6 +231,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})
+                for screen, expected in (("16:10", "16:10"), ("3440:1440", "3440:1440"), ("4:3", False),
+                                         ("16:9", "16:9"), ("5:1", True), ("wide", True)):
+                    settings.write_text(json.dumps({"widescreen": True, "screen": screen}), encoding="utf-8")
+                    self.assertEqual(saved_settings(), {"widescreen": expected}, screen)
                 settings.write_text("{", encoding="utf-8")
                 self.assertEqual(saved_settings(), {})
 

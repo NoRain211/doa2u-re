@@ -28,6 +28,7 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
+const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
 
 enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
 const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "UNLOCKS", "FREE CAMERA", "UPDATE", "CHECK AT START"};
@@ -49,7 +50,7 @@ struct Settings {
     int height = 0;
     int msaa = 8;
     bool smaa = true;
-    bool widescreen = true;
+    std::string screen = "16:9"; // "4:3", "16:9", "16:10" or an ultrawide "W:H"
     bool surround = false;
     bool skip_intro = false;
     bool check_updates = true;
@@ -84,7 +85,9 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "height", value)) settings.height = std::atoi(value.c_str());
     if (jsonValue(text, "msaa", value)) settings.msaa = std::atoi(value.c_str());
     if (jsonValue(text, "smaa", value)) settings.smaa = value == "true";
-    if (jsonValue(text, "widescreen", value)) settings.widescreen = value == "true";
+    // Settings saved before 16:10 hold only a widescreen flag.
+    if (jsonValue(text, "widescreen", value)) settings.screen = value == "true" ? "16:9" : "4:3";
+    if (jsonValue(text, "screen", value) && value.size() > 2) settings.screen = value.substr(1, value.size() - 2);
     if (jsonValue(text, "surround", value)) settings.surround = value == "true";
     if (jsonValue(text, "skipIntro", value)) settings.skip_intro = value == "true";
     if (jsonValue(text, "checkUpdates", value)) settings.check_updates = value == "true";
@@ -98,7 +101,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
     std::ofstream file(path, std::ios::trunc);
     file << "{\n  \"height\": " << settings.height << ",\n  \"msaa\": " << settings.msaa
          << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
-         << ",\n  \"widescreen\": " << (settings.widescreen ? "true" : "false")
+         << ",\n  \"widescreen\": " << (settings.screen != "4:3" ? "true" : "false")
+         << ",\n  \"screen\": \"" << settings.screen << '"'
          << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
          << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
          << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
@@ -151,7 +155,7 @@ struct Launcher {
         switch (item) {
         case RESOLUTION: return std::to_string(kHeights[choice[item]]) + "P";
         case MSAA: return kSamples[choice[item]] == 1 ? "OFF" : std::to_string(kSamples[choice[item]]) + "X";
-        case WIDESCREEN: return choice[item] ? "16:9" : "4:3";
+        case WIDESCREEN: return kScreens[choice[item]];
         case SURROUND: return choice[item] ? "5.1" : "STEREO";
         case SKIP_INTRO: return choice[item] ? "SKIP" : "PLAY";
         case UPDATE: return update != nullptr ? "WORKING" : pending.empty() ? "CHECK" : "INSTALL";
@@ -162,7 +166,8 @@ struct Launcher {
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2, 2, 2, 2, 2, 2, 2, 2};
+        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2,
+            static_cast<int>(std::size(kScreens)), 2, 2, 2, 2, 2, 2};
         choice[item] = (choice[item] + counts[item] + step) % counts[item];
     }
 
@@ -317,8 +322,9 @@ struct Launcher {
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
-            text(left + 20, kValueY, value, selected ? kWhite : Color{232, 222, 212}, 2);
-            text(left + 24 + value.size() * 16, kValueY + 4, ">", arrow);
+            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // ULTRAWIDE fits only small
+            text(left + 20, kValueY + (scale == 2 ? 0 : 4), value, selected ? kWhite : Color{232, 222, 212}, scale);
+            text(left + 24 + value.size() * 8 * scale, kValueY + 4, ">", arrow);
         }
 
         // Page tabs along the bottom, the current one underlined in sunset gold.
@@ -400,7 +406,10 @@ int main(int argc, char **argv)
     launcher.choice[MSAA] = static_cast<int>(std::upper_bound(std::begin(kSamples), std::end(kSamples),
         std::max(settings.msaa, 1)) - std::begin(kSamples)) - 1;
     launcher.choice[SMAA] = settings.smaa ? 1 : 0;
-    launcher.choice[WIDESCREEN] = settings.widescreen ? 1 : 0;
+    launcher.choice[WIDESCREEN] = 3; // a saved ultrawide "W:H"
+    for (int i = 0; i < static_cast<int>(std::size(kScreens)); ++i) {
+        if (settings.screen == kScreens[i]) launcher.choice[WIDESCREEN] = i;
+    }
     launcher.choice[SURROUND] = settings.surround ? 1 : 0;
     launcher.choice[SKIP_INTRO] = settings.skip_intro ? 1 : 0;
     launcher.choice[CHECK_UPDATES] = settings.check_updates ? 1 : 0;
@@ -508,7 +517,13 @@ int main(int argc, char **argv)
         settings.height = kHeights[launcher.choice[RESOLUTION]];
         settings.msaa = kSamples[launcher.choice[MSAA]];
         settings.smaa = launcher.choice[SMAA] != 0;
-        settings.widescreen = launcher.choice[WIDESCREEN] != 0;
+        settings.screen = kScreens[launcher.choice[WIDESCREEN]];
+        if (launcher.choice[WIDESCREEN] == 3) {
+            // The primary screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+            const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+            settings.screen = mode != nullptr && mode->w * 9 > mode->h * 16
+                ? std::to_string(mode->w) + ":" + std::to_string(mode->h) : "64:27";
+        }
         settings.surround = launcher.choice[SURROUND] != 0;
         settings.skip_intro = launcher.choice[SKIP_INTRO] != 0;
         settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;

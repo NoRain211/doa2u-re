@@ -645,6 +645,12 @@ bool recomp_d3d_draw_constants(
             constants_out[13] = 1.0f + (0.5f - viewport.TopLeftY) * constants_out[5];
             constants_out[14] = -viewport.MinDepth * constants_out[10];
             constants_out[15] = 1.0f;
+            // The 2D layer's fit to the screen shape scales clip X and Y about the viewport center.
+            for (unsigned axis = 0; axis < 2; ++axis) {
+                const float scale = draw.layer_scale[axis];
+                if (!layout.pretransformed || scale <= 0.0f) continue;
+                for (unsigned row = 0; row < 16; row += 4) constants_out[row + axis] *= scale;
+            }
         }
         if (screen_offset) {
             const float width = sub_viewport ? draw.viewport[2] : viewport.Width;

@@ -70,6 +70,17 @@ def seed_hdd_cache(disc):
         partial.replace(target)
 
 
+def screen_shape(text):
+    """A "W:H" screen choice as the widescreen value: False for 4:3, else the
+    shape, which the runner accepts from 4:3 to 4:1 (recomp-runtime/widescreen.h)."""
+    width, colon, height = str(text).partition(":")
+    if not (colon and width.isdigit() and height.isdigit() and int(height) > 0
+            and 3 * int(width) >= 4 * int(height) and int(width) <= 4 * int(height)
+            and int(width) <= 16384 and int(height) <= 16384):
+        raise ValueError(f"Screen shape {text!r} must be W:H from 4:3 to 4:1")
+    return False if 3 * int(width) == 4 * int(height) else f"{int(width)}:{int(height)}"
+
+
 def saved_settings():
     """The choices a launcher saved in private/launcher.json, as run() options."""
     try:
@@ -86,6 +97,12 @@ def saved_settings():
                         ("freeCamera", "free_camera")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
+    # Launchers since 16:10 save a "screen" shape instead of the widescreen flag.
+    if isinstance(saved.get("screen"), str):
+        try:
+            options["widescreen"] = screen_shape(saved["screen"])
+        except ValueError:
+            pass
     return options
 
 
@@ -113,7 +130,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
                         ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr),
                         ("RECOMP_FREE_CAMERA", free_camera)):
         if value is not None:
-            env[name] = str(int(value))
+            env[name] = value if isinstance(value, str) else str(int(value))
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
     # Both presenters keep compiled draw shaders here and load them at the next start.
@@ -219,6 +236,8 @@ if __name__ == "__main__":
                           help="Play without a time limit; close the game window to exit")
     parser.add_argument("--widescreen", action=argparse.BooleanOptionalAction, default=None,
                         help="Use the game's native 16:9 camera and menus")
+    parser.add_argument("--screen", type=screen_shape, metavar="W:H",
+                        help="Widescreen in this shape, such as 16:10 or 21:9 (4:3 to 4:1); 4:3 turns it off")
     parser.add_argument("--resolution", type=int, choices=(480, 720, 1080, 1440, 2160),
                         help="Render height: 480p, 720p, 1080p, 1440p or 4K; width follows aspect ratio")
     parser.add_argument("--msaa", type=int, choices=(1, 2, 4, 8, 16, 32),
@@ -260,7 +279,8 @@ if __name__ == "__main__":
             return value if value is not None else saved.get(name)
         raise SystemExit(run(None if args.play else args.seconds, args.input_start_pulse_at,
                              args.input_a_pulse_at, args.isolated, args.input_buttons_pulse_at,
-                             args.input_analog_pulse_at, pick("widescreen", args.widescreen),
+                             args.input_analog_pulse_at,
+                             args.screen if args.screen is not None else pick("widescreen", args.widescreen),
                              pick("msaa", args.msaa), pick("smaa", args.smaa),
                              pick("resolution", args.resolution), args.story_finale,
                              args.skip_intro or saved.get("skip_intro", False),

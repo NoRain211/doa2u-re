@@ -215,8 +215,8 @@ static void showCard()
 {
     using namespace std::chrono;
     constexpr auto fade = milliseconds(1500), total = milliseconds(10000);
-    const char *wide = std::getenv("RECOMP_D3D_WIDESCREEN");
-    const float aspect = wide != nullptr && std::strcmp(wide, "0") != 0 ? 16.0f / 9.0f : 4.0f / 3.0f;
+    const float aspect = (recomp_kernel_video_flags() & 0x00010000u) != 0u
+        ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
     std::fprintf(stderr, "recomp runner: staff roll starts; dedication card shown\n");
     // Guest time stops for the card, so the output pump must not play past it.
     recomp_dsound_output_lock();

@@ -67,7 +67,9 @@ typedef struct RecompD3dPresenterClearCommand {
 typedef struct RecompD3dPresenterPresentCommand {
     uint32_t effective_flags;
     uint32_t swap_counter;
-    bool widescreen; /* the game drew anamorphic 16:9, else 4:3; a netplay session may differ from the window */
+    /* Width over height the game drew its frame for: 4:3 or the widescreen
+       shape; a netplay session may differ from the window. 0 is the window's. */
+    float aspect;
 } RecompD3dPresenterPresentCommand;
 
 /* Fixed-function vertex lighting: directional and point lights. DOA3 also
@@ -141,6 +143,9 @@ typedef struct RecompD3dPresenterDrawCommand {
     /* One allowed rectangle with exclusive right/bottom guest target pixel edges. */
     bool has_scissor;
     int32_t scissor[4];
+    /* A pretransformed draw's scale about the viewport center, fitting the 2D
+       layer to the screen shape (widescreen.h); 0 leaves it. */
+    float layer_scale[2];
     /* Additional world-view-projection matrices for 1..3 explicit weights. */
     float blend_transforms[3][16];
     uint32_t blend_weight_count;
