@@ -240,7 +240,8 @@ profiles already saved with the unlock keep it.
 
 `--random-cpu-costumes`, or **CPU Costumes: Random** on the **GAMEPLAY** page,
 dresses CPU opponents in Story, Time Attack, Survival and Team in random
-unlocked costumes instead of their first one. It stays off online.
+unlocked costumes where the game would give their first one. Story's special
+picks, such as a costume about to unlock, stay. It stays off online.
 
 To package a release ZIP from a clean checkout:
 
