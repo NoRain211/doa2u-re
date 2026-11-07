@@ -161,7 +161,11 @@ it; neither reaches the threshold readers. The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
-backdrops) keep filling it. The projections live in guest RAM, which netplay
+backdrops) keep filling it. A 3D draw into a viewport narrower than the
+target, such as the character select portrait in its panel, moves toward
+the center with that panel and keeps its size, since its projection already
+has the screen's shape; its scissor fits the same way, and program draws
+shift their viewport offset in c59. The projections live in guest RAM, which netplay
 sessions hash and replays must recompute exactly, so both keep 16:9: the
 session or replay sets `recomp_kernel_widescreen` from the host's flags.
 

@@ -23,6 +23,7 @@ float recomp_d3d8_content_aspect(void);
 /* Fits an on-screen pretransformed draw of the game's 16:9 2D layer to
    another widescreen shape (widescreen.h), scissor rectangle included. */
 void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw);
+void recomp_d3d8_fit_3d_viewport(RecompD3dPresenterDrawCommand *draw);
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size);
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size);
 void recomp_d3d8_shutdown(void);
