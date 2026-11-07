@@ -6,11 +6,13 @@
 #include "guest_snapshot.h"
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
+#include "cpu_costume.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "netplay_menu.h"
 #include "netplay_session.h"
+#include "perf_overlay.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -21,7 +23,9 @@
 extern "C" {
 #include "kernel_abi.h"
 #include "native_fiber.h"
+#include "overlay_text.h"
 #include "program_manual.h"
+#include "quit_prompt.h"
 #include "stop_report.h"
 RecompFunction recomp_program_lookup(std::uint32_t address);
 }
@@ -58,13 +62,44 @@ static bool scriptedInputOnly;
 static bool guestRamWriteWatch;
 static std::uint8_t *guestRam;
 
+static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
+{
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    RecompOverlayText text;
+    recomp_overlay_clear(&text);
+    switch (recomp_quit_prompt_filter(port, gamepad, static_cast<std::uint64_t>(now))) {
+    case RECOMP_QUIT_OPENED:
+        recomp_overlay_set_title(&text, "Quit to the desktop?");
+        recomp_overlay_set_hint(&text, "A quit   B keep playing");
+        recomp_overlay_publish(RECOMP_OVERLAY_QUIT_PROMPT, &text);
+        break;
+    case RECOMP_QUIT_CANCELLED:
+        recomp_overlay_publish(RECOMP_OVERLAY_QUIT_PROMPT, &text);
+        break;
+    case RECOMP_QUIT_CHOSEN:
+        recomp_stop(0, "player-quit");
+        break;
+    case RECOMP_QUIT_NONE:
+        break;
+    }
+}
+
+// A host pad goes through the quit prompt, then the netplay menu. The open
+// prompt owns the pads, so the room cannot inject its A behind it.
+static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
+{
+    quitPrompt(port, sampled ? gamepad : nullptr);
+    if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
+}
+
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
     bool present = false;
     if (recomp_netplay_session_pad(port, gamepad, &present)) return present;
     if (port != 0u) {
         const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
-        if (sampled) recomp_netplay_menu_filter(port, gamepad);
+        filterHostPad(port, gamepad, sampled);
         return sampled;
     }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
@@ -75,7 +110,7 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
     }
-    if (sampled) recomp_netplay_menu_filter(0u, gamepad);
+    filterHostPad(0u, gamepad, sampled);
     return recomp_netplay_session_back_pad(gamepad) || sampled;
 }
 
@@ -532,10 +567,14 @@ static void bootGuest()
     recomp_input_adapter_reset();
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
+    recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_PERF] = recomp_perf_overlay;
     recomp_netplay_session_install(recomp_synctest_enabled());
     /* The free camera and the scene freeze run only with RECOMP_FREE_CAMERA=1,
-       and never online; off, input samples and task switches go unhooked. */
-    recomp_free_camera_install(recomp_netplay_session_enabled() || recomp_synctest_enabled());
+       and never online; off, input samples and task switches go unhooked.
+       Random CPU costumes are off online too, where both games must agree. */
+    const bool online = recomp_netplay_session_enabled() || recomp_synctest_enabled();
+    recomp_free_camera_install(online);
+    recomp_cpu_costume_install(online);
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");

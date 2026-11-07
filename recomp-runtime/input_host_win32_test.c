@@ -88,8 +88,8 @@ int main(void)
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_Y] == 0xffu);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0u);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_X] == 0u);
-    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0xffu);
-    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_WHITE] == 0u);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_WHITE] == 0xffu);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0u);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] == 0xffu);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] == 0u);
     CHECK(pad.thumb_ly == 32767); /* stick up is positive, as in XInput */
@@ -112,8 +112,8 @@ int main(void)
     CHECK(pad.buttons == 0x0060u); /* BACK | LEFT_THUMB */
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_X] == 0xffu);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_A] == 0u);
-    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_WHITE] == 0xffu);
-    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0u);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0xffu);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_WHITE] == 0u);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] == 0xffu);
     CHECK(pad.thumb_lx == -1000 && pad.thumb_ry == -2000);
     SDL_SetJoystickVirtualButton(second, SDL_GAMEPAD_BUTTON_WEST, false);

@@ -80,6 +80,10 @@ first tick; attract replays and story movies still play. The game's soft reset
 relaunches its own XBE through XLaunchNewImage (`0x2bab9d`); the runner exits
 with code 4 and `run_game.py` starts a fresh runner, so the relaunch boots
 like a cold start without its launch data.
+A null path opens the Dashboard: the Live menus' account and network prompts
+and the save-space prompts do this when the player answers Yes. The runner
+ends normally there (`xapi:dashboard`, code 0), as the desktop stands in for
+the Dashboard. A launch with reason 1 (error) still stops with code 2.
 
 The optional dedication card (`RECOMP_DEDICATION_CARD`, set by `run_game.py`
 from `private/dedication.bmp`) starts on the first guest read of the staff
@@ -703,8 +707,12 @@ queued work, as the SDK's fence kick does. No guest report slot is written.
 Indices beyond the SDK's 64 report pages, an End without Begin, and a
 requested report timestamp stop explicitly.
 InsertCallback (`0x349e10`, stdcall type/callback/context) calls its cdecl
-callback immediately: captured commands own their bytes and the host GPU
-never writes guest memory, so READ and WRITE conditions already hold.
+callback at the second following Swap: captured commands own their bytes and
+the host GPU never writes guest memory, so READ and WRITE conditions already
+hold. The game skips a flare test while its callback is pending, so the host
+GPU can run a frame behind. Calling it at once made every next-frame poll spin
+until the GPU finished (issue #118: about 6 ms of each frame at 3x on a fast
+PC). Pending callbacks are part of the D3D8 rollback state.
 
 ## Game tasks
 
@@ -726,6 +734,21 @@ still read in place. A read issued by the main game thread still pauses
 frames until it finishes, as it would on hardware. Reads at the handle
 cursor and close both wait until no read on that handle is in flight.
 
+Stage Select also offers Tengu's boss stage (issue #117). Its list
+(`stage_select_build_rows`, `0x1354a0`) writes one-byte entry numbers into
+rows at `0xdf5f10`, indexing the 24-byte entries at `0x6e22b0`, and appends
+Random; every other read goes through `0x135410`, `0x135510` and
+`0x135580`. `stage_select.c`
+replaces those four and adds stage 18 (the Miyama his story fight loads)
+before Random in the regular list, with the game's unused Miyama name (61)
+and thumbnails (14, 36). Its entry sits in the reserved kernel page at
+`0x03ff0c00`, since other data follows the table. Random's pick
+(`0x135700`) can then choose it too. The tag list stays as it was.
+Only Sparring was played with it. The stage's season variants (ids 27, 64,
+65) load inconsistently and are left out. Random's row moves one place, so
+online players need this build on both sides, which netplay's build check
+already requires.
+
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start
@@ -740,6 +763,16 @@ them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
 come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.
+
+With `RECOMP_RANDOM_CPU_COSTUMES=1` (the launchers' **CPU Costumes: Random**,
+issue #116), `cpu_costume.c` wraps `battle_get_fighter_costume` (`0xc6b00`,
+cdecl character and opponent index). In Story, Time Attack, Survival and Team
+(battle modes 3, 4, 6, 7) a plain pick, the character's first costume group or
+the second when the player wears the first, becomes a random unlocked group
+(`0x11e410`), skipping one that matches the player's costume (`0xc5490`).
+Other callers ask again during a run, so the pick hashes a per-boot seed with
+the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
+index. Story's own picks stay. Netplay and SyncTest boots leave it off.
 
 ## Input API contract
 

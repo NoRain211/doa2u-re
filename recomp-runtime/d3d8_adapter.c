@@ -38,7 +38,7 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
-void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
+void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool content_widescreen; /* the game's D3DPRESENTFLAG_WIDESCREEN at CreateDevice */
 static bool gpu_work_suppressed;
@@ -53,6 +53,9 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
     gpu_work_suppressed = suppressed;
 }
 void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
+/* Counts host draws for the first-draw log only. It stays out of the saved
+   state: the F3 readout draws on shown frames alone, so SyncTest's replayed
+   frames would count differently. */
 static uint32_t submitted_draws;
 /* The host keeps one main color target across Swap and Reset (which clears
    only depth). It still holds the frame Present last showed, and the pixels
@@ -75,6 +78,14 @@ static uint32_t visibility_scale[VISIBILITY_TESTS];
 static uint32_t visibility_value[VISIBILITY_TESTS];
 static uint8_t visibility_pending_result[VISIBILITY_TESTS];
 static uint8_t visibility_valid[VISIBILITY_TESTS];
+/* InsertCallback callbacks wait for the second following Swap. The guest
+   skips a test while its callback is pending, so the GPU may run a frame
+   behind instead of every poll waiting for it (issue #118), and guest state
+   stays on a fixed schedule for rollback. */
+enum { PENDING_CALLBACKS = 64u, CALLBACK_SWAPS = 2u };
+typedef struct PendingCallback { uint32_t callback, context, due_swap; } PendingCallback;
+static PendingCallback pending_callbacks[PENDING_CALLBACKS];
+static uint32_t pending_callback_count;
 
 static uint32_t argument(uint32_t entry, uint32_t index)
 {
@@ -87,7 +98,6 @@ typedef struct D3d8State {
     RecompD3dDeviceState device;
     RecompD3dFrameState frame;
     RecompD3dRenderStateModel render;
-    uint32_t submitted_draws;
     bool back_buffer_displayed;
     bool back_buffer_saved;
     bool display_mode_pending;
@@ -96,6 +106,8 @@ typedef struct D3d8State {
     uint32_t visibility_value[VISIBILITY_TESTS];
     uint8_t visibility_pending_result[VISIBILITY_TESTS];
     uint8_t visibility_valid[VISIBILITY_TESTS];
+    PendingCallback pending_callbacks[PENDING_CALLBACKS];
+    uint32_t pending_callback_count;
 } D3d8State;
 
 size_t recomp_d3d8_state_size(void)
@@ -142,7 +154,6 @@ void recomp_d3d8_state_save(void *state)
     out->device = device_state;
     out->frame = frame_state;
     recomp_d3d8_render_state_save(&out->render);
-    out->submitted_draws = submitted_draws;
     out->back_buffer_displayed = back_buffer_displayed;
     out->back_buffer_saved = back_buffer_saved;
     out->display_mode_pending = display_mode_pending;
@@ -152,6 +163,8 @@ void recomp_d3d8_state_save(void *state)
     memcpy(out->visibility_pending_result, visibility_pending_result,
         sizeof out->visibility_pending_result);
     memcpy(out->visibility_valid, visibility_valid, sizeof out->visibility_valid);
+    memcpy(out->pending_callbacks, pending_callbacks, sizeof out->pending_callbacks);
+    out->pending_callback_count = pending_callback_count;
 }
 
 void recomp_d3d8_state_restore(const void *state)
@@ -160,7 +173,6 @@ void recomp_d3d8_state_restore(const void *state)
     device_state = in->device;
     frame_state = in->frame;
     recomp_d3d8_render_state_restore(&in->render);
-    submitted_draws = in->submitted_draws;
     back_buffer_displayed = in->back_buffer_displayed;
     back_buffer_saved = in->back_buffer_saved;
     display_mode_pending = in->display_mode_pending;
@@ -170,6 +182,8 @@ void recomp_d3d8_state_restore(const void *state)
     memcpy(visibility_pending_result, in->visibility_pending_result,
         sizeof visibility_pending_result);
     memcpy(visibility_valid, in->visibility_valid, sizeof visibility_valid);
+    memcpy(pending_callbacks, in->pending_callbacks, sizeof pending_callbacks);
+    pending_callback_count = in->pending_callback_count;
 }
 
 static void load(void *destination, uint32_t address, size_t size)
@@ -318,6 +332,8 @@ void recomp_d3d8_shutdown(void)
     memset(visibility_value, 0, sizeof visibility_value);
     memset(visibility_pending_result, 0, sizeof visibility_pending_result);
     memset(visibility_valid, 0, sizeof visibility_valid);
+    memset(pending_callbacks, 0, sizeof pending_callbacks);
+    pending_callback_count = 0u;
 }
 
 void recomp_d3d8_reset_keeping_window(void)
@@ -708,6 +724,18 @@ static bool present_ready(void *unused)
     return recomp_d3d_presenter_present_ready(presenter);
 }
 
+static void run_due_callbacks(uint32_t swap_counter)
+{
+    uint32_t kept = 0u;
+    /* A callback may append more; those are due at a later Swap and are kept. */
+    for (uint32_t i = 0u; i < pending_callback_count; ++i) {
+        PendingCallback entry = pending_callbacks[i];
+        if ((int32_t)(swap_counter - entry.due_swap) < 0) pending_callbacks[kept++] = entry;
+        else kernel_call_guest(entry.callback, &entry.context, 1u);
+    }
+    pending_callback_count = kept;
+}
+
 static void swap(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -721,10 +749,15 @@ static void swap(void)
     /* The wait also moves guest time, so a hidden frame keeps it; under the
        frame clock it never sleeps. */
     recomp_d3d_wait_present();
-    if (!present_suppressed && recomp_d3d_overlay_hook != NULL) {
+    if (!present_suppressed) {
         RecompD3dPresenterTarget target;
-        resolve_target(color_header(0u), 0u, &target);
-        recomp_d3d_overlay_hook(&target);
+        bool resolved = false;
+        for (unsigned i = 0u; i < RECOMP_D3D_OVERLAY_HOOKS; ++i) {
+            if (recomp_d3d_overlay_hooks[i] == NULL) continue;
+            if (!resolved) resolve_target(color_header(0u), 0u, &target);
+            resolved = true;
+            recomp_d3d_overlay_hooks[i](&target);
+        }
     }
     result.command.data.present.aspect = recomp_d3d8_content_aspect();
     /* A host wait for the GPU here would stall every guest thread, including
@@ -745,6 +778,7 @@ static void swap(void)
     *recomp_memory_u32(DEVICE + 0x1de4u) = result.command.data.present.swap_counter;
     for (uint32_t i = 0; i < 2u; ++i) store(color_header(i), &device_state.color[i], sizeof device_state.color[i]);
     *recomp_memory_u32(DEVICE + FRAME_COUNTER) = result.command.data.present.swap_counter;
+    run_due_callbacks(result.command.data.present.swap_counter);
     if (recomp_d3d_present_hook != NULL) recomp_d3d_present_hook(result.command.data.present.swap_counter);
     recomp_runtime.registers.eax = result.command.data.present.swap_counter;
     recomp_runtime.registers.esp = entry + 8u;
@@ -838,15 +872,17 @@ static void block_on_fence(void)
 /* D3DDevice_InsertCallback (0x349e10, stdcall type, callback, context).
    Queued commands own their bytes and the host GPU never writes guest memory,
    so the READ (0) and WRITE (1) conditions already hold here. The cdecl
-   callback runs at once on the calling thread instead of the GPU interrupt. */
+   callback runs on the calling thread at a later Swap (run_due_callbacks)
+   instead of the GPU interrupt. */
 static void insert_callback(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
     const uint32_t type = argument(entry, 0u), callback = argument(entry, 1u);
-    uint32_t context = argument(entry, 2u);
     recomp_d3d8_require_device();
     if (type > 1u || callback == 0u) recomp_stop(2, "d3d8:insert-callback:%u", type);
-    kernel_call_guest(callback, &context, 1u);
+    if (pending_callback_count == PENDING_CALLBACKS) recomp_stop(2, "d3d8:insert-callback-full");
+    pending_callbacks[pending_callback_count++] =
+        (PendingCallback){callback, argument(entry, 2u), frame_state.swap_counter + CALLBACK_SWAPS};
     recomp_runtime.registers.esp = entry + 16u;
 }
 

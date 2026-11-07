@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'surround', 'intro', 'unlock', 'freeCamera') {
+foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera') {
     $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
     $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
 }
@@ -46,10 +46,10 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             (root / "private").mkdir()
             for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, vrr=True,
                                                 skip_intro=True, surround=True, unlock_all=False, vulkan=True,
-                                                free_camera=True)),
+                                                free_camera=True, random_cpu_costumes=True)),
                                    (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False, vrr=False,
                                                 skip_intro=False, surround=False, unlock_all=True, vulkan=False,
-                                                free_camera=False))):
+                                                free_camera=False, random_cpu_costumes=False))):
                 env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
                            RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"),
                            RECOMP_LAUNCHER_TEST_LAST="1" if last else "0")
@@ -159,9 +159,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.args[0][-1], "--skip-intro")
                 self.assertEqual(run(None, unlock_all=False), 0)
                 self.assertEqual(execute.call_args.args[0][-1], "--no-unlock-all")
-                self.assertEqual(run(None, surround=True, free_camera=True), 0)
+                self.assertEqual(run(None, surround=True, free_camera=True, random_cpu_costumes=True), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_FREE_CAMERA"], "1")
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_RANDOM_CPU_COSTUMES"], "1")
                 self.assertEqual(run(None, vrr=True), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_VRR"], "1")
                 self.assertEqual(run(None, vulkan=True), 0)
@@ -223,11 +224,11 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(saved_settings(), {})
                 settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False,
                     "widescreen": True, "vrr": True, "skipIntro": True, "surround": True, "unlockAll": False,
-                    "freeCamera": True}),
+                    "freeCamera": True, "randomCpuCostumes": True}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
                     "widescreen": True, "vrr": True, "skip_intro": True, "surround": True, "unlock_all": False,
-                    "free_camera": True})
+                    "free_camera": True, "random_cpu_costumes": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

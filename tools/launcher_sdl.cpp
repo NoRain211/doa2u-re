@@ -30,8 +30,23 @@ const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE", "32:9"};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
-const char *kLabels[] = {"RESOLUTION", "MSAA", "SMAA", "SCREEN", "OUTPUT", "INTRO MOVIES", "UNLOCKS", "FREE CAMERA", "UPDATE", "CHECK AT START"};
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
+// One row per Item, in Item order: its label and how many values it cycles through.
+struct Row { const char *label; int count; };
+const Row kRows[] = {
+    {"RESOLUTION", static_cast<int>(std::size(kHeights))},
+    {"MSAA", static_cast<int>(std::size(kSamples))},
+    {"SMAA", 2},
+    {"SCREEN", static_cast<int>(std::size(kScreens))},
+    {"OUTPUT", 2},
+    {"INTRO MOVIES", 2},
+    {"UNLOCKS", 2},
+    {"CPU COSTUMES", 2},
+    {"FREE CAMERA", 2},
+    {"UPDATE", 2},
+    {"CHECK AT START", 2},
+};
+static_assert(std::size(kRows) == ITEM_COUNT, "kRows needs one row per Item");
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
@@ -166,9 +181,8 @@ struct Launcher {
 
     void change(int item, int step)
     {
-        static const int counts[] = {static_cast<int>(std::size(kHeights)), static_cast<int>(std::size(kSamples)), 2,
-            static_cast<int>(std::size(kScreens)), 2, 2, 2, 2, 2, 2};
-        choice[item] = (choice[item] + counts[item] + step) % counts[item];
+        const int count = kRows[item].count;
+        choice[item] = (choice[item] + count + step) % count;
     }
 
     // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
@@ -318,7 +332,7 @@ struct Launcher {
             const bool selected = in_page && static_cast<int>(i) == row;
             if (selected) fill({left, kLabelY - 6, column, kValueY + kValueH + 10 - kLabelY}, kGold, 45);
             if (i > 0) fill({left, kLabelY - 2, 1, kValueY + kValueH + 2 - kLabelY}, kWhite, 36);
-            text(left + 8, kLabelY, kLabels[item], selected ? kWhite : Color{198, 182, 166});
+            text(left + 8, kLabelY, kRows[item].label, selected ? kWhite : Color{198, 182, 166});
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
