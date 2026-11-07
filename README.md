@@ -96,7 +96,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
-| Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select on Direct3D 11 |
+| Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
