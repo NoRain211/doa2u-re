@@ -9,6 +9,11 @@ notices remain with that source. DOA2U's verified native widescreen branches
 use XC_VIDEO's widescreen bit without DOA3's extra letterbox flag. Shared-depth
 full-frame effects now retain depth under scaling/MSAA instead of inheriting
 the sister presenter's depth-disabled fallback.
+Screen shapes follow DOA3 `67e57e9` (its pull request 47): the
+`RECOMP_D3D_WIDESCREEN` `W:H` parser, the launchers' 16:10 and Ultrawide
+choices, and the Direct3D 11 window that covers the screen and fits the
+picture into it. DOA2U widens its own projection builder instead of DOA3's
+constants and fits its 16:9 2D layer, where DOA3 narrows a 4:3 one.
 The Windows launcher follows committed DOA3 `tools/launcher.cs` at
 `6c782d5`: one C# file, built by the in-box .NET Framework 4 compiler into
 `Launcher.exe` (build, settings, play) and `DOA2U.exe` (play only). It keeps

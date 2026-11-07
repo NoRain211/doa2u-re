@@ -2765,9 +2765,9 @@ static bool testWidescreenAntialiasing(bool smaa, bool msaa, unsigned height = 4
         passed &= expect("AA present", d3d_backend_submit(presenter, &present));
 #ifdef RECOMP_TEST_D3D11
         RECT rect{};
-        const unsigned client_height = (std::min)(height, static_cast<unsigned>(GetSystemMetrics(SM_CYSCREEN)));
+        // A scaled window covers the screen; the picture is fitted into it.
         passed &= GetClientRect(presenterWindow(), &rect) &&
-            rect.right == (client_height * 16u + 8u) / 9u && rect.bottom == client_height;
+            rect.right == GetSystemMetrics(SM_CXSCREEN) && rect.bottom == GetSystemMetrics(SM_CYSCREEN);
 #endif
         passed &= expect("AA target release", d3d_backend_release_memory(presenter, 0x10000u, 4096u, true));
     }

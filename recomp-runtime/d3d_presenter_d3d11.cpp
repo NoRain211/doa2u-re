@@ -5,6 +5,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
+#include "widescreen.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -248,6 +249,7 @@ struct RecompD3dPresenter {
     HWND window = nullptr;
     bool close_requested = false;
     bool widescreen = false;
+    uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
     uint32_t msaa = 1u;         // RECOMP_D3D_MSAA: main target sample count
     float target_scale_x = 1.0f, target_scale_y = 1.0f; // bound target / guest size
@@ -365,13 +367,13 @@ RecompD3dPresenter *active_presenter;
 
 static bool immediate_present;
 
-/* The window's aspect: 16:9 with RECOMP_D3D_WIDESCREEN=1, else 4:3. The game
-   renders 4:3 or anamorphic 16:9 into its backbuffer, normally the same; a
-   netplay session takes the host's, and submitPresent fits it in. */
+/* The display aspect: RECOMP_D3D_WIDESCREEN's shape (16:9 for 1), else 4:3.
+   The game renders 4:3 or that shape anamorphic into its backbuffer; a
+   netplay session takes the host's 4:3 or 16:9, and submitPresent fits it in. */
 uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
 {
     return static_cast<uint32_t>(presenter->widescreen
-        ? (height * 16u + 8u) / 9u
+        ? (height * presenter->aspect_w + presenter->aspect_h - 1u) / presenter->aspect_h
         : (height * 4u + 1u) / 3u);
 }
 
@@ -397,25 +399,43 @@ uint32_t scaledSize(const RecompD3dPresenter *presenter, uint32_t guest)
         static_cast<uint32_t>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION));
 }
 
-/* Beyond the screen the swap chain downsamples into a screen-sized window. */
-uint32_t windowHeight(const RecompD3dPresenter *presenter)
+/* A scaled window covers the primary screen, whatever its shape; scale 1
+   keeps a 480-line window. (DOA3 port, issue #45 there.) */
+uint32_t windowWidth(const RecompD3dPresenter *presenter)
 {
-    return presenter->scale == 1.0f ? presenter->config.height : (std::min)(
-        mainHeight(presenter), static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN)));
+    return presenter->scale == 1.0f
+        ? presentClientWidth(presenter, presenter->config.height)
+        : static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
 }
 
-/* VRR needs direct flip, which a DWM-scaled swap chain loses; with VRR the
-   swap chain matches the window and the presenter scales into it itself. */
+uint32_t windowHeight(const RecompD3dPresenter *presenter)
+{
+    return presenter->scale == 1.0f
+        ? presenter->config.height : static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
+}
+
+/* VRR needs direct flip. */
 bool immediatePresent(const RecompD3dPresenter *presenter)
 {
     return immediate_present && !presenter->vrr;
 }
 
-bool vrrScaled(const RecompD3dPresenter *presenter)
+/* The swap chain always matches the window, so DWM never stretches it out of
+   shape; a main target of another size is drawn into it by the presenter. */
+bool scalesToWindow(const RecompD3dPresenter *presenter)
 {
-    return presenter->vrr &&
-        (mainWidth(presenter) != presentClientWidth(presenter, windowHeight(presenter)) ||
-         mainHeight(presenter) != windowHeight(presenter));
+    return mainWidth(presenter) != windowWidth(presenter) ||
+        mainHeight(presenter) != windowHeight(presenter);
+}
+
+/* The largest rectangle of the picture's aspect centered in a width x height
+   window; the rest of the screen stays black. */
+D3D11_VIEWPORT fitViewport(float aspect, UINT width, UINT height)
+{
+    const float fitted = std::round(height * aspect);
+    const float w = (std::min)(fitted, static_cast<float>(width));
+    const float h = fitted <= width ? static_cast<float>(height) : std::round(width / aspect);
+    return {std::floor((width - w) / 2.0f), std::floor((height - h) / 2.0f), w, h, 0.0f, 1.0f};
 }
 
 LRESULT CALLBACK presenterWindowProc(
@@ -637,7 +657,7 @@ bool bindDrawConstants(RecompD3dPresenter *presenter, const float *constants)
 bool createWindow(RecompD3dPresenter *presenter)
 {
     WNDCLASSEXW window_class{};
-    const uint32_t client_width = presentClientWidth(presenter, windowHeight(presenter));
+    const uint32_t client_width = windowWidth(presenter);
     RECT window_rect = {
         0,
         0,
@@ -710,10 +730,8 @@ HRESULT createDeviceWithDriver(
     };
     D3D_FEATURE_LEVEL selected_feature_level{};
 
-    swap_chain_desc.BufferDesc.Width = vrrScaled(presenter)
-        ? presentClientWidth(presenter, windowHeight(presenter)) : mainWidth(presenter);
-    swap_chain_desc.BufferDesc.Height = vrrScaled(presenter)
-        ? windowHeight(presenter) : mainHeight(presenter);
+    swap_chain_desc.BufferDesc.Width = windowWidth(presenter);
+    swap_chain_desc.BufferDesc.Height = windowHeight(presenter);
     swap_chain_desc.BufferDesc.RefreshRate.Numerator = 0u;
     swap_chain_desc.BufferDesc.RefreshRate.Denominator = 1u;
     swap_chain_desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -3039,7 +3057,8 @@ void writeBackBufferBmp(
 /* RECOMP_D3D_FRAME_DUMP names the BMP path; AT and COUNT select presents.
    INTERVAL_MS optionally spaces captures in host time. Capture stays inside
    the renderer, without cross-process window painting or missed-frame bursts. */
-void dumpBackBufferOnce(RecompD3dPresenter *presenter, uint32_t present_count)
+void dumpBackBufferOnce(RecompD3dPresenter *presenter, uint32_t present_count,
+    ID3D11Texture2D *source)
 {
     const char *path = std::getenv("RECOMP_D3D_FRAME_DUMP");
     if (path == nullptr) {
@@ -3083,7 +3102,7 @@ void dumpBackBufferOnce(RecompD3dPresenter *presenter, uint32_t present_count)
         path = burst_path;
     }
 
-    writeBackBufferBmp(presenter, path, present_count);
+    writeBackBufferBmp(presenter, path, present_count, source);
     presenter->next_frame_dump_ms = GetTickCount64() + interval_ms;
 }
 
@@ -3474,12 +3493,17 @@ void recordFrameStatistics(RecompD3dPresenter *presenter,
     presenter->last_stat_refresh = stats.PresentRefreshCount;
 }
 
-// Saves the window's back buffer, the game's frame before the overlay, through
-// a CPU-readable copy. Only a requested screenshot pays for the wait.
-void saveScreenshot(RecompD3dPresenter *presenter)
+// Saves the game's frame before the overlay (source, or the window's back
+// buffer), through a CPU-readable copy. Only a requested screenshot pays for the wait.
+void saveScreenshot(RecompD3dPresenter *presenter, ID3D11Texture2D *source)
 {
     ID3D11Texture2D *back_buffer = nullptr;
-    presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer));
+    if (source != nullptr) {
+        back_buffer = source;
+        back_buffer->AddRef();
+    } else {
+        presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer));
+    }
     bool saved = false;
     if (back_buffer == nullptr) {
         std::fprintf(stderr, "recomp screenshot: could not read the back buffer\n");
@@ -3541,8 +3565,11 @@ RecompD3dPresenterError submitPresent(
        unconditionally meant the throttled path was never actually throttled:
        every frame was retired immediately and only the blocking behaviour
        changed. Pace to one refresh unless immediate presenting is asked for. */
-    // A picture at another aspect than the window's is drawn smaller, with black bars.
-    const bool drawn = vrrScaled(presenter) || present.widescreen != presenter->widescreen;
+    // A picture of another size or aspect than the window is drawn into it, with black bars.
+    const float window_aspect = presenter->widescreen
+        ? static_cast<float>(presenter->aspect_w) / presenter->aspect_h : 4.0f / 3.0f;
+    const float shown = present.aspect > 0.0f ? present.aspect : window_aspect;
+    const bool drawn = scalesToWindow(presenter) || std::fabs(shown - window_aspect) > 0.001f;
     if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
@@ -3554,15 +3581,7 @@ RecompD3dPresenterError submitPresent(
         if (back_buffer == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         back_buffer->GetDesc(&window);
         releaseCom(back_buffer);
-        D3D11_VIEWPORT viewport = {0.0f, 0.0f,
-            static_cast<float>(window.Width), static_cast<float>(window.Height), 0.0f, 1.0f};
-        // The swap chain fills the window, whose aspect is the player's setting.
-        const float shown = present.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
-        const float room = presenter->widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
-        if (shown < room) viewport.Width *= shown / room;
-        else viewport.Height *= room / shown;
-        viewport.TopLeftX = (window.Width - viewport.Width) / 2.0f;
-        viewport.TopLeftY = (window.Height - viewport.Height) / 2.0f;
+        const D3D11_VIEWPORT viewport = fitViewport(shown, window.Width, window.Height);
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         context->ClearState();
         context->ClearRenderTargetView(presenter->present_target_view, black);
@@ -3576,13 +3595,21 @@ RecompD3dPresenterError submitPresent(
         context->Draw(3u, 0u);
         context->ClearState();
     }
-    // Capture the rendered buffer before flip presentation releases it.
-    dumpBackBufferOnce(presenter, presenter->present_count + 1u);
+    // Capture the rendered buffer before flip presentation releases it, at the
+    // main target's size: a frame drawn into the window is dumped before fitting.
+    ID3D11Texture2D *frame = nullptr;
+    if (drawn) {
+        ID3D11Resource *output = nullptr;
+        presenter->vrr_source->GetResource(&output);
+        output->QueryInterface(IID_PPV_ARGS(&frame));
+        releaseCom(output);
+    }
+    dumpBackBufferOnce(presenter, presenter->present_count + 1u, frame);
     if (presenter->draw_log_active) {
         char path[1024];
         std::snprintf(path, sizeof path, "%s-%u.bmp",
             presenter->draw_log_trigger, presenter->present_count + 1u);
-        writeBackBufferBmp(presenter, path, presenter->present_count + 1u);
+        writeBackBufferBmp(presenter, path, presenter->present_count + 1u, frame);
         // Offscreen targets too (reflections, glow), as their single-sample views hold them.
         for (RenderTargetEntry &entry : presenter->render_targets) {
             ID3D11Resource *resource = nullptr;
@@ -3616,7 +3643,8 @@ RecompD3dPresenterError submitPresent(
     // The runtime's overlay text goes on the window, not the game's back
     // buffer, which the game reads back as its front buffer.
     {
-        if (recomp_screenshot_take_request()) saveScreenshot(presenter);
+        if (recomp_screenshot_take_request()) saveScreenshot(presenter, frame);
+        releaseCom(frame);
         DXGI_SWAP_CHAIN_DESC window{};
         presenter->swap_chain->GetDesc(&window);
         RecompOverlayText overlay;
@@ -3820,8 +3848,10 @@ RecompD3dPresenterError d3d_backend_create(
         return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
     }
     created->config = *config;
-    const char *widescreen = std::getenv("RECOMP_D3D_WIDESCREEN");
-    created->widescreen = widescreen != nullptr && std::strcmp(widescreen, "0") != 0;
+    unsigned aspect_w = 16u, aspect_h = 9u;
+    created->widescreen = recomp_widescreen(&aspect_w, &aspect_h);
+    created->aspect_w = aspect_w;
+    created->aspect_h = aspect_h;
     const char *performance = std::getenv("RECOMP_PERF_COUNTER");
     created->performance_counter = performance != nullptr && std::strcmp(performance, "1") == 0;
     created->draw_log_trigger = std::getenv("RECOMP_D3D_DRAW_LOG");

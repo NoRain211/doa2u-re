@@ -10,9 +10,11 @@
 #include "d3d_vblank.h"
 #include "kernel_abi.h"
 #include "stop_report.h"
+#include "widescreen.h"
 #include "xapi_time_adapter.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -241,6 +243,46 @@ bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
     if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
     if (error != RECOMP_D3D_PRESENTER_OK) recomp_stop(2, "d3d8:coverage:%u", (unsigned)error);
     return covered;
+}
+
+float recomp_d3d8_content_aspect(void)
+{
+    return content_widescreen ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
+}
+
+void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
+{
+    const float aspect = recomp_d3d8_content_aspect();
+    if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen) return;
+    const float width = (float)draw->target.color.width;
+    float left = INFINITY, right = -INFINITY;
+    /* An indexed draw may share its buffer, so only the vertices it uses count. */
+    const uint16_t *indices = draw->index_count != 0u ? draw->index_bytes : NULL;
+    const uint32_t count = indices != NULL ? draw->index_count : draw->vertex_count;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const uint32_t vertex = indices != NULL ? indices[i] : i;
+        if (vertex >= draw->vertex_count) continue;
+        float x;
+        memcpy(&x, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof x);
+        if (!isfinite(x)) continue;
+        left = fminf(left, x);
+        right = fmaxf(right, x);
+    }
+    float scale[2];
+    recomp_widescreen_2d_scale(aspect, width, left, right, scale);
+    if (scale[0] == 1.0f && scale[1] == 1.0f) return;
+    memcpy(draw->layer_scale, scale, sizeof scale);
+    /* The presenter scales about the viewport's center; zero width is the whole target. */
+    const bool whole = draw->viewport[2] <= 0.0f;
+    const float center[2] = {
+        whole ? width * 0.5f : draw->viewport[0] + draw->viewport[2] * 0.5f,
+        whole ? (float)draw->target.color.height * 0.5f : draw->viewport[1] + draw->viewport[3] * 0.5f};
+    if (draw->has_scissor) {
+        for (uint32_t i = 0u; i < 4u; ++i) {
+            const float edge = center[i % 2u] + ((float)draw->scissor[i] - center[i % 2u]) * scale[i % 2u];
+            draw->scissor[i] = (int32_t)(i < 2u ? floorf(edge) : ceilf(edge));
+        }
+    }
 }
 
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size)
@@ -684,7 +726,7 @@ static void swap(void)
         resolve_target(color_header(0u), 0u, &target);
         recomp_d3d_overlay_hook(&target);
     }
-    result.command.data.present.widescreen = content_widescreen;
+    result.command.data.present.aspect = recomp_d3d8_content_aspect();
     /* A host wait for the GPU here would stall every guest thread, including
        the vblank threads that refill CRI's audio rings (issue #69). Under the
        frame clock the guest wait is skipped: which threads run while the GPU
@@ -731,7 +773,7 @@ void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t h
     command = (RecompD3dPresenterCommand){.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     command.data.present.effective_flags = 5u;
     command.data.present.swap_counter = frame_state.swap_counter;
-    command.data.present.widescreen = display_aspect > 1.5f; /* the card is drawn for this aspect */
+    command.data.present.aspect = display_aspect; /* the card is drawn for this aspect */
     recomp_d3d8_submit(&command);
     back_buffer_displayed = true;
     back_buffer_saved = false;
@@ -758,7 +800,7 @@ void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *ta
     RecompD3dPresenterCommand command = {.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     command.data.present.effective_flags = 5u;
     command.data.present.swap_counter = frame_state.swap_counter;
-    command.data.present.widescreen = content_widescreen;
+    command.data.present.aspect = recomp_d3d8_content_aspect();
     recomp_d3d8_submit(&command);
     back_buffer_displayed = true;
     back_buffer_saved = false;

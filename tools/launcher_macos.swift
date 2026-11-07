@@ -14,6 +14,7 @@ let settingsURL = root.appendingPathComponent("private/launcher.json")
 
 let heights = [480, 720, 1080, 1440, 2160]
 let samples = [1, 2, 4, 8]
+let screens = ["4:3", "16:9", "16:10", "Ultrawide"]
 
 var settings: [String: Any] = [:]
 if let data = try? Data(contentsOf: settingsURL),
@@ -25,6 +26,18 @@ func intSetting(_ key: String, _ fallback: Int) -> Int {
 }
 func boolSetting(_ key: String, _ fallback: Bool) -> Bool {
     (settings[key] as? NSNumber)?.boolValue ?? fallback
+}
+// "4:3", "16:9", "16:10" or an ultrawide "W:H"; settings saved before 16:10
+// hold only a widescreen flag.
+func screenSetting() -> String {
+    settings["screen"] as? String ?? (boolSetting("widescreen", true) ? "16:9" : "4:3")
+}
+// The main screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+func ultrawideShape() -> String {
+    guard let screen = NSScreen.screens.first else { return "64:27" }
+    let w = Int(screen.frame.width * screen.backingScaleFactor)
+    let h = Int(screen.frame.height * screen.backingScaleFactor)
+    return w * 9 > h * 16 ? "\(w):\(h)" : "64:27"
 }
 let screenHeight: Int = {
     guard let screen = NSScreen.screens.first ?? NSScreen.main else { return 1080 }
@@ -90,8 +103,8 @@ final class LauncherView: NSView {
     let msaa = Row("MSAA", "Smooths polygon edges; a count the GPU lacks falls back to its highest",
                    samples.map { $0 == 1 ? "Off" : "\($0)x" }, samples.lastIndex(where: { $0 <= intSetting("msaa", 8) }) ?? 0)
     let smaa = Row("SMAA", "Smooths edges with SMAA after MSAA", ["Off", "On"], boolSetting("smaa", true) ? 1 : 0)
-    let screen = Row("Screen", "16:9 uses the game's own widescreen camera and menus", ["4:3", "16:9"],
-                     boolSetting("widescreen", true) ? 1 : 0)
+    let screen = Row("Screen", "Widescreen widens the game's own camera; its 16:9 menus keep their shape", screens,
+                     screens.firstIndex(of: screenSetting()) ?? 3)
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
     let intro = Row("Intro Movies", "Skip goes straight to the title screen at boot", ["Play", "Skip"],
                     boolSetting("skipIntro", false) ? 1 : 0)
@@ -149,7 +162,8 @@ final class LauncherView: NSView {
             "height": heights[resolution.index],
             "msaa": samples[msaa.index],
             "smaa": smaa.index == 1,
-            "widescreen": screen.index == 1,
+            "widescreen": screen.index != 0,
+            "screen": screen.index == 3 ? ultrawideShape() : screens[screen.index],
             "skipIntro": intro.index == 1,
             "surround": surround.index == 1,
             "checkUpdates": checkAtStart.index == 1,

@@ -18,6 +18,11 @@ uint32_t recomp_d3d8_require_device(void);
 void recomp_d3d8_target(RecompD3dPresenterTarget *target);
 void recomp_d3d8_submit(const RecompD3dPresenterCommand *command);
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
+/* Width over height the game draws its frames for: 4:3, or the widescreen shape. */
+float recomp_d3d8_content_aspect(void);
+/* Fits an on-screen pretransformed draw of the game's 16:9 2D layer to
+   another widescreen shape (widescreen.h), scissor rectangle included. */
+void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw);
 void recomp_d3d8_release_memory(uint32_t base, uint32_t size);
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size);
 void recomp_d3d8_shutdown(void);
