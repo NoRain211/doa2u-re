@@ -89,6 +89,20 @@ static class Game
         return s.TryGetValue(key, out v) && v is string ? (string)v : fallback;
     }
 
+    // "4:3", "16:9", "16:10" or an ultrawide "W:H"; settings saved before
+    // 16:10 hold only a widescreen flag.
+    public static string ScreenShape(Dictionary<string, object> s)
+    {
+        return Str(s, "screen", Bool(s, "widescreen", true) ? "16:9" : "4:3");
+    }
+
+    // The primary screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+    public static string UltrawideShape()
+    {
+        var bounds = Screen.PrimaryScreen.Bounds;
+        return bounds.Width * 9 > bounds.Height * 16 ? bounds.Width + ":" + bounds.Height : "64:27";
+    }
+
     public static bool IsIso(string path)
     {
         return !string.IsNullOrEmpty(path) && path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(path);
@@ -236,6 +250,7 @@ class LauncherForm : Form
 {
     static readonly int[] Heights = { 480, 720, 1080, 1440, 2160 };
     static readonly int[] Samples = { 1, 2, 4, 8, 16, 32 };
+    static readonly string[] Screens = { "4:3", "16:9", "16:10", "Ultrawide" };
     const int BuildPage = 4, PlayPage = 5, UpdatePage = 6;
     const string DiscordUrl = "https://discord.gg/56TGGxZnE3";
     // The Discord mark in a 24-unit box: one outline of cubic Bezier segments, the eyes cut out below.
@@ -312,7 +327,9 @@ class LauncherForm : Form
         msaa = new Row { Label = "MSAA", Info = "Smooths polygon edges; a count the GPU lacks falls back to its highest",
             Names = new[] { "Off", "2x", "4x", "8x", "16x", "32x" }, Index = savedMsaa < 0 ? Samples.Length - 1 : savedMsaa, Default = Samples.Length - 1 };
         smaa = Choice("SMAA", "Smooths edges with SMAA Ultra after MSAA", new[] { "Off", "On" }, Game.Bool(settings, "smaa", true), 1);
-        screen = Choice("Screen", "16:9 uses the game's own widescreen camera and menus", new[] { "4:3", "16:9" }, Game.Bool(settings, "widescreen", true), 1);
+        int savedScreen = Array.IndexOf(Screens, Game.ScreenShape(settings)); // -1: an ultrawide "W:H"
+        screen = new Row { Label = "Screen", Info = "Widescreen widens the game's own camera; its 16:9 menus keep their shape",
+            Names = Screens, Index = savedScreen >= 0 ? savedScreen : 3, Default = 1 };
         renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
@@ -426,7 +443,8 @@ class LauncherForm : Form
     {
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
-            { "widescreen", screen.Index == 1 }, { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
+            { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
+            { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
     }
 

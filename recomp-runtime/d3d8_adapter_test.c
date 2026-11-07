@@ -7,6 +7,7 @@
 #include "d3d_vblank.h"
 #include "stop_report.h"
 
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -232,6 +233,8 @@ RecompD3dPresenterError recomp_d3d_presenter_destroy(
 
 static uint32_t saved_display, freed_display;
 uint32_t recomp_kernel_av_get_saved_data_address(void) { return saved_display; }
+static float widescreen_aspect = 16.0f / 9.0f;
+float recomp_kernel_widescreen_aspect(void) { return widescreen_aspect; }
 void recomp_kernel_av_set_saved_data_address(uint32_t address) { saved_display = address; }
 uint32_t recomp_kernel_allocate_contiguous(
     uint32_t size, uint32_t highest_address, uint32_t alignment, uint32_t protect)
@@ -332,6 +335,48 @@ static int create(void)
 {
     const uint32_t arguments[] = {0u, 1u, 0u, 0x40u, PARAMETERS, OUTPUT};
     return call(0x34a470u, arguments, 6u, NULL);
+}
+
+/* Another screen shape fits the 16:9 HUD layer, scissor included; an indexed
+   draw's bounds come from the vertices it uses. */
+static int fit_tests(void)
+{
+    reset_fixture();
+    RecompD3dPresentationParameters wide;
+    memcpy(&wide, recomp_memory(PARAMETERS, sizeof wide), sizeof wide);
+    wide.flags |= 0x10u;
+    memcpy(recomp_memory(PARAMETERS, sizeof wide), &wide, sizeof wide);
+    int passed = create();
+    /* A 200-wide quad, plus two unused vertices spanning the target. */
+    const float vertices[6][4] = {{100.0f, 0.0f, 0.0f, 1.0f}, {300.0f, 0.0f, 0.0f, 1.0f},
+        {100.0f, 100.0f, 0.0f, 1.0f}, {300.0f, 100.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f},
+        {720.0f, 0.0f, 0.0f, 1.0f}};
+    const uint16_t indices[6] = {0u, 1u, 2u, 2u, 1u, 3u};
+    RecompD3dPresenterDrawCommand draw = {0};
+    draw.vertex_bytes = vertices;
+    draw.vertex_stride = sizeof vertices[0];
+    draw.vertex_count = 6u;
+    draw.index_bytes = indices;
+    draw.index_count = 6u;
+    draw.target.color.width = 720u;
+    draw.target.color.height = 480u;
+    draw.has_scissor = true;
+    const int32_t full[4] = {0, 0, 720, 480};
+    memcpy(draw.scissor, full, sizeof full);
+    widescreen_aspect = 32.0f / 9.0f;
+    recomp_d3d8_fit_2d_layer(&draw);
+    passed &= expect("ultrawide narrows the HUD layer and its scissor about the center",
+        draw.layer_scale[0] == 0.5f && draw.layer_scale[1] == 1.0f && draw.scissor[0] == 180 &&
+        draw.scissor[1] == 0 && draw.scissor[2] == 540 && draw.scissor[3] == 480);
+    memcpy(draw.scissor, full, sizeof full);
+    widescreen_aspect = 1.6f;
+    recomp_d3d8_fit_2d_layer(&draw);
+    passed &= expect("16:10 shortens the HUD layer and its scissor about the center",
+        draw.layer_scale[0] == 1.0f && fabsf(draw.layer_scale[1] - 0.9f) < 1e-5f && draw.scissor[0] == 0 &&
+        draw.scissor[1] >= 23 && draw.scissor[1] <= 24 && draw.scissor[2] == 720 &&
+        draw.scissor[3] >= 456 && draw.scissor[3] <= 457);
+    widescreen_aspect = 16.0f / 9.0f;
+    return passed;
 }
 
 static int coverage_tests(void)
@@ -957,6 +1002,7 @@ int main(void)
     const uint32_t partial[5] = {COLOR_HEADER, RECT_SOURCE, 1u, SNAPSHOT, 0u};
     passed &= call(0x344aa0u, partial, 5u, "d3d8:copy-rects-unbound");
     passed &= coverage_tests();
+    passed &= fit_tests();
     recomp_d3d8_shutdown();
     passed &= expect("shutdown destroys presenter once", destroy_count == 1u);
     recomp_d3d8_shutdown();

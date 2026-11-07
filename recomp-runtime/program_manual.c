@@ -88,6 +88,26 @@ static void skip_startup_logo(void)
 
 static bool boot_opening_pending = true;
 bool recomp_skip_intro;
+
+/* The lifted projection builder. */
+extern void sub_00034280(void);
+
+/* 0x34280(matrix, fov, aspect, near, far, offset, scale) builds a camera's
+   projection: X scale 1 / (tan(fov / 2) * aspect), Y scale 1 / tan(fov / 2).
+   Widescreen views pass 1 / (9/16), from a 9/16 the compiler shares with
+   unrelated thresholds, so the shape goes in here instead: the view keeps its
+   height and widens (or, at 16:10, narrows) to the screen. cdecl, ret 0. */
+static void build_projection(void)
+{
+    const uint32_t aspect_arg = recomp_runtime.registers.esp + 12u;
+    float aspect;
+    memcpy(&aspect, recomp_memory(aspect_arg, sizeof aspect), sizeof aspect);
+    if (aspect == 1.0f / 0.5625f && (recomp_kernel_video_flags() & 0x00010000u) != 0u) {
+        aspect = recomp_kernel_widescreen_aspect();
+        memcpy(recomp_memory(aspect_arg, sizeof aspect), &aspect, sizeof aspect);
+    }
+    sub_00034280();
+}
 static char fight_names[2][16];
 static uint32_t fight_local_side;
 static bool fight_names_set;
@@ -191,6 +211,7 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (guest_address == 0x002bd531u) return host_kernel_init_segment;
     if (guest_address == 0x002b8a24u) return get_tick_count;
     if (guest_address == 0x00381331u) return xnet_startup;
+    if (guest_address == 0x00034280u) return build_projection;
     RecompFunction function = recomp_d3d8_resource_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_lookup_manual(guest_address);
     if (function == NULL) function = recomp_d3d8_state_lookup_manual(guest_address);

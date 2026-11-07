@@ -117,6 +117,10 @@ RecompFunction recomp_cpu_costume_lookup_manual(uint32_t address)
     return NULL;
 }
 
+uint32_t recomp_kernel_video_flags(void) { return 0u; }
+float recomp_kernel_widescreen_aspect(void) { return 16.0f / 9.0f; }
+void sub_00034280(void) {}
+
 static int test_fmod(void)
 {
     RecompFunction function = recomp_lookup_manual(0x00336dfeu);

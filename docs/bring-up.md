@@ -138,7 +138,21 @@ XGetVideoFlags (0x2bb87e) returns bit 0 from this setting; game initialization
 (0x282570) retains it and requests presentation flag 0x10. The device model
 accepts that flag at creation and Reset. The game's existing camera and UI
 branches select their 16:9 behavior, and the presenter sizes the window to
-match. No game matrices or guest code are patched.
+match. No game matrices or guest code are patched for 16:9.
+
+A `W:H` value keeps the widescreen bit and renders that shape (16:10, or an
+ultrawide such as 64:27). Every widescreen view builds its projection with
+0x34280 (cdecl matrix, fov, aspect, near, far, offset, scale), passing aspect
+1 / (9/16) from the pooled constant 0x3c2cec; FUN_00039710 and FUN_00192010
+read the same constant as unrelated thresholds, so it stays. The manual
+lookup wraps 0x34280 and replaces exactly that aspect with the shape, which
+keeps the vertical field of view and widens or narrows the view. The D3D8
+adapter scales on-screen pretransformed draws narrower than the target, the
+game's 16:9 HUD and menus, about the viewport center into the screen's
+largest 16:9 area, scissor included; quads as wide as the target (fades,
+backdrops) keep filling it. The projections live in guest RAM, which netplay
+sessions hash and replays must recompute exactly, so both keep 16:9: the
+session or replay sets `recomp_kernel_widescreen` from the host's flags.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability

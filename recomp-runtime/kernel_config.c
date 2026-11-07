@@ -1,4 +1,5 @@
 #include "kernel_abi.h"
+#include "widescreen.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -25,6 +26,18 @@ uint32_t recomp_kernel_video_flags(void)
 {
     return setting(recomp_kernel_widescreen, "RECOMP_D3D_WIDESCREEN")
         ? 0x004f0000u : 0x004e0000u;
+}
+
+/* A netplay session or replay keeps 16:9: the shape changes the game's
+   projection matrices, which are in the guest RAM both sides hash. */
+float recomp_kernel_widescreen_aspect(void)
+{
+    unsigned w = 16u, h = 9u;
+
+    if (recomp_kernel_widescreen < 0) {
+        (void)recomp_widescreen(&w, &h);
+    }
+    return (float)w / (float)h;
 }
 
 /* XC_AUDIO: surround with AC3 (discrete 5.1) sends DOA2 and DSOUND down
