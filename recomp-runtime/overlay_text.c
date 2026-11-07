@@ -51,7 +51,7 @@ bool recomp_overlay_empty(const RecompOverlayText *text)
     return text == NULL || (text->title[0] == '\0' && text->count == 0u && text->hint[0] == '\0');
 }
 
-static RecompOverlayText published;
+static RecompOverlayText published[RECOMP_OVERLAY_SOURCES];
 /* The copy is a few hundred bytes, so a spin lock held only for it is
    enough between the game thread and a render thread. MSVC's C has no
    <stdatomic.h> by default, so Windows uses its interlocked calls. */
@@ -83,18 +83,23 @@ static void unlock(void)
 }
 #endif
 
-void recomp_overlay_publish(const RecompOverlayText *text)
+void recomp_overlay_publish(RecompOverlaySource source, const RecompOverlayText *text)
 {
-    if (text == NULL) return;
+    if (text == NULL || (unsigned)source >= RECOMP_OVERLAY_SOURCES) return;
     lock();
-    published = *text;
+    published[source] = *text;
     unlock();
 }
 
 void recomp_overlay_take(RecompOverlayText *text)
 {
     if (text == NULL) return;
+    recomp_overlay_clear(text);
     lock();
-    *text = published;
+    for (unsigned i = 0u; i < RECOMP_OVERLAY_SOURCES; ++i) {
+        if (recomp_overlay_empty(&published[i])) continue;
+        *text = published[i];
+        break;
+    }
     unlock();
 }

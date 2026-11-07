@@ -34,9 +34,18 @@ bool recomp_overlay_add_line(RecompOverlayText *text, const char *format, ...);
 void recomp_overlay_set_hint(RecompOverlayText *text, const char *hint);
 bool recomp_overlay_empty(const RecompOverlayText *text);
 
-/* The game side hands a finished overlay over once a frame; a presenter,
-   possibly on its own thread, takes a copy of the latest one to draw. */
-void recomp_overlay_publish(const RecompOverlayText *text);
+/* Each source keeps its own overlay, so one clearing its text leaves the
+   other's. The presenter draws the first non-empty one in this order: the
+   quit prompt covers the free camera's panel until it closes. */
+typedef enum RecompOverlaySource {
+    RECOMP_OVERLAY_QUIT_PROMPT,
+    RECOMP_OVERLAY_FREE_CAMERA,
+    RECOMP_OVERLAY_SOURCES,
+} RecompOverlaySource;
+
+/* The game side hands a source's finished overlay over; a presenter,
+   possibly on its own thread, takes a copy of the one to draw. */
+void recomp_overlay_publish(RecompOverlaySource source, const RecompOverlayText *text);
 void recomp_overlay_take(RecompOverlayText *text);
 
 #ifdef __cplusplus

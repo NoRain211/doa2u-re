@@ -149,6 +149,9 @@ X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
 a readout of the frame rate, the average frame time and the slowest frame of
 the last second; it starts off.
 
+Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
+playing.
+
 ## Build from source
 
 The public tests need no game files or lifter checkout:
