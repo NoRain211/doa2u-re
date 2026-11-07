@@ -267,7 +267,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, intro, unlock, freeCamera, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, intro, unlock, cpuCostumes, freeCamera, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -336,6 +336,7 @@ class LauncherForm : Form
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
         freeCamera = Choice("Free Camera", "In game, F1 or a right-stick click flies the camera", new[] { "Off", "On" }, Game.Bool(settings, "freeCamera", false), 0);
+        cpuCostumes = Choice("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", new[] { "Default", "Random" }, Game.Bool(settings, "randomCpuCostumes", false), 0);
         gameSource = Game.Str(settings, "game_source", null);
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
@@ -345,7 +346,7 @@ class LauncherForm : Form
             new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape, renderer and VRR", Rows = PageRows(resolution, msaa, smaa, screen, renderer, vrr) },
             new Page { Name = "AUDIO SETTINGS", Info = "Chooses stereo or 5.1 surround", Rows = PageRows(surround) },
             new Page { Name = "MOVIES", Info = "Plays or skips the logo and opening movies at boot", Rows = PageRows(intro) },
-            new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks and whether the free camera is allowed", Rows = PageRows(unlock, freeCamera) },
+            new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks, CPU costumes and whether the free camera is allowed", Rows = PageRows(unlock, cpuCostumes, freeCamera) },
             new Page { Name = "BUILD GAME", Info = BuildStatus(), Rows = new[] { chooseGame, buildRow, new Row { Label = "Exit", Info = "Returns to the menu", Action = "back" } } },
             new Page { Name = "START GAME", Info = "Saves these settings and starts the game", Rows = new Row[0], Action = "play" },
             new Page { Name = "UPDATE", Info = UpdateStatus(), Rows = PageRows(updateRow, checkAtStart) },
@@ -444,7 +445,7 @@ class LauncherForm : Form
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
             { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
-            { "freeCamera", freeCamera.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
+            { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }

@@ -757,6 +757,16 @@ come only from the game's own award paths. Acceptance runs use it with a
 profile that has never run with the unlock on; earlier saves keep their
 unlocks.
 
+With `RECOMP_RANDOM_CPU_COSTUMES=1` (the launchers' **CPU Costumes: Random**,
+issue #116), `cpu_costume.c` wraps `battle_get_fighter_costume` (`0xc6b00`,
+cdecl character and opponent index). In Story, Time Attack, Survival and Team
+(battle modes 3, 4, 6, 7) a plain pick, the character's first costume group or
+the second when the player wears the first, becomes a random unlocked group
+(`0x11e410`), skipping one that matches the player's costume (`0xc5490`).
+Other callers ask again during a run, so the pick hashes a per-boot seed with
+the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
+index. Story's own picks stay. Netplay and SyncTest boots leave it off.
+
 ## Input API contract
 
 `input_adapter.c` binds 5849 XInitDevices, device enumeration/changes,

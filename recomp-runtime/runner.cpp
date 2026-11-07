@@ -6,6 +6,7 @@
 #include "guest_snapshot.h"
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
+#include "cpu_costume.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
@@ -569,8 +570,11 @@ static void bootGuest()
     recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_PERF] = recomp_perf_overlay;
     recomp_netplay_session_install(recomp_synctest_enabled());
     /* The free camera and the scene freeze run only with RECOMP_FREE_CAMERA=1,
-       and never online; off, input samples and task switches go unhooked. */
-    recomp_free_camera_install(recomp_netplay_session_enabled() || recomp_synctest_enabled());
+       and never online; off, input samples and task switches go unhooked.
+       Random CPU costumes are off online too, where both games must agree. */
+    const bool online = recomp_netplay_session_enabled() || recomp_synctest_enabled();
+    recomp_free_camera_install(online);
+    recomp_cpu_costume_install(online);
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");

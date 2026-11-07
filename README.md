@@ -67,7 +67,7 @@ keeps running.
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the renderer, VRR, an
-  optional intro-movie skip, 5.1 surround, the unlock setting and the free camera, and remembers them. `DOA2U.exe` plays
+  optional intro-movie skip, 5.1 surround, the unlock setting, random CPU costumes and the free camera, and remembers them. `DOA2U.exe` plays
   with the same choices. On release ZIPs after 0.1.10, the settings launcher on
   each platform can check GitHub for a newer release and install it from its
   **UPDATE** page; **Check At Start** turns the start-up check off.
@@ -254,6 +254,11 @@ At first launch `run_game.py` builds an image from
 `--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
 off the automatic character and costume unlock, so unlocks come from play;
 profiles already saved with the unlock keep it.
+
+`--random-cpu-costumes`, or **CPU Costumes: Random** on the **GAMEPLAY** page,
+dresses CPU opponents in Story, Time Attack, Survival and Team in random
+unlocked costumes where the game would give their first one. Story's special
+picks, such as a costume about to unlock, stay. It stays off online.
 
 To package a release ZIP from a clean checkout:
 
