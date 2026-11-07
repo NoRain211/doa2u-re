@@ -357,8 +357,9 @@ and a different build shows on the other player's plate.
 B leaves the room, and the runner first tells the other player with its own
 leave message, separate from the session's goodbye, which can arrive late
 into a room. A host that hears it says who left and lets the next player in;
-a joiner forgets the host's address, stops calling it and shows THE HOST
-CLOSED THE ROOM, so a room opened again on the same port starts empty.
+a joiner drops the host as its peer, stops calling it and shows THE HOST
+CLOSED THE ROOM, so a room opened again on the same port starts empty. JOIN
+ONLINE still offers the host's address.
 Once the host's room has a round trip, INPUT DELAY suggests one frame per
 33 ms of it, rounded up, none up to 20 ms, at most the rollback window;
 once the other player is in, the host's left/right steps the delay. The
