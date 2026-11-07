@@ -13,6 +13,7 @@
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
 #include "stop_report.h"
+#include "stage_select.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -211,6 +212,8 @@ static void launch_new_image(void)
 
 RecompFunction recomp_lookup_manual(uint32_t guest_address)
 {
+    RecompFunction stage = recomp_stage_select_lookup_manual(guest_address);
+    if (stage != NULL) return stage;
     if (guest_address == 0x000d92c0u) return skip_startup_legal;
     if (recomp_skip_intro && guest_address == 0x000d9300u) return skip_startup_logo;
     if (recomp_skip_intro && guest_address == 0x00069180u) return movie_scene_tick;

@@ -94,6 +94,7 @@ keeps running.
 | Story, Ayane and Gen Fu | Stages 1-6 cleared without a stop in scripted runs; the Tengu fight was lost each time |
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
+| Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
 | Native 16:9 widescreen, 16:10 and ultrawide, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |

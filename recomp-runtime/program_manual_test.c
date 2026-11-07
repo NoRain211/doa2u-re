@@ -96,6 +96,12 @@ RecompFunction recomp_fiber_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_stage_select_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 RecompFunction recomp_input_lookup_manual(uint32_t address)
 {
     (void)address;
