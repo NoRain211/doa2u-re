@@ -154,6 +154,14 @@ void recomp_dispatch_indirect_site(uint32_t guest_address, uint32_t saved_esp,
     dispatched = guest_address;
     dispatched_return = *recomp_memory_u32(recomp_runtime.registers.esp);
     dispatched_context = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
+    if (guest_address == 0x276b54u) { /* a callback that queues another, as InsertCallback(1, 0x276b50, 0x22) */
+        const uint32_t esp = recomp_runtime.registers.esp;
+        recomp_runtime.registers.esp -= 16u;
+        uint32_t *frame = recomp_memory_u32(recomp_runtime.registers.esp);
+        frame[0] = 0u; frame[1] = 1u; frame[2] = 0x276b50u; frame[3] = 0x22u;
+        recomp_d3d8_lookup_manual(0x349e10u)();
+        recomp_runtime.registers.esp = esp;
+    }
     recomp_runtime.registers.esp += 4u; /* cdecl: the callee pops only its return. */
 }
 static jmp_buf stop_environment;
@@ -833,6 +841,17 @@ int main(void)
     passed &= expect("callback runs as cdecl with its context on the second swap",
         dispatched == 0x276b50u && dispatched_context == 0x11u && dispatched_return == 0u &&
         recomp_runtime.registers.esp == ENTRY_ESP + 8u);
+    arguments[0] = 1u; arguments[1] = 0x276b54u; arguments[2] = 0x11u;
+    passed &= call(0x349e10u, arguments, 3u, NULL);
+    arguments[0] = 0u;
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= expect("a callback can queue another", dispatched == 0x276b54u);
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= expect("a callback queued by a callback still skips the next swap", dispatched == 0x276b54u);
+    passed &= call(0x34af80u, arguments, 1u, NULL);
+    passed &= expect("a callback queued by a callback runs on the second swap",
+        dispatched == 0x276b50u && dispatched_context == 0x22u);
     arguments[0] = 2u;
     passed &= call(0x349e10u, arguments, 3u, "d3d8:insert-callback:2");
     arguments[0] = 0x11u; arguments[1] = OUTPUT; arguments[2] = 0u;

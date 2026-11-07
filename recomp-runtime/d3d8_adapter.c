@@ -685,7 +685,8 @@ static bool present_ready(void *unused)
 static void run_due_callbacks(void)
 {
     uint32_t kept = 0u;
-    for (uint32_t i = 0u; i < pending_callback_count; ++i) {
+    const uint32_t due = pending_callback_count; /* a callback's own inserts wait for the next Swap */
+    for (uint32_t i = 0u; i < due; ++i) {
         PendingCallback entry = pending_callbacks[i];
         if (--entry.swaps != 0u) {
             pending_callbacks[kept++] = entry;
@@ -693,6 +694,7 @@ static void run_due_callbacks(void)
         }
         kernel_call_guest(entry.callback, &entry.context, 1u);
     }
+    for (uint32_t i = due; i < pending_callback_count; ++i) pending_callbacks[kept++] = pending_callbacks[i];
     pending_callback_count = kept;
 }
 
