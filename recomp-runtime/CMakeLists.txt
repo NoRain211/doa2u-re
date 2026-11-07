@@ -425,6 +425,9 @@ endif()
 
 add_executable(recomp_free_camera_test free_camera.c free_camera_test.c)
 add_test(NAME recomp-runtime-free-camera COMMAND recomp_free_camera_test)
+add_executable(recomp_perf_overlay_test perf_overlay.c perf_overlay_test.c)
+recomp_use_sdl3(recomp_perf_overlay_test)
+add_test(NAME recomp-runtime-perf-overlay COMMAND recomp_perf_overlay_test)
 add_executable(recomp_scene_freeze_test scene_freeze.c scene_freeze_test.c)
 add_test(NAME recomp-runtime-scene-freeze COMMAND recomp_scene_freeze_test)
 add_executable(recomp_screenshot_test screenshot.c screenshot_test.c)
@@ -626,7 +629,7 @@ if(RECOMP_PROGRAM_DIR)
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp
-        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c perf_overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c
         host_diagnostics.cpp)
     # Netplay pairs runners of one release (VERSION) or commit and one program,

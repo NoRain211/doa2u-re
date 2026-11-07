@@ -2,13 +2,10 @@
 #include "overlay.h"
 #include "d3d8_adapter.h"
 #include "d3d_draw_model.h"
-#include "input_host_win32.h"
 #include "kernel_abi.h"
 
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <SDL3/SDL.h>
 
 enum { MAX_QUADS = 8192u, FVF_XYZRHW_DIFFUSE = 0x44u };
 
@@ -189,31 +186,3 @@ float recomp_overlay_display_aspect(void)
 {
     return recomp_kernel_video_flags() & 0x00010000u ? 16.0f / 9.0f : 4.0f / 3.0f;
 }
-
-void recomp_overlay_perf(const RecompD3dPresenterTarget *target)
-{
-    static bool shown, held;
-    static double last_ms, window_ms, slowest_ms;
-    static unsigned frames;
-    static char line[48];
-    const bool down = recomp_input_host_key(RECOMP_INPUT_HOST_KEY_F3);
-    if (down && !held) shown = !shown;
-    held = down;
-    const double ms = (double)SDL_GetTicksNS() / 1e6; /* monotonic, so clock changes cannot skew it */
-    if (last_ms != 0.0 && ms - last_ms > slowest_ms) slowest_ms = ms - last_ms;
-    last_ms = ms;
-    if (window_ms == 0.0) window_ms = ms; /* the first Swap opens the window */
-    else ++frames;
-    if (ms - window_ms >= 1000.0) {
-        snprintf(line, sizeof line, "%.0f FPS  %.1f MS  MAX %.1f",
-            frames * 1000.0 / (ms - window_ms), (ms - window_ms) / frames, slowest_ms);
-        window_ms = ms;
-        frames = 0u;
-        slowest_ms = 0.0;
-    }
-    if (!shown || line[0] == '\0') return;
-    recomp_overlay_rect(4.0f, 4.0f, recomp_overlay_text_width(line, 2.0f) + 12.0f, 26.0f, 0xb0000000u);
-    recomp_overlay_text(10.0f, 10.0f, 2.0f, 0xffffffffu, line);
-    recomp_overlay_submit(target, recomp_overlay_display_aspect());
-}
-

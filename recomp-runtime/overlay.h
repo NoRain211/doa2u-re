@@ -20,9 +20,6 @@ float recomp_overlay_text_width(const char *text, float scale);
 void recomp_overlay_submit(const RecompD3dPresenterTarget *target, float display_aspect);
 /* 16:9 when RECOMP_D3D_WIDESCREEN asks for the game's wide mode, else 4:3. */
 float recomp_overlay_display_aspect(void);
-/* F3 toggles the frame rate, average frame time and slowest frame of the
-   last second in the top-left corner. Call once per shown frame. */
-void recomp_overlay_perf(const RecompD3dPresenterTarget *target);
 
 #ifdef __cplusplus
 }

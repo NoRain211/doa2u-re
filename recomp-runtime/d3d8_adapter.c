@@ -36,8 +36,7 @@ static RecompD3dDeviceState device_state;
 static RecompD3dFrameState frame_state;
 static RecompD3dPresenter *presenter;
 void (*recomp_d3d_present_hook)(uint32_t swap_counter);
-void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
-void (*recomp_d3d_perf_hook)(const RecompD3dPresenterTarget *target);
+void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool content_widescreen; /* the game's D3DPRESENTFLAG_WIDESCREEN at CreateDevice */
 static bool gpu_work_suppressed;
@@ -680,11 +679,15 @@ static void swap(void)
     /* The wait also moves guest time, so a hidden frame keeps it; under the
        frame clock it never sleeps. */
     recomp_d3d_wait_present();
-    if (!present_suppressed && (recomp_d3d_overlay_hook != NULL || recomp_d3d_perf_hook != NULL)) {
+    if (!present_suppressed) {
         RecompD3dPresenterTarget target;
-        resolve_target(color_header(0u), 0u, &target);
-        if (recomp_d3d_perf_hook != NULL) recomp_d3d_perf_hook(&target);
-        if (recomp_d3d_overlay_hook != NULL) recomp_d3d_overlay_hook(&target);
+        bool resolved = false;
+        for (unsigned i = 0u; i < RECOMP_D3D_OVERLAY_HOOKS; ++i) {
+            if (recomp_d3d_overlay_hooks[i] == NULL) continue;
+            if (!resolved) resolve_target(color_header(0u), 0u, &target);
+            resolved = true;
+            recomp_d3d_overlay_hooks[i](&target);
+        }
     }
     result.command.data.present.widescreen = content_widescreen;
     /* A host wait for the GPU here would stall every guest thread, including

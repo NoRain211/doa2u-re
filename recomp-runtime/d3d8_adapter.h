@@ -38,11 +38,14 @@ void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *ta
 uint32_t recomp_d3d8_swap_counter(void);
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
-/* Optional host hook that draws over a shown frame, into target, just
-   before its Present. */
-extern void (*recomp_d3d_overlay_hook)(const RecompD3dPresenterTarget *target);
-/* Like the overlay hook, drawn first; the runner's frame rate readout. */
-extern void (*recomp_d3d_perf_hook)(const RecompD3dPresenterTarget *target);
+/* Optional host hooks that draw over a shown frame, into target, just
+   before its Present, in this order. Each owner sets only its own slot. */
+enum {
+    RECOMP_D3D_OVERLAY_PERF,    /* the runner's frame rate readout */
+    RECOMP_D3D_OVERLAY_NETPLAY, /* the netplay menu or session screens */
+    RECOMP_D3D_OVERLAY_HOOKS,
+};
+extern void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
 /* Optional host hook at the frame boundary: guest state is final and the
    frame-locked clock has already advanced. SyncTest snapshots here. */
 extern void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
