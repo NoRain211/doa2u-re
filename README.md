@@ -147,7 +147,8 @@ pinned lifter and extractor; use the release ZIP.
 arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
 X/Y, Q/W are White/Black and E/R are the triggers.
 
-Hold Back for two seconds to quit to the desktop: A quits, B keeps playing.
+Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
+playing.
 
 ## Build from source
 

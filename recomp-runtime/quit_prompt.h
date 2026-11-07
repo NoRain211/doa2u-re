@@ -20,8 +20,9 @@ typedef enum RecompQuitEvent {
 /* Holding Back for two seconds on any pad asks whether to quit to the desktop
    (issue #59): A quits, B cancels. The game sees no input from a pad while
    the prompt is open, nor afterwards until that pad is let go. now_ms is a
-   monotonic host clock. */
+   monotonic host clock; a null pad is an absent one. */
 RecompQuitEvent recomp_quit_prompt_filter(uint32_t port, RecompInputGamepad *pad, uint64_t now_ms);
+bool recomp_quit_prompt_open(void);
 
 #ifdef __cplusplus
 }

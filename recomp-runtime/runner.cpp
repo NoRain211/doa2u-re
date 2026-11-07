@@ -89,10 +89,9 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
     if (recomp_netplay_session_pad(port, gamepad, &present)) return present;
     if (port != 0u) {
         const bool sampled = !scriptedInputOnly && recomp_input_host_sample(port, gamepad);
-        if (sampled) {
-            quitPrompt(port, gamepad);
-            recomp_netplay_menu_filter(port, gamepad);
-        }
+        quitPrompt(port, sampled ? gamepad : nullptr);
+        // The open prompt owns the pads, so the room cannot inject its A behind it.
+        if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
         return sampled;
     }
     const bool sampled = recomp_input_pulse_source_sample(&inputPulses, gamepad);
@@ -103,10 +102,8 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
             static_cast<unsigned long long>(inputPulses.sample_count));
         startHeld = start;
     }
-    if (sampled) {
-        quitPrompt(0u, gamepad);
-        recomp_netplay_menu_filter(0u, gamepad);
-    }
+    quitPrompt(0u, sampled ? gamepad : nullptr);
+    if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(0u, gamepad);
     return recomp_netplay_session_back_pad(gamepad) || sampled;
 }
 

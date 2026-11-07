@@ -31,19 +31,33 @@ int main(void)
     expect("letting go restarts the hold", step(0u, 0u, 0, 0, 1500u, &pad) == RECOMP_QUIT_NONE);
     expect("hold starts", step(0u, 0x20u, 0, 0, 2000u, &pad) == RECOMP_QUIT_NONE);
     expect("not yet after 1.9 s", step(0u, 0x20u, 0, 0, 3900u, &pad) == RECOMP_QUIT_NONE);
+    expect("another pad's A passes before the prompt", step(1u, 0u, 1, 0, 3950u, &pad) == RECOMP_QUIT_NONE &&
+        pad.analog_buttons[0] == 0xffu);
     expect("two seconds open the prompt and hide Back",
-        step(0u, 0x20u, 0, 0, 4000u, &pad) == RECOMP_QUIT_OPENED && pad.buttons == 0u);
+        step(0u, 0x20u, 0, 0, 4000u, &pad) == RECOMP_QUIT_OPENED && pad.buttons == 0u && recomp_quit_prompt_open());
     expect("A still held from before the prompt does nothing", step(1u, 0u, 1, 0, 4010u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[0] == 0u);
-    expect("the opening pad must let go first", step(0u, 0x20u, 0, 1, 4020u, &pad) == RECOMP_QUIT_NONE);
+    expect("the opening pad must let go first", step(0u, 0x20u, 0, 1, 4020u, &pad) == RECOMP_QUIT_NONE &&
+        pad.buttons == 0u && pad.analog_buttons[1] == 0u);
     step(0u, 0u, 0, 0, 4030u, &pad);
     expect("B cancels and is swallowed", step(0u, 0u, 0, 1, 4040u, &pad) == RECOMP_QUIT_CANCELLED &&
-        pad.analog_buttons[1] == 0u);
+        pad.analog_buttons[1] == 0u && !recomp_quit_prompt_open());
     expect("B stays hidden until released", step(0u, 0u, 0, 1, 4050u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[1] == 0u);
-    step(0u, 0u, 0, 0, 4055u, &pad);
-    expect("input returns after release", step(0u, 0u, 1, 0, 4060u, &pad) == RECOMP_QUIT_NONE &&
+    step(0u, 0x20u, 0, 1, 4060u, &pad);
+    expect("Back held from the cancel does not reopen it", step(0u, 0x20u, 0, 1, 6100u, &pad) == RECOMP_QUIT_NONE);
+    memset(&pad, 0, sizeof pad);
+    pad.thumb_lx = 20000;
+    recomp_quit_prompt_filter(0u, &pad, 6110u);
+    expect("a pushed stick stays hidden too", pad.thumb_lx == 0);
+    step(0u, 0u, 0, 0, 6115u, &pad);
+    expect("input returns after release", step(0u, 0u, 1, 0, 6120u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[0] == 0xffu);
+    step(3u, 0u, 0, 0, 6150u, &pad); /* ports stay latched from the prompt until let go */
+    step(3u, 0x20u, 0, 0, 6200u, &pad);
+    recomp_quit_prompt_filter(3u, NULL, 6300u);
+    expect("an unplugged pad's hold starts over", step(3u, 0x20u, 0, 0, 8300u, &pad) == RECOMP_QUIT_NONE);
+    step(2u, 0u, 0, 0, 4990u, &pad);
     step(2u, 0x20u, 0, 0, 5000u, &pad);
     expect("any pad opens it", step(2u, 0x20u, 0, 0, 7000u, &pad) == RECOMP_QUIT_OPENED);
     step(2u, 0u, 0, 0, 7010u, &pad);
