@@ -168,6 +168,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     keymap = keyboard_map()
     if keymap:
         env.setdefault("RECOMP_KEYMAP", keymap)
+    # The game's PC SETTINGS page saves the launchers' choices here.
+    env["RECOMP_LAUNCHER_SETTINGS"] = str(ROOT / "private/launcher.json")
     # Both presenters keep compiled draw shaders here and load them at the next start.
     shader_cache = ROOT / "private/shader-cache"
     shader_cache.mkdir(parents=True, exist_ok=True)

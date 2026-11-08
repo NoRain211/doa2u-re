@@ -14,7 +14,10 @@ extern "C" {
    for the free camera and the scene freeze; returns false when it is off.
    Online (a session, synctest or replay) removes the hooks for that boot. */
 bool recomp_free_camera_install(bool online);
-/* The camera build (0x000399D0) while the free camera is allowed. */
+/* PC Settings: turns the free camera on or off while the game runs (not online). */
+void recomp_free_camera_set_enabled(bool on);
+bool recomp_free_camera_enabled(void);
+/* The camera build (0x000399D0) for every offline boot; it checks the setting. */
 RecompFunction recomp_free_camera_lookup_manual(uint32_t guest_address);
 
 #ifdef __cplusplus

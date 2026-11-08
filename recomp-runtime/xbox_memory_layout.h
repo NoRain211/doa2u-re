@@ -15,6 +15,10 @@
 /* Physical page zero is guest-owned; keep FS state in the reserved kernel page. */
 #define XBOX_PCR_BASE (XBOX_KERNEL_DATA_BASE + 0x800u)
 #define XBOX_PCR_SIZE 0x400u
+/* The runner's own guest data (PC Settings text, layout and sprites), above
+   the startup thread's TLS block, which the loader keeps below it. */
+#define XBOX_RUNNER_ASSET_BASE 0x03ff8000u
+#define XBOX_RUNNER_ASSET_SIZE 0x8000u
 
 #ifdef __cplusplus
 extern "C" {

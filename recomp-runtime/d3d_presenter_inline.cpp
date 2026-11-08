@@ -170,6 +170,16 @@ void recomp_d3d_presenter_set_immediate_present(bool enabled)
     d3d_backend_set_immediate_present(enabled);
 }
 
+bool recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa)
+{
+    return d3d_backend_set_quality(scale, msaa, smaa);
+}
+
+bool recomp_d3d_presenter_quality_live()
+{
+    return d3d_backend_quality_live();
+}
+
 void recomp_d3d_presenter_report_draw_textures()
 {
     if (active == nullptr || std::this_thread::get_id() != active->owner) return;

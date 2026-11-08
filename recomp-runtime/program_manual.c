@@ -16,6 +16,10 @@
 #include "xbox_memory_layout.h"
 #include "stop_report.h"
 #include "stage_select.h"
+#include "unlock_profile.h"
+#include "pc_settings.h"
+#include "runner_assets.h"
+#include "menu_quit.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -239,5 +243,13 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     /* The free camera wraps the camera build, only while it is allowed. */
     if (function == NULL) function = recomp_free_camera_lookup_manual(guest_address);
     if (function == NULL) function = recomp_cpu_costume_lookup_manual(guest_address);
+    /* Unlock Everything keeps saves and awards to what was earned. */
+    if (function == NULL) function = recomp_unlock_profile_lookup_manual(guest_address);
+    /* PC SETTINGS in the game's Options menu. */
+    if (function == NULL) function = recomp_pc_settings_lookup_manual(guest_address);
+    /* Quit Game, the main menu's last entry. */
+    if (function == NULL) function = recomp_menu_quit_lookup_manual(guest_address);
+    /* The runner's own sprites (PC Settings' label, Quit Game's). */
+    if (function == NULL) function = recomp_runner_assets_lookup_manual(guest_address);
     return function;
 }

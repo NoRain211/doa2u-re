@@ -136,6 +136,26 @@ RecompFunction recomp_cpu_costume_lookup_manual(uint32_t address)
     (void)address;
     return NULL;
 }
+RecompFunction recomp_unlock_profile_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+RecompFunction recomp_pc_settings_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+RecompFunction recomp_menu_quit_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+RecompFunction recomp_runner_assets_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
 
 uint32_t recomp_kernel_video_flags(void) { return video_flags; }
 float recomp_kernel_widescreen_aspect(void) { return screen_aspect; }

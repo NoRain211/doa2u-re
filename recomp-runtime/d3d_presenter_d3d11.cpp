@@ -4286,6 +4286,18 @@ void d3d_backend_set_immediate_present(bool enabled)
     immediate_present = enabled;
 }
 
+/* The swap chain, its VRR output and the targets are sized at creation, so
+   PC Settings' quality rows apply at the next start here. */
+bool d3d_backend_set_quality(float, uint32_t, bool)
+{
+    return false;
+}
+
+bool d3d_backend_quality_live()
+{
+    return false;
+}
+
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(
     RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels)
 {

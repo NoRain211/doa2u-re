@@ -74,7 +74,7 @@ bool recomp_load_xbe(const doaxbv::XbeParseResult& parsed,
             tls.dataStartAddress + tls.sizeOfZeroFill;
         // XAPI uses a negative index from StackBase to the pointer preceding aligned TLS.
         tlsSize = (tlsSize + 15u) & ~std::uint64_t{15u};
-        if (tlsSize + 4u > memory.size() - XBOX_STARTUP_THREAD_STACK_SLOT) {
+        if (tlsSize + 4u > XBOX_RUNNER_ASSET_BASE - XBOX_STARTUP_THREAD_STACK_SLOT) {
             error = "startup TLS leaves reserved memory";
             return false;
         }

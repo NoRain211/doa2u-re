@@ -41,9 +41,10 @@ cache, which takes a few seconds. Saves and the cache live in
 private\play-disc. Start + Back + both triggers resets the game.
 
 With Unlocks on Everything (the default), every character and costume is
-unlocked, and the game saves the unlocks to your profile. Earn offers only
-the default characters and costumes; a profile saved with Everything keeps
-them.
+unlocked while you play, but your profile saves only what you earn. Earn
+offers only what your profile has earned, so switching back gives you your
+own progress. Profiles saved by earlier releases keep the unlocks those
+releases saved.
 
 Controls: the first connected controller (Xbox, PlayStation and other
 controllers SDL3 supports). The keyboard drives player 1:
