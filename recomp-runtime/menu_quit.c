@@ -9,7 +9,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <uchar.h>
 
 /* The main menu (frontend_main_menu_update, 0x13b850) is a carousel over the
    16 entries of 0x6e20a0, 28 bytes each: mode, label sprite, picture, wide
@@ -83,7 +82,7 @@ enum {
    the O of ONLINE with the end of RANKING's R as its tail. */
 #define LEAN 0.25f
 typedef struct Piece {
-    char16_t c;          /* 0 for a tail drawn on the letter before */
+    recomp_utf16 c;      /* 0 for a tail drawn on the letter before */
     uint32_t sprite;
     int16_t from, to;
     int8_t top, bottom;  /* rows; 0 and 0 for all */
@@ -98,7 +97,7 @@ static const Piece PIECES[] = {
 };
 
 /* The popup's text per game language (Japanese reads English). */
-typedef struct Words { const char16_t *title, *yes, *no, *help; } Words;
+typedef struct Words { const recomp_utf16 *title, *yes, *no, *help; } Words;
 static const Words WORDS[5] = {
     {u"Quit the game?", u"Yes", u"No", u"Quit the game and return to the desktop."},
     {u"Quitter le jeu ?", u"Oui", u"Non", u"Quitter le jeu et revenir au bureau."},
@@ -159,7 +158,7 @@ static unsigned language_index(void)
     return language >= 2u && language <= 5u ? language - 1u : 0u;
 }
 
-static uint32_t put_text(uint32_t *cursor, const char16_t *text)
+static uint32_t put_text(uint32_t *cursor, const recomp_utf16 *text)
 {
     const uint32_t start = *cursor;
     size_t n = 0u;

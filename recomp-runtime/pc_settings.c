@@ -7,7 +7,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <uchar.h>
 
 /* The game's Options menu (frontend_options_menu_update, 0x11cfc0) keeps a
    cursor per depth at 0xdf4ac8, the depth at 0xdf4ad4 and the page at 0xdf4ad8.
@@ -125,10 +124,10 @@ static bool live[PC_ROWS];
 enum { MAX_CHOICES = 6, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELPS = 3 };
 
 typedef struct Language {
-    const char16_t *label;  /* the top-list row, in capitals */
-    const char16_t *rows[PC_ROWS];
-    const char16_t *values[PC_ROWS][MAX_CHOICES];
-    const char16_t *help[HELPS];
+    const recomp_utf16 *label;  /* the top-list row, in capitals */
+    const recomp_utf16 *rows[PC_ROWS];
+    const recomp_utf16 *values[PC_ROWS][MAX_CHOICES];
+    const recomp_utf16 *help[HELPS];
 } Language;
 
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
@@ -244,7 +243,7 @@ bool recomp_pc_settings_applies_now(unsigned setting) { return setting < PC_ROWS
 void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on || ALWAYS_LIVE[setting]; }
 uint8_t recomp_pc_settings_choice(unsigned setting) { return setting < PC_ROWS ? (uint8_t)u16(VALUES + 2u * setting) : 0u; }
 
-static uint32_t put_text(uint32_t *cursor, const char16_t *text)
+static uint32_t put_text(uint32_t *cursor, const recomp_utf16 *text)
 {
     const uint32_t address = *cursor;
     size_t n = 0u;
@@ -335,7 +334,7 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
 
 /* Where each letter is in the game's labels: the word's sprite and the
    letter's slice along the row, in tenths of a pixel of u = x - lean(y). */
-typedef struct Letter { char16_t c; uint32_t sprite; int16_t from, to; } Letter;
+typedef struct Letter { recomp_utf16 c; uint32_t sprite; int16_t from, to; } Letter;
 static const Letter LETTERS[] = {
     {u'-', 0x30029, 485, 540},  {u'.', 0x30037, 660, 715},  {u'A', 0x3000d, 145, 250},
     {u'C', 0x30010, 25, 140},   {u'D', 0x3000e, 255, 380},  {u'E', 0x3000d, 385, 485},
@@ -454,11 +453,11 @@ static void write_sprite(uint32_t base, float image[LABEL_H][LABEL_W])
 }
 
 /* Draws text into the white sprite; false while the game's label art is not loaded. */
-static bool compose(const char16_t *text, float white[LABEL_H][LABEL_W], int *width)
+static bool compose(const recomp_utf16 *text, float white[LABEL_H][LABEL_W], int *width)
 {
     memset(white, 0, sizeof(float) * LABEL_H * LABEL_W);
     float pen = SLANT * (float)WHITE_H;
-    for (const char16_t *c = text; *c != 0u; ++c) {
+    for (const recomp_utf16 *c = text; *c != 0u; ++c) {
         if (*c == u' ') {
             pen += SPACE;
             continue;

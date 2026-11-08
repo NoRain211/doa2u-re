@@ -3,9 +3,12 @@
 
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -214,7 +217,19 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;
     out += "}";
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    file << out;
-    return static_cast<bool>(file);
+    // Written beside the file and renamed over it, so a failed save keeps the old file.
+    const std::string temp = path + ".tmp";
+    {
+        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+        file << out;
+        file.close();
+        if (!file) {
+            std::remove(temp.c_str());
+            return false;
+        }
+    }
+    std::error_code error;
+    std::filesystem::rename(temp, path, error);
+    if (error) std::remove(temp.c_str());
+    return !error;
 }

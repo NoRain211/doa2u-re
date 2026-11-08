@@ -11,6 +11,10 @@
 extern "C" {
 #endif
 
+/* Runner text is UTF-16, written as u"" literals. C11 types those as
+   uint_least16_t; macOS has no <uchar.h> to name that char16_t. */
+typedef uint_least16_t recomp_utf16;
+
 /* Sprites and message text the runner adds to the game. The game draws a
    sprite by id (group << 16 | index): 0xaa970 finds its 12-byte rectangle
    {left, top, right, bottom, u16 index, u16 group} and 0xaa9b0 its texture

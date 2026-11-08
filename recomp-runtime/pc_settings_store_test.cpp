@@ -71,6 +71,7 @@ int main()
         saved.find("\"checkUpdates\":true") != std::string::npos &&
         saved.find("\"window\":{\"x\":1,\"y\":[2,3]}") != std::string::npos);
     expect("msaa off", saved.find("\"msaa\":1") != std::string::npos);
+    expect("no temporary file", !std::filesystem::exists(path + ".tmp"));
     std::uint8_t again[RECOMP_PC_SETTING_COUNT];
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u);
