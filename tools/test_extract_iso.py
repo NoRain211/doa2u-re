@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from extract_iso import extract, listing_files, read_listing, run_logged, sha256
+from extract_iso import check_path, extract, listing_files, read_listing, run_logged, sha256
 
 
 def listing(entries, count=1):
@@ -63,6 +63,12 @@ class ExtractionTests(unittest.TestCase):
             path.write_bytes(listing("/sub/a.txt (3 bytes)").replace(
                 "synthetic.iso", "新しいフォルダー.iso").encode("cp932"))
             self.assertEqual(listing_files(read_listing(path)), {"sub/a.txt": 3})
+
+    def test_paths_the_extractor_cannot_name(self):
+        with patch("extract_iso.narrow_encoding", return_value="ascii"):
+            check_path("C:/games/game.iso")
+            with self.assertRaisesRegex(ValueError, "ascii"):
+                check_path("/games/新しいフォルダー/game.iso")
 
     @unittest.skipUnless(os.environ.get("EXTRACT_XISO_TEST_TOOL"), "optional real extractor check")
     def test_real_extraction_and_no_overwrite(self):
