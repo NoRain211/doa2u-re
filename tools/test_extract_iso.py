@@ -62,7 +62,10 @@ class ExtractionTests(unittest.TestCase):
             path = Path(folder) / "listing.log"
             path.write_bytes(listing("/sub/a.txt (3 bytes)").replace(
                 "synthetic.iso", "新しいフォルダー.iso").encode("cp932"))
-            self.assertEqual(listing_files(read_listing(path)), {"sub/a.txt": 3})
+            with patch("extract_iso.narrow_encoding", return_value="cp932"):
+                text = read_listing(path)
+            self.assertTrue(text.endswith("新しいフォルダー.iso total 3 bytes\n"))
+            self.assertEqual(listing_files(text), {"sub/a.txt": 3})
 
     def test_paths_the_extractor_cannot_name(self):
         with patch("extract_iso.narrow_encoding", return_value="ascii"):
