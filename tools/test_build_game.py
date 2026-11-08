@@ -135,10 +135,19 @@ class BuildTests(unittest.TestCase):
                 self.assertEqual(target["note"], "kept")
                 self.assertEqual(selected_xbe(), (disc / "b.xbe").resolve())
                 iso.write_bytes(b"another image")
-                with self.assertRaises(ValueError):
+                # A different ISO replaces the extraction instead of being refused outright.
+                def replace(iso, output, extractor):
+                    (output / "disc").mkdir(parents=True)
+                    (output / "receipt.json").write_text(json.dumps(dict(iso_sha256=sha256(iso))))
+                    (output / "disc/b.xbe").write_bytes(b"game")
+
+                with patch("build_game.ROOT", root), patch("build_game.extract", side_effect=replace) as extract:
                     import_disc(iso)
+                    extract.assert_called_once()
+                    self.assertFalse((disc / "a.xbe").exists())
+                    self.assertEqual(json.loads((root / "private/target.json").read_text())["xbe_path"],
+                                     "private/imported-disc/disc/b.xbe")
             with patch("build_game.ROOT", root), patch("build_game.XBE_SHA256", "0" * 64):
-                iso.write_bytes(b"synthetic image")
                 with self.assertRaises(ValueError):
                     import_disc(iso)
 

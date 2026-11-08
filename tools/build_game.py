@@ -186,10 +186,12 @@ def import_disc(iso, extractor=None):
     receipt = imported / "receipt.json"
     if receipt.is_file():
         print("Checking the ISO against the existing extraction...", flush=True)
-        if json.loads(receipt.read_text(encoding="utf-8"))["iso_sha256"] != sha256(iso):
-            raise ValueError(f"{imported} holds a different disc; move it away to use this ISO")
-        print(f"Using the disc already extracted to {imported / 'disc'}", flush=True)
-    else:
+        if json.loads(receipt.read_text(encoding="utf-8"))["iso_sha256"] == sha256(iso):
+            print(f"Using the disc already extracted to {imported / 'disc'}", flush=True)
+        else:
+            print(f"Removing the extraction of a different disc in {imported}", flush=True)
+            shutil.rmtree(imported)
+    if not receipt.is_file():
         if imported.exists():
             print(f"Removing the unfinished extraction in {imported}", flush=True)
             shutil.rmtree(imported)
