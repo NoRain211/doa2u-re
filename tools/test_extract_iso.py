@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from extract_iso import extract, listing_files, run_logged, sha256
+from extract_iso import extract, listing_files, read_listing, run_logged, sha256
 
 
 def listing(entries, count=1):
@@ -55,6 +55,14 @@ class ExtractionTests(unittest.TestCase):
                                ("/a (3 bytes)", 2), ("/a (3 bytes)\nWARNING: truncated", 1)):
             with self.assertRaises(ValueError):
                 listing_files(listing(entries, count))
+
+    def test_listing_written_in_the_ansi_code_page(self):
+        # A Japanese Windows prints the image path as cp932, which is not valid UTF-8.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "listing.log"
+            path.write_bytes(listing("/sub/a.txt (3 bytes)").replace(
+                "synthetic.iso", "新しいフォルダー.iso").encode("cp932"))
+            self.assertEqual(listing_files(read_listing(path)), {"sub/a.txt": 3})
 
     @unittest.skipUnless(os.environ.get("EXTRACT_XISO_TEST_TOOL"), "optional real extractor check")
     def test_real_extraction_and_no_overwrite(self):

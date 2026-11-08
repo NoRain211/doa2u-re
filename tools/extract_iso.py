@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import locale
 import os
 from pathlib import Path
 import re
@@ -59,6 +60,15 @@ def run_logged(args, log_path, cwd=None, on_line=None, redact=True):
             code = process.wait()
         if code:
             raise subprocess.CalledProcessError(code, args)
+
+
+def read_listing(path):
+    """extract-xiso prints the image path in the console's ANSI code page, not UTF-8."""
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode(locale.getpreferredencoding(False), "replace")
 
 
 def listing_files(text):
@@ -122,7 +132,7 @@ def extract(iso, output, tool):
     original_hash = sha256(iso)
     # Redaction could rewrite a disc folder named like the user, and listing_files parses this log.
     run_logged([executable, "-l", iso], output / "listing.log", redact=False)
-    files = listing_files((output / "listing.log").read_text(encoding="utf-8", errors="strict"))
+    files = listing_files(read_listing(output / "listing.log"))
     if shutil.disk_usage(output).free < sum(files.values()):
         raise ValueError("Not enough disk space for the listed files")
     disc = output / "disc"
