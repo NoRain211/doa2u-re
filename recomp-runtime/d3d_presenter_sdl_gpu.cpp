@@ -580,6 +580,43 @@ RecompD3dPresenterError lookupDepthTarget(RecompD3dPresenter *presenter,
     return RECOMP_D3D_PRESENTER_OK;
 }
 
+void releaseColorTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *&render, SDL_GPUTexture *&resolve)
+{
+    if (resolve != nullptr && resolve != render) SDL_ReleaseGPUTexture(presenter->device, resolve);
+    if (render != nullptr) SDL_ReleaseGPUTexture(presenter->device, render);
+    render = resolve = nullptr;
+}
+
+/* A colour target and, when multisampled, the texture it resolves to (the
+   target itself otherwise). False, keeping neither, when one fails. */
+bool createColorTarget(RecompD3dPresenter *presenter, uint32_t width, uint32_t height,
+    SDL_GPUSampleCount samples, SDL_GPUTexture *&render, SDL_GPUTexture *&resolve)
+{
+    const bool multisampled = samples != SDL_GPU_SAMPLECOUNT_1;
+    render = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (multisampled ? 0u : SDL_GPU_TEXTUREUSAGE_SAMPLER),
+        width, height, 1u, 1u, samples);
+    resolve = !multisampled ? render : createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        width, height);
+    if (render != nullptr && resolve != nullptr) return true;
+    releaseColorTarget(presenter, render, resolve);
+    return false;
+}
+
+/* The main colour target, its resolve and its depth. */
+bool createMainTargets(RecompD3dPresenter *presenter, uint32_t width, uint32_t height, SDL_GPUSampleCount msaa,
+    SDL_GPUTexture *&color, SDL_GPUTexture *&resolve, SDL_GPUTexture *&depth)
+{
+    depth = nullptr;
+    if (!createColorTarget(presenter, width, height, msaa, color, resolve)) return false;
+    depth = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, presenter->depth_format,
+        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, width, height, 1u, 1u, msaa);
+    if (depth != nullptr) return true;
+    releaseColorTarget(presenter, color, resolve);
+    return false;
+}
+
 RecompD3dPresenterError bindTarget(RecompD3dPresenter *presenter,
     const RecompD3dPresenterTarget &target, BoundTarget &bound)
 {
@@ -622,20 +659,10 @@ RecompD3dPresenterError bindTarget(RecompD3dPresenter *presenter,
             created.host_width = host_width;
             created.host_height = host_height;
             created.scaled = scaled;
-            created.render = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
-                SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (created.multisampled ? 0u : SDL_GPU_TEXTUREUSAGE_SAMPLER),
-                host_width, host_height, 1u, 1u, samples);
-            created.resolve = !created.multisampled ? created.render : createTexture(presenter,
-                SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, host_width, host_height);
-            if (created.render == nullptr || created.resolve == nullptr) {
+            if (!createColorTarget(presenter, host_width, host_height, samples, created.render, created.resolve)) {
                 std::fprintf(stderr,
                     "recomp d3d presenter: render target create failed data=0x%08X fmt=0x%02X size=%ux%u: %s\n",
                     desc.data, desc.format_byte, desc.width, desc.height, SDL_GetError());
-                if (created.resolve != nullptr && created.resolve != created.render)
-                    SDL_ReleaseGPUTexture(presenter->device, created.resolve);
-                if (created.render != nullptr) SDL_ReleaseGPUTexture(presenter->device, created.render);
                 return RECOMP_D3D_PRESENTER_HOST_FAILURE;
             }
             presenter->render_targets.push_back(created);
@@ -3029,22 +3056,13 @@ SDL_GPUSampleCount supportedSamples(SDL_GPUDevice *device, SDL_GPUTextureFormat 
 
 bool createResources(RecompD3dPresenter *presenter)
 {
-    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
-    presenter->main_color = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (presenter->msaa_count == 1u ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
-        width, height, 1u, 1u, presenter->msaa);
-    presenter->main_resolve = presenter->msaa_count == 1u ? presenter->main_color : createTexture(presenter,
-        SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, width, height);
-    presenter->main_depth = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, presenter->depth_format,
-        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, width, height, 1u, 1u, presenter->msaa);
+    if (!createMainTargets(presenter, mainWidth(presenter), mainHeight(presenter), presenter->msaa,
+            presenter->main_color, presenter->main_resolve, presenter->main_depth)) return false;
     presenter->white_texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
         SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER, 1u, 1u);
     presenter->white_volume = createTexture(presenter, SDL_GPU_TEXTURETYPE_3D,
         SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER, 1u, 1u, 1u);
-    if (presenter->main_color == nullptr || presenter->main_resolve == nullptr ||
-        presenter->main_depth == nullptr || presenter->white_texture == nullptr ||
-        presenter->white_volume == nullptr) return false;
+    if (presenter->white_texture == nullptr || presenter->white_volume == nullptr) return false;
     const uint32_t white = 0xffffffffu;
     if (!uploadTexture(presenter, presenter->white_texture, &white, 4u, 0u, 1u, 1u) ||
         !uploadTexture(presenter, presenter->white_volume, &white, 4u, 0u, 1u, 1u)) return false;
@@ -3081,36 +3099,50 @@ void blitPicture(RecompD3dPresenter *presenter, SDL_GPUTexture *source, uint32_t
     SDL_BlitGPUTexture(commandBuffer(presenter), &blit);
 }
 
-/* As at creation: a scaled picture fills the screen borderless on Windows,
-   480 is a window of the picture's size, at most the screen's. */
-void fitWindow(RecompD3dPresenter *presenter)
+/* The window for the picture: its size, at most the screen's, and whether it
+   fills the screen instead. */
+struct WindowFit {
+    uint32_t width, height;
+    bool fullscreen;
+};
+
+WindowFit windowFit(const RecompD3dPresenter *presenter)
 {
-    if (presenter->window == nullptr || std::getenv("RECOMP_HEADLESS") != nullptr) return;
     const uint32_t main_height = mainHeight(presenter);
     const uint32_t display_width = presentClientWidth(presenter, main_height);
-    uint32_t window_width = display_width, window_height = main_height;
+    WindowFit fit{display_width, main_height, false};
     if (const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
+        // Beyond the screen the swapchain downsamples into a screen-sized window.
         const uint32_t max_width = static_cast<uint32_t>(mode->w);
         const uint32_t max_height = static_cast<uint32_t>(mode->h > 80 ? mode->h - 80 : mode->h);
         const float aspect = static_cast<float>(display_width) / main_height;
-        if (window_width > max_width) {
-            window_width = max_width;
-            window_height = static_cast<uint32_t>(window_width / aspect + 0.5f);
+        if (fit.width > max_width) {
+            fit.width = max_width;
+            fit.height = static_cast<uint32_t>(fit.width / aspect + 0.5f);
         }
-        if (window_height > max_height) {
-            window_height = max_height;
-            window_width = static_cast<uint32_t>(window_height * aspect + 0.5f);
+        if (fit.height > max_height) {
+            fit.height = max_height;
+            fit.width = static_cast<uint32_t>(fit.height * aspect + 0.5f);
         }
     }
+    // Steam sets these in Game Mode and on the Deck, where gamescope would only letterbox a window.
     const bool steam = envFlag("SteamTenfoot") || envFlag("SteamDeck");
 #ifdef _WIN32
-    const bool fullscreen = steam || presenter->scale > 1.0f;
+    // As the D3D11 renderer, a scaled picture fills the screen borderless; 480 stays windowed.
+    fit.fullscreen = steam || presenter->scale > 1.0f;
 #else
-    const bool fullscreen = steam;
+    fit.fullscreen = steam;
 #endif
-    SDL_SetWindowFullscreen(presenter->window, fullscreen);
-    if (!fullscreen) {
-        SDL_SetWindowSize(presenter->window, static_cast<int>(window_width), static_cast<int>(window_height));
+    return fit;
+}
+
+void fitWindow(RecompD3dPresenter *presenter)
+{
+    if (presenter->window == nullptr || std::getenv("RECOMP_HEADLESS") != nullptr) return;
+    const WindowFit fit = windowFit(presenter);
+    SDL_SetWindowFullscreen(presenter->window, fit.fullscreen);
+    if (!fit.fullscreen) {
+        SDL_SetWindowSize(presenter->window, static_cast<int>(fit.width), static_cast<int>(fit.height));
         SDL_SetWindowPosition(presenter->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
 }
@@ -3161,20 +3193,10 @@ void applyQuality(RecompD3dPresenter *presenter)
     const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
 
     // The main target.
-    SDL_GPUTexture *color = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (presenter->msaa_count == 1u ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
-        width, height, 1u, 1u, msaa);
-    SDL_GPUTexture *resolve = presenter->msaa_count == 1u ? color : createTexture(presenter,
-        SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, width, height);
-    SDL_GPUTexture *depth = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, presenter->depth_format,
-        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, width, height, 1u, 1u, msaa);
-    if (color == nullptr || resolve == nullptr || depth == nullptr) {
+    SDL_GPUTexture *color, *resolve, *depth;
+    if (!createMainTargets(presenter, width, height, msaa, color, resolve, depth)) {
         std::fprintf(stderr, "recomp d3d presenter: quality %ux%u msaa=%u unavailable: %s\n",
             width, height, presenter->msaa_count, SDL_GetError());
-        if (resolve != nullptr && resolve != color) SDL_ReleaseGPUTexture(presenter->device, resolve);
-        if (color != nullptr) SDL_ReleaseGPUTexture(presenter->device, color);
-        if (depth != nullptr) SDL_ReleaseGPUTexture(presenter->device, depth);
         presenter->scale = old_scale;
         presenter->msaa = old_msaa;
         presenter->msaa_count = sampleCount(old_msaa);
@@ -3185,8 +3207,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     blitPicture(presenter, presenter->main_resolve, old_width, old_height, resolve, width, height);
     submitCommands(presenter);
     SDL_WaitForGPUIdle(presenter->device);
-    if (presenter->main_resolve != presenter->main_color) SDL_ReleaseGPUTexture(presenter->device, presenter->main_resolve);
-    SDL_ReleaseGPUTexture(presenter->device, presenter->main_color);
+    releaseColorTarget(presenter, presenter->main_color, presenter->main_resolve);
     SDL_ReleaseGPUTexture(presenter->device, presenter->main_depth);
     presenter->main_color = color;
     presenter->main_resolve = resolve;
@@ -3201,27 +3222,17 @@ void applyQuality(RecompD3dPresenter *presenter)
         const uint32_t host_width = host_main ? width : scaledSize(presenter, entry.desc.width);
         const uint32_t host_height = host_main ? height : scaledSize(presenter, entry.desc.height);
         const SDL_GPUSampleCount samples = host_main ? msaa : SDL_GPU_SAMPLECOUNT_1;
-        const bool multisampled = samples != SDL_GPU_SAMPLECOUNT_1;
-        SDL_GPUTexture *render = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (multisampled ? 0u : SDL_GPU_TEXTUREUSAGE_SAMPLER),
-            host_width, host_height, 1u, 1u, samples);
-        SDL_GPUTexture *target_resolve = !multisampled ? render : createTexture(presenter,
-            SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, host_width, host_height);
-        if (render == nullptr || target_resolve == nullptr) {
-            if (target_resolve != nullptr && target_resolve != render) SDL_ReleaseGPUTexture(presenter->device, target_resolve);
-            if (render != nullptr) SDL_ReleaseGPUTexture(presenter->device, render);
+        SDL_GPUTexture *render, *target_resolve;
+        if (!createColorTarget(presenter, host_width, host_height, samples, render, target_resolve))
             continue; // keeps its old size
-        }
         blitPicture(presenter, entry.resolve, entry.host_width, entry.host_height, target_resolve,
             host_width, host_height);
         submitCommands(presenter);
         SDL_WaitForGPUIdle(presenter->device);
-        if (entry.resolve != entry.render) SDL_ReleaseGPUTexture(presenter->device, entry.resolve);
-        SDL_ReleaseGPUTexture(presenter->device, entry.render);
+        releaseColorTarget(presenter, entry.render, entry.resolve);
         entry.render = render;
         entry.resolve = target_resolve;
-        entry.multisampled = multisampled;
+        entry.multisampled = samples != SDL_GPU_SAMPLECOUNT_1;
         entry.samples = samples;
         entry.host_width = host_width;
         entry.host_height = host_height;
@@ -3331,35 +3342,12 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     created->copy_mips = created->scale != 1.0f;
 
     const uint32_t main_width = mainWidth(created), main_height = mainHeight(created);
-    const uint32_t display_width = presentClientWidth(created, main_height);
-    uint32_t window_width = display_width, window_height = main_height;
-    if (const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
-        // Beyond the screen the swapchain downsamples into a screen-sized window.
-        const uint32_t max_width = static_cast<uint32_t>(mode->w);
-        const uint32_t max_height = static_cast<uint32_t>(mode->h > 80 ? mode->h - 80 : mode->h);
-        const float aspect = static_cast<float>(display_width) / main_height;
-        if (window_width > max_width) {
-            window_width = max_width;
-            window_height = static_cast<uint32_t>(window_width / aspect + 0.5f);
-        }
-        if (window_height > max_height) {
-            window_height = max_height;
-            window_width = static_cast<uint32_t>(window_height * aspect + 0.5f);
-        }
-    }
-    // Steam sets these in Game Mode and on the Deck, where gamescope would only letterbox a window.
-    const bool steam = envFlag("SteamTenfoot") || envFlag("SteamDeck");
-#ifdef _WIN32
-    // As the D3D11 renderer, a scaled picture fills the screen borderless; 480 stays windowed.
-    const bool fullscreen = steam || created->scale > 1.0f;
-#else
-    const bool fullscreen = steam;
-#endif
+    const WindowFit fit = windowFit(created);
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (std::getenv("RECOMP_HEADLESS") != nullptr) flags |= SDL_WINDOW_HIDDEN;
-    else if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+    else if (fit.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
     created->window = SDL_CreateWindow(unpacedRun() ? "DOA2U Recomp (unpaced)" : "DOA2U Recomp",
-        static_cast<int>(window_width), static_cast<int>(window_height), flags);
+        static_cast<int>(fit.width), static_cast<int>(fit.height), flags);
     if (created->window == nullptr) return fail("window");
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
@@ -3369,7 +3357,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     if (!createResources(created)) return fail("presenter resources");
     std::fprintf(stderr, "recomp d3d presenter: %s target=%ux%u msaa=%u window=%ux%u\n",
         SDL_GetGPUDeviceDriver(created->device), main_width, main_height, created->msaa_count,
-        window_width, window_height);
+        fit.width, fit.height);
     try {
         created->precompile = std::thread(precompileDrawShaders, created);
     } catch (const std::system_error &) {
@@ -3630,7 +3618,7 @@ RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter)
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-bool d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
 {
     std::lock_guard<std::mutex> lock(quality_lock);
     quality_request.scale = scale;
@@ -3639,7 +3627,6 @@ bool d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
     ++quality_request.generation;
     std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d\n",
         scale, msaa, smaa ? 1 : 0);
-    return true;
 }
 
 bool d3d_backend_quality_live()

@@ -393,9 +393,9 @@ void recomp_d3d_presenter_set_immediate_present(bool enabled);
 
 /* PC Settings: asks for a new resolution scale (1-8, as RECOMP_D3D_SCALE),
    MSAA sample count and SMAA while the game runs. The renderer applies them
-   after its next presented frame, keeping what targets show. Returns false
-   when this renderer only takes them at the next start. */
-bool recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa);
+   after its next presented frame, keeping what targets show, when
+   recomp_d3d_presenter_quality_live says it can; otherwise at the next start. */
+void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa);
 /* Whether this renderer applies recomp_d3d_presenter_set_quality live. */
 bool recomp_d3d_presenter_quality_live(void);
 

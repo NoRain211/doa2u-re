@@ -21,8 +21,8 @@ RecompD3dPresenterError d3d_backend_release_memory(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size, bool targets);
 RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
 void d3d_backend_set_immediate_present(bool enabled);
-/* recomp_d3d_presenter_set_quality, from any thread; false if not live. */
-bool d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);
+/* recomp_d3d_presenter_set_quality, from any thread. */
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);
 bool d3d_backend_quality_live();
 void d3d_backend_report_draw_textures();
 
