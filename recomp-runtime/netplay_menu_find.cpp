@@ -24,6 +24,7 @@ void find()
     menu.find.choice = 0;
     menu.find.joining = 0u;
     menu.find.listedAt = Clock::time_point{};
+    menu.find.askingSince = Clock::now();
     menu.message.clear();
     menu.screen = Screen::Find;
 }
@@ -66,6 +67,7 @@ static bool forgetJoin()
     menu.net.match.server_port = server.server_port;
     menu.find.listOk = false; // the new socket has no list yet
     menu.find.listedAt = Clock::time_point{};
+    menu.find.askingSince = Clock::now();
     return true;
 }
 
@@ -173,7 +175,8 @@ void drawFind()
             selected ? White : Gray, detail.c_str());
     }
     const char *status = menu.find.joining != 0u ? "JOINING..."
-        : !menu.find.listOk ? "ASKING THE MATCHMAKER..."
+        : !menu.find.listOk ? (Clock::now() - menu.find.askingSince > std::chrono::seconds(6)
+                                      ? "NO ANSWER FROM THE MATCHMAKER. STILL ASKING..." : "ASKING THE MATCHMAKER...")
         : rooms.empty() ? "NO OPEN ROOMS. Y HOSTS ONE FOR OTHERS TO FIND."
         : menu.find.quick ? "FINDING THE NEAREST ROOM..." : nullptr;
     if (status != nullptr && menu.message.empty()) recomp_overlay_text(40.0f, 396.0f, 2.0f, Yellow, status);
