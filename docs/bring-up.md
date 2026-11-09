@@ -157,7 +157,16 @@ tan, sin and cos of the horizontal half angle at 0x879BF4, 0x877C6C and
 it for a camera slot. At 16:9 a wider shape culled objects outside the
 middle 16:9, so they popped in at the sides. The manual lookup puts the
 shape's height over width in 0x3c2cec for those two calls only and restores
-it; neither reaches the threshold readers. The D3D8
+it; neither reaches the threshold readers. Mirror cameras build their
+projection and cone from `g_back_buffer_width_over_height` (0x877EA0, 720/480)
+instead. Koku An's polished floor renders the mirrored stage into a 256x256
+target (`floor_mirror_setup_camera` 0x279D60 or `_at` 0x27A070, then
+`floor_mirror_begin_render` 0x27A430) and projects it onto the floor with the
+same matrix. With 1.5 the mirror covered the middle 42% of a 32:9 view, and
+the floor smeared its clamped edge texels over the rest, flickering as the
+camera moved (issue #139). Every reader of 0x877EA0, including the water
+mirror (0x26C2E0) and a plane mirror (0x280460), gets the shape for its call
+only. 16:9 keeps the game's 1.5, so its outer 8% still shows the smear. The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
