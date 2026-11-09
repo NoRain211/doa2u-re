@@ -111,7 +111,7 @@ final class LauncherView: NSView {
     let updateRow = Row("Update", "Choose Check to look for a newer release", ["Check"], 0)
     let checkAtStart = Row("Check At Start", "Looks for a newer release when the launcher opens", ["Off", "On"],
                            boolSetting("checkUpdates", true) ? 1 : 0)
-    let unlock = Row("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them",
+    let unlock = Row("Unlocks", "Earn offers only what the profile has earned; Everything is never saved to it",
                      ["Everything", "Earn"], boolSetting("unlockAll", true) ? 0 : 1)
     let freeCamera = Row("Free Camera", "In game, F1 or a right-stick click flies the camera", ["Off", "On"],
                          boolSetting("freeCamera", false) ? 1 : 0)
