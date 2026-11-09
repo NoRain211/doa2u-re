@@ -43,6 +43,7 @@ enum {
     ROOM_READY = 1u,
     ROOM_START = 2u,
     ROOM_SILENCE_MS = 3000u,
+    ROOM_RETURN_MS = 10000u, /* a host back from a session keeps its seat this long for the last joiner */
     PART_HEADER = 10u,
     CHUNK_BYTES = 1024u,
     CHUNKS_PER_REQUEST = 16u,
@@ -530,6 +531,8 @@ static int receive_from(RecompNetplay *net, uint8_t *packet, size_t capacity,
                 match_answer(net, raw, length);
                 continue;
             }
+            /* The peer proved its own address, so the server relays for someone it paired here since. */
+            if (m->direct) continue;
             /* The other side gave up on a direct path, so this one follows. */
             relay_on(net, "the other player relays");
             from->sin_addr.s_addr = net->peer_address;
@@ -571,6 +574,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     const char *name, bool ready, bool start)
 {
     const uint64_t now = now_ms();
+    if (room->heard_ms == 0u) room->heard_ms = now; /* ROOM_RETURN_MS counts from the first tick */
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
     struct sockaddr_in from;
     int size;
@@ -637,6 +641,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             room->owed = true;
             /* Not in the room yet: a forged address would hold the seat and hide the room from the list. */
             if (room->doubted) continue;
+            m->direct = true;
         }
         room->joined = true;
         m->busy = true;
@@ -673,7 +678,10 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             }
         }
     }
-    if (room->joined && now - room->heard_ms > ROOM_SILENCE_MS) recomp_netplay_room_drop(net, room);
+    /* busy without joined is a host back from a session, whose last joiner is booting too. */
+    if (room->joined ? now - room->heard_ms > ROOM_SILENCE_MS
+                     : room->hosting && net->match.busy && now - room->heard_ms > ROOM_RETURN_MS)
+        recomp_netplay_room_drop(net, room);
     /* punch_ms can be newer than now when this tick read the match itself. */
     if (net->match.punching && now > net->match.punch_ms + PUNCH_MS) relay_on(net, "no direct path after 5 s");
     if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
@@ -732,6 +740,7 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
     room->joined = room->ready = room->start = room->pinged = room->doubted = false;
     room->echo = 0u;
     net->match.busy = false;
+    net->match.direct = false;
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;
         net->match.relay = false;

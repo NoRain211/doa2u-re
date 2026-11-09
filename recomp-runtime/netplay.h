@@ -95,6 +95,8 @@ typedef struct RecompNetplayMatch {
     uint64_t punch_ms;
     bool relay; /* packets to the peer go through the server, as do its answers */
     bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
+    /* A host's peer came by address and proved it, so a relayed packet is not theirs and is dropped. */
+    bool direct;
     /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
     uint8_t nonce[RECOMP_NETPLAY_TOKEN_BYTES];
     /* The server's proof of this socket's address, zeros until it sends one. */

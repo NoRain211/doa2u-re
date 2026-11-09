@@ -164,8 +164,9 @@ wrap packets for a relayed peer. So the room, the session lobby and the
 session run the same way over either path.
 
 - HOST ONLINE says HOST every 5 s while its room is up, open while nobody
-  is in it, and LEAVE when the host leaves. Its room's status says LISTED
-  ON FIND MATCH once the server answers.
+  is in it, and LEAVE when the host leaves. A host back from a session
+  says closed while it keeps the seat for its last joiner, for up to 10 s.
+  Its room's status says LISTED ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
   check. A joins the chosen room and Y quick-matches.
@@ -182,7 +183,9 @@ session run the same way over either path.
   room packet, rather than from PEER, sends one room packet for each it
   receives until the player echoes one of the host's clocks, and seats
   the player only then, so a forged room packet draws one packet back and
-  cannot hold the room. After 5 s without an answer, or
+  cannot hold the room. The server relays for whoever joined a room last,
+  so a host whose player proved its own address this way drops relayed
+  packets. After 5 s without an answer, or
   with no endpoints, the runner relays. A runner that hears a relayed
   packet relays too, so a path that works one way only still ends with
   both sides on the relay. The plates show RELAY beside the ping.
