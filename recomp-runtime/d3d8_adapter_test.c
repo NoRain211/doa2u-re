@@ -400,12 +400,14 @@ static int fit_tests(void)
     widescreen_aspect = 32.0f / 9.0f;
     recomp_d3d8_fit_3d_viewport(&view);
     passed &= expect("ultrawide moves a 3D panel view toward the center with its scissor",
-        view.viewport[0] == 180.0f && view.viewport[2] == 200.0f && view.scissor[0] == 230 &&
+        view.viewport[0] == 180.0f && view.viewport[2] == 200.0f && view.viewport[1] == 0.0f &&
+        view.viewport[3] == 100.0f && view.scissor[0] == 230 &&
         view.scissor[2] == 330 && view.program_constants[59][0] == 280.0f);
     view.viewport[0] = 0.0f;
     view.viewport[2] = 720.0f;
     recomp_d3d8_fit_3d_viewport(&view);
-    passed &= expect("a full-width 3D view stays", view.viewport[0] == 0.0f && view.viewport[2] == 720.0f);
+    passed &= expect("a full-width 3D view stays", view.viewport[0] == 0.0f && view.viewport[2] == 720.0f &&
+        view.viewport[1] == 0.0f && view.viewport[3] == 100.0f);
     widescreen_aspect = 16.0f / 9.0f;
     return passed;
 }
