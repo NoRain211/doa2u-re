@@ -1004,8 +1004,8 @@ CONTEXT and the live part of its native stack, up to 64 KiB. The running
 fiber (its stack is the caller's), a converted thread's fiber and a fiber
 whose stack does not fit are not rewound. Deleted fibers stay parked and
 native fiber objects restart in place, so a saved state that still names one
-stays valid. Linux and macOS do not capture fiber stacks, so SyncTest skips
-frames with a parked fiber that owns its stack there.
+stays valid. Linux and macOS keep a parked fiber's registers on its stack,
+so they save the stack pointer and the live stack, with the same limits.
 
 Some frames cannot be rewound and are skipped rather than reported:
 

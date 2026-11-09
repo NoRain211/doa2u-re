@@ -347,9 +347,9 @@ void recomp_native_fiber_release_thread(void)
     active_fiber = NULL;
 }
 
-/* shortcut: POSIX switches keep the continuation on the fiber stack, but it
-   is not captured, so every parked fiber reports itself unrewindable and
-   SyncTest skips; add stack capture when rollback targets Linux or macOS. */
+/* A parked fiber's whole continuation is on its stack: recomp_fiber_switch
+   pushed the callee-saved registers there before it stored sp. So the state
+   is sp and the bytes from it to the top. */
 size_t recomp_native_fiber_state_size(void)
 {
     return sizeof(RecompNativeFiberState);
@@ -361,16 +361,35 @@ bool recomp_native_fiber_owns_stack(void *fiber)
     return native != NULL && native->stack_memory != NULL;
 }
 
-void recomp_native_fiber_state_save(void *fiber, RecompNativeFiberState *state)
+void recomp_native_fiber_state_save(void *handle, RecompNativeFiberState *state)
 {
+    const RecompNativeFiber *fiber = handle;
+
     memset(state, 0, sizeof *state);
-    if (recomp_native_fiber_owns_stack(fiber)) state->flags = RECOMP_NATIVE_STATE_UNAVAILABLE;
+    if (fiber == NULL || fiber->stack_memory == NULL) return;
+    const uintptr_t top = (uintptr_t)fiber->stack_memory + fiber->stack_size;
+    const uintptr_t sp = (uintptr_t)fiber->sp;
+    if (sp <= (uintptr_t)fiber->stack_memory || sp > top || top - sp > RECOMP_NATIVE_STACK_SAVE_MAX) {
+        state->flags = RECOMP_NATIVE_STATE_UNAVAILABLE;
+        return;
+    }
+    state->sp = sp;
+    state->stack_bytes = (uint32_t)(top - sp);
+    state->flags = RECOMP_NATIVE_STATE_STACK;
+    memcpy(state->stack, fiber->sp, state->stack_bytes);
 }
 
-bool recomp_native_fiber_state_restore(void *fiber, const RecompNativeFiberState *state)
+bool recomp_native_fiber_state_restore(void *handle, const RecompNativeFiberState *state)
 {
-    (void)fiber;
-    (void)state;
+    RecompNativeFiber *fiber = handle;
+
+    if (fiber == NULL || (state->flags & RECOMP_NATIVE_STATE_STACK) == 0u) return true;
+    /* The saved frames point into the stack they came from. */
+    if (fiber->stack_memory == NULL || state->stack_bytes > RECOMP_NATIVE_STACK_SAVE_MAX ||
+        state->sp + state->stack_bytes != (uintptr_t)fiber->stack_memory + fiber->stack_size)
+        return false;
+    memcpy((void *)(uintptr_t)state->sp, state->stack, state->stack_bytes);
+    fiber->sp = (void *)(uintptr_t)state->sp;
     return true;
 }
 
