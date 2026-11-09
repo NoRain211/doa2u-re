@@ -823,21 +823,28 @@ values (`0x910a0`, `0x91370`) and row count, all answered for page 19 by the
 runner. Its input moves through the rows (`0x11b8d0`), steps the selected
 value as the game's pages do (`0x11b9f0`) and goes back to the top list
 (`0x11bca0`). Text is UTF-16 in five languages (Japanese shows English), in
-message numbers from `0x7000` in `0x6a3e0`. The page, its text and two
-sprites live in the runner's guest asset area at `0x03ff8000` (32 KiB above
-the startup TLS block, which the loader now keeps below it).
+message numbers from `0x7000`.
 
-The PC SETTINGS label is made the way the game's labels look: the game's own
-bold font (group 0, `spBase`; character to sprite through `0x68b788`, A8
-glyphs) drawn at 0.84 x 0.95 with glyphs nearly touching, and its glow is
-that label padded 6 and 7, blurred (sigma 3.5), brightened 2.52 times and
-tinted `0x3990fa`; both were fitted to the game's own art. They are made in
-the game's language once its font is loaded, as two 256x32 P8 sprites of
-group `0x7f`, which `0xaa970` (rectangle) and `0xaa9b0` (texture and palette)
-answer for the runner. The settings read and write the launchers'
+The PC SETTINGS label is cut letter by letter from the other top-list labels
+(group 3), and its glow is that label padded 6 and 7, blurred (sigma 3.5),
+brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
+own art. They are made in the game's language once its label art is loaded.
+The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
 `RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks and
 CPU Costumes apply at once, offline only, and the others at the next launch.
+
+QUIT GAME (`menu_quit.c`) is one more carousel position after the main
+menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
+`0x1343d0` read it), with mode `0x13`, which no entry uses and the mode
+switch ignores. Its confirm opens the runner's quit prompt; keeping on plays
+the cancel sound and runs the menu's own transition cancel (`0x135ae0`).
+
+Both features' guest data lives in the runner's asset area (128 KiB at
+`0x03f00000`, below the startup stack), which `runner_assets.c` hands out at
+each boot. It also owns their sprites, a group past the game's `0x1a5`
+(`0xaa970` rectangle, `0xaa9b0` texture and palette), and their message text
+(`0x6a3e0`).
 
 ## Input API contract
 

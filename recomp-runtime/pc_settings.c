@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings.h"
-#include "d3d8_adapter.h"
+#include "kernel_abi.h"
 #include "runner_assets.h"
-#include "xbox_memory_layout.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -22,15 +21,13 @@
 
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
    no table uses. Its label is made from letters cut out of the other labels'
-   own art (group 3), with the same blue glow, into a sprite group of its own;
-   its text goes through a message range of its own in 0x6a3e0. */
+   own art (group 3), with the same blue glow, as two runner sprites; its
+   text is runner text (runner_assets.c). */
 enum {
     PC_ROW = 5,
     TOP_ROWS = 8,
     PC_PAGE = 19,
     PC_ROWS = RECOMP_PC_SETTING_COUNT,
-    PC_GROUP = RECOMP_RUNNER_SPRITE_GROUP, /* runner_assets.c answers the game's lookups for it */
-    PC_MESSAGES = 0x7000,          /* message numbers the game never uses */
     VALUE_KIND = 0x7e00,           /* 0x910a0 keys for each row's values, outside its 1-28 */
 
     CURSORS = 0x00df4ac8u,
@@ -43,8 +40,6 @@ enum {
     PAGE_LEAVE = 0x0067afa0u,
     PAGE_DRAW = 0x0067aff0u,
     PAGE_IN = 0x0067b040u,
-    SPRITE_DEFS = 0x00686698u,     /* per group: 12-byte rectangles */
-    SPRITE_TEXTURES = 0x0067ce78u, /* per group: texture, palette */
     LAYOUT_TEMPLATE = 0x0067a540u, /* page 8's layout */
 
     OPTIONS_UPDATE = 0x0011cfc0u,
@@ -55,7 +50,6 @@ enum {
     SPRITE = 0x00097830u,
     QUAD = 0x000976f0u,
     HELP = 0x00091560u,
-    MESSAGE = 0x0006a3e0u,
     PAGE_LAYOUT = 0x00090ad0u,
     PAGE_TEXT = 0x000910a0u,
     VALUE_TEXT = 0x00091370u,
@@ -66,24 +60,15 @@ enum {
     PC_LEAVE = 0x03fffff8u,
 };
 
-/* The runner's guest asset area (xbox_memory_layout.h). A page layout is a
-   record per row (x 0x10a), then one per row with a value (x 0x1e0), then a
-   zero word; the cursor (0x90f00) walks and animates all of them, so the
-   layout comes after the sprite data, with room to spare. */
+/* A page layout is a record per row (x 0x10a), then one per row with a value
+   (x 0x1e0), then a zero word; the cursor (0x90f00) walks and animates all of
+   them. The labels are P8 sprites of 256x32 (2^8 x 2^5). */
 enum {
-    VALUES = XBOX_RUNNER_ASSET_BASE,             /* u16 per row */
-    DEFS = XBOX_RUNNER_ASSET_BASE + 0x40u,       /* white, glow */
-    ENTRIES = XBOX_RUNNER_ASSET_BASE + 0x60u,    /* texture, palette per sprite */
-    HEADERS = XBOX_RUNNER_ASSET_BASE + 0x80u,    /* 2 textures, 2 palettes */
-    LAYOUT = XBOX_RUNNER_ASSET_BASE + 0x100u,    /* 2 * PC_ROWS records of 28, then 0 */
     LAYOUT_RECORDS = 2u * RECOMP_PC_SETTING_COUNT,
-    TEXT = XBOX_RUNNER_ASSET_BASE + 0x400u,
-    TEXT_END = XBOX_RUNNER_ASSET_BASE + 0x3000u,
-    PALETTES = XBOX_RUNNER_ASSET_BASE + 0x3000u, /* white, glow; 1 KiB each */
-    WHITE = XBOX_RUNNER_ASSET_BASE + 0x4000u,    /* P8 256x32 */
-    GLOW = XBOX_RUNNER_ASSET_BASE + 0x6000u,     /* P8 256x32 */
-    LABEL_W = 256,
-    LABEL_H = 32,
+    LABEL_LOG_W = 8,
+    LABEL_LOG_H = 5,
+    LABEL_W = 1 << LABEL_LOG_W,
+    LABEL_H = 1 << LABEL_LOG_H,
     WHITE_H = 18,
 };
 
@@ -104,9 +89,6 @@ extern void sub_00095A10(void);
 extern void sub_00097830(void);
 extern void sub_000976F0(void);
 extern void sub_00091560(void);
-extern void sub_0006A3E0(void);
-extern void sub_000AA970(void);
-extern void sub_000AA9B0(void);
 extern void sub_00090AD0(void);
 extern void sub_000910A0(void);
 extern void sub_00091370(void);
@@ -116,7 +98,9 @@ extern void sub_00090F00(void);
 
 /* ---- Text ------------------------------------------------------------ */
 
-static const uint8_t CHOICES[PC_ROWS] = {5u, 6u, 2u, 5u, 2u, 2u, 2u, 2u, 2u, 2u, 2u};
+#define COUNT(list) (sizeof (list) / sizeof (list)[0])
+static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
 };
@@ -130,6 +114,7 @@ typedef struct Language {
     const recomp_utf16 *help[HELPS];
 } Language;
 
+/* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
 #define SAMPLES(off) off, u"2x", u"4x", u"8x", u"16x", u"32x"
 #define SHAPES(wide) u"4:3", u"16:9", u"16:10", wide, u"32:9"
@@ -185,9 +170,17 @@ static const Language *language_text(unsigned language)
     return &LANGUAGES[language >= 2u && language <= 5u ? language - 1u : 0u];
 }
 
-/* Message numbers: rows, then each row's values, then the help lines. */
+/* Message numbers from RECOMP_RUNNER_TEXT_PC: rows, then each row's values,
+   then the help lines. */
 enum { MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES, MSG_COUNT = MSG_HELP + HELPS };
-static uint32_t text_address[5][MSG_COUNT];
+
+static const recomp_utf16 *message_text(const Language *text, unsigned message)
+{
+    if (message < MSG_VALUES) return text->rows[message - MSG_ROWS];
+    if (message < MSG_HELP)
+        return text->values[(message - MSG_VALUES) / MAX_CHOICES][(message - MSG_VALUES) % MAX_CHOICES];
+    return text->help[message - MSG_HELP];
+}
 
 /* The top list's sprites in each language: white rows, then glows. */
 static const uint32_t WHITE_BASE[6] = {0x3000du, 0x3000du, 0x3001bu, 0x30029u, 0x30045u, 0x30037u};
@@ -196,67 +189,43 @@ static const uint32_t GLOW_BASE[6] = {0x30006u, 0x30006u, 0x30014u, 0x30022u, 0x
 /* ---- State -------------------------------------------------------- */
 
 static RecompPcSettingsHost host;
+static uint32_t values;          /* guest u16 per row: the choices */
+static uint32_t layout;          /* guest page layout: LAYOUT_RECORDS of 28 bytes, then 0 */
 static bool drawing_top;
 static bool drawing_pc;          /* page 19's own draw is running */
-static uint32_t help_message;    /* replaces 0xc4 while the help line draws */
 static int label_language = -1; /* the language the label sprites were made in */
 
 /* ---- Guest helpers -------------------------------------------------- */
 
-static uint32_t arg(unsigned i) { return *recomp_memory_u32(recomp_runtime.registers.esp + 4u * i); }
 static void set_arg(unsigned i, uint32_t value) { *recomp_memory_u32(recomp_runtime.registers.esp + 4u * i) = value; }
-static uint16_t u16(uint32_t address) { uint16_t v; memcpy(&v, recomp_memory(address, 2u), 2u); return v; }
-static void set_u16(uint32_t address, uint16_t v) { memcpy(recomp_memory(address, 2u), &v, 2u); }
+static uint16_t u16(uint32_t address) { return *recomp_memory_u16(address); }
+static void set_u16(uint32_t address, uint16_t v) { *recomp_memory_u16(address) = v; }
 static void set_u32(uint32_t address, uint32_t v) { *recomp_memory_u32(address) = v; }
+static uint32_t call1(RecompFunction function, uint32_t a) { return kernel_call_lifted(function, &a, 1u); }
 
-/* A cdecl call straight into a lifted function, past the manual hooks. */
-static uint32_t call(void (*function)(void), const uint32_t *args, unsigned count)
+static unsigned game_language(void) { return kernel_call_lifted(sub_000212E0, NULL, 0u) & 0xffu; }
+
+/* A message's text in the game's language. */
+static uint32_t text_for(unsigned message)
 {
-    const uint32_t saved = recomp_runtime.registers.esp;
-    uint32_t esp = saved;
-    for (unsigned i = count; i > 0u; --i) {
-        esp -= 4u;
-        set_u32(esp, args[i - 1u]);
-    }
-    esp -= 4u;
-    set_u32(esp, 0u);
-    recomp_runtime.registers.esp = esp;
-    function();
-    recomp_runtime.registers.esp = saved;
-    return recomp_runtime.registers.eax;
+    uint32_t text = 0u;
+    recomp_runner_text_lookup(RECOMP_RUNNER_TEXT_PC + message, game_language(), &text);
+    return text;
 }
-
-static uint32_t call1(void (*function)(void), uint32_t a) { return call(function, &a, 1u); }
-
-static void finish(uint32_t eax)
-{
-    recomp_runtime.registers.eax = eax;
-    recomp_runtime.registers.esp += 4u;
-}
-
-static unsigned game_language(void) { return call(sub_000212E0, NULL, 0u) & 0xffu; }
 
 /* ---- Install -------------------------------------------------------- */
 
 unsigned recomp_pc_settings_choices(unsigned setting) { return setting < PC_ROWS ? CHOICES[setting] : 0u; }
 bool recomp_pc_settings_applies_now(unsigned setting) { return setting < PC_ROWS && live[setting]; }
 void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on || ALWAYS_LIVE[setting]; }
-uint8_t recomp_pc_settings_choice(unsigned setting) { return setting < PC_ROWS ? (uint8_t)u16(VALUES + 2u * setting) : 0u; }
-
-static uint32_t put_text(uint32_t *cursor, const recomp_utf16 *text)
+uint8_t recomp_pc_settings_choice(unsigned setting)
 {
-    const uint32_t address = *cursor;
-    size_t n = 0u;
-    while (text[n] != 0u) ++n;
-    if (address + (n + 1u) * 2u > TEXT_END) return 0u;
-    for (size_t i = 0u; i <= n; ++i) set_u16(address + 2u * (uint32_t)i, (uint16_t)text[i]);
-    *cursor = (address + (uint32_t)(n + 1u) * 2u + 3u) & ~3u;
-    return address;
+    return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;
 }
 
 static void reset_layout(void)
 {
-    for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) set_u32(LAYOUT + record * 28u + 0xcu, 0u);
+    for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) set_u32(layout + record * 28u + 0xcu, 0u);
 }
 
 void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t choices[RECOMP_PC_SETTING_COUNT])
@@ -264,51 +233,37 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
     host = with != NULL ? *with : (RecompPcSettingsHost){0};
     drawing_top = false;
     drawing_pc = false;
-    help_message = 0u;
     label_language = -1;
     memcpy(live, ALWAYS_LIVE, sizeof live);
-    memset(recomp_memory(XBOX_RUNNER_ASSET_BASE, XBOX_RUNNER_ASSET_SIZE), 0, XBOX_RUNNER_ASSET_SIZE);
+    values = recomp_runner_alloc(2u * PC_ROWS, 4u);
+    layout = recomp_runner_alloc(28u * LAYOUT_RECORDS + 4u, 4u);
     for (unsigned row = 0u; row < PC_ROWS; ++row)
-        set_u16(VALUES + 2u * row, choices[row] < CHOICES[row] ? choices[row] : 0u);
+        set_u16(values + 2u * row, choices[row] < CHOICES[row] ? choices[row] : 0u);
 
     /* Page 8's row record (0) and value record (4), 26 apart, then the end. */
     for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) {
         const unsigned row = record % PC_ROWS;
         const bool value = record >= PC_ROWS;
-        const uint32_t to = LAYOUT + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
+        const uint32_t to = layout + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
         memcpy(recomp_memory(to, 28u), recomp_memory(LAYOUT_TEMPLATE + 28u * (value ? 4u : 0u), 28u), 28u);
         set_u32(to, at);
         set_u32(to + 4u, at);
     }
-    set_u32(LAYOUT + 28u * LAYOUT_RECORDS, 0u);
+    set_u32(layout + 28u * LAYOUT_RECORDS, 0u);
 
-    uint32_t cursor = TEXT;
-    for (unsigned l = 0u; l < 5u; ++l) {
-        const Language *text = &LANGUAGES[l];
-        for (unsigned row = 0u; row < PC_ROWS; ++row) {
-            text_address[l][MSG_ROWS + row] = put_text(&cursor, text->rows[row]);
-            for (unsigned v = 0u; v < CHOICES[row]; ++v)
-                text_address[l][MSG_VALUES + row * MAX_CHOICES + v] = put_text(&cursor, text->values[row][v]);
-        }
-        for (unsigned h = 0u; h < HELPS; ++h) text_address[l][MSG_HELP + h] = put_text(&cursor, text->help[h]);
+    for (unsigned m = 0u; m < MSG_COUNT; ++m) {
+        if (message_text(&LANGUAGES[0], m) == NULL) continue; /* a row's unused value */
+        const recomp_utf16 *text[6];
+        for (unsigned l = 0u; l < 6u; ++l) text[l] = message_text(language_text(l), m);
+        recomp_runner_text_set(RECOMP_RUNNER_TEXT_PC + m, text);
     }
 
-    /* Two P8 sprites (white label, glow) with their palettes. */
+    /* Two P8 sprites (white label, glow), each palette one colour at every alpha. */
     for (unsigned i = 0u; i < 2u; ++i) {
-        const uint32_t texture = HEADERS + 20u * i, palette = HEADERS + 40u + 12u * i;
-        set_u32(texture, 0x00040001u);
-        set_u32(texture + 4u, i == 0u ? WHITE : GLOW);
-        set_u32(texture + 8u, 0u);
-        set_u32(texture + 12u, 5u << 24 | 8u << 20 | 1u << 16 | 0x0bu << 8 | 0x2au); /* 256x32, P8, swizzled */
-        set_u32(texture + 16u, 0u);
-        set_u32(palette, 0x00830001u);
-        set_u32(palette + 4u, PALETTES + 1024u * i);
-        set_u32(palette + 8u, 0u);
-        set_u32(ENTRIES + 8u * i, texture);
-        set_u32(ENTRIES + 8u * i + 4u, palette);
-        recomp_runner_sprite_set(RECOMP_RUNNER_SPRITE_PC_WHITE + i, DEFS + 12u * i, ENTRIES + 8u * i);
-        for (unsigned a = 0u; a < 256u; ++a)
-            set_u32(PALETTES + 1024u * i + 4u * a, a << 24 | (i == 0u ? 0xffffffu : 0x3990fau));
+        uint32_t colours;
+        const uint32_t palette = recomp_runner_palette(&colours);
+        for (unsigned a = 0u; a < 256u; ++a) set_u32(colours + 4u * a, a << 24 | (i == 0u ? 0xffffffu : 0x3990fau));
+        recomp_runner_sprite(RECOMP_RUNNER_SPRITE_PC_WHITE + i, LABEL_LOG_W, LABEL_LOG_H, palette);
     }
 
     /* As page 8: start and enter reset the layout, draw shows the page, and
@@ -348,42 +303,9 @@ static const Letter LETTERS[] = {
     {0x00cdu, 0x3003b, 120, 185},
 };
 
-static uint32_t swizzle(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+static uint8_t word_alpha(const RecompGameSprite *w, int x, int y)
 {
-    uint32_t index = 0u, bit = 0u;
-    while (w > 1u || h > 1u) {
-        if (w > 1u) { index |= (x & 1u) << bit++; x >>= 1; w >>= 1; }
-        if (h > 1u) { index |= (y & 1u) << bit++; y >>= 1; h >>= 1; }
-    }
-    return index;
-}
-
-/* One of the game's label words: its P8 texture, palette and rectangle. */
-typedef struct Word { uint32_t pixels, palette, width, height; int left, top, right, bottom; } Word;
-
-static bool word_for(uint32_t sprite, Word *word)
-{
-    const uint32_t group = sprite >> 16;
-    const uint32_t def = *recomp_memory_u32(SPRITE_DEFS + 4u * group) + 12u * (sprite & 0xffffu);
-    int16_t rect[4];
-    memcpy(rect, recomp_memory(def, 8u), 8u);
-    const uint32_t entry = *recomp_memory_u32(SPRITE_TEXTURES + 4u * group) + 8u * u16(def + 8u);
-    const uint32_t texture = *recomp_memory_u32(entry), palette = *recomp_memory_u32(entry + 4u);
-    if (texture == 0u || palette == 0u) return false;
-    const uint32_t format = *recomp_memory_u32(texture + 12u);
-    if (((format >> 8) & 0xffu) != 0x0bu) return false;
-    *word = (Word){*recomp_memory_u32(texture + 4u) & 0x03ffffffu, *recomp_memory_u32(palette + 4u) & 0x03ffffffu,
-        1u << ((format >> 20) & 0xfu), 1u << ((format >> 24) & 0xfu), rect[0], rect[1], rect[2], rect[3]};
-    return word->right > word->left && word->bottom - word->top == WHITE_H &&
-        word->right - word->left <= LABEL_W && (uint32_t)word->right <= word->width &&
-        (uint32_t)word->bottom <= word->height;
-}
-
-static uint8_t word_alpha(const Word *w, int x, int y)
-{
-    const uint8_t index = *recomp_memory(w->pixels +
-        swizzle((uint32_t)(w->left + x), (uint32_t)(w->top + y), w->width, w->height), 1u);
-    return (uint8_t)(*recomp_memory_u32(w->palette + 4u * index) >> 24);
+    return (uint8_t)(recomp_game_sprite_colour(w, recomp_game_sprite_index(w, x, y)) >> 24);
 }
 
 /* u of a pixel: x less the row's lean, so a letter's slice is u0 <= u < u1. */
@@ -391,7 +313,7 @@ static float lean_u(int x, int y) { return (float)x - SLANT * (float)(WHITE_H - 
 
 /* Copies one letter at pen: the pixels of its slice, less any blob that lies
    mostly outside the slice (a neighbour's corner). */
-static void put_letter(const Word *w, float u0, float u1, float pen, float white[LABEL_H][LABEL_W])
+static void put_letter(const RecompGameSprite *w, float u0, float u1, float pen, float white[LABEL_H][LABEL_W])
 {
     enum { MAX_W = LABEL_W };
     static uint8_t alpha[WHITE_H][MAX_W];
@@ -443,13 +365,16 @@ static void put_letter(const Word *w, float u0, float u1, float pen, float white
         }
 }
 
-static void write_sprite(uint32_t base, float image[LABEL_H][LABEL_W])
+/* Alphas as palette indices: index a is alpha a. */
+static void write_sprite(unsigned slot, float image[LABEL_H][LABEL_W])
 {
+    static uint8_t pixels[LABEL_H * LABEL_W];
     for (uint32_t y = 0u; y < LABEL_H; ++y)
         for (uint32_t x = 0u; x < LABEL_W; ++x) {
             const float a = image[y][x] < 0.0f ? 0.0f : image[y][x] > 1.0f ? 1.0f : image[y][x];
-            *recomp_memory(base + swizzle(x, y, LABEL_W, LABEL_H), 1u) = (uint8_t)lrintf(a * 255.0f);
+            pixels[y * LABEL_W + x] = (uint8_t)lrintf(a * 255.0f);
         }
+    recomp_runner_sprite_pixels(slot, pixels);
 }
 
 /* Draws text into the white sprite; false while the game's label art is not loaded. */
@@ -466,8 +391,8 @@ static bool compose(const recomp_utf16 *text, float white[LABEL_H][LABEL_W], int
         for (size_t i = 0u; i < sizeof LETTERS / sizeof LETTERS[0]; ++i)
             if (LETTERS[i].c == *c) letter = &LETTERS[i];
         if (letter == NULL) continue; /* every label's letters are in the table */
-        Word word;
-        if (!word_for(letter->sprite, &word)) return false;
+        RecompGameSprite word;
+        if (!recomp_game_sprite(letter->sprite, WHITE_H, &word) || word.right - word.left > LABEL_W) return false;
         const float u0 = letter->from / 10.0f, u1 = letter->to / 10.0f;
         put_letter(&word, u0, u1, pen, white);
         pen += u1 - u0;
@@ -517,15 +442,10 @@ static void make_label(void)
         return;
     }
     blur_glow(white, glow);
-    write_sprite(WHITE, white);
-    write_sprite(GLOW, glow);
-    const int16_t rects[2][4] = {{0, 0, (int16_t)width, WHITE_H}, {0, 0, (int16_t)(width + 12), LABEL_H}};
-    for (unsigned i = 0u; i < 2u; ++i) {
-        memcpy(recomp_memory(DEFS + 12u * i, 8u), rects[i], 8u);
-        set_u16(DEFS + 12u * i + 8u, (uint16_t)i);
-        set_u16(DEFS + 12u * i + 10u, PC_GROUP);
-    }
-    recomp_d3d8_invalidate_textures(WHITE, 2u * LABEL_W * LABEL_H);
+    write_sprite(RECOMP_RUNNER_SPRITE_PC_WHITE, white);
+    write_sprite(RECOMP_RUNNER_SPRITE_PC_GLOW, glow);
+    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_PC_WHITE, width, WHITE_H);
+    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_PC_GLOW, width + 12, LABEL_H);
     label_language = language;
     fprintf(stderr, "recomp pc settings: label made, language %d, %d pixels wide\n", language, width);
 }
@@ -539,12 +459,12 @@ static void top_input(void)
 {
     const uint32_t count = TOP_ROWS;
     const uint32_t navigate[2] = {CURSORS, count};
-    call(sub_0011B8D0, navigate, 2u);
+    kernel_call_lifted(sub_0011B8D0, navigate, 2u);
     const uint16_t row = u16(CURSORS);
     const uint32_t back[2] = {row, count};
-    if ((call(sub_0011BCA0, back, 2u) & 0xffu) != 0u) {
+    if ((kernel_call_lifted(sub_0011BCA0, back, 2u) & 0xffu) != 0u) {
         call1(sub_00134950, 1u);
-        call(sub_00020A70, NULL, 0u);
+        kernel_call_lifted(sub_00020A70, NULL, 0u);
         return;
     }
     if ((call1(sub_0011BDA0, 1u) & 0xffu) == 0u) return;
@@ -565,7 +485,7 @@ static void top_input(void)
         set_u16(PAGE, 0xfu);
         set_u16(MENU_STATE, 0u);
     } else {
-        if (page == 4u) set_u16(CONTROLLER_STATE, (uint16_t)call(sub_0011CF20, NULL, 0u));
+        if (page == 4u) set_u16(CONTROLLER_STATE, (uint16_t)kernel_call_lifted(sub_0011CF20, NULL, 0u));
         set_u16(DEPTH, 1u);
         set_u16(CURSORS + 2u, 0u);
         set_u16(PAGE, page);
@@ -576,20 +496,20 @@ static void pc_input(void)
 {
     const uint32_t count = PC_ROWS;
     const uint32_t navigate[2] = {CURSORS + 2u, count};
-    call(sub_0011B8D0, navigate, 2u);
+    kernel_call_lifted(sub_0011B8D0, navigate, 2u);
     const uint16_t row = u16(CURSORS + 2u);
     const uint32_t back[2] = {row, count};
-    if ((call(sub_0011BCA0, back, 2u) & 0xffu) != 0u) {
+    if ((kernel_call_lifted(sub_0011BCA0, back, 2u) & 0xffu) != 0u) {
         set_u16(DEPTH, 0u);
         set_u16(PAGE, 0u);
         if (host.closed != NULL) host.closed(host.context);
         return;
     }
     if (row >= PC_ROWS) return;
-    const uint32_t value = VALUES + 2u * row;
+    const uint32_t value = values + 2u * row;
     const uint16_t before = u16(value);
     const uint32_t step[4] = {value, CHOICES[row], 1u, 0u};
-    call(sub_0011B9F0, step, 4u);
+    kernel_call_lifted(sub_0011B9F0, step, 4u);
     const uint16_t after = u16(value);
     if (after != before && host.changed != NULL) host.changed(row, after, host.context);
 }
@@ -598,10 +518,10 @@ static void options_update(void)
 {
     if (u16(DEPTH) == 0u) {
         top_input();
-        finish(1u);
+        kernel_return_caller_cleanup(1u);
     } else if (u16(PAGE) == PC_PAGE) {
         pc_input();
-        finish(1u);
+        kernel_return_caller_cleanup(1u);
     } else {
         sub_0011CFC0();
     }
@@ -609,9 +529,9 @@ static void options_update(void)
 
 static void row_count(void (*original)(void))
 {
-    const uint16_t page = (uint16_t)arg(1u);
-    if (page == 0u) finish(TOP_ROWS);
-    else if (page == PC_PAGE) finish(PC_ROWS);
+    const uint16_t page = (uint16_t)kernel_arg(1u);
+    if (page == 0u) kernel_return_caller_cleanup(TOP_ROWS);
+    else if (page == PC_PAGE) kernel_return_caller_cleanup(PC_ROWS);
     else original();
 }
 static void row_count_main(void) { row_count(sub_0011AC90); }
@@ -630,10 +550,10 @@ static void top_preview(void)
 {
     const uint16_t row = u16(CURSORS);
     set_u16(CURSORS, row == PC_ROW ? (uint16_t)(PC_PAGE - 1u) : (uint16_t)game_row(row));
-    const uint32_t context = arg(1u);
+    const uint32_t context = kernel_arg(1u);
     const uint32_t eax = call1(sub_00095A10, context);
     set_u16(CURSORS, row);
-    finish(eax);
+    kernel_return_caller_cleanup(eax);
 }
 
 /* 0x97830 (sprite, x, y, layer, fade, colour, scale, mode, flags) */
@@ -644,38 +564,30 @@ static void sprite(void)
         return;
     }
     const unsigned language = game_language() % 6u;
-    const uint32_t id = arg(1u), x = arg(2u);
+    const uint32_t id = kernel_arg(1u), x = kernel_arg(2u);
     const uint16_t cursor = u16(CURSORS);
     if (x == 0xf0u && id >= WHITE_BASE[language] && id < WHITE_BASE[language] + 7u) {
         const unsigned row = id - WHITE_BASE[language];
         if (row == 4u && label_language >= 0) {
             uint32_t pc[9];
-            for (unsigned i = 0u; i < 9u; ++i) pc[i] = arg(1u + i);
-            pc[0] = (uint32_t)PC_GROUP << 16;
+            for (unsigned i = 0u; i < 9u; ++i) pc[i] = kernel_arg(1u + i);
+            pc[0] = recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_PC_WHITE);
             pc[2] += 26u;
             pc[5] = cursor == PC_ROW ? 0xffffffu : 0x808080u;
-            static bool reported;
-            if (!reported) {
-                int16_t r[4];
-                memcpy(r, recomp_memory(DEFS, 8u), 8u);
-                fprintf(stderr, "recomp pc settings: label drawn at %u,%u, rect %d,%d,%d,%d, key %08x\n",
-                    pc[1], pc[2], r[0], r[1], r[2], r[3], *recomp_memory_u32(DEFS + 8u));
-                reported = true;
-            }
-            call(sub_00097830, pc, 9u);
+            kernel_call_lifted(sub_00097830, pc, 9u);
         }
         if (row >= 5u) {
-            set_arg(3u, arg(3u) + 26u);
+            set_arg(3u, kernel_arg(3u) + 26u);
             set_arg(6u, cursor == row + 1u ? 0xffffffu : 0x808080u);
         }
     } else if (x == 0xf6u && id >= GLOW_BASE[language] && id < GLOW_BASE[language] + TOP_ROWS) {
         const unsigned row = id - GLOW_BASE[language];
         if (row == PC_ROW) {
             if (label_language < 0) {
-                finish(0u);
+                kernel_return_caller_cleanup(0u);
                 return;
             }
-            set_arg(1u, (uint32_t)PC_GROUP << 16 | 1u);
+            set_arg(1u, recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_PC_GLOW));
         } else if (row > PC_ROW) {
             set_arg(1u, GLOW_BASE[language] + row - 1u);
         }
@@ -686,11 +598,12 @@ static void sprite(void)
 /* 0x976f0 (x, y, width, height, colours, count, flags): the row bars. */
 static void quad(void)
 {
-    if (drawing_top && arg(1u) == 0u && arg(3u) == 0x21eu && arg(4u) == 0x16u && arg(2u) == 0x5cu + 6u * 0x1au) {
+    if (drawing_top && kernel_arg(1u) == 0u && kernel_arg(3u) == 0x21eu && kernel_arg(4u) == 0x16u &&
+        kernel_arg(2u) == 0x5cu + 6u * 0x1au) {
         uint32_t bar[7];
-        for (unsigned i = 0u; i < 7u; ++i) bar[i] = arg(1u + i);
-        call(sub_000976F0, bar, 7u);
-        set_arg(2u, arg(2u) + 0x1au);
+        for (unsigned i = 0u; i < 7u; ++i) bar[i] = kernel_arg(1u + i);
+        kernel_call_lifted(sub_000976F0, bar, 7u);
+        set_arg(2u, kernel_arg(2u) + 0x1au);
     }
     sub_000976F0();
 }
@@ -698,50 +611,33 @@ static void quad(void)
 /* 0x91560 (page, cursor, fade): the help line. */
 static void help(void)
 {
-    const uint16_t page = (uint16_t)arg(1u), row = (uint16_t)arg(2u);
-    uint32_t args[3] = {arg(1u), arg(2u), arg(3u)};
+    const uint16_t page = (uint16_t)kernel_arg(1u), row = (uint16_t)kernel_arg(2u);
+    uint32_t args[3] = {kernel_arg(1u), kernel_arg(2u), kernel_arg(3u)};
+    unsigned help_line = HELPS; /* the game's own */
     if (page == 0u) {
         if (row == PC_ROW) {
             args[1] = 0u;
-            help_message = PC_MESSAGES + MSG_HELP + HELP_TOP;
+            help_line = HELP_TOP;
         } else if (row > PC_ROW) {
             args[1] = game_row(row);
         }
     } else if (page == PC_PAGE) {
         args[0] = 0u;
         args[1] = 0u;
-        help_message = PC_MESSAGES + MSG_HELP + (row < PC_ROWS && live[row] ? HELP_NOW : HELP_NEXT);
+        help_line = row < PC_ROWS && live[row] ? HELP_NOW : HELP_NEXT;
     }
-    const uint32_t eax = call(sub_00091560, args, 3u);
-    help_message = 0u;
-    finish(eax);
-}
-
-/* 0x6a3e0 (message, language or 0xff) */
-static void message(void)
-{
-    uint32_t number = arg(1u) & 0xffffu;
-    if (help_message != 0u && number == 0xc4u) number = help_message;
-    const uint32_t requested = arg(2u) & 0xffu;
-    if (number >= PC_MESSAGES && number < PC_MESSAGES + MSG_COUNT) {
-        const unsigned language = requested == 0xffu ? game_language() : requested;
-        finish(text_address[language_text(language) - LANGUAGES][number - PC_MESSAGES]);
-        return;
-    }
-    uint32_t text;
-    if (number >= RECOMP_RUNNER_TEXT_FIRST &&
-        recomp_runner_text_lookup(number, requested == 0xffu ? game_language() : requested, &text)) {
-        finish(text);
-        return;
-    }
-    sub_0006A3E0();
+    /* The help line draws message 0xc4 for the row passed. */
+    if (help_line < HELPS) recomp_runner_text_redirect(0xc4u, RECOMP_RUNNER_TEXT_PC + MSG_HELP + help_line);
+    const uint32_t eax = kernel_call_lifted(sub_00091560, args, 3u);
+    recomp_runner_text_redirect(0u, 0u);
+    kernel_return_caller_cleanup(eax);
 }
 
 /* ---- Page 19 ----------------------------------------------------------- */
 
 static void page_layout(void)
 {
-    if ((uint16_t)arg(1u) == PC_PAGE) finish(LAYOUT);
+    if ((uint16_t)kernel_arg(1u) == PC_PAGE) kernel_return_caller_cleanup(layout);
     else sub_00090AD0();
 }
 
@@ -750,16 +646,15 @@ static void page_layout(void)
 static void page_text(void)
 {
     if (drawing_pc) {
-        const uint16_t key = (uint16_t)arg(1u);
-        const Language *text = language_text(game_language());
-        const unsigned l = (unsigned)(text - LANGUAGES);
-        if (key == PC_PAGE && arg(2u) < PC_ROWS) {
-            finish(text_address[l][MSG_ROWS + arg(2u)]);
+        const uint16_t key = (uint16_t)kernel_arg(1u);
+        if (key == PC_PAGE && kernel_arg(2u) < PC_ROWS) {
+            kernel_return_caller_cleanup(text_for(MSG_ROWS + kernel_arg(2u)));
             return;
         }
         if (key >= VALUE_KIND && key < VALUE_KIND + PC_ROWS) {
-            const uint32_t row = key - VALUE_KIND, choice = arg(2u) & 0xffffu;
-            finish(text_address[l][MSG_VALUES + row * MAX_CHOICES + (choice < CHOICES[row] ? choice : 0u)]);
+            const uint32_t row = key - VALUE_KIND, choice = kernel_arg(2u) & 0xffffu;
+            const uint32_t value = choice < CHOICES[row] ? choice : 0u;
+            kernel_return_caller_cleanup(text_for(MSG_VALUES + row * MAX_CHOICES + value));
             return;
         }
     }
@@ -769,20 +664,21 @@ static void page_text(void)
 /* Every PC row has a value, so the value row is the row. */
 static void value_text(void)
 {
-    if ((uint16_t)arg(1u) == PC_PAGE && arg(2u) < PC_ROWS) finish(VALUE_KIND + arg(2u));
+    if ((uint16_t)kernel_arg(1u) == PC_PAGE && kernel_arg(2u) < PC_ROWS)
+        kernel_return_caller_cleanup(VALUE_KIND + kernel_arg(2u));
     else sub_00091370();
 }
 
 static void pc_enter(void)
 {
     reset_layout();
-    finish(0u);
+    kernel_return_caller_cleanup(0u);
 }
 
 /* As page 8's 0x93df0 and 0x93e90: rows, values, then the cursor. */
 static void pc_page_draw(uint32_t visible)
 {
-    const uint32_t context = arg(1u), fade = *recomp_memory_u32(context + 0x10u);
+    const uint32_t context = kernel_arg(1u), fade = *recomp_memory_u32(context + 0x10u);
     const uint32_t cursor = u16(CURSORS + 2u), mask = (1u << PC_ROWS) - 1u;
     static unsigned reported;
     if (reported < 2u) {
@@ -791,15 +687,15 @@ static void pc_page_draw(uint32_t visible)
     }
     drawing_pc = true;
     const uint32_t rows[4] = {PC_PAGE, cursor, fade, visible};
-    call(sub_00091440, rows, 4u);
-    const uint32_t values[6] = {PC_PAGE, cursor, fade, mask, VALUES, visible};
-    call(sub_00093270, values, 6u);
+    kernel_call_lifted(sub_00091440, rows, 4u);
+    const uint32_t value_args[6] = {PC_PAGE, cursor, fade, mask, values, visible};
+    kernel_call_lifted(sub_00093270, value_args, 6u);
     /* (context, layout, value mask, cursor, rows, visible): the bars and the
        cursor slide out from the left while visible and back while not. */
-    const uint32_t mark[6] = {context, LAYOUT, mask, cursor, PC_ROWS, visible};
-    const uint32_t eax = call(sub_00090F00, mark, 6u);
+    const uint32_t mark[6] = {context, layout, mask, cursor, PC_ROWS, visible};
+    const uint32_t eax = kernel_call_lifted(sub_00090F00, mark, 6u);
     drawing_pc = false;
-    finish(eax);
+    kernel_return_caller_cleanup(eax);
 }
 static void pc_draw(void) { pc_page_draw(1u); }
 static void pc_leave(void) { pc_page_draw(0u); }
@@ -815,7 +711,6 @@ RecompFunction recomp_pc_settings_lookup_manual(uint32_t guest_address)
     case SPRITE: return sprite;
     case QUAD: return quad;
     case HELP: return help;
-    case MESSAGE: return message;
     case PAGE_LAYOUT: return page_layout;
     case PAGE_TEXT: return page_text;
     case VALUE_TEXT: return value_text;
@@ -825,3 +720,4 @@ RecompFunction recomp_pc_settings_lookup_manual(uint32_t guest_address)
     default: return NULL;
     }
 }
+

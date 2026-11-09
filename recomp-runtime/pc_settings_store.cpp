@@ -1,23 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings_store.h"
 
-#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 namespace {
-
-constexpr std::array<int, 5> kHeights = {480, 720, 1080, 1440, 2160};
-constexpr std::array<int, 6> kSamples = {1, 2, 4, 8, 16, 32};
-constexpr std::array<const char *, 5> kScreens = {"4:3", "16:9", "16:10", "", "32:9"}; // "" is Ultrawide
-constexpr unsigned kUltrawide = 3u;
 
 /* One flat JSON object: each key with its value's source text, in order.
    Nested values are kept whole; this file only ever holds scalars. */
@@ -130,8 +125,8 @@ std::string text(const Entries &entries, const char *key, const std::string &fal
 std::uint8_t nearest(int height)
 {
     std::uint8_t best = 0u;
-    for (std::uint8_t i = 1u; i < kHeights.size(); ++i)
-        if (std::abs(kHeights[i] - height) < std::abs(kHeights[best] - height)) best = i;
+    for (std::uint8_t i = 1u; i < std::size(RECOMP_PC_HEIGHTS); ++i)
+        if (std::abs(RECOMP_PC_HEIGHTS[i] - height) < std::abs(RECOMP_PC_HEIGHTS[best] - height)) best = i;
     return best;
 }
 
@@ -139,14 +134,14 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
 {
     choices[RECOMP_PC_RESOLUTION] = nearest(integer(entries, "height", store.primaryHeight));
     const int samples = integer(entries, "msaa", 32);
-    choices[RECOMP_PC_MSAA] = static_cast<std::uint8_t>(kSamples.size() - 1u);
-    for (std::uint8_t i = 0u; i < kSamples.size(); ++i)
-        if (kSamples[i] == samples) choices[RECOMP_PC_MSAA] = i;
+    choices[RECOMP_PC_MSAA] = static_cast<std::uint8_t>(std::size(RECOMP_PC_SAMPLES) - 1u);
+    for (std::uint8_t i = 0u; i < std::size(RECOMP_PC_SAMPLES); ++i)
+        if (RECOMP_PC_SAMPLES[i] == samples) choices[RECOMP_PC_MSAA] = i;
     choices[RECOMP_PC_SMAA] = boolean(entries, "smaa", true) ? 1u : 0u;
     const std::string screen = text(entries, "screen", boolean(entries, "widescreen", true) ? "16:9" : "4:3");
-    choices[RECOMP_PC_SCREEN] = kUltrawide; // any other W:H is an ultrawide shape
-    for (std::uint8_t i = 0u; i < kScreens.size(); ++i)
-        if (i != kUltrawide && screen == kScreens[i]) choices[RECOMP_PC_SCREEN] = i;
+    choices[RECOMP_PC_SCREEN] = RECOMP_PC_ULTRAWIDE; // any other W:H is an ultrawide shape
+    for (std::uint8_t i = 0u; i < std::size(RECOMP_PC_SCREENS); ++i)
+        if (RECOMP_PC_SCREENS[i] != nullptr && screen == RECOMP_PC_SCREENS[i]) choices[RECOMP_PC_SCREEN] = i;
     choices[RECOMP_PC_RENDERER] = boolean(entries, "vulkan", false) ? 1u : 0u;
     choices[RECOMP_PC_VRR] = boolean(entries, "vrr", false) ? 1u : 0u;
     choices[RECOMP_PC_AUDIO] = boolean(entries, "surround", false) ? 1u : 0u;
@@ -198,14 +193,16 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     std::uint8_t saved[RECOMP_PC_SETTING_COUNT];
     choose(entries, store, saved);
     const auto flag = [](bool on) { return std::string(on ? "true" : "false"); };
-    put(&entries, "height", std::to_string(kHeights[choices[RECOMP_PC_RESOLUTION] % kHeights.size()]));
-    put(&entries, "msaa", std::to_string(kSamples[choices[RECOMP_PC_MSAA] % kSamples.size()]));
+    const unsigned height = choices[RECOMP_PC_RESOLUTION] % std::size(RECOMP_PC_HEIGHTS);
+    put(&entries, "height", std::to_string(RECOMP_PC_HEIGHTS[height]));
+    put(&entries, "msaa", std::to_string(RECOMP_PC_SAMPLES[choices[RECOMP_PC_MSAA] % std::size(RECOMP_PC_SAMPLES)]));
     put(&entries, "smaa", flag(choices[RECOMP_PC_SMAA] == 1u));
-    const unsigned screen = choices[RECOMP_PC_SCREEN] % kScreens.size();
+    const unsigned screen = choices[RECOMP_PC_SCREEN] % std::size(RECOMP_PC_SCREENS);
     put(&entries, "widescreen", flag(screen != 0u));
     /* An ultrawide shape already saved stays; choosing Ultrawide saves the monitor's. */
-    if (screen != kUltrawide) put(&entries, "screen", std::string("\"") + kScreens[screen] + "\"");
-    else if (saved[RECOMP_PC_SCREEN] != kUltrawide) put(&entries, "screen", "\"" + store.ultrawideShape + "\"");
+    if (screen != RECOMP_PC_ULTRAWIDE) put(&entries, "screen", std::string("\"") + RECOMP_PC_SCREENS[screen] + "\"");
+    else if (saved[RECOMP_PC_SCREEN] != RECOMP_PC_ULTRAWIDE)
+        put(&entries, "screen", "\"" + store.ultrawideShape + "\"");
     put(&entries, "vulkan", flag(choices[RECOMP_PC_RENDERER] == 1u));
     put(&entries, "vrr", flag(choices[RECOMP_PC_VRR] == 1u));
     put(&entries, "surround", flag(choices[RECOMP_PC_AUDIO] == 1u));

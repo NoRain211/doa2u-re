@@ -170,6 +170,7 @@ void sub_00090F00(void)
     ret(0u);
 }
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size) { (void)base; (void)size; ++invalidated; }
+void recomp_stop(int code, const char *format, ...) { fprintf(stderr, "stop %d: %s\n", code, format); abort(); }
 
 /* ---- Host ---------------------------------------------------------------------- */
 static unsigned changed_setting = 99u, changed_choice = 99u, closed;
@@ -226,11 +227,13 @@ int main(void)
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
     /* The layout: 11 row records, 11 value records, then the end word. */
-    const uint32_t layout = XBOX_RUNNER_ASSET_BASE + 0x100u;
+    uint32_t page = 19u;
+    const uint32_t layout = hook(0x00090ad0u, &page, 1u);
     expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 10u * 28u) == ((0x5du + 260u) << 16 | 0x10au));
     expect("layout values", rd32(layout + 11u * 28u) == (0x5du << 16 | 0x1e0u) &&
         rd32(layout + 11u * 28u + 0x14u) == 0x40001u && rd32(layout + 21u * 28u + 0x18u) == 0x883ec0u);
-    expect("layout end", rd32(layout + 22u * 28u) == 0u && layout + 22u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + 0x400u);
+    expect("layout end", rd32(layout + 22u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
+        layout + 22u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
     expect("page tables", rd32(0x0067af50u + 4u * 19u) != 0u && rd32(0x0067aff0u + 4u * 19u) != 0u &&
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
@@ -246,7 +249,7 @@ int main(void)
         recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
 
     /* Row counts: the top list has eight rows, page 19 eleven, others the game's. */
-    uint32_t page = 0u;
+    page = 0u;
     expect("top rows", hook(0x0011ac90u, &page, 1u) == 8u && hook(0x0011ad10u, &page, 1u) == 8u);
     page = 19u;
     expect("pc rows", hook(0x0011ac90u, &page, 1u) == 11u);
@@ -263,12 +266,15 @@ int main(void)
     drawn_count = 0u; bar_count = 0u;
     hook(0x00095a70u, &context, 1u);
     /* P C _ S E T T I N G S: 3.24 lean + 11.5 11.5 7 11 10 10 10 7 11.5 12 11. */
-    expect("label made", invalidated == 1u && rd16(XBOX_RUNNER_ASSET_BASE + 0x44u) == 117u &&
-        rd16(XBOX_RUNNER_ASSET_BASE + 0x50u) == 117u + 12u);
+    const uint32_t white_id = 0x1f0u << 16, glow_id = 0x1f0u << 16 | 1u;
+    const uint32_t white_rect = hook(0x000aa970u, &white_id, 1u), glow_rect = hook(0x000aa970u, &glow_id, 1u);
+    expect("label made", invalidated == 2u && rd16(white_rect + 4u) == 117u && rd16(glow_rect + 4u) == 117u + 12u);
+    const uint32_t white_texture = rd32(hook(0x000aa9b0u, &white_id, 1u));
+    const uint32_t glow_texture = rd32(hook(0x000aa9b0u, &glow_id, 1u));
     int white_pixels = 0, glow_pixels = 0;
     for (uint32_t i = 0; i < 0x2000u; ++i) {
-        white_pixels += *recomp_memory(XBOX_RUNNER_ASSET_BASE + 0x4000u + i, 1u) != 0u;
-        glow_pixels += *recomp_memory(XBOX_RUNNER_ASSET_BASE + 0x6000u + i, 1u) != 0u;
+        white_pixels += *recomp_memory(rd32(white_texture + 4u) + i, 1u) != 0u;
+        glow_pixels += *recomp_memory(rd32(glow_texture + 4u) + i, 1u) != 0u;
     }
     expect("label pixels", white_pixels > 200 && glow_pixels > white_pixels);
     expect("eight bars", bar_count == 8u && bars[7] == 0x5cu + 7u * 0x1au);
@@ -280,13 +286,11 @@ int main(void)
     expect("warning moves", drawn[7].id == 0x3000du + 5u && drawn[7].y == 0x5du + 6u * 26u && drawn[7].color == 0x808080u);
     expect("exit moves", drawn[8].id == 0x3000du + 6u && drawn[8].y == 0x5du + 7u * 26u);
     expect("sprite rect", recomp_runner_assets_lookup_manual(0x000aa970u) != NULL &&
-        recomp_pc_settings_lookup_manual(0x000aa970u) == NULL);
-    const uint32_t pc_sprite = 0x1f0u << 16, other = 0x3000du;
-    expect("own sprites", hook(0x000aa970u, &pc_sprite, 1u) == XBOX_RUNNER_ASSET_BASE + 0x40u &&
-        hook(0x000aa970u, &other, 1u) == 0x5555u);
-    const uint32_t pc_texture = 0x1f0u << 16 | 1u;
-    expect("own textures", hook(0x000aa9b0u, &pc_texture, 1u) == XBOX_RUNNER_ASSET_BASE + 0x68u &&
-        hook(0x000aa9b0u, &other, 1u) == 0x6666u);
+        recomp_pc_settings_lookup_manual(0x000aa970u) == NULL && recomp_pc_settings_lookup_manual(0x0006a3e0u) == NULL);
+    const uint32_t other = 0x3000du;
+    expect("own sprites", rd16(white_rect + 8u) == 0u && rd16(white_rect + 10u) == 0x1f0u &&
+        rd16(glow_rect + 8u) == 1u && hook(0x000aa970u, &other, 1u) == 0x5555u);
+    expect("own textures", rd32(glow_texture + 12u) == 0x05810b2au && hook(0x000aa9b0u, &other, 1u) == 0x6666u);
     /* The game has 0x1a5 sprite groups and unloads them all; the last stays its own. */
     const uint32_t game_group = 0x1a4u << 16 | 1u;
     expect("game groups untouched", hook(0x000aa9b0u, &game_group, 1u) == 0x6666u &&
@@ -323,10 +327,13 @@ int main(void)
     const uint32_t message[2] = {0xc4u, 0xffu};
     expect("help only while drawing", hook(0x0006a3e0u, message, 2u) == 0x1234u);
     /* Texts other modules add through runner_assets: per language, past PC Settings' own. */
-    const uint32_t quit_texts[6] = {0x111u, 0x222u, 0x333u, 0x444u, 0x555u, 0x666u};
-    recomp_runner_text_set(RECOMP_RUNNER_TEXT_FIRST, quit_texts);
-    const uint32_t quit_french[2] = {RECOMP_RUNNER_TEXT_FIRST, 2u}, quit_unknown[2] = {RECOMP_RUNNER_TEXT_FIRST + 1u, 2u};
-    expect("runner texts", hook(0x0006a3e0u, quit_french, 2u) == 0x333u &&
+    static const recomp_utf16 quit_english[] = u"Quit", quit_french_text[] = u"Quitter";
+    const recomp_utf16 *const quit_texts[6] = {quit_english, quit_english, quit_french_text,
+        quit_english, quit_english, quit_english};
+    recomp_runner_text_set(RECOMP_RUNNER_TEXT_QUIT, quit_texts);
+    const uint32_t quit_french[2] = {RECOMP_RUNNER_TEXT_QUIT, 2u}, quit_unknown[2] = {RECOMP_RUNNER_TEXT_QUIT + 1u, 2u};
+    const uint32_t french = hook(0x0006a3e0u, quit_french, 2u);
+    expect("runner texts", ascii(french) == 'Q' && rd16(french + 8u) == 't' &&
         hook(0x0006a3e0u, quit_unknown, 2u) == 0x1234u);
 
     /* Top-list input: PC SETTINGS opens page 19; Warning still opens its scene. */
@@ -370,8 +377,7 @@ int main(void)
     expect("values", value_count == 11u && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
         ascii(values[RECOMP_PC_UNLOCKS]) == 'E' && rd16(values[RECOMP_PC_UNLOCKS] + 2u) == 'a'); /* Earn */
     expect("cursor mark", cursor_marks == 1u && layout_walked == 22u && cursor_visible == 1u);
-    expect("sprites intact", rd32(XBOX_RUNNER_ASSET_BASE + 0x80u + 12u) == 0x05810b2au &&
-        rd32(XBOX_RUNNER_ASSET_BASE + 0x60u) == XBOX_RUNNER_ASSET_BASE + 0x80u);
+    expect("sprites intact", rd32(rd32(hook(0x000aa9b0u, &white_id, 1u)) + 12u) == 0x05810b2au);
     language = 3u; /* German */
     hook(draw, &context, 1u);
     expect("german", ascii(labels[0]) == 'A' && rd16(labels[0] + 8u) == 0xf6u); /* "Aufl\u00f6sung" */
@@ -379,14 +385,14 @@ int main(void)
     const uint32_t key[2] = {19u, 0u};
     expect("labels only while drawing", hook(0x000910a0u, key, 2u) == 0x9999u);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
-    expect("enter resets", rd32(XBOX_RUNNER_ASSET_BASE + 0x100u + 0xcu) == 0u &&
-        rd32(XBOX_RUNNER_ASSET_BASE + 0x100u + 21u * 28u + 0xcu) == 0u);
+    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 21u * 28u + 0xcu) == 0u);
 
     /* A new language remakes the label (Italian, which needs the Z of OPZIONI). */
     language = 4u;
     wr16(DEPTH, 0u); wr16(PAGE, 0u);
     hook(0x00095a70u, &context, 1u);
-    expect("relabel", invalidated == 2u);
+    expect("relabel", invalidated == 4u);
     expect("unhooked", recomp_pc_settings_lookup_manual(0x0011c590u) == NULL);
     return fails == 0 ? 0 : 1;
 }
+

@@ -29,6 +29,13 @@ enum RecompPcSetting {
     RECOMP_PC_SETTING_COUNT
 };
 
+/* The launcher's values behind the Resolution, MSAA and Screen choices, in
+   the rows' order. Ultrawide (NULL) saves the monitor's own shape. */
+static const uint16_t RECOMP_PC_HEIGHTS[] = {480u, 720u, 1080u, 1440u, 2160u};
+static const uint8_t RECOMP_PC_SAMPLES[] = {1u, 2u, 4u, 8u, 16u, 32u};
+static const char *const RECOMP_PC_SCREENS[] = {"4:3", "16:9", "16:10", NULL, "32:9"};
+enum { RECOMP_PC_ULTRAWIDE = 3 };
+
 /* The number of choices a setting has. */
 unsigned recomp_pc_settings_choices(unsigned setting);
 /* True when a change takes effect at once; the others apply at the next launch.

@@ -95,8 +95,6 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
 // prompt owns the pads, so the room cannot inject its A behind it.
 static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
 {
-    // Quit Game's popup owns the pads while it is open, as the quit prompt does.
-    if (sampled) recomp_menu_quit_filter(port, gamepad);
     quitPrompt(port, sampled ? gamepad : nullptr);
     if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
 }
@@ -134,10 +132,6 @@ static bool unlockAll = true; // --no-unlock-all leaves unlocks to play
 static std::string launcherSettings;
 static RecompPcSettingsStore pcStore;
 
-// PC Settings' choices as the launcher's values: 480p..4K, MSAA off..32x.
-static const unsigned pcHeights[] = {480u, 720u, 1080u, 1440u, 2160u};
-static const unsigned pcSamples[] = {1u, 2u, 4u, 8u, 16u, 32u};
-
 static void pcSettingChanged(unsigned setting, unsigned choice, void *)
 {
     switch (setting) {
@@ -147,8 +141,8 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA: {
-        const unsigned height = pcHeights[std::min(recomp_pc_settings_choice(RECOMP_PC_RESOLUTION), std::uint8_t{4})];
-        const unsigned samples = pcSamples[std::min(recomp_pc_settings_choice(RECOMP_PC_MSAA), std::uint8_t{5})];
+        const unsigned height = RECOMP_PC_HEIGHTS[recomp_pc_settings_choice(RECOMP_PC_RESOLUTION)];
+        const unsigned samples = RECOMP_PC_SAMPLES[recomp_pc_settings_choice(RECOMP_PC_MSAA)];
         recomp_d3d_presenter_set_quality(static_cast<float>(height) / 480.0f, samples,
             recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u);
         break;

@@ -182,8 +182,7 @@ bool recomp_free_camera_install(bool online)
 
 void recomp_free_camera_set_enabled(bool on)
 {
-    (void)enabled(); /* reads the test settings once */
-    if (state.enabled == (on ? 1 : 0)) return;
+    if (enabled() == on) return;
     state.enabled = on ? 1 : 0;
     if (state.online) return;
     if (!on) {
