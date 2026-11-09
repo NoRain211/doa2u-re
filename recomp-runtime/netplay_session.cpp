@@ -935,6 +935,13 @@ bool recomp_netplay_session_load_replay(const std::string &path)
 static bool cancelHeld;
 static bool cancelPressed()
 {
+    // The lobby presents nothing itself. The SDL presenter reads keys and the close button
+    // only when it presents, and a closed window ends the run at the next present.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - notice.shown >= std::chrono::milliseconds(100)) {
+        notice.shown = now;
+        recomp_d3d8_present_overlay(drawNotice);
+    }
     std::uint8_t keys[RECOMP_INPUT_KEY_COUNT];
     recomp_input_keyboard_sample(keys); // before the pad, which would take the press edges
     RecompInputGamepad pad{};
