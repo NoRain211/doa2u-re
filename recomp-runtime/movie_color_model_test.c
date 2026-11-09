@@ -122,7 +122,7 @@ int main(void)
     for (unsigned i = 0u; i < sizeof output; ++i) CHECK(output[i] == 0xa5u);
 
     /* Pixels through Sofdec's own table, as its converter shows them: mid grey
-       darkens, a slightly green grey turns grey, the Team NINJA red stays red. */
+       darkens, a slightly green grey keeps less of its tint, the Team NINJA red stays red. */
     {
         static const uint8_t yuv[4][3] = {{128, 128, 128}, {235, 128, 128}, {150, 118, 116}, {117, 86, 211}};
         static const uint8_t bgra[4][4] = {{80, 80, 80, 255}, {206, 206, 206, 255}, {85, 94, 85, 255}, {23, 30, 177, 255}};

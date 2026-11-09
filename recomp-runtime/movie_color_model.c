@@ -35,7 +35,8 @@ void recomp_movie_color_sofdec_table(int16_t table[RECOMP_MOVIE_COLOR_TABLE_ENTR
         const double in[3] = {sofdec_luma(i), sofdec_chroma(i) - 128, sofdec_chroma(i) - 128};
         for (int plane = 0; plane < 3; ++plane) {
             int16_t *entry = table + plane * 1024 + i * 4;
-            /* B, G, R, A; the luma entry carries the opaque alpha. The cast truncates as _ftol does. */
+            /* B, G, R, A; the luma entry carries the opaque alpha. Sofdec adds 0.5 (0x46c038)
+               before _ftol truncates, so negative values round toward zero there too. */
             for (int channel = 0; channel < 3; ++channel)
                 entry[channel] = (int16_t)(in[plane] * inverse[(2 - channel) * 3 + plane] + 0.5);
             entry[3] = plane == 0 ? 0x3fc0 : 0;

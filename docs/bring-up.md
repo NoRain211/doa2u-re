@@ -944,7 +944,9 @@ code intra DC at 11 bits and say so only in a `TMPGEXS` user-data tag;
 at bytes 0x20-0x21, as the boot opening's two do, converts through Sofdec's
 own table (`movie_color_model.c`, built as `0x3261e0` builds it), which darkens
 and turns near-grey color grey; BT.601 showed the opening's storm green
-(issue #131). The other movies convert as BT.601. Frames are due on the
+(issue #131). CRI also checks the header version before reading that flag;
+the port does not, since every DOA2 movie passes the check. The other movies
+convert as BT.601. Frames are due on the
 guest clock from the first status poll that finds the first frame decoded,
 and late frames are dropped as Sofdec drops them. `mwPlyInitSfdFx` still runs
 as guest code, since
