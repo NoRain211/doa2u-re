@@ -150,6 +150,13 @@ X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
 a readout of the frame rate, the average frame time and the slowest frame of
 the last second; it starts off.
 
+To rebind the keyboard, create `private/keyboard.json` with the buttons to
+change, for example `{"a": "Space", "b": "Ctrl", "start": "Tab"}`. Buttons are
+up, down, left, right, start, back, a, b, x, y, white, black, ltrig and rtrig;
+keys are A-Z, 0-9, F1-F12, Up, Down, Left, Right, Enter, Backspace, Space,
+Tab, Shift, Ctrl and Esc. Buttons you leave out keep their keys. The free
+camera still reads its own fixed keys.
+
 Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
 playing.
 

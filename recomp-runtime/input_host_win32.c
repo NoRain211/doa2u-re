@@ -77,6 +77,39 @@ static bool trace_enabled(void)
     return enabled != 0;
 }
 
+/* The keys that press pad buttons for port 0. RECOMP_KEYMAP="name=hexVK,..."
+   (built by run_game.py from private/keyboard.json) replaces the defaults. */
+static struct { const char *name; uint8_t key; uint16_t button; int analog; } keymap[] = {
+    {"up", VK_UP, XBOX_DPAD_UP, -1}, {"down", VK_DOWN, XBOX_DPAD_DOWN, -1},
+    {"left", VK_LEFT, XBOX_DPAD_LEFT, -1}, {"right", VK_RIGHT, XBOX_DPAD_RIGHT, -1},
+    {"start", VK_RETURN, XBOX_START, -1}, {"back", VK_BACK, XBOX_BACK, -1},
+    {"x", 'A', 0, RECOMP_INPUT_ANALOG_X}, {"y", 'S', 0, RECOMP_INPUT_ANALOG_Y},
+    {"a", 'Z', 0, RECOMP_INPUT_ANALOG_A}, {"b", 'X', 0, RECOMP_INPUT_ANALOG_B},
+    {"white", 'Q', 0, RECOMP_INPUT_ANALOG_WHITE}, {"black", 'W', 0, RECOMP_INPUT_ANALOG_BLACK},
+    {"ltrig", 'E', 0, RECOMP_INPUT_ANALOG_LTRIG}, {"rtrig", 'R', 0, RECOMP_INPUT_ANALOG_RTRIG},
+};
+
+static void load_keymap(void)
+{
+    static bool loaded;
+    if (loaded) return;
+    loaded = true;
+    const char *at = getenv("RECOMP_KEYMAP");
+    while (at != NULL && *at != '\0') {
+        const char *equals = strchr(at, '=');
+        char *end = NULL;
+        const unsigned long key = equals != NULL ? strtoul(equals + 1, &end, 16) : 0ul;
+        if (equals == NULL) break;
+        for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
+            if (strlen(keymap[i].name) == (size_t)(equals - at) && strncmp(at, keymap[i].name, equals - at) == 0
+                && key > 0ul && key < RECOMP_INPUT_KEY_COUNT) keymap[i].key = (uint8_t)key;
+        }
+        at = strchr(end, ',');
+        if (at == NULL) break;
+        ++at;
+    }
+}
+
 static const char *test_unplug_file(void)
 {
     static const char *path;
@@ -296,21 +329,12 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
     }
 
     recomp_input_keyboard_sample(keyboard);
-    if (pressed(VK_UP)) gamepad->buttons |= XBOX_DPAD_UP;
-    if (pressed(VK_DOWN)) gamepad->buttons |= XBOX_DPAD_DOWN;
-    if (pressed(VK_LEFT)) gamepad->buttons |= XBOX_DPAD_LEFT;
-    if (pressed(VK_RIGHT)) gamepad->buttons |= XBOX_DPAD_RIGHT;
-    if (pressed(VK_RETURN)) gamepad->buttons |= XBOX_START;
-    if (pressed(VK_BACK)) gamepad->buttons |= XBOX_BACK;
-
-    if (pressed('A')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_X] = 0xffu;
-    if (pressed('S')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_Y] = 0xffu;
-    if (pressed('Z')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_A] = 0xffu;
-    if (pressed('X')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_B] = 0xffu;
-    if (pressed('Q')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_WHITE] = 0xffu;
-    if (pressed('W')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_BLACK] = 0xffu;
-    if (pressed('E')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] = 0xffu;
-    if (pressed('R')) gamepad->analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] = 0xffu;
+    load_keymap();
+    for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
+        if (!pressed(keymap[i].key)) continue;
+        if (keymap[i].button != 0u) gamepad->buttons |= keymap[i].button;
+        else gamepad->analog_buttons[keymap[i].analog] = 0xffu;
+    }
     trace_sample(gamepad, host, true);
     return true;
 }
