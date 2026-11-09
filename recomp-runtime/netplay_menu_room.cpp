@@ -56,6 +56,7 @@ void enterRoom(bool hosting)
     menu.lobby.typing = false;
     menu.lobby.showAddress = false;
     menu.lobby.checkedIn = Clock::time_point{}; // a host lists its room on the first tick
+    menu.lobby.rejoinAt = Clock::now();
     char stale[64]; // typed before the room opened, such as a game's Enter
     (void)recomp_input_keyboard_take_text(stale, sizeof stale);
     menu.screen = Screen::Room;
@@ -266,6 +267,15 @@ bool updateRoom(std::uint16_t keys)
         menu.lobby.checkedIn = Clock::now();
         recomp_netplay_match_host(&menu.net, menu.digest.data(), static_cast<std::uint8_t>(menu.delay),
             !room.joined && !menu.lobby.starting, menu.name.c_str());
+    }
+    // A relayed room that went silent may have lost its pair to a matchmaker restart. The host's
+    // heartbeat lists its room again under the same ID, so the joiner asks for it again.
+    if (room.joined || !menu.net.match.relay) {
+        menu.lobby.rejoinAt = Clock::now();
+    } else if (!menu.lobby.hosting && menu.lobby.found && menu.find.joining != 0u &&
+        Clock::now() - menu.lobby.rejoinAt >= std::chrono::seconds(3)) {
+        menu.lobby.rejoinAt = Clock::now();
+        recomp_netplay_match_join(&menu.net, menu.find.joining, menu.digest.data(), menu.name.c_str());
     }
     if (room.heard_new) {
         room.heard_new = false;

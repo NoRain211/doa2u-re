@@ -132,7 +132,8 @@ class Matchmaker:
             same_address = sum(1 for host in self.rooms if host[0] == sender[0])
             if len(self.rooms) >= MAX_ROOMS or same_address >= ROOMS_PER_ADDRESS:
                 return []
-            room_id = self.random_id()
+            # From the endpoint and nonce alone: after a restart the room has its id again, so its joiner can ask again.
+            room_id = int.from_bytes(hashlib.sha256(endpoint(sender) + nonce).digest()[:4], "big")
             while room_id == 0 or room_id in self.by_id:
                 room_id = self.random_id()
             room = self.rooms[sender] = self.by_id[room_id] = Room(room_id, sender, now)

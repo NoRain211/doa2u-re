@@ -41,7 +41,9 @@ in one place adds the detour to players far from it.
 
 Only in memory, and the log holds only the status counts:
 
-- Each room: a random id, the host's public endpoint as the server sees it,
+- Each room: an id made from the host's public endpoint and its socket's
+  nonce (random only if that one is taken), the endpoint as the server
+  sees it,
   the host's LAN endpoint, the build digest, name, input delay, whether
   its room is empty, its socket's nonce, the host's last round trip to the
   server, and when it was first and last heard. A room that is not heard
@@ -52,6 +54,12 @@ Only in memory, and the log holds only the status counts:
 
 Cookies are not stored; the server makes them again from a random secret
 it picks at start.
+
+A restart forgets the rooms and pairs. Each host's next heartbeat lists
+its room again under the same id, since the endpoint and nonce are the
+same. A relayed joiner whose room has been silent for 3 s says JOIN for
+that id again every 3 s, which makes the pair anew once the host's room
+is open.
 
 The room list shows ids, names, ages, delays and each host's round trip to
 the server, never an endpoint. Endpoints go only to the two players of a

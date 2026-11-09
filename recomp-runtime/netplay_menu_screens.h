@@ -54,6 +54,7 @@ struct LobbyState {
     std::string peerAddress;
     RecompNetplayRoom room{};
     Clock::time_point opened, startAt, saidAt, checkedIn;
+    Clock::time_point rejoinAt; // a relayed joiner: when the host was last heard, or JOIN last said again
     // Room chat: the last few lines as name and text, and the line being typed.
     std::vector<ChatLine> chat;
     bool typing = false;
