@@ -75,3 +75,15 @@ uint32_t recomp_sfd_subtitles(const uint8_t *bytes, uint32_t size, RecompSfdCue 
     return count;
 }
 
+bool recomp_sfd_sofdec_colors(const uint8_t *bytes, uint32_t size)
+{
+    static const char record[] = "SofdecStream";
+    for (uint32_t at = 0u; at + sizeof record - 1u <= size; ++at) {
+        if (memcmp(bytes + at, record, sizeof record - 1u) != 0) continue;
+        /* 26 stream entries of 64 bytes start 0x160 in; the video entry's bytes 0x20 and 0x21 read 1 and 3. */
+        for (uint32_t entry = at + 0x160u; entry < at + 0x160u + 26u * 0x40u && entry + 0x40u <= size; entry += 0x40u)
+            if (bytes[entry + 0x18u] == RECOMP_SFD_VIDEO) return bytes[entry + 0x20u] == 1u && bytes[entry + 0x21u] == 3u;
+        return false;
+    }
+    return false;
+}

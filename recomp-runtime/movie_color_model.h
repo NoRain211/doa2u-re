@@ -27,6 +27,9 @@ bool recomp_movie_color_convert(
     const int16_t *color_table, size_t table_entries,
     uint8_t *destination, size_t destination_bytes, size_t destination_pitch);
 
+/* Fills the table Sofdec's mwPlyFxCnvFrmARGB8888 converts with. */
+void recomp_movie_color_sofdec_table(int16_t table[RECOMP_MOVIE_COLOR_TABLE_ENTRIES]);
+
 #ifdef __cplusplus
 }
 #endif

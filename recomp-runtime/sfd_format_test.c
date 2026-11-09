@@ -69,6 +69,19 @@ int main(void)
     CHECK(recomp_sfd_subtitles(tags, at, cues, 1u) == 1u);
     /* A value running past the bytes ends the scan. */
     CHECK(recomp_sfd_subtitles(tags, at - 40u, cues, 4u) == 1u);
+
+    /* The SofdecStream video entry asks for Sofdec's own colors with bytes 1, 3.
+       Stream entries are 64 bytes from 0x160 with the stream type at 0x18; the
+       first (type 0xbf) is a non-video entry the scan must skip. */
+    static uint8_t header[0x200];
+    memcpy(header + 8, "SofdecStream", 12u);
+    header[8 + 0x160 + 0x18] = 0xbf;
+    header[8 + 0x1a0 + 0x18] = RECOMP_SFD_VIDEO;
+    header[8 + 0x1a0 + 0x20] = 1u;
+    CHECK(!recomp_sfd_sofdec_colors(header, sizeof header));
+    header[8 + 0x1a0 + 0x21] = 3u;
+    CHECK(recomp_sfd_sofdec_colors(header, sizeof header));
+    CHECK(!recomp_sfd_sofdec_colors(header, 8u + 0x1a0u + 0x30u));
     return 0;
 }
 
