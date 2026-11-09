@@ -72,9 +72,14 @@ std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
             if (!fs::is_regular_file(save.path() / "SaveMeta.xbx", error)) continue;
             // min(), not {}: libstdc++'s file clock starts in 2174, so {} is later than every file.
             auto changed = fs::file_time_type::min();
-            for (const auto &file : fs::directory_iterator(save.path(), error))
+            bool profile = false; // other saves have a SaveMeta.xbx too, and the other player refuses them
+            for (const auto &file : fs::directory_iterator(save.path(), error)) {
                 changed = std::max(changed, fs::last_write_time(file.path(), error));
-            if (latest.empty() || changed > newest) {
+                std::string name = file.path().filename().string();
+                for (char &c : name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                profile = profile || name == "UPS.DAT";
+            }
+            if (profile && (latest.empty() || changed > newest)) {
                 latest = save.path().lexically_relative(root).generic_string();
                 newest = changed;
             }

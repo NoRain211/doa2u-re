@@ -106,6 +106,11 @@ int main()
     write(mine / "UDATA/54430006/AAAAAAAAAAAA/ups.dat", other);
     write(mine / "UDATA/54430006/TitleMeta.xbx", beside);
     write(mine / "TDATA/54430006/title.dat", title);
+    // A newer save that is not a profile: the other player would refuse it, so it is never the one sent.
+    write(mine / "UDATA/54430006/BBBBBBBBBBBB/SaveMeta.xbx", meta(u"Name=Record\r\n"));
+    write(mine / "UDATA/54430006/BBBBBBBBBBBB/br.dat", data);
+    fs::last_write_time(mine / "UDATA/54430006/BBBBBBBBBBBB/br.dat",
+        fs::last_write_time(mine / "UDATA/54430006/0F515488395E/ups.dat") + std::chrono::hours(1));
     fs::last_write_time(mine / "UDATA/54430006/AAAAAAAAAAAA/ups.dat",
         fs::last_write_time(mine / "UDATA/54430006/0F515488395E/ups.dat") - std::chrono::hours(1));
     fs::last_write_time(mine / "UDATA/54430006/AAAAAAAAAAAA/SaveMeta.xbx",
