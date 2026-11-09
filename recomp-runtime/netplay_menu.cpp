@@ -606,3 +606,12 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
     }
     if (menu.screen != Screen::Room) recomp_netplay_close(&menu.net);
 }
+
+void recomp_netplay_menu_exit()
+{
+    // The exit can come from under the menu's own lock, so this only tries for it.
+    std::unique_lock<std::mutex> guard(menu.lock, std::try_to_lock);
+    if (menu.screen != Screen::Room) return;
+    recomp_netplay_room_leave(&menu.net);
+    if (menu.lobby.hosting) recomp_netplay_match_leave(&menu.net);
+}

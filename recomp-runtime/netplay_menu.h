@@ -30,5 +30,8 @@ int recomp_netplay_menu_display(const std::filesystem::path &storage);
 /* Opens the room a session came from again on the session's socket, which
    the menu takes back: the host listens, the joiner calls the host. */
 void recomp_netplay_menu_return_to_room(const RecompNetplay &socket);
+/* At exit: a player in a room says so, as B in the room does, so the other
+   player is not left calling and the matchmaker drops the listing at once. */
+void recomp_netplay_menu_exit();
 
 #endif
