@@ -113,7 +113,7 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
 | 1 HOST | host, every 5 s | digest, delay, open, name, LAN endpoint, round trip in ms (2 bytes, 0 unknown) | 2 HOSTED: room id, the host's public endpoint |
-| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, oldest first |
+| 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, newest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second |
@@ -140,7 +140,7 @@ One address holds one claim at a time, and the server takes at most 10
 JOINs from it between its once-a-second sweeps (up to 20 across one), so
 a single address cannot empty the list.
 
-A list entry is 42 bytes, so a list holds 12 rooms. The host's round trip
+A list entry is 42 bytes, so a list holds 11 rooms. The host's round trip
 is its own HOST to HOSTED time from its last heartbeat; a version 1 runner
 or server gets no answer from a version 2 one.
 

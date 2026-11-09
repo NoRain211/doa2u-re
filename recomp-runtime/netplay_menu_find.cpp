@@ -28,7 +28,7 @@ void find()
     menu.screen = Screen::Find;
 }
 
-// The listed rooms whose names pass the name check, oldest first, as many as fit.
+// The listed rooms whose names pass the name check, newest first as the server lists them, as many as fit.
 static std::vector<const RecompNetplayListedRoom *> shownRooms()
 {
     std::vector<const RecompNetplayListedRoom *> rooms;
@@ -147,7 +147,9 @@ void updateFind(std::uint16_t keys)
     if (menu.find.quick && menu.find.listOk) {
         menu.find.quick = false;
         if (count > 0) {
-            askToJoin((nearest != nullptr ? nearest : rooms.front())->id, now);
+            const auto oldest = std::max_element(rooms.begin(), rooms.end(),
+                [](const RecompNetplayListedRoom *a, const RecompNetplayListedRoom *b) { return a->age_s < b->age_s; });
+            askToJoin((nearest != nullptr ? nearest : *oldest)->id, now);
         } else {
             recomp_netplay_close(&menu.net);
             menu.screen = Screen::Versus; // where a failed host leaves its message
