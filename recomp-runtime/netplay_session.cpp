@@ -473,9 +473,15 @@ static void confirmSaveFrame()
     if (s.remote_count <= running)
         std::fprintf(stderr, "recomp netplay: save in frame %u waits for the other player's input\n", running);
     const auto began = std::chrono::steady_clock::now();
+    auto sent = began - std::chrono::seconds(1);
     while (s.remote_count <= running) {
         recomp_netplay_receive(&rollback.net, &s);
-        recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+        // As awaitFrontier repeats: a send each pass ran past the relay's 250 packets a second.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - sent >= std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) {
+            recomp_netplay_send(&rollback.net, &s, rollback.advantage);
+            sent = now;
+        }
         stalled(began);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
