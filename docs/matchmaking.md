@@ -180,8 +180,9 @@ session run the same way over either path.
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. A host that takes a player from that player's own
   room packet, rather than from PEER, sends one room packet for each it
-  receives until the player echoes one of the host's clocks, so a forged
-  room packet draws one packet back. After 5 s without an answer, or
+  receives until the player echoes one of the host's clocks, and seats
+  the player only then, so a forged room packet draws one packet back and
+  cannot hold the room. After 5 s without an answer, or
   with no endpoints, the runner relays. A runner that hears a relayed
   packet relays too, so a path that works one way only still ends with
   both sides on the relay. The plates show RELAY beside the ping.

@@ -626,6 +626,18 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             fprintf(stderr, "recomp netplay: reached the other player directly\n");
         }
         const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+        const uint8_t *clocks = at + 2u + RECOMP_NETPLAY_NAME_BYTES;
+        room->echo = get32(clocks);
+        room->echo_at_ms = now;
+        const uint32_t echo = get32(clocks + 4u), age = get16(clocks + 8u);
+        if (room->doubted) {
+            /* One of this side's clocks: from the last 3 s, at most 1 ms ahead since it is forced odd. */
+            const int32_t ago = (int32_t)((uint32_t)now - echo);
+            room->doubted = echo == 0u || ago < -1 || ago > (int32_t)ROOM_SILENCE_MS;
+            room->owed = true;
+            /* Not in the room yet: a forged address would hold the seat and hide the room from the list. */
+            if (room->doubted) continue;
+        }
         room->joined = true;
         m->busy = true;
         room->heard_ms = now;
@@ -636,23 +648,13 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         memcpy(room->name, at + 2u, length);
         room->name[length] = '\0';
         room->peer_id = (uint64_t)get32(sender + 4u) << 32 | get32(sender);
-        at += 2u + RECOMP_NETPLAY_NAME_BYTES;
-        room->echo = get32(at);
-        room->echo_at_ms = now;
-        const uint32_t echo = get32(at + 4u), age = get16(at + 8u);
-        if (room->doubted) {
-            /* One of this side's clocks: from the last 3 s, at most 1 ms ahead since it is forced odd. */
-            const int32_t ago = (int32_t)((uint32_t)now - echo);
-            room->doubted = echo == 0u || ago < -1 || ago > (int32_t)ROOM_SILENCE_MS;
-            room->owed = true;
-        }
         if (echo != 0u) {
             /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
             const int64_t ping = (int64_t)(int32_t)((uint32_t)now - echo) - (int64_t)age;
             room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
             room->pinged = true;
         }
-        at += 10u;
+        at = clocks + 10u;
         const uint32_t id = get32(at);
         const size_t said = at[4];
         /* One line a second; a line held back here comes again in a later repeat. */

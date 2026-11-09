@@ -175,7 +175,7 @@ typedef struct RecompNetplayRoom {
     uint32_t say_id, heard_id;
     uint64_t said_ms;
     /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
-       packet per packet it sends until it echoes one of this side's clocks. */
+       packet per packet it sends and is not joined until it echoes one of this side's clocks. */
     bool doubted, owed;
 } RecompNetplayRoom;
 
