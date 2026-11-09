@@ -435,6 +435,9 @@ int main(int argc, char **argv)
     launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
     launcher.choice[CPU_COSTUMES] = settings.random_cpu_costumes ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
+    // A plain exit keeps an untouched 16x/32x MSAA or ultrawide shape; play saves what the rows show.
+    const Settings loaded = settings;
+    const int shown_msaa = launcher.choice[MSAA], shown_screen = launcher.choice[WIDESCREEN];
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -550,6 +553,10 @@ int main(int argc, char **argv)
         settings.unlock_all = launcher.choice[UNLOCKS] == 0;
         settings.random_cpu_costumes = launcher.choice[CPU_COSTUMES] != 0;
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
+        if (result != 0) {
+            if (launcher.choice[MSAA] == shown_msaa) settings.msaa = loaded.msaa;
+            if (launcher.choice[WIDESCREEN] == shown_screen) settings.screen = loaded.screen;
+        }
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             if (result == 0) result = 1;
