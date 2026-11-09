@@ -28,7 +28,10 @@ static void openRouterPort(std::uint16_t port)
     }
     char lan[64];
     lanAddress = recomp_netplay_route_address(lan, sizeof lan) ? lan : "";
-    Upnp idle = Upnp::Idle;
+    Upnp idle = Upnp::Idle, left = Upnp::AskingLeft;
+    // A room left while its forward was being asked for takes that answer when it opens again.
+    // shortcut: the answer is for the port the first room asked with; ask again if the port setting can change in between.
+    if (upnpState.compare_exchange_strong(left, Upnp::Asking)) return;
     if (!upnpState.compare_exchange_strong(idle, Upnp::Asking)) return; // a forward is open or still being asked for
     std::thread([port] {
         char address[sizeof upnpAddress];
