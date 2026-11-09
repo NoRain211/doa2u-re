@@ -420,8 +420,10 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do {
             try FileManager.default.createDirectory(
                 at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Keys this launcher has no row for, such as game_source, stay as saved.
+            settings.merge(view.chosen) { $1 }
             let data = try JSONSerialization.data(
-                withJSONObject: view.chosen, options: [.prettyPrinted, .sortedKeys])
+                withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: settingsURL)
         } catch {
             NSAlert(error: error).runModal()
@@ -431,11 +433,14 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.terminate(nil)
     }
 
-    // Other settings save on play; Check At Start must also hold after a plain quit.
-    func keepCheckSetting() {
-        let check = view.checkAtStart.index == 1
-        guard !launched, check != boolSetting("checkUpdates", true) else { return }
-        settings["checkUpdates"] = check
+    // Settings hold after a plain quit too, so the game plays with them later.
+    func keepSettings() {
+        guard !launched else { return }
+        // A quit keeps an untouched 16x/32x MSAA or ultrawide shape; play saves what the rows show.
+        var kept = view.chosen
+        if view.msaa.index == samples.lastIndex(where: { $0 <= intSetting("msaa", 8) }) ?? 0 { kept["msaa"] = settings["msaa"] }
+        if view.screen.index == screens.firstIndex(of: screenSetting()) ?? 3 { kept["screen"] = settings["screen"] }
+        settings.merge(kept) { $1 }
         try? FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: settingsURL)
     }
@@ -447,13 +452,13 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        keepCheckSetting()
+        keepSettings()
         if !launched { exit(1) }
     }
 
     // AppKit exits 0 after terminate, so a Dock or Cmd-Q quit would start the game.
     func applicationWillTerminate(_ notification: Notification) {
-        keepCheckSetting()
+        keepSettings()
         exit(launched ? 0 : 1)
     }
 }

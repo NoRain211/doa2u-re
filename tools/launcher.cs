@@ -275,6 +275,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
+    readonly string savedShape; // a saved ultrawide "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
     // The newer version a check found, and whether a check or install is running on its thread.
@@ -330,6 +331,7 @@ class LauncherForm : Form
         int savedScreen = Array.IndexOf(Screens, Game.ScreenShape(settings)); // -1: an ultrawide "W:H"
         screen = new Row { Label = "Screen", Info = "Widescreen widens the game's own camera; its 16:9 menus keep their shape",
             Names = Screens, Index = savedScreen >= 0 ? savedScreen : 3, Default = 1 };
+        savedShape = savedScreen >= 0 ? null : Game.ScreenShape(settings);
         renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
@@ -664,11 +666,11 @@ class LauncherForm : Form
             using (var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + build.Id) { UseShellExecute = false, CreateNoWindow = true }))
                 kill.WaitForExit();
         }
-        // Other settings save with a build or play; Check At Start must also hold after a plain exit.
-        var saved = Game.LoadSettings();
-        if (Game.Bool(saved, "checkUpdates", true) == (checkAtStart.Index == 1)) return;
-        saved["checkUpdates"] = checkAtStart.Index == 1;
-        try { Game.SaveSettings(saved); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        // Settings hold after a plain exit too, so DOA2U.exe plays with them. An exit keeps
+        // the saved ultrawide shape; play sizes it to the current screen.
+        var kept = Settings();
+        if (screen.Index == 3 && savedShape != null) kept["screen"] = savedShape;
+        try { Game.SaveSettings(kept); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     static int Clamp(int value, int max) { return Math.Min(Math.Max(value, 0), max); }
