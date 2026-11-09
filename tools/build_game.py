@@ -189,8 +189,22 @@ def import_disc(iso, extractor=None):
         if json.loads(receipt.read_text(encoding="utf-8"))["iso_sha256"] == sha256(iso):
             print(f"Using the disc already extracted to {imported / 'disc'}", flush=True)
         else:
-            print(f"Removing the extraction of a different disc in {imported}", flush=True)
-            shutil.rmtree(imported)
+            # Stage first, so picking the wrong ISO cannot destroy a usable import.
+            staging = imported.with_name(imported.name + ".staging")
+            if staging.exists():
+                print(f"Removing the old staged extraction in {staging}", flush=True)
+                shutil.rmtree(staging)
+            bundled = ROOT / "tools/artifacts/extract-xiso.exe"
+            try:
+                extract(iso, staging, extractor or (bundled if bundled.is_file() else extract_xiso(ROOT)))
+                if not any(sha256(xbe) == XBE_SHA256 for xbe in (staging / "disc").glob("*.xbe")):
+                    raise ValueError("This build supports only Dead or Alive Ultimate (Xbox, USA) Disc 2")
+                shutil.rmtree(imported)
+                staging.rename(imported)
+                print(f"Swapped in the staged disc at {imported / 'disc'}", flush=True)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging)
     if not receipt.is_file():
         if imported.exists():
             print(f"Removing the unfinished extraction in {imported}", flush=True)

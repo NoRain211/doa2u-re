@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Synthetic source authentication and target-custody checks."""
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -147,6 +148,22 @@ class BuildTests(unittest.TestCase):
                     self.assertFalse((disc / "a.xbe").exists())
                     self.assertEqual(json.loads((root / "private/target.json").read_text())["xbe_path"],
                                      "private/imported-disc/disc/b.xbe")
+                # An unsupported ISO stages, fails clean, and leaves the good import untouched.
+                def bogus(iso, output, extractor):
+                    (output / "disc").mkdir(parents=True)
+                    (output / "receipt.json").write_text(json.dumps(dict(iso_sha256=sha256(iso))))
+                    (output / "disc/c.xbe").write_bytes(b"other")
+
+                iso.write_bytes(b"unwanted image")
+                with patch("build_game.ROOT", root), patch("build_game.extract", side_effect=bogus):
+                    with self.assertRaises(ValueError):
+                        import_disc(iso)
+                self.assertFalse((root / "private/imported-disc.staging").exists())
+                self.assertEqual((disc / "b.xbe").read_bytes(), b"game")
+                self.assertEqual((root / "private/imported-disc/receipt.json").read_text(),
+                                 json.dumps(dict(iso_sha256=hashlib.sha256(b"another image").hexdigest())))
+                self.assertEqual(selected_xbe(), (disc / "b.xbe").resolve())
+                iso.write_bytes(b"another image")
             with patch("build_game.ROOT", root), patch("build_game.XBE_SHA256", "0" * 64):
                 with self.assertRaises(ValueError):
                     import_disc(iso)
