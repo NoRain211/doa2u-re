@@ -48,7 +48,7 @@ Only in memory, and the log holds only the status counts:
   for 20 s is dropped. One address may hold 4 rooms, and the server holds
   4,096.
 - Each pair made by a join: the two public endpoints and nonces, kept 10
-  minutes past their last relayed packet.
+  minutes past their last relayed packet. One address may hold 16.
 
 Cookies are not stored; the server makes them again from a random secret
 it picks at start.
@@ -116,7 +116,7 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | 3 LIST | anyone | digest, padded to 512 bytes in all | 4 ROOMS: count, then room id, age in seconds, delay, name and the host's round trip per room, oldest first |
 | 5 JOIN | joiner | room id, digest, name, LAN endpoint | 6 PEER to each side: the other's public endpoint, its LAN endpoint when both share a public address, and name; or 7 GONE |
 | 8 LEAVE | host | none | none |
-| 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second |
+| 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second for a pair and 500 for an address |
 | 10 COOKIE | server | cookie | the client stores it and sends its last HOST, JOIN or LEAVE again with it |
 
 UDP source addresses can be forged, so neither side takes one on trust.

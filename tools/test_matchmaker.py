@@ -175,6 +175,20 @@ class MatchmakerTest(unittest.TestCase):
         forwarded = sum(len(self.send(relaying(), JOINER_AT, 3.5)) for _ in range(mm.RELAY_PER_SECOND + 10))
         self.assertEqual(forwarded, mm.RELAY_PER_SECOND)
 
+    def test_one_address_relays_and_pairs_only_so_much(self):
+        hosts = [(f"203.0.113.{i + 1}", 47701) for i in range(mm.PAIRS_PER_ADDRESS + 1)]
+        ids = [self.host(sender=host)[0] for host in hosts]
+        joiners = [(JOINER_AT[0], 50000 + i) for i in range(len(hosts))]
+        for i, joiner in enumerate(joiners):  # under the JOIN rate, and each new claim lets go of the last
+            kind = self.send(joining(ids[i]), joiner, 1.0 + i)[0][0][5]
+            self.assertEqual(kind, mm.PEER if i < mm.PAIRS_PER_ADDRESS else mm.GONE)
+        self.assertEqual(self.server.pair_counts[JOINER_AT[0]], mm.PAIRS_PER_ADDRESS)
+        forwarded = [sum(len(self.send(relaying(), joiner, 30.5)) for _ in range(mm.RELAY_PER_SECOND))
+                     for joiner in joiners[:3]]
+        self.assertEqual(forwarded, [mm.RELAY_PER_SECOND, mm.RELAY_PER_SECOND, 0])
+        self.send(listing(), JOINER_AT, 30.5 + mm.PAIR_SECONDS + 1.0)  # a sweep
+        self.assertEqual((self.server.pairs, self.server.pair_counts), ({}, {}))
+
     def test_a_sender_without_a_cookie_gets_one_and_nothing_is_stored(self):
         room_id, _ = self.host()
         forged = ("192.0.2.1", 1)
