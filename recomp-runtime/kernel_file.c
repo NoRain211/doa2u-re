@@ -453,6 +453,15 @@ static bool save_write_allowed(const FileHandleEntry *entry, uint32_t owner)
     return true;
 }
 
+/* What a session's game sees of a host file's attributes: the directory bit
+   or normal. Windows adds archive, and index or cloud bits by folder, that
+   POSIX hosts never report, and both sides of a session must see the same. */
+static uint32_t guest_attributes(uint32_t host)
+{
+    if (recomp_save_session == NULL) return host;
+    return (host & FILE_ATTRIBUTE_DIRECTORY) != 0u ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+}
+
 static uint32_t register_file_handle(
     HANDLE host_handle,
     FileHandleKind kind,
@@ -544,7 +553,7 @@ static uint32_t register_file_handle(
                             (uint64_t)data.nFileSizeHigh << 32u;
                         entry.size = size;
                         entry.allocation_size = (size + 4095u) & ~4095ull;
-                        entry.attributes = data.dwFileAttributes;
+                        entry.attributes = guest_attributes(data.dwFileAttributes);
                         if (!recomp_directory_add(
                                 &file_handles[i].directory, &entry)) {
                             fprintf(stderr, "recomp kernel: directory '%s' lists only its first %u entries\n",
@@ -1783,7 +1792,7 @@ static void bridge_nt_query_information_file(void)
         file_size = (uint64_t)size.QuadPart;
         policy = profile_metadata ? "host-profile-file-information" : "host-file-information";
         const uint32_t attributes = profile_metadata
-            ? host.FileAttributes : FILE_ATTRIBUTE_NORMAL;
+            ? guest_attributes(host.FileAttributes) : FILE_ATTRIBUTE_NORMAL;
         if (profile_metadata && recomp_save_session == NULL && file_information != 0u &&
             ((file_information_class == FILE_BASIC_INFORMATION && length >= 0x28u) ||
              (file_information_class == FILE_NETWORK_OPEN_INFORMATION && length >= 0x38u))) {

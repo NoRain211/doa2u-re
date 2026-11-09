@@ -719,8 +719,10 @@ BOOL GetFileAttributesExA(
     timespec_to_filetime(&STAT_BTIME(st), &data->ftCreationTime);
     timespec_to_filetime(&STAT_ATIME(st), &data->ftLastAccessTime);
     timespec_to_filetime(&STAT_MTIME(st), &data->ftLastWriteTime);
-    data->nFileSizeHigh = (DWORD)((uint64_t)st.st_size >> 32u);
-    data->nFileSizeLow = (DWORD)((uint64_t)st.st_size & 0xffffffffu);
+    /* Windows reports a directory as empty; st_size is the file system's own figure. */
+    const uint64_t size = S_ISDIR(st.st_mode) ? 0u : (uint64_t)st.st_size;
+    data->nFileSizeHigh = (DWORD)(size >> 32u);
+    data->nFileSizeLow = (DWORD)(size & 0xffffffffu);
     return TRUE;
 }
 
@@ -889,8 +891,10 @@ BOOL FindNextFileA(
         timespec_to_filetime(&STAT_BTIME(st), &lpFindFileData->ftCreationTime);
         timespec_to_filetime(&STAT_ATIME(st), &lpFindFileData->ftLastAccessTime);
         timespec_to_filetime(&STAT_MTIME(st), &lpFindFileData->ftLastWriteTime);
-        lpFindFileData->nFileSizeHigh = (DWORD)((uint64_t)st.st_size >> 32u);
-        lpFindFileData->nFileSizeLow = (DWORD)((uint64_t)st.st_size & 0xffffffffu);
+        /* Windows reports a directory as empty; st_size is the file system's own figure. */
+        const uint64_t size = S_ISDIR(st.st_mode) ? 0u : (uint64_t)st.st_size;
+        lpFindFileData->nFileSizeHigh = (DWORD)(size >> 32u);
+        lpFindFileData->nFileSizeLow = (DWORD)(size & 0xffffffffu);
         return TRUE;
     }
     last_error = 18; // ERROR_NO_MORE_FILES
