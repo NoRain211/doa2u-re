@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Extract a user-owned Xbox ISO locally with XboxDev extract-xiso."""
 import argparse
+import ctypes
 import hashlib
 import json
+import locale
 import os
 from pathlib import Path
 import re
@@ -61,6 +63,20 @@ def run_logged(args, log_path, cwd=None, on_line=None, redact=True):
             raise subprocess.CalledProcessError(code, args)
 
 
+def narrow_encoding():
+    """The code page a narrow-character program reads names in; UTF-8 mode hides it from locale."""
+    return f"cp{ctypes.windll.kernel32.GetACP()}" if os.name == "nt" else sys.getfilesystemencoding()
+
+
+def read_listing(path):
+    """extract-xiso prints the image path in that code page, not UTF-8."""
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode(narrow_encoding(), "replace")
+
+
 def listing_files(text):
     files, seen = {}, set()
     count = None
@@ -100,6 +116,16 @@ def listing_files(text):
     return files
 
 
+def check_path(path):
+    """extract-xiso reads narrow paths, so Windows hands it the ANSI form of a name."""
+    try:
+        str(path).encode(narrow_encoding())
+    except UnicodeEncodeError:
+        raise ValueError(f"extract-xiso reads names in {narrow_encoding()}, which cannot store "
+                         "every character of the ISO or output path; move both to a path that "
+                         "code page can store")
+
+
 def extract(iso, output, tool):
     private = package_root() / "private"
     private.mkdir(exist_ok=True)
@@ -113,6 +139,8 @@ def extract(iso, output, tool):
     iso = iso.resolve(strict=True)
     if not iso.is_file():
         raise ValueError("Input must be an ISO file")
+    check_path(iso)
+    check_path(output)
     executable = shutil.which(str(tool))
     if not executable:
         raise ValueError("Install XboxDev extract-xiso or pass --extractor <executable>")
@@ -122,7 +150,7 @@ def extract(iso, output, tool):
     original_hash = sha256(iso)
     # Redaction could rewrite a disc folder named like the user, and listing_files parses this log.
     run_logged([executable, "-l", iso], output / "listing.log", redact=False)
-    files = listing_files((output / "listing.log").read_text(encoding="utf-8", errors="strict"))
+    files = listing_files(read_listing(output / "listing.log"))
     if shutil.disk_usage(output).free < sum(files.values()):
         raise ValueError("Not enough disk space for the listed files")
     disc = output / "disc"
