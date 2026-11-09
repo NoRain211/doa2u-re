@@ -92,6 +92,7 @@ bool recomp_d3d8_resource_inline_texture(uint32_t stage, RecompD3dTextureDesc *o
     return true;
 }
 void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw) { (void)draw; }
+void recomp_d3d8_fit_3d_viewport(RecompD3dPresenterDrawCommand *draw) { (void)draw; }
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
 {
     ++coverage_queries;

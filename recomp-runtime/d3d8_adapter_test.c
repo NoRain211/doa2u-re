@@ -385,6 +385,29 @@ static int fit_tests(void)
         draw.layer_scale[0] == 1.0f && fabsf(draw.layer_scale[1] - 0.9f) < 1e-5f && draw.scissor[0] == 0 &&
         draw.scissor[1] >= 23 && draw.scissor[1] <= 24 && draw.scissor[2] == 720 &&
         draw.scissor[3] >= 456 && draw.scissor[3] <= 457);
+    /* A 3D view in a menu panel moves with the panel and keeps its size. */
+    RecompD3dPresenterDrawCommand view = {0};
+    view.target.color.width = 720u;
+    view.target.color.height = 480u;
+    const float panel[6] = {100.0f, 0.0f, 200.0f, 100.0f, 0.0f, 1.0f};
+    memcpy(view.viewport, panel, sizeof panel);
+    view.has_scissor = true;
+    const int32_t panel_clip[4] = {100, 0, 300, 100};
+    memcpy(view.scissor, panel_clip, sizeof panel_clip);
+    view.program_count = 1u;
+    view.program_constants[58][0] = 100.0f;
+    view.program_constants[59][0] = 200.0f;
+    widescreen_aspect = 32.0f / 9.0f;
+    recomp_d3d8_fit_3d_viewport(&view);
+    passed &= expect("ultrawide moves a 3D panel view toward the center with its scissor",
+        view.viewport[0] == 180.0f && view.viewport[2] == 200.0f && view.viewport[1] == 0.0f &&
+        view.viewport[3] == 100.0f && view.scissor[0] == 230 &&
+        view.scissor[2] == 330 && view.program_constants[59][0] == 280.0f);
+    view.viewport[0] = 0.0f;
+    view.viewport[2] = 720.0f;
+    recomp_d3d8_fit_3d_viewport(&view);
+    passed &= expect("a full-width 3D view stays", view.viewport[0] == 0.0f && view.viewport[2] == 720.0f &&
+        view.viewport[1] == 0.0f && view.viewport[3] == 100.0f);
     widescreen_aspect = 16.0f / 9.0f;
     return passed;
 }

@@ -1752,6 +1752,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
         memcpy(draw->scissor, clip, sizeof clip);
     }
     if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
+    else recomp_d3d8_fit_3d_viewport(draw);
     const RecompD3dRenderStateModel *state = recomp_d3d8_state_model();
     const bool native_line = primitive == 2u && !program && draw->fvf == 0x42u &&
         *recomp_memory_u32(device + 0xf88u) == 0u && *recomp_memory_u32(0x3553f8u) == 0u;
