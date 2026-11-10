@@ -525,7 +525,8 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
     if (!menu.installed || port >= RECOMP_INPUT_PORT_COUNT) return;
     std::lock_guard<std::mutex> guard(menu.lock);
     const std::uint16_t keys = keysOf(*pad);
-    const std::uint16_t edges = keys & ~menu.held[port];
+    const std::uint16_t edges = menu.settling[port] ? 0u : keys & ~menu.held[port];
+    menu.settling[port] = false;
     menu.held[port] = keys;
     if (menu.screen == Screen::Closed) {
         if (menu.swallow) {
@@ -586,6 +587,9 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
     menu.openedBy = 0u;
     menu.message.clear();
     menu.covering = true;
+    // The menu sees no pads during a session, so a B still held from leaving Versus would leave the room.
+    std::fill(std::begin(menu.settling), std::end(menu.settling), true);
+    menu.pressed = 0u;
     // The socket, its peer and how it reaches the peer carry over; the host's room greets the last joiner first.
     menu.net = RecompNetplay{};
     menu.net.socket = socket.socket;
