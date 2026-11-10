@@ -573,12 +573,14 @@ int main()
             answers += drainKind(forger, 5u);
         }
         check("doubted peer answered one for one and not seated", !doubtedRoom.joined && answers == 1);
-        // A joiner at its own address takes the seat while the forged packets keep coming.
+        // A joiner at its own address takes the seat while the forged packets keep coming, also
+        // when a forged one is the last the host reads each tick.
         RecompNetplayRoom realRoom{};
         const bool called = recomp_netplay_open(&joiner, 0u, "127.0.0.1", 47643u);
         for (int i = 0; i < 100 && !(doubtedRoom.joined && realRoom.joined); ++i) {
             sendFrom(forger, 47643u, roomPacket);
             recomp_netplay_room_tick(&joiner, &realRoom, digest, "JOINER", false, false);
+            sendFrom(forger, 47643u, roomPacket);
             recomp_netplay_room_tick(&host, &doubtedRoom, digest, "HOST", false, false);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }

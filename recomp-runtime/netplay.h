@@ -174,10 +174,9 @@ typedef struct RecompNetplayRoom {
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
     uint64_t said_ms;
-    /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
-       packet per packet it sends and is not joined until it echoes one of this side's clocks.
-       salt is added to the clocks sent to that peer and differs for each address. */
-    bool doubted, owed;
+    /* Added to the clocks this side sends. A host that took its player from that player's own
+       room packet, whose address may be forged, uses a number that differs for each address:
+       the player was taken only once it echoed such a clock. */
     uint32_t salt;
 } RecompNetplayRoom;
 
