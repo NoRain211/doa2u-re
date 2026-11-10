@@ -105,10 +105,11 @@ These steps set up one like it.
 7. In Cloudflare DNS, add an A record such as `mm` with the VM's public
    address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
    proxied name would not reach a UDP server. Probe the name too.
-8. Leave MATCHMAKER on DEFAULT on two machines on different home
-   networks. HOST ONLINE should say LISTED ON FIND MATCH and the
-   other should quick-match it, which is also the first test of punching
-   through real routers.
+8. Set MATCHMAKER in NETPLAY SETTINGS to the name from step 7 and port
+   47700 on two machines on different home networks; DEFAULT would test
+   the default server instead. HOST ONLINE should say LISTED ON FIND
+   MATCH and the other should quick-match it, which is also the first
+   test of punching through real routers.
 
 ## Packets
 
