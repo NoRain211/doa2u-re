@@ -168,7 +168,9 @@ class MatchmakerTest(unittest.TestCase):
         self.assertEqual(self.send(relaying(), JOINER_AT, 2.0), [])
         self.assertEqual(self.send(joining(room_id), JOINER_AT, 2.0)[0][0][5], mm.GONE)  # until the host's heartbeat
         self.assertEqual(self.host(now=3.0)[0], room_id)
-        self.send(joining(room_id), JOINER_AT, 4.0)
+        answers = self.send(joining(room_id), JOINER_AT, 4.0)  # both sides hear PEER again
+        self.assertEqual(sorted(to for _, to in answers), sorted([HOST_AT, JOINER_AT]))
+        self.assertTrue(all(packet[5] == mm.PEER for packet, _ in answers))
         self.assertEqual(self.send(relaying(), JOINER_AT, 5.0), [(relayed(HOST_AT), HOST_AT)])
 
     def test_relay_only_hides_endpoints(self):
