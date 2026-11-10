@@ -599,9 +599,25 @@ int main()
             tickRoom(host, doubtedRoom, digest, 1);
         }
         check("a joiner gets past a forged one", called && realRoom.joined && doubtedRoom.joined &&
-            std::strcmp(doubtedRoom.name, "JOINER") == 0);
+            std::strcmp(doubtedRoom.name, "JOINER") == 0 && host.match.direct);
         recomp_netplay_close(&joiner);
         recomp_netplay_close(&forger);
+        recomp_netplay_close(&host);
+    }
+
+    // A host back from a session gives up on a last joiner who never returns, and lets another player in.
+    {
+        RecompNetplayRoom backRoom{};
+        backRoom.hosting = true;
+        const bool opened = recomp_netplay_listen(&host, 47643u);
+        host.peer_address = htonl(0x7f000001u);
+        host.peer_port = htons(47642u);
+        recomp_netplay_room_hold(&host, &backRoom);
+        recomp_netplay_room_tick(&host, &backRoom, digest, "HOST", false, false);
+        const bool kept = host.peer_port != 0u && host.match.busy;
+        backRoom.held_until_ms -= 10001u; // 10 s on
+        recomp_netplay_room_tick(&host, &backRoom, digest, "HOST", false, false);
+        check("a returned host drops a joiner who stays away", opened && kept && host.peer_port == 0u && !host.match.busy);
         recomp_netplay_close(&host);
     }
 
@@ -724,6 +740,17 @@ int main()
             recomp_netplay_match_poll(&room);
         }
         check("forged matchmaker packet ignored", opened && ignored && room.match.met);
+
+        // Relayed packets are not from a peer who proved its own address: the server paired someone else since.
+        std::vector<std::uint8_t> wrapped = {'D', '2', 'M', 'M', 2u, 9u};
+        wrapped.insert(wrapped.end(), room.match.nonce, room.match.nonce + RECOMP_NETPLAY_TOKEN_BYTES);
+        wrapped.resize(wrapped.size() + 4u);
+        room.match.direct = true;
+        sendFrom(server, 47645u, wrapped);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        recomp_netplay_match_poll(&room);
+        check("relay ignored beside a direct peer", !room.match.relay);
+        room.match.direct = false;
 
         // A HOST without a cookie draws one, and the room says HOST again with it.
         const auto heardHost = [&] {

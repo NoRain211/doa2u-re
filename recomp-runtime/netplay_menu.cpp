@@ -598,6 +598,7 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
     menu.cursor = menu.lobby.hosting ? VersusHost : menu.lobby.found ? VersusFind : VersusJoin;
     if (menu.lobby.hosting) {
         host(true, menu.lobby.listing);
+        if (menu.screen == Screen::Room) recomp_netplay_room_hold(&menu.net, &menu.lobby.room);
     } else if (menu.lobby.found) {
         if (nameAllowed()) enterRoom(false); // a matched joiner has no address to call
     } else {
