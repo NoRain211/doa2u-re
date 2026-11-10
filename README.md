@@ -155,8 +155,10 @@ change, for example `{"a": "Space", "b": "Ctrl", "start": "Tab"}`. Buttons are
 up, down, left, right, start, back, a, b, x, y, white, black, ltrig and rtrig;
 keys are A-Z, 0-9, F1-F10, F12, Up, Down, Left, Right, Enter, Backspace,
 Space, Tab, Shift, Ctrl and Esc. Buttons you leave out keep their keys. F11
-and Alt+Enter are reserved for fullscreen and cannot be bound. The free
-camera still reads its own fixed keys.
+and Alt+Enter are reserved for fullscreen and cannot be bound. F3 keeps its
+readout and, with the free camera turned on, F1, F12 and P keep their jobs,
+so a button bound to one of those does both. The free camera's own keys stay
+fixed, and while it flies the keyboard is the camera's.
 
 Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
 playing.

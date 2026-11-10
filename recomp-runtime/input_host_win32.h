@@ -21,9 +21,12 @@ bool recomp_input_host_pad_connected(uint32_t port);
 typedef void (*RecompInputCaptureHook)(uint32_t port, RecompInputGamepad *gamepad, uint16_t stick_clicks);
 void recomp_input_host_set_capture_hook(RecompInputCaptureHook hook);
 
-/* Keys the runtime reads for itself. Some (A S Z X Q W E R, the arrows,
-   Return, Backspace) also press pad buttons for the game; the free camera
-   leaves those buttons out while it flies. */
+/* The pad buttons the keyboard pressed in port 0's last sample: the default
+   keys' (A S Z X Q W E R, the arrows, Return, Backspace) or RECOMP_KEYMAP's.
+   The free camera leaves them out while it flies. */
+void recomp_input_host_keyboard_buttons(RecompInputGamepad *pressed_buttons);
+
+/* Keys the runtime reads for itself. */
 typedef enum RecompInputHostKey {
     RECOMP_INPUT_HOST_KEY_F1,
     RECOMP_INPUT_HOST_KEY_GRAVE,

@@ -291,6 +291,11 @@ if(WIN32)
 elseif(SDL3_FOUND)
     add_test(NAME recomp-runtime-input-host-sdl COMMAND recomp_input_host_test)
 endif()
+if(TEST recomp-runtime-input-host-sdl)
+    add_test(NAME recomp-runtime-input-host-keymap COMMAND recomp_input_host_test keymap)
+    set_tests_properties(recomp-runtime-input-host-keymap PROPERTIES
+        ENVIRONMENT "RECOMP_KEYMAP=a=20,start=74;RECOMP_TEST_FOCUSED=1")
+endif()
 if(WIN32)
     add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_xtalk_xapo.cpp
         audio_capture_xapo.cpp dsound_hrtf.c)

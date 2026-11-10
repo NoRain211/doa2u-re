@@ -110,6 +110,21 @@ static void load_keymap(void)
     }
 }
 
+/* RECOMP_TEST_FOCUSED gives a test, which has no window, the keyboard. */
+static bool test_focused(void)
+{
+    static int set = -1;
+    if (set < 0) set = getenv("RECOMP_TEST_FOCUSED") != NULL;
+    return set != 0;
+}
+
+static RecompInputGamepad keyboard_buttons; /* what the keymap pressed in port 0's last sample */
+
+void recomp_input_host_keyboard_buttons(RecompInputGamepad *pressed_buttons)
+{
+    *pressed_buttons = keyboard_buttons;
+}
+
 static const char *test_unplug_file(void)
 {
     static const char *path;
@@ -322,7 +337,8 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
         /* The keyboard drives port 0 only. */
         return host != NULL;
     }
-    if (!focused()) {
+    memset(&keyboard_buttons, 0, sizeof keyboard_buttons);
+    if (!focused() && !test_focused()) {
         recomp_input_keyboard_reset();
         trace_sample(gamepad, host, false);
         return true;
@@ -332,9 +348,12 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
     load_keymap();
     for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
         if (!pressed(keymap[i].key)) continue;
-        if (keymap[i].button != 0u) gamepad->buttons |= keymap[i].button;
-        else gamepad->analog_buttons[keymap[i].analog] = 0xffu;
+        if (keymap[i].button != 0u) keyboard_buttons.buttons |= keymap[i].button;
+        else keyboard_buttons.analog_buttons[keymap[i].analog] = 0xffu;
     }
+    gamepad->buttons |= keyboard_buttons.buttons;
+    for (unsigned i = 0; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; ++i)
+        gamepad->analog_buttons[i] |= keyboard_buttons.analog_buttons[i];
     trace_sample(gamepad, host, true);
     return true;
 }
