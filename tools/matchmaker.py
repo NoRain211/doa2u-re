@@ -33,6 +33,8 @@ MAX_ROOMS = 4096
 ROOMS_PER_ADDRESS = 4
 JOINS_PER_SECOND = 10  # per address; a joiner repeats JOIN until it hears
 RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while waiting for the other player
+RELAY_PER_ADDRESS = 2 * RELAY_PER_SECOND  # a second, so one address cannot relay through every pair it makes
+PAIRS_PER_ADDRESS = 16  # each lasts PAIR_SECONDS; without a cap one address adds 10 a second
 MAX_RELAY = 1200
 
 HOST_BODY = struct.Struct(">64sBBB32s6sH")  # digest, delay, open, name length, name, LAN endpoint, round trip
@@ -64,6 +66,12 @@ def peer(nonce, public, lan, name):
     return header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0")
 
 
+def over(counts, address, cap):
+    """Counts one more for the address since the last sweep; true once that passes the cap."""
+    counts[address] = counts.get(address, 0) + 1
+    return counts[address] > cap
+
+
 class Room:
     def __init__(self, room_id, host, now):
         self.id, self.host, self.born = room_id, host, now
@@ -83,6 +91,7 @@ class Matchmaker:
         self.pairs = {}  # by endpoint, both ways
         self.claims = {}  # the room each joining address holds; one each, so one address cannot hide the list
         self.join_counts = {}  # JOINs per address since the last sweep
+        self.relay_counts = {}  # RELAYs per address since the last sweep
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
         self.secret = os.urandom(32)  # cookies stop working across a restart; clients get new ones
@@ -154,13 +163,13 @@ class Matchmaker:
 
     def join(self, body, sender, nonce, now):
         room_id, digest, length, name, lan = JOIN_BODY.unpack(body)
-        count = self.join_counts[sender[0]] = self.join_counts.get(sender[0], 0) + 1
-        if count > JOINS_PER_SECOND:
+        if over(self.join_counts, sender[0], JOINS_PER_SECOND):
             return []
         room = self.by_id.get(room_id)
         # A joiner asks again until it hears; its own claim answers again.
         claimed = room is not None and room.claimed_until > now and room.claimer != sender
-        if length > NAME or room is None or room.digest != digest or not room.open or claimed:
+        full = sender not in self.pairs and sum(1 for end in self.pairs if end[0] == sender[0]) >= PAIRS_PER_ADDRESS
+        if length > NAME or room is None or room.digest != digest or not room.open or claimed or full:
             return [(header(GONE) + nonce + struct.pack(">I", room_id), sender)]
         if room.claimer != sender or room.claimed_until <= now:
             held = self.claims.get(sender[0])
@@ -189,7 +198,8 @@ class Matchmaker:
         if int(now) != pair.second:
             pair.second, pair.count = int(now), 0
         pair.count += 1
-        if pair.count > RELAY_PER_SECOND:
+        # The address is counted only past the pair's own cap, so a pair over it cannot use up the address's share.
+        if pair.count > RELAY_PER_SECOND or over(self.relay_counts, sender[0], RELAY_PER_ADDRESS):
             self.over_cap += 1
             return []
         pair.used = back.used = now
@@ -205,6 +215,7 @@ class Matchmaker:
     def sweep(self, now):
         self.swept = now
         self.join_counts.clear()
+        self.relay_counts.clear()
         for room in [room for room in self.rooms.values() if now - room.seen > ROOM_SECONDS]:
             self.remove(room)
         for address in [address for address, room in self.claims.items() if room.claimed_until <= now]:
