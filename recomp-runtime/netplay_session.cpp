@@ -180,13 +180,27 @@ static void drawNotice(const RecompD3dPresenterTarget *target)
     recomp_overlay_submit(target, recomp_overlay_display_aspect());
 }
 
+static void presentNotice()
+{
+    notice.shown = std::chrono::steady_clock::now();
+    recomp_d3d8_present_overlay(drawNotice);
+}
+
+/* A wait presents its panel again every 100 ms. The window answers only then: the SDL
+   presenter reads keys and the close button when it presents, and a closed window ends the
+   run at the next present. */
+static bool noticeDue()
+{
+    return std::chrono::steady_clock::now() - notice.shown >= std::chrono::milliseconds(100);
+}
+
 // Presents the panel now. A hint adds a third line; an empty one keeps the taller panel, covering an older hint.
 static void showNotice(const char *title, std::string detail, const char *hint = nullptr)
 {
     notice.title = title;
     notice.detail = std::move(detail);
     notice.hint = hint;
-    recomp_d3d8_present_overlay(drawNotice);
+    presentNotice();
 }
 
 /* A stalled session shows a notice over its last frame after 1 s, which also
@@ -209,11 +223,10 @@ static void stalled(std::chrono::steady_clock::time_point began)
     // Contact heard during this wait starts its 15 s afresh.
     const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
     if (waited > grace) endSession("rollback:peer-timeout");
-    if (waited < seconds(1) || now - notice.shown < milliseconds(100)) return;
+    if (waited < seconds(1) || !noticeDue()) return;
     if (!rollback.interrupted && heard)
         std::fprintf(stderr, "recomp netplay: the other player went quiet at frame %u\n", rollback.session.frame);
     rollback.interrupted = true;
-    notice.shown = now;
     showNotice(heard ? "WAITING FOR OPPONENT" : "CONNECTING",
         "ENDING THE SESSION IN " + std::to_string(duration_cast<seconds>(grace - waited).count() + 1) + " S");
 }
@@ -931,17 +944,12 @@ bool recomp_netplay_session_load_replay(const std::string &path)
     return enterSession(info.delay, info.player);
 }
 
-// B, Back or Esc, pressed while STARTING MATCH shows; one already held must be let go first.
+// One pass of the STARTING MATCH wait, which presents nothing itself: keeps its notice up, then
+// tells whether B, Back or Esc was pressed. One already held must be let go first.
 static bool cancelHeld;
-static bool cancelPressed()
+static bool startWaitCancelled()
 {
-    // The lobby presents nothing itself. The SDL presenter reads keys and the close button
-    // only when it presents, and a closed window ends the run at the next present.
-    const auto now = std::chrono::steady_clock::now();
-    if (now - notice.shown >= std::chrono::milliseconds(100)) {
-        notice.shown = now;
-        recomp_d3d8_present_overlay(drawNotice);
-    }
+    if (noticeDue()) presentNotice();
     std::uint8_t keys[RECOMP_INPUT_KEY_COUNT];
     recomp_input_keyboard_sample(keys); // before the pad, which would take the press edges
     RecompInputGamepad pad{};
@@ -973,7 +981,7 @@ static void startRoomSession()
     else std::fprintf(stderr, "recomp netplay: joining the host\n");
     showNotice("STARTING MATCH", hosting ? "WAITING FOR THE OTHER PLAYER" : "CONNECTING TO THE HOST", "B / ESC CANCEL");
     cancelHeld = true;
-    if (!joinLobby(hosting, delay, cancelPressed)) endSession("netplay:session-failed");
+    if (!joinLobby(hosting, delay, startWaitCancelled)) endSession("netplay:session-failed");
     showNotice("STARTING MATCH", "LOADING VERSUS", "");
     host.reboot();
 }
