@@ -81,7 +81,8 @@ struct Menu : RecompNetplaySettings {
     std::string digest;
     std::function<std::string()> ownName;
     float aspect = 4.0f / 3.0f;
-    std::mutex lock; // the game may sample pads on another guest thread than it presents from
+    // The game may sample pads on another guest thread than it presents from. Recursive and timed for the exit hook.
+    std::recursive_timed_mutex lock;
     Screen screen = Screen::Closed;
     std::uint16_t held[RECOMP_INPUT_PORT_COUNT]{};
     std::uint16_t pressed = 0u;
