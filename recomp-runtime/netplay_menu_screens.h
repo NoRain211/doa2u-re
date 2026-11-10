@@ -87,6 +87,8 @@ struct Menu : RecompNetplaySettings {
     std::mutex lock;
     Screen screen = Screen::Closed;
     std::uint16_t held[RECOMP_INPUT_PORT_COUNT]{};
+    // Back from a session: what a port holds at its first sample must be let go before it counts.
+    bool settling[RECOMP_INPUT_PORT_COUNT]{};
     std::uint16_t pressed = 0u;
     std::uint16_t aliased = 0u; // the pressed face buttons that came from the keyboard's Z, X, A, S and Backspace
     unsigned repeat = 0u, frame = 0u;
