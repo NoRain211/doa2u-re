@@ -144,7 +144,7 @@ class Matchmaker:
     def list(self, digest, sender, nonce, now):
         rooms = sorted((room for room in self.rooms.values()
                         if room.digest == digest and room.open and room.claimed_until <= now and room.host != sender),
-                       key=lambda room: room.born)
+                       key=lambda room: room.born, reverse=True)  # newest first: a full list would never show a new room
         rooms = rooms[:(LIST_BYTES - 7 - TOKEN) // ENTRY.size]
         answer = header(ROOMS) + nonce + bytes((len(rooms),))
         for room in rooms:
