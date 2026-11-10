@@ -32,7 +32,8 @@ holds no addresses or names.
 `--probe HOST:PORT` asks a running server for its list and says whether
 and how fast it answered, exiting 1 when it did not.
 
-It is not deployed yet; [Deploying](#deploying) has the plan. The relay
+MATCHMAKER on DEFAULT uses a deployed server; [Deploying](#deploying)
+says how it is set up. The relay
 costs bandwidth: a session sends about 60 packets of about 100 bytes a
 second each way, which is about 45 MB an hour for a relayed match. A relay
 in one place adds the detour to players far from it.
@@ -67,8 +68,9 @@ join, and `--relay-only` sends none.
 
 ## Deploying
 
-The plan is an Oracle Cloud Always Free VM in a US region, named through
+The default server is an Oracle Cloud Always Free VM, named through
 Cloudflare DNS, in the normal mode: punching first, relay when it fails.
+These steps set up one like it.
 
 1. Sign up with a US home region. Always Free compute is created only in
    the home region, so treat the choice as permanent; the region nearest
