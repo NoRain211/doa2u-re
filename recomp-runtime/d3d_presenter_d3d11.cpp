@@ -248,6 +248,8 @@ struct RecompD3dPresenter {
     bool owns_window_class = false;
     HWND window = nullptr;
     bool close_requested = false;
+    bool fullscreen = false;           // borderless over the monitor; F11 and Alt+Enter toggle it
+    WINDOWPLACEMENT windowed_placement{}; // where leaving fullscreen returns; length 0 = unset
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
@@ -430,12 +432,55 @@ D3D11_VIEWPORT fitViewport(float aspect, UINT width, UINT height)
     return {std::floor((width - w) / 2.0f), std::floor((height - h) / 2.0f), w, h, 0.0f, 1.0f};
 }
 
+/* Borderless fullscreen on the window's monitor. The swap chain follows the
+   client size on the next present. A window that started fullscreen (scale > 1)
+   leaves it for a centered 480-line window. */
+void toggleFullscreen(RecompD3dPresenter *presenter)
+{
+    HWND window = presenter->window;
+    if (!presenter->fullscreen) {
+        MONITORINFO monitor{sizeof monitor};
+        GetWindowPlacement(window, &presenter->windowed_placement);
+        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(window, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+            monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+            SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    } else {
+        WINDOWPLACEMENT &placement = presenter->windowed_placement;
+        if (placement.length == 0u) {
+            RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
+                static_cast<LONG>(presenter->config.height)};
+            AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
+            const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
+            const LONG left = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
+            const LONG top = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+            placement.length = sizeof placement;
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = {left, top, left + width, top + height};
+        }
+        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPlacement(window, &placement);
+        SetWindowPos(window, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+    presenter->fullscreen = !presenter->fullscreen;
+}
+
 LRESULT CALLBACK presenterWindowProc(
     HWND window,
     UINT message,
     WPARAM wparam,
     LPARAM lparam)
 {
+    // F11 and Alt+Enter (a WM_SYSKEYDOWN) switch fullscreen and never reach the game.
+    const bool toggle = (message == WM_KEYDOWN && wparam == VK_F11) ||
+        (message == WM_SYSKEYDOWN && wparam == VK_RETURN);
+    if (toggle || (message == WM_KEYUP && wparam == VK_F11) || (message == WM_SYSCHAR && wparam == VK_RETURN)) {
+        if (toggle && (lparam & (1 << 30)) == 0) // not a key repeat
+            toggleFullscreen(reinterpret_cast<RecompD3dPresenter *>(GetWindowLongPtrW(window, GWLP_USERDATA)));
+        return 0;
+    }
     if (message == WM_KEYDOWN || message == WM_KEYUP)
         recomp_input_keyboard_event(static_cast<uint32_t>(wparam), message == WM_KEYDOWN);
     if (message == WM_CHAR) recomp_input_keyboard_char(static_cast<uint32_t>(wparam));
@@ -658,6 +703,7 @@ bool createWindow(RecompD3dPresenter *presenter)
     };
     /* A scaled window fills the screen; decorations would not fit. */
     const DWORD style = presenter->scale > 1.0f ? WS_POPUP : WS_OVERLAPPEDWINDOW;
+    presenter->fullscreen = style == WS_POPUP;
 
     presenter->instance = GetModuleHandleW(nullptr);
     window_class.cbSize = sizeof window_class;
@@ -752,6 +798,13 @@ HRESULT createDeviceWithDriver(
         &selected_feature_level,
         &presenter->context);
     // Flip chains use the per-chain limit; immediate presents retain the default.
+    // The window handles Alt+Enter itself; DXGI's own switch would take exclusive fullscreen.
+    if (SUCCEEDED(result)) {
+        IDXGIFactory *factory = nullptr;
+        if (SUCCEEDED(presenter->swap_chain->GetParent(IID_PPV_ARGS(&factory))))
+            factory->MakeWindowAssociation(presenter->window, DXGI_MWA_NO_ALT_ENTER);
+        releaseCom(factory);
+    }
     if (SUCCEEDED(result) && !immediate) {
         IDXGISwapChain2 *chain = nullptr;
         result = presenter->swap_chain->QueryInterface(IID_PPV_ARGS(&chain));

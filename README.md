@@ -148,7 +148,8 @@ pinned lifter and extractor; use the release ZIP.
 arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
 X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
 a readout of the frame rate, the average frame time and the slowest frame of
-the last second; it starts off.
+the last second; it starts off. F11 or Alt+Enter switches between a window and
+borderless fullscreen.
 
 Offline, hold Back for two seconds to quit to the desktop: A quits, B keeps
 playing.
