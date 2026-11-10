@@ -226,6 +226,17 @@ static void resumed(std::chrono::steady_clock::time_point began)
         std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
 }
 
+/* Repeats this side's pads while a wait goes on: every 4 ms, or every 16 ms through the
+   matchmaker's relay. Each repeat costs the relay bandwidth, and it drops a pair's packets
+   past 250 a second. */
+static void repeatPads(std::chrono::steady_clock::time_point &sent)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (now - sent < std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) return;
+    recomp_netplay_send(&rollback.net, &rollback.session, rollback.advantage);
+    sent = now;
+}
+
 /* At the newest frame: gathers pads until the frame may run or a rewind is
    due, and returns the frame to load or RECOMP_ROLLBACK_NONE. */
 static std::uint32_t awaitFrontier(bool last)
@@ -273,12 +284,8 @@ static std::uint32_t awaitFrontier(bool last)
         }
         if (started && blocked == Clock::time_point{}) blocked = checked;
         if (!udp) recomp_stop(4, "rollback:stalled");
+        repeatPads(sent);
         const Clock::time_point now = Clock::now();
-        // Each repeat through the matchmaker's relay costs its bandwidth, so a relayed wait repeats less.
-        if (now - sent >= std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) {
-            recomp_netplay_send(&rollback.net, &s, rollback.advantage);
-            sent = now;
-        }
         stalled(began);
         // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
         Clock::time_point until = now + std::chrono::milliseconds(2);
@@ -473,15 +480,10 @@ static void confirmSaveFrame()
     if (s.remote_count <= running)
         std::fprintf(stderr, "recomp netplay: save in frame %u waits for the other player's input\n", running);
     const auto began = std::chrono::steady_clock::now();
-    auto sent = began - std::chrono::seconds(1);
+    std::chrono::steady_clock::time_point sent{};
     while (s.remote_count <= running) {
         recomp_netplay_receive(&rollback.net, &s);
-        // As awaitFrontier repeats: a send each pass ran past the relay's 250 packets a second.
-        const auto now = std::chrono::steady_clock::now();
-        if (now - sent >= std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) {
-            recomp_netplay_send(&rollback.net, &s, rollback.advantage);
-            sent = now;
-        }
+        repeatPads(sent);
         stalled(began);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
