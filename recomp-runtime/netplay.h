@@ -177,8 +177,10 @@ typedef struct RecompNetplayRoom {
     uint32_t say_id, heard_id;
     uint64_t said_ms;
     /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
-       packet per packet it sends and is not joined until it echoes one of this side's clocks. */
+       packet per packet it sends and is not joined until it echoes one of this side's clocks.
+       salt is added to the clocks sent to that peer and differs for each address. */
     bool doubted, owed;
+    uint32_t salt;
 } RecompNetplayRoom;
 
 /* Reads what the other player said and, every 100 ms or every call while

@@ -567,6 +567,19 @@ static uint64_t now_ms(void)
 #endif
 }
 
+/* What a doubted endpoint's clocks are offset by. Every player this host answers sees its clock,
+   so without this a clock shown to one address could be echoed from a forged one.
+   shortcut: a keyed mixer, not a MAC; replace it if a seat ever guards more than the room. */
+static uint32_t clock_salt(uint32_t address, uint16_t port)
+{
+    static uint64_t key;
+    if (key == 0u && !random_bytes((uint8_t *)&key, sizeof key)) return 0u;
+    uint64_t mixed = key ^ ((uint64_t)address << 16 | port);
+    mixed = (mixed ^ mixed >> 30) * 0xbf58476d1ce4e5b9u; /* splitmix64's finalizer */
+    mixed = (mixed ^ mixed >> 27) * 0x94d049bb133111ebu;
+    return (uint32_t)((mixed ^ mixed >> 31) >> 32);
+}
+
 /* Layout: magic, version, kind, digest, flags, name length, name, the
    sender's clock, the last clock it heard and how long ago, for the ping,
    a chat line's id, length and text, then the sender's install ID. */
@@ -623,6 +636,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             net->peer_port = from.sin_port;
             room->pinged = false;
             room->doubted = !candidate;
+            if (room->doubted) room->salt = clock_salt(net->peer_address, net->peer_port);
             m->relay = false; /* heard directly */
         }
         if (m->punching) { /* relayed packets end punching first, so this one came directly */
@@ -634,9 +648,10 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->echo = get32(clocks);
         room->echo_at_ms = now;
         const uint32_t echo = get32(clocks + 4u), age = get16(clocks + 8u);
+        /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
+        const int32_t ago = (int32_t)((uint32_t)now + room->salt - echo);
         if (room->doubted) {
-            /* One of this side's clocks: from the last 3 s, at most 1 ms ahead since it is forced odd. */
-            const int32_t ago = (int32_t)((uint32_t)now - echo);
+            /* One of the clocks this side sent to this address in the last 3 s. */
             room->doubted = echo == 0u || ago < -1 || ago > (int32_t)ROOM_SILENCE_MS;
             room->owed = true;
             /* Not in the room yet: a forged address would hold the seat and hide the room from the list. */
@@ -654,8 +669,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->name[length] = '\0';
         room->peer_id = (uint64_t)get32(sender + 4u) << 32 | get32(sender);
         if (echo != 0u) {
-            /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
-            const int64_t ping = (int64_t)(int32_t)((uint32_t)now - echo) - (int64_t)age;
+            const int64_t ping = (int64_t)ago - (int64_t)age;
             room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
             room->pinged = true;
         }
@@ -699,7 +713,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
     memcpy(at + 2u, name, at[1]);
     at += 2u + RECOMP_NETPLAY_NAME_BYTES;
-    put32(at, (uint32_t)now | 1u); /* never 0, which means no clock heard */
+    put32(at, ((uint32_t)now + room->salt) | 1u); /* never 0, which means no clock heard */
     put32(at + 4u, room->echo);
     const uint64_t age = now - room->echo_at_ms;
     put16(at + 8u, (uint16_t)(room->echo == 0u ? 0u : age > 65535u ? 65535u : age));
