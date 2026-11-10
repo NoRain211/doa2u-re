@@ -94,7 +94,7 @@ typedef struct RecompNetplayMatch {
     bool punching;
     uint64_t punch_ms;
     bool relay; /* packets to the peer go through the server, as do its answers */
-    bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
+    bool busy;  /* the room's seat is taken or held, so a late pairing for another player is ignored */
     /* A host's peer came by address and proved it, so a relayed packet is not theirs and is dropped. */
     bool direct;
     /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
@@ -175,6 +175,8 @@ typedef struct RecompNetplayRoom {
     bool heard_new;
     /* Kept between ticks. */
     uint64_t heard_ms, sent_ms, echo_at_ms, heard_line_ms;
+    /* A host back from a session holds its seat for the last joiner until then; 0 when it holds none. */
+    uint64_t held_until_ms;
     uint32_t echo;
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
@@ -200,6 +202,10 @@ void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text);
 /* Forgets the other player as if they went quiet; a host stops answering
    them and lets another player in. */
 void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room);
+/* A host back from a session keeps its seat for the socket's peer, the last
+   joiner, whose runner is booting too. The tick drops them if they have not
+   spoken within 10 s. */
+void recomp_netplay_room_hold(RecompNetplay *net, RecompNetplayRoom *room);
 /* Tells the other player this side is leaving the room, before the socket
    closes. Their tick sets left: a host lets another player in, and a joiner
    stops calling, so a room opened again on the same port starts empty. */

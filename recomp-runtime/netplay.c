@@ -636,7 +636,6 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     const char *name, bool ready, bool start)
 {
     const uint64_t now = now_ms();
-    if (room->heard_ms == 0u) room->heard_ms = now; /* ROOM_RETURN_MS counts from the first tick */
     uint8_t packet[RECOMP_NETPLAY_MAX_PACKET + 1u];
     struct sockaddr_in from;
     int size;
@@ -731,10 +730,9 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             }
         }
     }
-    /* busy without joined is a host back from a session, whose last joiner is booting too. */
-    if (room->joined ? now - room->heard_ms > ROOM_SILENCE_MS
-                     : room->hosting && net->match.busy && now - room->heard_ms > ROOM_RETURN_MS)
-        recomp_netplay_room_drop(net, room);
+    const bool quiet = room->joined && now - room->heard_ms > ROOM_SILENCE_MS;
+    const bool stayed_away = !room->joined && room->held_until_ms != 0u && now > room->held_until_ms;
+    if (quiet || stayed_away) recomp_netplay_room_drop(net, room);
     /* punch_ms can be newer than now when this tick read the match itself. */
     if (net->match.punching && now > net->match.punch_ms + PUNCH_MS) relay_on(net, "no direct path after 5 s");
     if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
@@ -775,12 +773,19 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
     room->joined = room->ready = room->start = room->pinged = false;
     room->echo = 0u;
     room->salt = 0u;
+    room->held_until_ms = 0u;
     net->match.busy = false;
     net->match.direct = false;
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;
         net->match.relay = false;
     }
+}
+
+void recomp_netplay_room_hold(RecompNetplay *net, RecompNetplayRoom *room)
+{
+    room->held_until_ms = now_ms() + ROOM_RETURN_MS;
+    net->match.busy = true;
 }
 
 void recomp_netplay_room_leave(const RecompNetplay *net)

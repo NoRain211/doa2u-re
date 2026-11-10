@@ -612,10 +612,10 @@ int main()
         const bool opened = recomp_netplay_listen(&host, 47643u);
         host.peer_address = htonl(0x7f000001u);
         host.peer_port = htons(47642u);
-        host.match.busy = true;
+        recomp_netplay_room_hold(&host, &backRoom);
         recomp_netplay_room_tick(&host, &backRoom, digest, "HOST", false, false);
         const bool kept = host.peer_port != 0u && host.match.busy;
-        backRoom.heard_ms -= 10001u; // 10 s on
+        backRoom.held_until_ms -= 10001u; // 10 s on
         recomp_netplay_room_tick(&host, &backRoom, digest, "HOST", false, false);
         check("a returned host drops a joiner who stays away", opened && kept && host.peer_port == 0u && !host.match.busy);
         recomp_netplay_close(&host);
