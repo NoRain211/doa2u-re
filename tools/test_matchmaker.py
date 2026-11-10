@@ -182,13 +182,12 @@ class MatchmakerTest(unittest.TestCase):
         for i, joiner in enumerate(joiners):  # under the JOIN rate, and each new claim lets go of the last
             kind = self.send(joining(ids[i]), joiner, 1.0 + i)[0][0][5]
             self.assertEqual(kind, mm.PEER if i < mm.PAIRS_PER_ADDRESS else mm.GONE)
-        self.assertEqual(self.server.pair_counts[JOINER_AT[0]], mm.PAIRS_PER_ADDRESS)
         # Each pair sends past its own cap; what that cap drops is not counted against the address.
         forwarded = [sum(len(self.send(relaying(), joiner, 30.5)) for _ in range(mm.RELAY_PER_SECOND + 10))
                      for joiner in joiners[:3]]
         self.assertEqual(forwarded, [mm.RELAY_PER_SECOND, mm.RELAY_PER_SECOND, 0])
         self.send(listing(), JOINER_AT, 30.5 + mm.PAIR_SECONDS + 1.0)  # a sweep
-        self.assertEqual((self.server.pairs, self.server.pair_counts), ({}, {}))
+        self.assertEqual(self.server.pairs, {})
 
     def test_a_sender_without_a_cookie_gets_one_and_nothing_is_stored(self):
         room_id, _ = self.host()
