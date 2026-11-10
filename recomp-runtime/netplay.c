@@ -38,8 +38,8 @@ enum {
     LOBBY_CHUNK = 4u,   /* one chunk of the sender's profile */
     LOBBY_ROOM = 5u,    /* a room member's state */
     LOBBY_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 6u,
-    ROOM_BYTES = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES + 10u + 5u +
-        RECOMP_NETPLAY_CHAT_BYTES + 8u,
+    ROOM_CLOCKS = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES, /* where a room packet's clocks are */
+    ROOM_BYTES = ROOM_CLOCKS + 10u + 5u + RECOMP_NETPLAY_CHAT_BYTES + 8u,
     ROOM_READY = 1u,
     ROOM_START = 2u,
     ROOM_SILENCE_MS = 3000u,
@@ -245,7 +245,9 @@ static bool open_socket(RecompNetplay *net, uint16_t local_port)
 {
     memset(net, 0, sizeof *net);
     net->socket = (uintptr_t)INVALID_SOCKET;
-    if (!random_bytes(net->match.nonce, sizeof net->match.nonce)) return false;
+    if (!random_bytes(net->match.nonce, sizeof net->match.nonce) ||
+        !random_bytes((uint8_t *)&net->match.clock_key, sizeof net->match.clock_key))
+        return false;
 #ifdef _WIN32
     WSADATA data;
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return false;
@@ -567,14 +569,19 @@ static uint64_t now_ms(void)
 /* What the clocks a host sends an address it was not given are offset by. Every player this host
    answers sees its clock, so without this a clock shown to one address could be echoed from a forged one.
    shortcut: a keyed mixer, not a MAC; replace it if a seat ever guards more than the room. */
-static uint32_t clock_salt(uint32_t address, uint16_t port)
+static uint32_t clock_salt(const RecompNetplay *net, const struct sockaddr_in *to)
 {
-    static uint64_t key;
-    if (key == 0u && !random_bytes((uint8_t *)&key, sizeof key)) return 0u;
-    uint64_t mixed = key ^ ((uint64_t)address << 16 | port);
+    uint64_t mixed = net->match.clock_key ^ ((uint64_t)to->sin_addr.s_addr << 16 | to->sin_port);
     mixed = (mixed ^ mixed >> 30) * 0xbf58476d1ce4e5b9u; /* splitmix64's finalizer */
     mixed = (mixed ^ mixed >> 27) * 0x94d049bb133111ebu;
     return (uint32_t)((mixed ^ mixed >> 31) >> 32);
+}
+
+/* How long ago this side sent the clock a packet echoes. Signed: the clock is forced odd, so it
+   can be 1 ms ahead. */
+static int32_t clock_age(uint64_t now, uint32_t salt, uint32_t echo)
+{
+    return (int32_t)((uint32_t)now + salt - echo);
 }
 
 /* Fills a room packet but for its chat line and returns where that goes.
@@ -594,13 +601,32 @@ static uint8_t *room_packet(uint8_t *packet, const RecompNetplayRoom *room, cons
     const size_t length = strlen(name);
     at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
     memcpy(at + 2u, name, at[1]);
-    at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+    at = packet + ROOM_CLOCKS;
     put32(at, clock | 1u); /* never 0, which means no clock heard */
     put32(at + 4u, echo);
     put16(at + 8u, (uint16_t)(echo == 0u ? 0u : age > 65535u ? 65535u : age));
     put32(packet + ROOM_BYTES - 8u, (uint32_t)room->id);
     put32(packet + ROOM_BYTES - 4u, (uint32_t)(room->id >> 32));
     return at + 10u;
+}
+
+/* An empty host hears anyone, at an address that may be forged. It takes a caller only when
+   they echo a clock sent to that address in the last 3 s, and answers any other one packet
+   for one. Nothing is kept until then, so forged packets neither hold the room nor keep a
+   player out. True for a caller to take, whose clocks room->salt then offsets. */
+static bool room_caller_proved(const RecompNetplay *net, RecompNetplayRoom *room, const struct sockaddr_in *from,
+    const uint8_t *packet, uint64_t now, const char *digest, const char *name)
+{
+    const uint32_t salt = clock_salt(net, from), echo = get32(packet + ROOM_CLOCKS + 4u);
+    const int32_t age = clock_age(now, salt, echo);
+    if (echo != 0u && age >= -1 && age <= (int32_t)ROOM_SILENCE_MS) {
+        room->salt = salt;
+        return true;
+    }
+    uint8_t answer[ROOM_BYTES];
+    room_packet(answer, room, digest, name, false, false, (uint32_t)now + salt, get32(packet + ROOM_CLOCKS), 0u);
+    send_raw(net, from->sin_addr.s_addr, from->sin_port, answer, ROOM_BYTES);
+    return false;
 }
 
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
@@ -651,23 +677,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         if (!from_peer(net, &from)) {
             /* A joiner takes either endpoint the matchmaker gave. */
             if (room->joined || (!room->hosting && !candidate)) continue;
-            if (!candidate) {
-                /* An empty host hears anyone, at an address that may be forged. It answers one packet for
-                   one and takes the player only when they echo a clock sent to that address in the last
-                   3 s. Nothing is kept until then, so forged packets neither hold the room nor keep a
-                   player out. */
-                const uint8_t *heard = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES;
-                const uint32_t salt = clock_salt(from.sin_addr.s_addr, from.sin_port), echoed = get32(heard + 4u);
-                /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
-                const int32_t since = (int32_t)((uint32_t)now + salt - echoed);
-                if (echoed == 0u || since < -1 || since > (int32_t)ROOM_SILENCE_MS) {
-                    uint8_t answer[ROOM_BYTES];
-                    room_packet(answer, room, digest, name, false, false, (uint32_t)now + salt, get32(heard), 0u);
-                    send_raw(net, from.sin_addr.s_addr, from.sin_port, answer, ROOM_BYTES);
-                    continue;
-                }
-                room->salt = salt;
-            }
+            if (!candidate && !room_caller_proved(net, room, &from, packet, now, digest, name)) continue;
             net->peer_address = from.sin_addr.s_addr;
             net->peer_port = from.sin_port;
             room->pinged = false;
@@ -678,7 +688,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             fprintf(stderr, "recomp netplay: reached the other player directly\n");
         }
         const uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
-        const uint8_t *clocks = at + 2u + RECOMP_NETPLAY_NAME_BYTES;
+        const uint8_t *clocks = packet + ROOM_CLOCKS;
         room->echo = get32(clocks);
         room->echo_at_ms = now;
         const uint32_t echo = get32(clocks + 4u), age = get16(clocks + 8u);
@@ -693,8 +703,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->name[length] = '\0';
         room->peer_id = (uint64_t)get32(sender + 4u) << 32 | get32(sender);
         if (echo != 0u) {
-            /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
-            const int64_t ping = (int64_t)(int32_t)((uint32_t)now + room->salt - echo) - (int64_t)age;
+            const int64_t ping = (int64_t)clock_age(now, room->salt, echo) - (int64_t)age;
             room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
             room->pinged = true;
         }
@@ -757,6 +766,7 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
 {
     room->joined = room->ready = room->start = room->pinged = false;
     room->echo = 0u;
+    room->salt = 0u;
     net->match.busy = false;
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;

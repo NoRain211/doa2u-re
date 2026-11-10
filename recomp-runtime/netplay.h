@@ -97,6 +97,9 @@ typedef struct RecompNetplayMatch {
     bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
     /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
     uint8_t nonce[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* Random for each socket and never sent: it keys the offset of the clocks a host's room
+       sends an address it was not given. */
+    uint64_t clock_key;
     /* The server's proof of this socket's address, zeros until it sends one. */
     uint8_t cookie[RECOMP_NETPLAY_TOKEN_BYTES];
     /* The last HOST, JOIN or LEAVE, sent once more when a new cookie answers it. */
