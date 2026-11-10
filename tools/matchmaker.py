@@ -196,8 +196,12 @@ class Matchmaker:
         if int(now) != pair.second:
             pair.second, pair.count = int(now), 0
         pair.count += 1
+        if pair.count > RELAY_PER_SECOND:
+            self.over_cap += 1
+            return []
+        # Counted after the pair's own cap, so a pair over it cannot use up the address's share.
         count = self.relay_counts[sender[0]] = self.relay_counts.get(sender[0], 0) + 1
-        if pair.count > RELAY_PER_SECOND or count > RELAY_PER_ADDRESS:
+        if count > RELAY_PER_ADDRESS:
             self.over_cap += 1
             return []
         pair.used = back.used = now
