@@ -84,8 +84,9 @@ SyncTest.
 - Each XAPI fiber keeps its C continuation on a native host stack. On
   Windows, parked fibers are saved with their captured context and live
   stack (up to 64 KiB), so a rewind restores the C frames as well as the
-  guest registers. POSIX hosts do not capture them yet: a save with a
-  parked fiber that owns its stack reports itself unrestorable there, and
+  guest registers. POSIX hosts save the stack pointer and the live stack
+  the same way, since their switch keeps the registers on the stack. The
+  fiber test rewinds a parked task on x86-64 Linux; a whole session's
   rollback on Linux and macOS is unverified.
 - The other host modules (heap, allocations, threads, files, input, D3D8,
   DirectSound) save and restore their own state.
