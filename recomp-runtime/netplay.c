@@ -567,8 +567,8 @@ static uint64_t now_ms(void)
 #endif
 }
 
-/* What a doubted endpoint's clocks are offset by. Every player this host answers sees its clock,
-   so without this a clock shown to one address could be echoed from a forged one.
+/* What the clocks a host sends an address it was not given are offset by. Every player this host
+   answers sees its clock, so without this a clock shown to one address could be echoed from a forged one.
    shortcut: a keyed mixer, not a MAC; replace it if a seat ever guards more than the room. */
 static uint32_t clock_salt(uint32_t address, uint16_t port)
 {
@@ -580,9 +580,32 @@ static uint32_t clock_salt(uint32_t address, uint16_t port)
     return (uint32_t)((mixed ^ mixed >> 31) >> 32);
 }
 
-/* Layout: magic, version, kind, digest, flags, name length, name, the
+/* Fills a room packet but for its chat line and returns where that goes.
+   Layout: magic, version, kind, digest, flags, name length, name, the
    sender's clock, the last clock it heard and how long ago, for the ping,
    a chat line's id, length and text, then the sender's install ID. */
+static uint8_t *room_packet(uint8_t *packet, const RecompNetplayRoom *room, const char *digest, const char *name,
+    bool ready, bool start, uint32_t clock, uint32_t echo, uint64_t age)
+{
+    memset(packet, 0, ROOM_BYTES);
+    put32(packet, LOBBY_MAGIC);
+    packet[4] = LOBBY_VERSION;
+    packet[5] = LOBBY_ROOM;
+    memcpy(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
+    at[0] = (uint8_t)((ready ? ROOM_READY : 0u) | (start ? ROOM_START : 0u));
+    const size_t length = strlen(name);
+    at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
+    memcpy(at + 2u, name, at[1]);
+    at += 2u + RECOMP_NETPLAY_NAME_BYTES;
+    put32(at, clock | 1u); /* never 0, which means no clock heard */
+    put32(at + 4u, echo);
+    put16(at + 8u, (uint16_t)(echo == 0u ? 0u : age > 65535u ? 65535u : age));
+    put32(packet + ROOM_BYTES - 8u, (uint32_t)room->id);
+    put32(packet + ROOM_BYTES - 4u, (uint32_t)(room->id >> 32));
+    return at + 10u;
+}
+
 void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const char *digest,
     const char *name, bool ready, bool start)
 {
@@ -630,13 +653,29 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             continue;
         }
         if (!from_peer(net, &from)) {
-            /* A host takes the first player who talks; a joiner either endpoint the matchmaker gave. */
+            /* A joiner takes either endpoint the matchmaker gave. */
             if (room->joined || (!room->hosting && !candidate)) continue;
+            if (!candidate) {
+                /* An empty host hears anyone, at an address that may be forged. It answers one packet for
+                   one and takes the player only when they echo a clock sent to that address in the last
+                   3 s. Nothing is kept until then, so forged packets neither hold the room nor keep a
+                   player out. */
+                const uint8_t *heard = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES;
+                const uint32_t salt = clock_salt(from.sin_addr.s_addr, from.sin_port), echoed = get32(heard + 4u);
+                /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
+                const int32_t since = (int32_t)((uint32_t)now + salt - echoed);
+                if (echoed == 0u || since < -1 || since > (int32_t)ROOM_SILENCE_MS) {
+                    uint8_t answer[ROOM_BYTES];
+                    room_packet(answer, room, digest, name, false, false, (uint32_t)now + salt, get32(heard), 0u);
+                    send_raw(net, from.sin_addr.s_addr, from.sin_port, answer, ROOM_BYTES);
+                    continue;
+                }
+                room->salt = salt;
+                m->direct = true;
+            }
             net->peer_address = from.sin_addr.s_addr;
             net->peer_port = from.sin_port;
             room->pinged = false;
-            room->doubted = !candidate;
-            if (room->doubted) room->salt = clock_salt(net->peer_address, net->peer_port);
             m->relay = false; /* heard directly */
         }
         if (m->punching) { /* relayed packets end punching first, so this one came directly */
@@ -648,16 +687,6 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->echo = get32(clocks);
         room->echo_at_ms = now;
         const uint32_t echo = get32(clocks + 4u), age = get16(clocks + 8u);
-        /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
-        const int32_t ago = (int32_t)((uint32_t)now + room->salt - echo);
-        if (room->doubted) {
-            /* One of the clocks this side sent to this address in the last 3 s. */
-            room->doubted = echo == 0u || ago < -1 || ago > (int32_t)ROOM_SILENCE_MS;
-            room->owed = true;
-            /* Not in the room yet: a forged address would hold the seat and hide the room from the list. */
-            if (room->doubted) continue;
-            m->direct = true;
-        }
         room->joined = true;
         m->busy = true;
         room->heard_ms = now;
@@ -669,7 +698,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
         room->name[length] = '\0';
         room->peer_id = (uint64_t)get32(sender + 4u) << 32 | get32(sender);
         if (echo != 0u) {
-            const int64_t ping = (int64_t)ago - (int64_t)age;
+            /* Signed: the echoed clock is forced odd, so it can be 1 ms ahead. */
+            const int64_t ping = (int64_t)(int32_t)((uint32_t)now + room->salt - echo) - (int64_t)age;
             room->ping_ms = ping > 0 ? (uint32_t)ping : 0u;
             room->pinged = true;
         }
@@ -699,32 +729,14 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     /* punch_ms can be newer than now when this tick read the match itself. */
     if (net->match.punching && now > net->match.punch_ms + PUNCH_MS) relay_on(net, "no direct path after 5 s");
     if (net->peer_port == 0u || (!start && now - room->sent_ms < 100u)) return;
-    if (room->doubted && !room->owed) return;
-    room->owed = false;
     room->sent_ms = now;
-    memset(packet, 0, ROOM_BYTES);
-    put32(packet, LOBBY_MAGIC);
-    packet[4] = LOBBY_VERSION;
-    packet[5] = LOBBY_ROOM;
-    memcpy(packet + 6u, digest, RECOMP_NETPLAY_DIGEST_BYTES);
-    uint8_t *at = packet + 6u + RECOMP_NETPLAY_DIGEST_BYTES;
-    at[0] = (uint8_t)((ready ? ROOM_READY : 0u) | (start ? ROOM_START : 0u));
-    const size_t length = strlen(name);
-    at[1] = (uint8_t)(length < RECOMP_NETPLAY_NAME_BYTES ? length : RECOMP_NETPLAY_NAME_BYTES);
-    memcpy(at + 2u, name, at[1]);
-    at += 2u + RECOMP_NETPLAY_NAME_BYTES;
-    put32(at, ((uint32_t)now + room->salt) | 1u); /* never 0, which means no clock heard */
-    put32(at + 4u, room->echo);
-    const uint64_t age = now - room->echo_at_ms;
-    put16(at + 8u, (uint16_t)(room->echo == 0u ? 0u : age > 65535u ? 65535u : age));
-    at += 10u;
+    uint8_t *at = room_packet(packet, room, digest, name, ready, start, (uint32_t)now + room->salt, room->echo,
+        now - room->echo_at_ms);
     if (now - room->said_ms < 2000u) {
         put32(at, room->say_id);
         at[4] = (uint8_t)strlen(room->say);
         memcpy(at + 5u, room->say, at[4]);
     }
-    put32(packet + ROOM_BYTES - 8u, (uint32_t)room->id);
-    put32(packet + ROOM_BYTES - 4u, (uint32_t)(room->id >> 32));
     const RecompNetplayMatch *m = &net->match;
     if (!m->punching) {
         send_to(net, net->peer_address, net->peer_port, packet, ROOM_BYTES);
@@ -751,7 +763,7 @@ void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text)
 
 void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
 {
-    room->joined = room->ready = room->start = room->pinged = room->doubted = false;
+    room->joined = room->ready = room->start = room->pinged = false;
     room->echo = 0u;
     net->match.busy = false;
     net->match.direct = false;
