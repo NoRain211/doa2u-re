@@ -339,12 +339,12 @@ add_executable(recomp_rollback_test rollback.c rollback_test.c)
 add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
 add_executable(recomp_replay_test replay.c replay_test.c)
 add_test(NAME recomp-runtime-replay COMMAND recomp_replay_test)
-add_executable(recomp_netplay_test netplay.c netplay_names.c rollback.c netplay_test.c)
+add_executable(recomp_netplay_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_test.c)
 if(WIN32)
     target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
 endif()
 add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
-add_executable(recomp_netplay_lobby_test netplay.c netplay_names.c rollback.c netplay_lobby_test.cpp)
+add_executable(recomp_netplay_lobby_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_lobby_test.cpp)
 if(WIN32)
     target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
 endif()
@@ -637,7 +637,7 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_names.c netplay_upnp.c netplay_menu.cpp
+        synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
