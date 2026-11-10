@@ -32,7 +32,8 @@ holds no addresses or names.
 `--probe HOST:PORT` asks a running server for its list and says whether
 and how fast it answered, exiting 1 when it did not.
 
-It is not deployed yet; [Deploying](#deploying) has the plan. The relay
+MATCHMAKER on DEFAULT uses a deployed server; [Deploying](#deploying)
+says how it is set up. The relay
 costs bandwidth: a session sends about 60 packets of about 100 bytes a
 second each way, which is about 45 MB an hour for a relayed match. A relay
 in one place adds the detour to players far from it.
@@ -67,8 +68,9 @@ join, and `--relay-only` sends none.
 
 ## Deploying
 
-The plan is an Oracle Cloud Always Free VM in a US region, named through
+The default server is an Oracle Cloud Always Free VM, named through
 Cloudflare DNS, in the normal mode: punching first, relay when it fails.
+These steps set up one like it.
 
 1. Sign up with a US home region. Always Free compute is created only in
    the home region, so treat the choice as permanent; the region nearest
@@ -103,10 +105,11 @@ Cloudflare DNS, in the normal mode: punching first, relay when it fails.
 7. In Cloudflare DNS, add an A record such as `mm` with the VM's public
    address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
    proxied name would not reach a UDP server. Probe the name too.
-8. Leave MATCHMAKER on DEFAULT on two machines on different home
-   networks. HOST ONLINE should say LISTED ON FIND MATCH and the
-   other should quick-match it, which is also the first test of punching
-   through real routers.
+8. Set MATCHMAKER in NETPLAY SETTINGS to the name from step 7 and port
+   47700 on two machines on different home networks; DEFAULT would test
+   the default server instead. HOST ONLINE should say LISTED ON FIND
+   MATCH and the other should quick-match it, which is also the first
+   test of punching through real routers.
 
 ## Packets
 
