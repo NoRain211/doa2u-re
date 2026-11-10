@@ -1098,4 +1098,5 @@ void recomp_netplay_session_exit()
 {
     closeReplay();
     sayGoodbye();
+    recomp_netplay_menu_exit();
 }

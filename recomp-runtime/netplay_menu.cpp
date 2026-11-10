@@ -469,6 +469,7 @@ static void draw()
 static void onOverlay(const RecompD3dPresenterTarget *target)
 {
     bool launch = false;
+    float aspect;
     {
         std::lock_guard<std::mutex> guard(menu.lock);
         if (menu.screen == Screen::Closed) {
@@ -496,8 +497,10 @@ static void onOverlay(const RecompD3dPresenterTarget *target)
         }
         if (menu.covering && versusChosen()) menu.covering = false;
         draw();
-        recomp_overlay_submit(target, menu.aspect);
+        aspect = menu.aspect;
     }
+    // Outside the lock: a closed window ends the run from this call, and the exit hook takes the lock.
+    recomp_overlay_submit(target, aspect);
 }
 
 } // namespace netplay_menu
@@ -606,4 +609,10 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
         join(true);
     }
     if (menu.screen != Screen::Room) recomp_netplay_close(&menu.net);
+}
+
+void recomp_netplay_menu_exit()
+{
+    std::lock_guard<std::mutex> guard(menu.lock);
+    if (menu.screen == Screen::Room) sayLeaving();
 }

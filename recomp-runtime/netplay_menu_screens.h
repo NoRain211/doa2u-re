@@ -81,7 +81,9 @@ struct Menu : RecompNetplaySettings {
     std::string digest;
     std::function<std::string()> ownName;
     float aspect = 4.0f / 3.0f;
-    std::mutex lock; // the game may sample pads on another guest thread than it presents from
+    // The game may sample pads on another guest thread than it presents from. Nothing that can
+    // end the run is called under it, since the exit hook takes it.
+    std::mutex lock;
     Screen screen = Screen::Closed;
     std::uint16_t held[RECOMP_INPUT_PORT_COUNT]{};
     std::uint16_t pressed = 0u;
@@ -118,6 +120,7 @@ void plateName(float x, float y, const std::string &name, std::uint32_t color);
 
 // netplay_menu_room.cpp
 void enterRoom(bool hosting);
+void sayLeaving();
 void host(bool bound, bool listed);
 void join(bool bound = false);
 bool updateRoom(std::uint16_t keys);
