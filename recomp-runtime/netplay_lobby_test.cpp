@@ -589,6 +589,46 @@ int main()
         recomp_netplay_close(&host);
     }
 
+    // A clock the host sent one address seats no one from another: each address is sent its own.
+    {
+        RecompNetplay visitor, forger;
+        RecompNetplayRoom saltedRoom{};
+        saltedRoom.hosting = true;
+        const bool opened = recomp_netplay_listen(&host, 47646u) &&
+            recomp_netplay_open(&visitor, 0u, "127.0.0.1", 47646u) && recomp_netplay_open(&forger, 0u, "127.0.0.1", 47646u);
+        std::vector<std::uint8_t> roomPacket = {'D', '2', 'L', 'B', 5u, 5u};
+        roomPacket.insert(roomPacket.end(), RECOMP_NETPLAY_DIGEST_BYTES, static_cast<std::uint8_t>('a'));
+        roomPacket.resize(167u);
+        sendFrom(visitor, 47646u, roomPacket);
+        std::uint8_t shown[2048];
+        int got = 0;
+        for (int i = 0; i < 25 && got != 167; ++i) {
+            recomp_netplay_room_tick(&host, &saltedRoom, digest, "HOST", false, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            got = static_cast<int>(recv(static_cast<RawSocket>(visitor.socket), reinterpret_cast<char *>(shown),
+                sizeof shown, 0));
+        }
+        // The host's clock follows the name; the last clock heard follows that.
+        const std::size_t clock = 6u + RECOMP_NETPLAY_DIGEST_BYTES + 2u + RECOMP_NETPLAY_NAME_BYTES;
+        std::memcpy(roomPacket.data() + clock + 4u, shown + clock, 4u);
+        sendFrom(forger, 47646u, roomPacket);
+        for (int i = 0; i < 5; ++i) {
+            recomp_netplay_room_tick(&host, &saltedRoom, digest, "HOST", false, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        check("another address's clock seats no one", opened && got == 167 && !saltedRoom.joined);
+        // The address the clock was sent to is seated by it.
+        sendFrom(visitor, 47646u, roomPacket);
+        for (int i = 0; i < 5; ++i) {
+            recomp_netplay_room_tick(&host, &saltedRoom, digest, "HOST", false, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        check("its own clock seats an address", saltedRoom.joined);
+        recomp_netplay_close(&visitor);
+        recomp_netplay_close(&forger);
+        recomp_netplay_close(&host);
+    }
+
     // A flood of chunk requests draws one 16-chunk burst per 50 ms, not 16 chunks per request.
     {
         RecompNetplay flooder;

@@ -182,7 +182,9 @@ session run the same way over either path.
   room packet, rather than from PEER, sends one room packet for each it
   receives until the player echoes one of the host's clocks, and seats
   the player only then, so a forged room packet draws one packet back and
-  cannot hold the room. After 5 s without an answer, or
+  cannot hold the room. The host offsets those clocks by a secret number
+  for each address, so a clock one player was sent does not pass from
+  another address. After 5 s without an answer, or
   with no endpoints, the runner relays. A runner that hears a relayed
   packet relays too, so a path that works one way only still ends with
   both sides on the relay. The plates show RELAY beside the ping.
