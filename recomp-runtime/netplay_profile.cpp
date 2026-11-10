@@ -9,6 +9,13 @@
 #include <fstream>
 #include <iterator>
 
+// File names here are ASCII, and Windows opens any case of one.
+static std::string upper(std::string text)
+{
+    for (char &c : text) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return text;
+}
+
 std::string recomp_netplay_profile_name(const std::uint8_t *bytes, std::size_t size)
 {
     std::string line;
@@ -72,9 +79,12 @@ std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
             if (!fs::is_regular_file(save.path() / "SaveMeta.xbx", error)) continue;
             // min(), not {}: libstdc++'s file clock starts in 2174, so {} is later than every file.
             auto changed = fs::file_time_type::min();
-            for (const auto &file : fs::directory_iterator(save.path(), error))
+            bool profile = false; // other saves have a SaveMeta.xbx too, and the other player refuses them
+            for (const auto &file : fs::directory_iterator(save.path(), error)) {
                 changed = std::max(changed, fs::last_write_time(file.path(), error));
-            if (latest.empty() || changed > newest) {
+                profile = profile || upper(file.path().filename().string()) == "UPS.DAT";
+            }
+            if (profile && (latest.empty() || changed > newest)) {
                 latest = save.path().lexically_relative(root).generic_string();
                 newest = changed;
             }
@@ -151,8 +161,7 @@ static bool safeProfilePath(const std::string &name)
         for (const char c : part)
             if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
         if (first && part != "UDATA" && part != "TDATA") return false;
-        std::string stem = part.substr(0u, part.find('.'));
-        for (char &c : stem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        const std::string stem = upper(part.substr(0u, part.find('.')));
         if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
             (stem.size() == 4u && (stem.rfind("COM", 0u) == 0u || stem.rfind("LPT", 0u) == 0u) &&
                 std::isdigit(static_cast<unsigned char>(stem[3]))))
@@ -171,8 +180,7 @@ static bool profileEntryOk(const std::string &name, bool folder, const std::uint
     const auto depth = std::count(name.begin(), name.end(), '/');
     if (name.rfind("UDATA/", 0u) != 0u || depth < 3) return true;
     if (depth > 3 || folder) return false;
-    std::string file = name.substr(name.rfind('/') + 1u);
-    for (char &c : file) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    const std::string file = upper(name.substr(name.rfind('/') + 1u));
     if (file == "UPS.DAT") return size == 0x12148u;
     if (file == "SAVEIMAGE.XBX") return size <= 0x4000u;
     if (file != "SAVEMETA.XBX" || size < 2u || size > 0x1000u || size % 2u != 0u || data[0] != 0xffu ||
@@ -236,10 +244,9 @@ bool recomp_netplay_unpack_profile(const std::uint8_t *blob, std::size_t size, c
         if (!file.write(reinterpret_cast<const char *>(body.data() + at), bytes)) return false;
         file.close();
         if (!file) return false;
-        std::string file_name = path.filename().string();
-        for (char &c : file_name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         // Windows opens any case of the name, so the filter reads every one.
-        if (file_name == "SAVEMETA.XBX") names.push_back(recomp_netplay_profile_name(body.data() + at, bytes));
+        if (upper(path.filename().string()) == "SAVEMETA.XBX")
+            names.push_back(recomp_netplay_profile_name(body.data() + at, bytes));
         at += bytes;
     }
     return !error;
