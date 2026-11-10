@@ -513,7 +513,8 @@ static int receive_from(RecompNetplay *net, uint8_t *packet, size_t capacity,
            failed receive; it is not fatal before the peer has bound its port. */
         if (size < 0) {
 #ifdef _WIN32
-            if (WSAGetLastError() == WSAECONNRESET) continue;
+            /* Nor is a datagram longer than any packet here, which Windows fails where others cut it. */
+            if (WSAGetLastError() == WSAECONNRESET || WSAGetLastError() == WSAEMSGSIZE) continue;
 #endif
             return -1;
         }

@@ -689,6 +689,14 @@ int main()
         check("cookie sent again", !first.empty() && !again.empty() &&
             std::all_of(first.begin() + 14, first.begin() + 22, [](std::uint8_t b) { return b == 0u; }) &&
             std::equal(cookie.begin() + 14, cookie.end(), again.begin() + 14));
+
+        // A datagram longer than any packet does not end the pass: the one behind it is read too.
+        room.match.met = false;
+        sendFrom(server, 47645u, std::vector<std::uint8_t>(1400u));
+        sendFrom(server, 47645u, peerPacket(47631u, room.match.nonce));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        recomp_netplay_match_poll(&room);
+        check("oversized datagram skipped", room.match.met);
         recomp_netplay_close(&server);
         recomp_netplay_close(&room);
     }
