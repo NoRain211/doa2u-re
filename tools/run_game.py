@@ -19,9 +19,10 @@ RELAUNCH = 4  # runner exit code for XLaunchNewImage of the game's own XBE
 # The archives check_hdd_install (0xf6cc0) expects on Z:, copied there by hdd_install_thread.
 HDD_ARCHIVES = ("voice.afs", "datahdd.afs", "datahdd2.afs")
 # Pad buttons and keys that private/keyboard.json may bind; the codes are Windows virtual keys.
+# F11 is left out: the presenter keeps it, with Alt+Enter, for fullscreen.
 KEY_ACTIONS = ("up", "down", "left", "right", "start", "back", "a", "b", "x", "y", "white", "black", "ltrig", "rtrig")
 KEY_CODES = {**{c: ord(c) for c in string.ascii_uppercase + string.digits},
-             **{f"F{n}": 0x6f + n for n in range(1, 13)},
+             **{f"F{n}": 0x6f + n for n in range(1, 13) if n != 11},
              "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0d, "SHIFT": 0x10, "CTRL": 0x11, "ESC": 0x1b,
              "SPACE": 0x20, "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28}
 
@@ -39,7 +40,7 @@ def keyboard_map():
     for action, key in bindings.items():
         if action not in KEY_ACTIONS or not isinstance(key, str) or key.upper() not in KEY_CODES:
             raise ValueError(f"private/keyboard.json: cannot bind {action!r} to {key!r}; buttons are "
-                             f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F12, Up, Down, Left, Right, "
+                             f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F10, F12, Up, Down, Left, Right, "
                              "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc")
     return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" for action, key in bindings.items())
 

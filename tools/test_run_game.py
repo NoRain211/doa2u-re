@@ -120,7 +120,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(keyboard_map(), "")
                 (root / "private/keyboard.json").write_text('{"a": "space", "start": "F5", "up": "W"}')
                 self.assertEqual(keyboard_map(), "a=20,start=74,up=57")
-                for bad in ('{"jump": "Z"}', '{"a": "Home"}', '[1]', '{"a":'):
+                for bad in ('{"jump": "Z"}', '{"a": "Home"}', '{"a": "F11"}', '[1]', '{"a":'):
                     (root / "private/keyboard.json").write_text(bad)
                     with self.assertRaises(ValueError):
                         keyboard_map()
