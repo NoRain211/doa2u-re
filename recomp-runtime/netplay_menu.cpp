@@ -469,8 +469,9 @@ static void draw()
 static void onOverlay(const RecompD3dPresenterTarget *target)
 {
     bool launch = false;
+    float aspect;
     {
-        std::lock_guard<std::recursive_timed_mutex> guard(menu.lock);
+        std::lock_guard<std::mutex> guard(menu.lock);
         if (menu.screen == Screen::Closed) {
             recomp_input_keyboard_want_text(false);
             return;
@@ -496,8 +497,10 @@ static void onOverlay(const RecompD3dPresenterTarget *target)
         }
         if (menu.covering && versusChosen()) menu.covering = false;
         draw();
-        recomp_overlay_submit(target, menu.aspect);
+        aspect = menu.aspect;
     }
+    // Outside the lock: a closed window ends the run from this call, and the exit hook takes the lock.
+    recomp_overlay_submit(target, aspect);
 }
 
 } // namespace netplay_menu
@@ -523,7 +526,7 @@ void recomp_netplay_menu_install(const std::filesystem::path &storage, const std
 void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
 {
     if (!menu.installed || port >= RECOMP_INPUT_PORT_COUNT) return;
-    std::lock_guard<std::recursive_timed_mutex> guard(menu.lock);
+    std::lock_guard<std::mutex> guard(menu.lock);
     const std::uint16_t keys = keysOf(*pad);
     const std::uint16_t edges = keys & ~menu.held[port];
     menu.held[port] = keys;
@@ -562,7 +565,7 @@ void recomp_netplay_menu_filter(std::uint32_t port, RecompInputGamepad *pad)
 bool recomp_netplay_menu_take_launch(std::uint32_t &hostPort, std::uint32_t &delay, std::string &join,
     RecompNetplay &socket)
 {
-    std::lock_guard<std::recursive_timed_mutex> guard(menu.lock);
+    std::lock_guard<std::mutex> guard(menu.lock);
     if (!menu.launched) return false;
     menu.launched = false;
     hostPort = menu.lobby.hosting ? menu.port : 0u;
@@ -582,7 +585,7 @@ int recomp_netplay_menu_display(const std::filesystem::path &storage)
 
 void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
 {
-    std::lock_guard<std::recursive_timed_mutex> guard(menu.lock);
+    std::lock_guard<std::mutex> guard(menu.lock);
     menu.openedBy = 0u;
     menu.message.clear();
     menu.covering = true;
@@ -609,10 +612,6 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket)
 
 void recomp_netplay_menu_exit()
 {
-    // The exit can come from under the menu's own lock, hence a recursive one. Another thread holds
-    // it for a frame at most; one that still has it after 50 ms is stuck, and the room goes unannounced.
-    std::unique_lock<std::recursive_timed_mutex> guard(menu.lock, std::chrono::milliseconds(50));
-    if (!guard.owns_lock() || menu.screen != Screen::Room) return;
-    recomp_netplay_room_leave(&menu.net);
-    if (menu.lobby.hosting) recomp_netplay_match_leave(&menu.net);
+    std::lock_guard<std::mutex> guard(menu.lock);
+    if (menu.screen == Screen::Room) sayLeaving();
 }
