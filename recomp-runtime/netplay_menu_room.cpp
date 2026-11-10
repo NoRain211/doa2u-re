@@ -18,6 +18,7 @@ enum class Upnp { Idle, Asking, Forwarded, NotForwarded, AskingLeft };
 static std::atomic<Upnp> upnpState{Upnp::Idle};
 static char upnpAddress[80];
 static std::string lanAddress;
+static const std::chrono::seconds RejoinEvery(3);
 
 static void openRouterPort(std::uint16_t port)
 {
@@ -59,6 +60,7 @@ void enterRoom(bool hosting)
     menu.lobby.typing = false;
     menu.lobby.showAddress = false;
     menu.lobby.checkedIn = Clock::time_point{}; // a host lists its room on the first tick
+    menu.lobby.rejoinDue = Clock::now() + RejoinEvery;
     char stale[64]; // typed before the room opened, such as a game's Enter
     (void)recomp_input_keyboard_take_text(stale, sizeof stale);
     menu.screen = Screen::Room;
@@ -145,10 +147,16 @@ static void leaveRoom()
     menu.cursor = menu.lobby.hosting ? VersusHost : menu.lobby.found ? VersusFind : VersusJoin;
 }
 
+// The FIND MATCH room this joiner is in, or 0. FIND keeps the id it joined with.
+static std::uint32_t foundRoom()
+{
+    return menu.lobby.found ? menu.find.joining : 0u;
+}
+
 // A joiner leaves a host it blocked, and FIND MATCH stops offering that host's room.
 static void leaveBlockedHost(const std::string &message)
 {
-    if (menu.lobby.found) menu.find.blockedRooms.push_back(menu.find.joining);
+    if (foundRoom() != 0u) menu.find.blockedRooms.push_back(foundRoom());
     leaveRoom();
     menu.message = message;
 }
@@ -276,6 +284,14 @@ bool updateRoom(std::uint16_t keys)
         // Back from a session, the seat is the last joiner's until they return or the room gives up on them.
         recomp_netplay_match_host(&menu.net, menu.digest.data(), static_cast<std::uint8_t>(menu.delay),
             !room.joined && !menu.lobby.starting && room.held_until_ms == 0u, menu.name.c_str());
+    }
+    // A relayed room that went silent may have lost its pair to a matchmaker restart. The host's
+    // heartbeat lists its room again under the same ID, so the joiner asks for it again every 3 s.
+    if (room.joined || !menu.net.match.relay) {
+        menu.lobby.rejoinDue = Clock::now() + RejoinEvery;
+    } else if (foundRoom() != 0u && Clock::now() >= menu.lobby.rejoinDue) {
+        menu.lobby.rejoinDue = Clock::now() + RejoinEvery;
+        recomp_netplay_match_join(&menu.net, foundRoom(), menu.digest.data(), menu.name.c_str());
     }
     if (room.heard_new) {
         room.heard_new = false;

@@ -135,8 +135,8 @@ class MatchmakerTest(unittest.TestCase):
                           (socket.inet_aton("127.0.0.1") + b"\x01\x02", False),
                           (socket.inet_aton("192.168.1.20") + bytes(2), False)):
             self.setUp()
-            self.send(hosting(lan=lan), HOST_AT, 0.0)
-            answers = dict((to, packet) for packet, to in self.send(joining(1, lan=lan), same_router, 1.0))
+            room_id, _ = self.host(lan=lan)
+            answers = dict((to, packet) for packet, to in self.send(joining(room_id, lan=lan), same_router, 1.0))
             self.assertEqual(len(answers), 2)
             for packet in answers.values():
                 self.assertEqual(packet[12 + mm.TOKEN:18 + mm.TOKEN], lan if kept else bytes(6))
@@ -160,6 +160,18 @@ class MatchmakerTest(unittest.TestCase):
         room_id, _ = self.host()
         first = self.send(joining(room_id), JOINER_AT, 1.0)
         self.assertEqual(self.send(joining(room_id), JOINER_AT, 1.5), first)
+
+    def test_a_restarted_server_pairs_a_room_and_its_joiner_again(self):
+        room_id, _ = self.host()
+        self.send(joining(room_id), JOINER_AT, 1.0)
+        self.server = mm.Matchmaker()  # everything is forgotten
+        self.assertEqual(self.send(relaying(), JOINER_AT, 2.0), [])
+        self.assertEqual(self.send(joining(room_id), JOINER_AT, 2.0)[0][0][5], mm.GONE)  # until the host's heartbeat
+        self.assertEqual(self.host(now=3.0)[0], room_id)
+        answers = self.send(joining(room_id), JOINER_AT, 4.0)  # both sides hear PEER again
+        self.assertEqual(sorted(to for _, to in answers), sorted([HOST_AT, JOINER_AT]))
+        self.assertTrue(all(packet[5] == mm.PEER for packet, _ in answers))
+        self.assertEqual(self.send(relaying(), JOINER_AT, 5.0), [(relayed(HOST_AT), HOST_AT)])
 
     def test_relay_only_hides_endpoints(self):
         self.server.relay_only = True
