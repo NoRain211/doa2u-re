@@ -178,10 +178,14 @@ session run the same way over either path.
   oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
-  player as before. A host that takes a player from that player's own
-  room packet, rather than from PEER, sends one room packet for each it
-  receives until the player echoes one of the host's clocks, so a forged
-  room packet draws one packet back. After 5 s without an answer, or
+  player as before. A host with an empty room answers a room packet from
+  an address PEER did not give it with one room packet, and takes that
+  player only when the player echoes one of the host's clocks. The host
+  keeps nothing until then, so a forged room packet draws one packet
+  back and neither holds the room nor keeps a real player out. The host
+  offsets those clocks by a secret number for each address, so a clock
+  one player was sent does not pass from another address. After 5 s
+  without an answer, or
   with no endpoints, the runner relays. A runner that hears a relayed
   packet relays too, so a path that works one way only still ends with
   both sides on the relay. The plates show RELAY beside the ping.

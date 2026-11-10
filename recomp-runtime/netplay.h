@@ -97,6 +97,9 @@ typedef struct RecompNetplayMatch {
     bool busy;  /* the room's peer is talking, so a late pairing for another player is ignored */
     /* Random for each socket; the server's packets echo it, so forged ones are dropped. */
     uint8_t nonce[RECOMP_NETPLAY_TOKEN_BYTES];
+    /* Random for each socket and never sent: it keys the offset of the clocks a host's room
+       sends an address it was not given. */
+    uint64_t clock_key;
     /* The server's proof of this socket's address, zeros until it sends one. */
     uint8_t cookie[RECOMP_NETPLAY_TOKEN_BYTES];
     /* The last HOST, JOIN or LEAVE, sent once more when a new cookie answers it. */
@@ -174,9 +177,10 @@ typedef struct RecompNetplayRoom {
     char say[RECOMP_NETPLAY_CHAT_BYTES + 1u];
     uint32_t say_id, heard_id;
     uint64_t said_ms;
-    /* A host's peer taken from an unasked room packet, whose address may be forged, gets one
-       packet per packet it sends until it echoes one of this side's clocks. */
-    bool doubted, owed;
+    /* Added to the clocks this side sends. A host that took its player from that player's own
+       room packet, whose address may be forged, uses a number that differs for each address:
+       the player was taken only once it echoed such a clock. */
+    uint32_t salt;
 } RecompNetplayRoom;
 
 /* Reads what the other player said and, every 100 ms or every call while
