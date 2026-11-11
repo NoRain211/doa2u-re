@@ -180,8 +180,32 @@ static uint8_t *scratch(unsigned slot, size_t size)
 }
 
 static RecompD3dPresenterDrawCommand texture_scratch;
+/* Every field attach_texture writes must stay inside one of the two spans
+   cleared below, or reused scratch keeps the previous draw's values. */
+#define ASSERT_EXTRA_TEXTURE_CLEARED(member) _Static_assert( \
+    (offsetof(RecompD3dPresenterDrawCommand, member) >= \
+        offsetof(RecompD3dPresenterDrawCommand, texture) && \
+     offsetof(RecompD3dPresenterDrawCommand, member) + sizeof(texture_scratch.member) <= \
+        offsetof(RecompD3dPresenterDrawCommand, point_mip_filter)) || \
+    (offsetof(RecompD3dPresenterDrawCommand, member) >= \
+        offsetof(RecompD3dPresenterDrawCommand, texture_is_backbuffer) && \
+     offsetof(RecompD3dPresenterDrawCommand, member) + sizeof(texture_scratch.member) <= \
+        offsetof(RecompD3dPresenterDrawCommand, has_alpha_mask)), \
+    #member " escapes the attach_extra_texture clear spans")
 static void attach_extra_texture(uint32_t device, uint32_t stage)
 {
+    ASSERT_EXTRA_TEXTURE_CLEARED(texture);
+    ASSERT_EXTRA_TEXTURE_CLEARED(has_texture);
+    ASSERT_EXTRA_TEXTURE_CLEARED(address_u);
+    ASSERT_EXTRA_TEXTURE_CLEARED(address_v);
+    ASSERT_EXTRA_TEXTURE_CLEARED(address_w);
+    ASSERT_EXTRA_TEXTURE_CLEARED(texture_is_backbuffer);
+    ASSERT_EXTRA_TEXTURE_CLEARED(texture_is_front_buffer);
+    ASSERT_EXTRA_TEXTURE_CLEARED(texture_bytes);
+    ASSERT_EXTRA_TEXTURE_CLEARED(texture_byte_count);
+    ASSERT_EXTRA_TEXTURE_CLEARED(palette_bytes);
+    ASSERT_EXTRA_TEXTURE_CLEARED(palette_byte_count);
+#undef ASSERT_EXTRA_TEXTURE_CLEARED
     /* Clear every field attach_texture can set. */
     memset(&texture_scratch.texture, 0, offsetof(RecompD3dPresenterDrawCommand, point_mip_filter) -
         offsetof(RecompD3dPresenterDrawCommand, texture));
