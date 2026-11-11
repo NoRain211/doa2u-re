@@ -48,10 +48,12 @@ Only in memory, and the log holds only the status counts:
   the host's LAN endpoint, the build digest, name, input delay, whether
   its room is empty, its socket's nonce, the host's last round trip to the
   server, and when it was first and last heard. A room that is not heard
-  for 20 s is dropped. One address may hold 4 rooms, and the server holds
-  4,096.
+  for 20 s is dropped. One address may hold 4 rooms and open 4 new ones a
+  minute, and the server holds 4,096.
 - Each pair made by a join: the two public endpoints and nonces, kept 10
-  minutes past their last relayed packet. One address may hold 16.
+  minutes past their last relayed packet. Once an address holds 16 pair
+  ends, as a joiner or a host, its other endpoints cannot join until one
+  goes; an endpoint that already holds a pair may still join again.
 
 Cookies are not stored; the server makes them again from a random secret
 it picks at start.
@@ -155,6 +157,13 @@ A list entry is 42 bytes, so a list holds 11 rooms. The host's round trip
 is its own HOST to HOSTED time from its last heartbeat; a version 1 runner
 or server gets no answer from a version 2 one.
 
+A list shows the newest rooms first, so an address that kept leaving and
+hosting again could keep its rooms above everyone else's. Each address
+opens at most 4 new rooms in each clock minute, so up to 8 around a
+minute's turn. A HOST past that gets no answer, and the host's heartbeat
+opens the room once the minute turns. Filling a list for a minute takes
+about three addresses together.
+
 ## In the game
 
 MATCHMAKER in NETPLAY SETTINGS names the server as host:port, edited like
@@ -178,18 +187,21 @@ session run the same way over either path.
   is in it, and LEAVE when the host leaves. It says HOST at once when its
   room fills or opens again, so a taken seat leaves the list before the
   server's 10 s claim on the room ends. A host back from a session
-  says closed while it keeps the seat for its last joiner, for up to 10 s.
+  says closed while it keeps the seat for its last joiner, for up to 10 s,
+  and answers no other caller until then.
   Its room's status says LISTED ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
-  check. A joins the chosen room and Y quick-matches.
+  check. The highlight stays on its room when newer rooms push it down,
+  unless they push it past the sixth place.
+  A joins the chosen room and Y quick-matches.
 - A host times each HOST until its HOSTED and says the latest time in its
   next HOST. FIND MATCH times each LIST until its ROOMS, ignores a ROOMS it
   did not ask for, and shows each room's estimated ping as its own round
   trip plus the host's, such as `~45 MS`. A room whose host has no round
   trip yet shows none. Nothing is sent to a listed host, so FIND MATCH
-  never learns where one is. Quick match takes the lowest estimate, or the
-  oldest room when no estimate is known.
+  never learns where one is. Quick match takes the lowest estimate of
+  every listed room, or the oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. A host with an empty room answers a room packet from
