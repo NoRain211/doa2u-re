@@ -180,14 +180,15 @@ session run the same way over either path.
   Its room's status says LISTED ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
-  check. A joins the chosen room and Y quick-matches.
+  check. The highlight stays on its room when newer rooms push it down.
+  A joins the chosen room and Y quick-matches.
 - A host times each HOST until its HOSTED and says the latest time in its
   next HOST. FIND MATCH times each LIST until its ROOMS, ignores a ROOMS it
   did not ask for, and shows each room's estimated ping as its own round
   trip plus the host's, such as `~45 MS`. A room whose host has no round
   trip yet shows none. Nothing is sent to a listed host, so FIND MATCH
-  never learns where one is. Quick match takes the lowest estimate, or the
-  oldest room when no estimate is known.
+  never learns where one is. Quick match takes the lowest estimate of
+  every listed room, or the oldest room when no estimate is known.
 - A PEER answer starts punching: room packets go to both endpoints every
   100 ms, a joiner takes the first that answers, and a host takes any
   player as before. A host with an empty room answers a room packet from
