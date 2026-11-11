@@ -3157,7 +3157,12 @@ void applyQuality(RecompD3dPresenter *presenter)
     // their textures and resolve on their own, so only an open one waits.
     if (presenter->visibility_open) {
         static bool reported;
-        if (!reported && quality_request.generation != quality_applied) {
+        bool pending;
+        {
+            std::lock_guard<std::mutex> lock(quality_lock);
+            pending = quality_request.generation != quality_applied;
+        }
+        if (!reported && pending) {
             std::fprintf(stderr, "recomp d3d presenter: quality waits for an open visibility test\n");
             reported = true;
         }

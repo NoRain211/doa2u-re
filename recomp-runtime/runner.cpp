@@ -160,7 +160,7 @@ static void pcSettingsClosed(void *)
         std::fprintf(stderr, "recomp runner: PC settings not saved; launcher settings unreadable or unwritable\n");
 }
 
-static void installPcSettings()
+static void installPcSettings(bool online)
 {
     const char *path = std::getenv("RECOMP_LAUNCHER_SETTINGS");
     launcherSettings = path != nullptr ? path : "";
@@ -173,10 +173,13 @@ static void installPcSettings()
 #endif
     std::uint8_t choices[RECOMP_PC_SETTING_COUNT];
     recomp_pc_settings_read(launcherSettings, pcStore, choices);
-    // The rows that apply at once show what is running.
+    // The rows that apply at once show what is running. Online turns the free camera
+    // and CPU costumes off for the session, so those rows keep the saved choice.
     choices[RECOMP_PC_UNLOCKS] = unlockAll ? 0u : 1u;
-    choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
-    choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
+    if (!online) {
+        choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
+        choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
+    }
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
     // The Vulkan renderer rebuilds its targets live; Direct3D 11 takes them at the next start.
@@ -630,7 +633,7 @@ static void bootGuest()
     recomp_cpu_costume_install(online);
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
-    installPcSettings();
+    installPcSettings(online);
     recomp_menu_quit_install();
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
