@@ -526,8 +526,9 @@ port 1 the host's Type A, and matched guest RAM through frame 1,800. The
 cached archives in partitions 3 to
 5 stay shared; `run_game.py` prepares them the same way on every machine.
 During a session the host reports no file times, which differ between
-machines, and of a file's attributes only whether it is a directory:
-Windows adds archive and other bits that Linux and macOS never report.
+machines, and of a file's attributes only whether it is a directory or
+read-only: Windows adds archive and other bits that Linux and macOS never
+report.
 
 The session runs in lockstep, where a frame runs only once the remote pad
 has arrived, and predicts up to 8 frames only while a round is live:
