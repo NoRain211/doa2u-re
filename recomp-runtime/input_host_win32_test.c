@@ -30,8 +30,36 @@ static SDL_Joystick *attach(uintptr_t index, SDL_JoystickID *id)
     return *id != 0 ? SDL_OpenJoystick(*id) : NULL;
 }
 
-int main(void)
+/* CMake runs this with RECOMP_KEYMAP=a=20,bogus,start=74,x=53 and RECOMP_TEST_FOCUSED=1:
+   Space is A, F5 is Start and S is X. The keys those had press nothing, and Y, which had S,
+   has no key. "bogus" has no key and is skipped without losing the entries after it. */
+static int keymap(void)
 {
+    RecompInputGamepad pad, keys;
+    recomp_input_keyboard_reset();
+    recomp_input_keyboard_event('Z', true);
+    recomp_input_keyboard_event(0x0du, true);
+    recomp_input_keyboard_event('S', true);
+    CHECK(recomp_input_host_sample(0u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_A] == 0u && (pad.buttons & 0x0010u) == 0u);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_X] == 0xffu && pad.analog_buttons[RECOMP_INPUT_ANALOG_Y] == 0u);
+    recomp_input_keyboard_event(0x20u, true);
+    recomp_input_keyboard_event(0x74u, true);
+    CHECK(recomp_input_host_sample(0u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_A] == 0xffu && (pad.buttons & 0x0010u) != 0u);
+    /* What the free camera leaves out while it flies. */
+    recomp_input_host_keyboard_buttons(&keys);
+    CHECK(keys.buttons == 0x0010u && keys.analog_buttons[RECOMP_INPUT_ANALOG_A] == 0xffu);
+    CHECK(keys.analog_buttons[RECOMP_INPUT_ANALOG_X] == 0xffu && keys.analog_buttons[RECOMP_INPUT_ANALOG_Y] == 0u);
+    CHECK(keys.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0u);
+    puts("input host keymap: ok");
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    (void)argv;
+    if (argc > 1) return keymap();
     uint8_t keys[RECOMP_INPUT_KEY_COUNT];
     recomp_input_keyboard_reset();
     recomp_input_keyboard_event('Z', true);

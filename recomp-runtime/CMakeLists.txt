@@ -283,6 +283,7 @@ add_test(NAME recomp-runtime-input-pulses COMMAND recomp_input_pulse_source_test
 
 add_library(recomp_keyboard STATIC input_keyboard_win32.c)
 add_executable(recomp_input_host_test input_host_win32.c input_host_win32_test.c)
+target_compile_definitions(recomp_input_host_test PRIVATE RECOMP_INPUT_TEST_FOCUSED)
 target_link_libraries(recomp_input_host_test PRIVATE recomp_keyboard)
 recomp_use_sdl3(recomp_input_host_test)
 if(WIN32)
@@ -290,6 +291,11 @@ if(WIN32)
     add_test(NAME recomp-runtime-input-host-sdl COMMAND recomp_input_host_test)
 elseif(SDL3_FOUND)
     add_test(NAME recomp-runtime-input-host-sdl COMMAND recomp_input_host_test)
+endif()
+if(TEST recomp-runtime-input-host-sdl)
+    add_test(NAME recomp-runtime-input-host-keymap COMMAND recomp_input_host_test keymap)
+    set_tests_properties(recomp-runtime-input-host-keymap PROPERTIES
+        ENVIRONMENT "RECOMP_KEYMAP=a=20,bogus,start=74,x=53;RECOMP_TEST_FOCUSED=1")
 endif()
 if(WIN32)
     add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_xtalk_xapo.cpp

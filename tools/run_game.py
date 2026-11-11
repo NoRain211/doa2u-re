@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import string
 import subprocess
 import sys
 import threading
@@ -17,6 +18,32 @@ from extract_iso import redact_private, sha256
 RELAUNCH = 4  # runner exit code for XLaunchNewImage of the game's own XBE
 # The archives check_hdd_install (0xf6cc0) expects on Z:, copied there by hdd_install_thread.
 HDD_ARCHIVES = ("voice.afs", "datahdd.afs", "datahdd2.afs")
+# Pad buttons and keys that private/keyboard.json may bind; the codes are Windows virtual keys.
+# F10 is left out because Windows treats it as a system key, and F11 because the presenter
+# keeps it, with Alt+Enter, for fullscreen.
+KEY_ACTIONS = ("up", "down", "left", "right", "start", "back", "a", "b", "x", "y", "white", "black", "ltrig", "rtrig")
+KEY_CODES = {**{c: ord(c) for c in string.ascii_uppercase + string.digits},
+             **{f"F{n}": 0x6f + n for n in range(1, 13) if n not in (10, 11)},
+             "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0d, "SHIFT": 0x10, "CTRL": 0x11, "ESC": 0x1b,
+             "SPACE": 0x20, "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28}
+
+
+def keyboard_map():
+    """RECOMP_KEYMAP text for private/keyboard.json, e.g. {"a": "Space", "start": "Enter"}; "" if absent."""
+    try:
+        bindings = json.loads((ROOT / "private/keyboard.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as error:
+        raise ValueError(f"private/keyboard.json is not valid JSON: {error}")
+    if not isinstance(bindings, dict):
+        raise ValueError("private/keyboard.json must be an object such as {\"a\": \"Space\"}")
+    for action, key in bindings.items():
+        if action not in KEY_ACTIONS or not isinstance(key, str) or key.upper() not in KEY_CODES:
+            raise ValueError(f"private/keyboard.json: cannot bind {action!r} to {key!r}; buttons are "
+                             f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, "
+                             "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc")
+    return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" for action, key in bindings.items())
 
 
 def prepare_disc(source, disc):
@@ -138,6 +165,9 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             env[name] = value if isinstance(value, str) else str(int(value))
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
+    keymap = keyboard_map()
+    if keymap:
+        env.setdefault("RECOMP_KEYMAP", keymap)
     # Both presenters keep compiled draw shaders here and load them at the next start.
     shader_cache = ROOT / "private/shader-cache"
     shader_cache.mkdir(parents=True, exist_ok=True)

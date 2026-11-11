@@ -2339,7 +2339,13 @@ bool triangleCovers(const float (&clip)[3][4], RecompD3dCullMode cull, const flo
 uint32_t virtualKey(SDL_Scancode code)
 {
     if (code >= SDL_SCANCODE_A && code <= SDL_SCANCODE_Z) return 'A' + (code - SDL_SCANCODE_A);
+    // Keys private/keyboard.json can bind (tools/run_game.py).
+    if (code >= SDL_SCANCODE_1 && code <= SDL_SCANCODE_9) return '1' + (code - SDL_SCANCODE_1);
+    if (code == SDL_SCANCODE_0) return '0';
+    if (code >= SDL_SCANCODE_F1 && code <= SDL_SCANCODE_F12) return 0x70u + (code - SDL_SCANCODE_F1);
     switch (code) {
+    case SDL_SCANCODE_TAB: return 0x09u;
+    case SDL_SCANCODE_SPACE: return 0x20u;
     case SDL_SCANCODE_BACKSPACE: return 0x08u;
     case SDL_SCANCODE_RETURN: return 0x0du;
     case SDL_SCANCODE_ESCAPE: return 0x1bu;
@@ -2350,9 +2356,6 @@ uint32_t virtualKey(SDL_Scancode code)
     // The free camera's own keys (input_host_win32.c).
     case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return 0x10u;
     case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return 0x11u;
-    case SDL_SCANCODE_F1: return 0x70u;
-    case SDL_SCANCODE_F3: return 0x72u;
-    case SDL_SCANCODE_F12: return 0x7bu;
     case SDL_SCANCODE_PERIOD: return 0xbeu;
     case SDL_SCANCODE_GRAVE: return 0xc0u;
     case SDL_SCANCODE_BACKSLASH: return 0xdcu;

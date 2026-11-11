@@ -231,27 +231,17 @@ static void hint_panel(void)
     recomp_overlay_publish(RECOMP_OVERLAY_FREE_CAMERA, &text);
 }
 
-/* The input host presses pad buttons for some keys (A S Z X Q W E R, the
-   arrows, Return, Backspace). The camera reads those keys itself, so it
+/* The input host presses pad buttons for some keys (by default A S Z X Q W E
+   R, the arrows, Return, Backspace). The camera reads keys itself, so it
    leaves their buttons out while they are down: otherwise S would press Y
    and reset the view, and A would press X and change camera. */
 static void leave_out_keys(RecompInputGamepad *g)
 {
-    static const struct { RecompInputHostKey key; unsigned analog; } analog_keys[] = {
-        {RECOMP_INPUT_HOST_KEY_A, RECOMP_INPUT_ANALOG_X}, {RECOMP_INPUT_HOST_KEY_S, RECOMP_INPUT_ANALOG_Y},
-        {RECOMP_INPUT_HOST_KEY_Z, RECOMP_INPUT_ANALOG_A}, {RECOMP_INPUT_HOST_KEY_X, RECOMP_INPUT_ANALOG_B},
-        {RECOMP_INPUT_HOST_KEY_Q, RECOMP_INPUT_ANALOG_WHITE}, {RECOMP_INPUT_HOST_KEY_W, RECOMP_INPUT_ANALOG_BLACK},
-        {RECOMP_INPUT_HOST_KEY_E, RECOMP_INPUT_ANALOG_LTRIG}, {RECOMP_INPUT_HOST_KEY_R, RECOMP_INPUT_ANALOG_RTRIG},
-    };
-    static const struct { RecompInputHostKey key; uint16_t button; } button_keys[] = {
-        {RECOMP_INPUT_HOST_KEY_UP, 0x0001u}, {RECOMP_INPUT_HOST_KEY_DOWN, 0x0002u},
-        {RECOMP_INPUT_HOST_KEY_LEFT, 0x0004u}, {RECOMP_INPUT_HOST_KEY_RIGHT, 0x0008u},
-        {RECOMP_INPUT_HOST_KEY_RETURN, XBOX_START}, {RECOMP_INPUT_HOST_KEY_BACKSPACE, XBOX_BACK},
-    };
-    for (size_t i = 0; i < sizeof analog_keys / sizeof analog_keys[0]; ++i)
-        if (recomp_input_host_key(analog_keys[i].key)) g->analog_buttons[analog_keys[i].analog] = 0u;
-    for (size_t i = 0; i < sizeof button_keys / sizeof button_keys[0]; ++i)
-        if (recomp_input_host_key(button_keys[i].key)) g->buttons &= (uint16_t)~button_keys[i].button;
+    RecompInputGamepad keys;
+    recomp_input_host_keyboard_buttons(&keys);
+    g->buttons &= (uint16_t)~keys.buttons;
+    for (unsigned i = 0; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; ++i)
+        if (keys.analog_buttons[i] != 0u) g->analog_buttons[i] = 0u;
 }
 
 static bool any_key(void)
