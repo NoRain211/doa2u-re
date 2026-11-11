@@ -68,6 +68,7 @@ std::u16string recomp_netplay_utf16(const std::string &name)
     return wide;
 }
 
+static bool safeProfilePath(const std::string &name);
 static bool profileEntryOk(const std::string &name, bool folder, const std::uint8_t *data, std::size_t size);
 
 std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
@@ -93,8 +94,11 @@ std::string recomp_netplay_latest_profile(const std::filesystem::path &root)
                     std::ifstream in(file.path(), std::ios::binary);
                     bytes.assign(std::istreambuf_iterator<char>(in), {});
                 }
-                taken = taken && profileEntryOk(file.path().lexically_relative(root).generic_string(), folder,
-                    bytes.data(), size <= 0x1000u ? bytes.size() : static_cast<std::size_t>(size));
+                // The checks the pack and the other player's unpack make, so neither refuses this folder.
+                const std::string name = file.path().lexically_relative(root).generic_string();
+                taken = taken && !file.is_symlink(error) && name.size() <= 200u && safeProfilePath(name) &&
+                    profileEntryOk(name, folder, bytes.data(),
+                        size <= 0x1000u ? bytes.size() : static_cast<std::size_t>(size));
             }
             if (profile && taken && (latest.empty() || changed > newest)) {
                 latest = save.path().lexically_relative(root).generic_string();

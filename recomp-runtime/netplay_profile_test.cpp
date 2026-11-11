@@ -111,13 +111,16 @@ int main()
     write(mine / "UDATA/54430006/BBBBBBBBBBBB/br.dat", data);
     fs::last_write_time(mine / "UDATA/54430006/BBBBBBBBBBBB/br.dat",
         fs::last_write_time(mine / "UDATA/54430006/0F515488395E/ups.dat") + std::chrono::hours(1));
-    // Newer profiles the other player would refuse: a ups.dat of another size, and a file the game never writes.
+    // Newer profiles the other player would refuse: a ups.dat of another size, a file the game never
+    // writes, and a folder name it refuses.
     write(mine / "UDATA/54430006/CCCCCCCCCCCC/SaveMeta.xbx", meta(u"Name=Short\r\n"));
     write(mine / "UDATA/54430006/CCCCCCCCCCCC/ups.dat", other);
     write(mine / "UDATA/54430006/DDDDDDDDDDDD/SaveMeta.xbx", meta(u"Name=Extra\r\n"));
     write(mine / "UDATA/54430006/DDDDDDDDDDDD/ups.dat", ups);
     write(mine / "UDATA/54430006/DDDDDDDDDDDD/notes.txt", data);
-    for (const char *save : {"CCCCCCCCCCCC/ups.dat", "DDDDDDDDDDDD/notes.txt"})
+    write(mine / "UDATA/54430006/EEEE EEEE/SaveMeta.xbx", meta(u"Name=Spaced\r\n"));
+    write(mine / "UDATA/54430006/EEEE EEEE/ups.dat", ups);
+    for (const char *save : {"CCCCCCCCCCCC/ups.dat", "DDDDDDDDDDDD/notes.txt", "EEEE EEEE/ups.dat"})
         fs::last_write_time(mine / "UDATA/54430006" / save,
             fs::last_write_time(mine / "UDATA/54430006/0F515488395E/ups.dat") + std::chrono::hours(2));
     fs::last_write_time(mine / "UDATA/54430006/AAAAAAAAAAAA/ups.dat",
