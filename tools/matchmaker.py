@@ -169,8 +169,9 @@ class Matchmaker:
         room = self.by_id.get(room_id)
         # A joiner asks again until it hears; its own claim answers again.
         claimed = room is not None and room.claimed_until > now and room.claimer != sender
-        full = sender not in self.pairs and sum(1 for end in self.pairs if end[0] == sender[0]) >= PAIRS_PER_ADDRESS
-        if length > NAME or room is None or room.digest != digest or not room.open or claimed or full:
+        # The pair count scans every pair, so it runs only for a join that would otherwise pass.
+        if (length > NAME or room is None or room.digest != digest or not room.open or claimed or
+                sender not in self.pairs and sum(1 for end in self.pairs if end[0] == sender[0]) >= PAIRS_PER_ADDRESS):
             return [(header(GONE) + nonce + struct.pack(">I", room_id), sender)]
         if room.claimer != sender or room.claimed_until <= now:
             held = self.claims.get(sender[0])

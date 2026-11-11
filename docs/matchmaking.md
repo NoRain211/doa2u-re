@@ -51,7 +51,9 @@ Only in memory, and the log holds only the status counts:
   for 20 s is dropped. One address may hold 4 rooms, and the server holds
   4,096.
 - Each pair made by a join: the two public endpoints and nonces, kept 10
-  minutes past their last relayed packet. One address may hold 16.
+  minutes past their last relayed packet. Once an address holds 16 pair
+  ends, as a joiner or a host, its other endpoints cannot join until one
+  goes; an endpoint that already holds a pair may still join again.
 
 Cookies are not stored; the server makes them again from a random secret
 it picks at start.
