@@ -3139,12 +3139,11 @@ WindowFit windowFit(const RecompD3dPresenter *presenter)
 void fitWindow(RecompD3dPresenter *presenter)
 {
     if (presenter->window == nullptr || std::getenv("RECOMP_HEADLESS") != nullptr) return;
+    // F11 and Alt+Enter choose fullscreen; the swapchain follows it, so only a window is resized.
+    if ((SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_FULLSCREEN) != 0) return;
     const WindowFit fit = windowFit(presenter);
-    SDL_SetWindowFullscreen(presenter->window, fit.fullscreen);
-    if (!fit.fullscreen) {
-        SDL_SetWindowSize(presenter->window, static_cast<int>(fit.width), static_cast<int>(fit.height));
-        SDL_SetWindowPosition(presenter->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
+    SDL_SetWindowSize(presenter->window, static_cast<int>(fit.width), static_cast<int>(fit.height));
+    SDL_SetWindowPosition(presenter->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 }
 
 /* Applies PC Settings' quality between frames. SMAA only switches its pass.
@@ -3272,7 +3271,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);
     presenter->visibility_free.clear();
     presenter->last_bound = {};
-    fitWindow(presenter);
+    if (scale != old_scale) fitWindow(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
         width, height, presenter->msaa_count, presenter->smaa ? 1 : 0);
 }
