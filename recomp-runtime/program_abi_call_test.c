@@ -4,6 +4,7 @@
 
 static unsigned manual_calls, generated_calls, lookups;
 static bool bound;
+uint32_t recomp_program_lookup_generation = 1u;
 
 static void manual_body(void) { ++manual_calls; }
 static void generated_body(void) { ++generated_calls; }
@@ -24,6 +25,18 @@ int main(void)
     RECOMP_ABI_CALL(0x1004u, generated_body);
     if (lookups != 3u || manual_calls != 1u || generated_calls != 2u) {
         fprintf(stderr, "ABI call: manual=%u generated=%u lookups=%u\n",
+            manual_calls, generated_calls, lookups);
+        return 1;
+    }
+    /* One site asks once per boot; a reboot's new generation asks again. */
+    lookups = manual_calls = generated_calls = 0u;
+    for (unsigned boot = 0u; boot < 2u; ++boot) {
+        bound = boot == 1u;
+        for (unsigned call = 0u; call < 3u; ++call) RECOMP_ABI_CALL(0x1000u, generated_body);
+        ++recomp_program_lookup_generation;
+    }
+    if (lookups != 2u || manual_calls != 3u || generated_calls != 3u) {
+        fprintf(stderr, "ABI call site: manual=%u generated=%u lookups=%u\n",
             manual_calls, generated_calls, lookups);
         return 1;
     }
