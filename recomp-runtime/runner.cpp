@@ -186,6 +186,9 @@ static void installPcSettings(bool online)
     const bool quality = recomp_d3d_presenter_quality_live();
     for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA})
         recomp_pc_settings_set_live(setting, quality);
+    // Online they take effect at the next offline start, and the page says so.
+    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA})
+        recomp_pc_settings_set_live(setting, !online);
 }
 
 /* Dedication card shown each time the staff roll starts. The BMP is a private

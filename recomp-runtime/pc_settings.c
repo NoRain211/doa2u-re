@@ -217,7 +217,7 @@ static uint32_t text_for(unsigned message)
 
 unsigned recomp_pc_settings_choices(unsigned setting) { return setting < PC_ROWS ? CHOICES[setting] : 0u; }
 bool recomp_pc_settings_applies_now(unsigned setting) { return setting < PC_ROWS && live[setting]; }
-void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on || ALWAYS_LIVE[setting]; }
+void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on; }
 uint8_t recomp_pc_settings_choice(unsigned setting)
 {
     return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;

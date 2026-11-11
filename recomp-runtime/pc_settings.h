@@ -39,8 +39,8 @@ enum { RECOMP_PC_ULTRAWIDE = 3 };
 /* The number of choices a setting has. */
 unsigned recomp_pc_settings_choices(unsigned setting);
 /* True when a change takes effect at once; the others apply at the next launch.
-   Unlocks, CPU costumes and the free camera always do; the host marks others
-   its renderer applies live, after recomp_pc_settings_install. */
+   Unlocks, CPU costumes and the free camera do unless the host turns them off;
+   the host marks others its renderer applies live, after recomp_pc_settings_install. */
 bool recomp_pc_settings_applies_now(unsigned setting);
 void recomp_pc_settings_set_live(unsigned setting, bool live);
 

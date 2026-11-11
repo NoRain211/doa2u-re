@@ -244,9 +244,9 @@ int main(void)
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) && !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
-    recomp_pc_settings_set_live(RECOMP_PC_UNLOCKS, false);
+    recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
     expect("renderer rows", recomp_pc_settings_applies_now(RECOMP_PC_MSAA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
+        !recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) && recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
 
     /* Row counts: the top list has eight rows, page 19 eleven, others the game's. */
     page = 0u;
