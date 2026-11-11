@@ -230,8 +230,17 @@ class MatchmakerTest(unittest.TestCase):
         self.send(listing(), JOINER_AT, 2.0 + mm.ROOM_SECONDS + 1.0)
         self.assertEqual(self.server.rooms, {})
         for port in range(mm.ROOMS_PER_ADDRESS):
-            self.host(now=30.0, sender=(HOST_AT[0], 50000 + port))
-        self.assertEqual(self.send(hosting(), (HOST_AT[0], 60000), 30.0), [])
+            self.host(now=60.0, sender=(HOST_AT[0], 50000 + port))
+        self.assertEqual(self.send(hosting(), (HOST_AT[0], 60000), 60.0), [])
+
+    def test_an_address_opens_few_rooms_a_minute(self):
+        # Leaving and hosting again from new ports would keep one address's rooms at the top of the list.
+        for port in range(mm.NEW_ROOMS_PER_MINUTE):
+            self.host(now=1.0, sender=(HOST_AT[0], 50000 + port))
+            self.send(mm.header(mm.LEAVE) + NO_TOKENS, (HOST_AT[0], 50000 + port), 1.0)
+        self.assertEqual(self.send(hosting(), (HOST_AT[0], 60000), 2.0), [])
+        self.host(now=2.0, sender=JOINER_AT)  # another address is not held back
+        self.host(now=61.0, sender=(HOST_AT[0], 60000))
 
     def test_garbage_gets_no_answer(self):
         for packet in (b"", b"D2MM", mm.header(mm.HOST) + NO_TOKENS + b"short", mm.header(mm.LEAVE) + b"short",

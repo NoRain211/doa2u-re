@@ -31,6 +31,7 @@ CLAIM_SECONDS = 10.0  # a joined room stays off the list while the two connect
 PAIR_SECONDS = 600.0  # a pair's relay lasts this long after its last packet
 MAX_ROOMS = 4096
 ROOMS_PER_ADDRESS = 4
+NEW_ROOMS_PER_MINUTE = 4  # per address; without it, leaving and hosting again keeps one's rooms the newest listed
 JOINS_PER_SECOND = 10  # per address; a joiner repeats JOIN until it hears
 RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while waiting for the other player
 RELAY_PER_ADDRESS = 2 * RELAY_PER_SECOND  # a second, so one address cannot relay through every pair it makes
@@ -92,6 +93,7 @@ class Matchmaker:
         self.claims = {}  # the room each joining address holds; one each, so one address cannot hide the list
         self.join_counts = {}  # JOINs per address since the last sweep
         self.relay_counts = {}  # RELAYs per address since the last sweep
+        self.room_counts, self.minute = {}, None  # rooms each address opened this minute
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
         self.secret = os.urandom(32)  # cookies stop working across a restart; clients get new ones
@@ -139,7 +141,8 @@ class Matchmaker:
         room = self.rooms.get(sender)
         if room is None:
             same_address = sum(1 for host in self.rooms if host[0] == sender[0])
-            if len(self.rooms) >= MAX_ROOMS or same_address >= ROOMS_PER_ADDRESS:
+            if (len(self.rooms) >= MAX_ROOMS or same_address >= ROOMS_PER_ADDRESS or
+                    over(self.room_counts, sender[0], NEW_ROOMS_PER_MINUTE)):
                 return []
             # From the endpoint and nonce alone: after a restart the room has its id again, so its joiner can ask again.
             room_id = int.from_bytes(hashlib.sha256(endpoint(sender) + nonce).digest()[:4], "big")
@@ -217,6 +220,9 @@ class Matchmaker:
         self.swept = now
         self.join_counts.clear()
         self.relay_counts.clear()
+        if int(now // 60) != self.minute:
+            self.minute = int(now // 60)
+            self.room_counts.clear()
         for room in [room for room in self.rooms.values() if now - room.seen > ROOM_SECONDS]:
             self.remove(room)
         for address in [address for address, room in self.claims.items() if room.claimed_until <= now]:
