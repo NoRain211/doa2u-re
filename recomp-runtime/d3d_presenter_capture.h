@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <new>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -59,17 +58,22 @@ private:
         alignas(8) RecompD3dPresenterCommand value;
         size_t offsets[8];
     };
-    struct Span { size_t size; size_t offset; };
+    // offset == SIZE_MAX marks an empty slot.
+    struct Span { uint64_t key; size_t size; size_t offset; };
 
     RecompD3dPresenterError addRecord(Kind kind, uint32_t base, uint32_t size);
+    void insertSpan(uint64_t key, size_t size, size_t offset);
+    void clearSpans();
 
     std::vector<Entry> entries_;
     std::vector<CapturedCommand> commands_;
     // Word storage keeps indices and vertex data aligned after relocation.
     // resize() appends uninitialized words; add() overwrites the used bytes.
     std::vector<uint64_t, NoInitAllocator<uint64_t>> payload_;
-    // Keyed by source, size and sampled bytes; memcmp still confirms each reuse.
-    std::unordered_multimap<uint64_t, Span> spans_;
+    // Open-addressing table keyed by source, size and sampled bytes; memcmp still
+    // confirms each reuse. Slots persist across clear(), so a frame allocates nothing.
+    std::vector<Span> spans_;
+    size_t span_count_ = 0u;
     bool sealed_ = false;
 };
 
