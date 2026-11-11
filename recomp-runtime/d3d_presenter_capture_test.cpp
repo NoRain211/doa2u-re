@@ -257,6 +257,36 @@ int main()
         CHECK(std::memcmp(geometry.*fields[i], sources[i].data(), sizes[i]) == 0);
     }
     for (size_t i = 2u; i < sources.size(); ++i) CHECK(geometry.*fields[i] == nullptr);
+
+    packet.clear();
+    RecompD3dPresenterCommand vertices{};
+    vertices.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+    vertices.data.draw.vertex_count = 3u;
+    vertices.data.draw.vertex_stride = 11u;
+    vertices.data.draw.vertex_bytes = sources[0].data();
+    sources[0][0] = sources[0][1] = 0u;
+    const std::vector<uint8_t> early_vertices = sources[0];
+    for (size_t i = 0u; i < 600u; ++i) {
+        sources[0][0] = static_cast<uint8_t>(i);
+        sources[0][1] = static_cast<uint8_t>(i >> 8);
+        CHECK(packet.add(vertices) == RECOMP_D3D_PRESENTER_OK);
+    }
+    sources[0] = early_vertices;
+    CHECK(packet.add(vertices) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(packet.command(600).data.draw.vertex_bytes == packet.command(0).data.draw.vertex_bytes);
+    CHECK(std::memcmp(packet.command(600).data.draw.vertex_bytes, early_vertices.data(), early_vertices.size()) == 0);
+
+    packet.clear();
+    sources[0][0] = 0x11u;
+    CHECK(packet.add(vertices) == RECOMP_D3D_PRESENTER_OK);
+    const std::vector<uint8_t> first_vertices = sources[0];
+    sources[0][0] = 0x22u;
+    CHECK(packet.add(vertices) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(packet.command(0).data.draw.vertex_bytes != packet.command(1).data.draw.vertex_bytes);
+    CHECK(std::memcmp(packet.command(0).data.draw.vertex_bytes, first_vertices.data(), first_vertices.size()) == 0);
+    CHECK(std::memcmp(packet.command(1).data.draw.vertex_bytes, sources[0].data(), sources[0].size()) == 0);
     std::puts("PASS capture ownership, order, deduplication, overflow, alignment, move and reuse");
     return 0;
 }

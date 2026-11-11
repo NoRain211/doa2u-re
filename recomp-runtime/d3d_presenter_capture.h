@@ -16,8 +16,21 @@ public:
     D3dCapturePacket() = default;
     D3dCapturePacket(const D3dCapturePacket &) = delete;
     D3dCapturePacket &operator=(const D3dCapturePacket &) = delete;
-    D3dCapturePacket(D3dCapturePacket &&) noexcept = default;
-    D3dCapturePacket &operator=(D3dCapturePacket &&) noexcept = default;
+    // The move empties spans_, so the source's span count must reset with it.
+    D3dCapturePacket(D3dCapturePacket &&other) noexcept
+        : entries_(std::move(other.entries_)), commands_(std::move(other.commands_)),
+          payload_(std::move(other.payload_)), spans_(std::move(other.spans_)),
+          span_count_(std::exchange(other.span_count_, 0u)), sealed_(other.sealed_) {}
+    D3dCapturePacket &operator=(D3dCapturePacket &&other) noexcept
+    {
+        entries_ = std::move(other.entries_);
+        commands_ = std::move(other.commands_);
+        payload_ = std::move(other.payload_);
+        spans_ = std::move(other.spans_);
+        span_count_ = std::exchange(other.span_count_, 0u);
+        sealed_ = other.sealed_;
+        return *this;
+    }
 
     RecompD3dPresenterError add(const RecompD3dPresenterCommand &command);
     RecompD3dPresenterError addRelease(uint32_t base, uint32_t size);
