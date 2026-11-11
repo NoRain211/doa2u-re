@@ -106,6 +106,24 @@ int recomp_directory_model_test(void)
     passed &= recomp_directory_next(&model, "*.dat", &entry) &&
         strcmp(entry.name, "profile.dat") == 0;
 
+    /* exFAT hands names over as created; the guest must still see NTFS order. */
+    recomp_directory_reset(&model);
+    passed &= add_entry(&model, "datadvd.afs", 1u, 0x80u);
+    passed &= add_entry(&model, "DOA_G4.sfd", 1u, 0x80u);
+    passed &= add_entry(&model, "doa2_op.sfd", 1u, 0x80u);
+    passed &= add_entry(&model, "bgm.afs", 1u, 0x80u);
+    passed &= add_entry(&model, "2_VI_WIDE_B.sfd", 1u, 0x80u);
+    {
+        static const char *const sorted[] = {
+            "2_VI_WIDE_B.sfd", "bgm.afs", "datadvd.afs", "doa2_op.sfd", "DOA_G4.sfd",
+        };
+        for (size_t i = 0u; i < sizeof sorted / sizeof sorted[0]; ++i) {
+            passed &= recomp_directory_next(&model, NULL, &entry) &&
+                strcmp(entry.name, sorted[i]) == 0;
+        }
+        passed &= !recomp_directory_next(&model, NULL, &entry);
+    }
+
     {
         static const struct {
             const char *pattern;

@@ -40,6 +40,20 @@ void recomp_directory_reset(RecompDirectoryModel *model)
     }
 }
 
+/* NTFS lists names in upcased ordinal order, but FAT, exFAT and readdir list
+   them as created. The guest opens files in listing order, so netplay peers
+   on different drives desynced until every host listed in NTFS order. */
+static int name_order(const char *a, const char *b)
+{
+    const unsigned char *x = (const unsigned char *)a;
+    const unsigned char *y = (const unsigned char *)b;
+    while (*x != '\0' && toupper(*x) == toupper(*y)) {
+        ++x;
+        ++y;
+    }
+    return toupper(*x) - toupper(*y);
+}
+
 bool recomp_directory_add(
     RecompDirectoryModel *model,
     const RecompDirectoryEntry *entry)
@@ -49,7 +63,12 @@ bool recomp_directory_add(
         memchr(entry->name, '\0', sizeof entry->name) == NULL) {
         return false;
     }
-    model->entries[model->count++] = *entry;
+    size_t at = model->count++;
+    while (at > 0u && name_order(entry->name, model->entries[at - 1u].name) < 0) {
+        model->entries[at] = model->entries[at - 1u];
+        --at;
+    }
+    model->entries[at] = *entry;
     return true;
 }
 
