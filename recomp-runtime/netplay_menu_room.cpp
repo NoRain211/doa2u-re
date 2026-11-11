@@ -42,10 +42,15 @@ static void openRouterPort(std::uint16_t port)
             char address[sizeof upnpAddress];
             const bool forwarded = recomp_netplay_open_router_port(asked, address, sizeof address);
             std::memcpy(upnpAddress, address, sizeof address);
+            const Upnp result = forwarded ? Upnp::Forwarded : Upnp::NotForwarded;
             Upnp asking = Upnp::Asking;
-            if (asked == upnpPort.load() &&
-                upnpState.compare_exchange_strong(asking, forwarded ? Upnp::Forwarded : Upnp::NotForwarded))
-                return;
+            if (upnpState.compare_exchange_strong(asking, result)) {
+                // A room that reopened on another port just before the swap stores its port first, so it shows
+                // here. Taking the answer back first leaves the forward to this thread alone; a failed take
+                // means the menu left the room and closed the forward itself.
+                Upnp taken = result;
+                if (upnpPort.load() == asked || !upnpState.compare_exchange_strong(taken, Upnp::Asking)) return;
+            }
             // The room closed meanwhile, or opened again on another port, so this forward closes.
             if (forwarded) recomp_netplay_close_router_port();
             Upnp left = Upnp::AskingLeft;
