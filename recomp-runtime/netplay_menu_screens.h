@@ -72,7 +72,7 @@ struct FindState {
     int choice = 0;
     std::uint32_t joining = 0u;
     std::vector<std::uint32_t> blockedRooms; // listed rooms of hosts this player blocked, this run
-    Clock::time_point listedAt, joinStarted, askedAt, askingSince; // askingSince: when this socket began waiting for its first list
+    Clock::time_point listedAt, joinStarted, askedAt, askingSince; // askingSince: when this socket first asked for a list
 };
 
 // The settings part is what netplay.txt keeps.

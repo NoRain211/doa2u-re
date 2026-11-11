@@ -9,12 +9,11 @@
 
 namespace netplay_menu {
 
-// A new socket has no list yet: it asks on the next tick, and the wait for an answer counts from now.
+// A new socket has no list yet: it asks on the first tick after the matchmaker's address is known.
 static void awaitList()
 {
     menu.find.listOk = false;
     menu.find.listedAt = Clock::time_point{};
-    menu.find.askingSince = Clock::now();
 }
 
 // FIND MATCH asks from a socket that becomes this joiner's room socket, so the
@@ -136,6 +135,7 @@ void updateFind(std::uint16_t keys)
         return;
     }
     if (match.server_port != 0u && now - menu.find.listedAt >= std::chrono::seconds(2)) {
+        if (menu.find.listedAt == Clock::time_point{}) menu.find.askingSince = now; // the wait counts from the first ask
         menu.find.listedAt = now;
         recomp_netplay_match_list(&menu.net, menu.digest.data());
     }
@@ -181,7 +181,10 @@ void drawFind()
         recomp_overlay_text(588.0f - recomp_overlay_text_width(detail.c_str(), 2.0f), y + 2.0f, 2.0f,
             selected ? White : Gray, detail.c_str());
     }
-    const char *asking = Clock::now() - menu.find.askingSince > std::chrono::seconds(6)
+    // A slow address lookup is not the matchmaker's silence.
+    const bool silent = menu.find.listedAt != Clock::time_point{} &&
+        Clock::now() - menu.find.askingSince > std::chrono::seconds(6);
+    const char *asking = silent
         ? "NO ANSWER FROM THE MATCHMAKER. STILL ASKING..." : "ASKING THE MATCHMAKER...";
     const char *status = menu.find.joining != 0u ? "JOINING..."
         : !menu.find.listOk ? asking
