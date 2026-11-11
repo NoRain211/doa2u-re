@@ -41,6 +41,9 @@ void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
 static bool present_suppressed;
 static bool content_widescreen; /* the game's D3DPRESENTFLAG_WIDESCREEN at CreateDevice */
+/* Its shape, also read at CreateDevice: reading it per draw parsed the
+   environment thousands of times a frame on busy stages. */
+static float content_aspect = 4.0f / 3.0f;
 static bool gpu_work_suppressed;
 
 void recomp_d3d8_set_present_suppressed(bool suppressed)
@@ -261,7 +264,7 @@ bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
 
 float recomp_d3d8_content_aspect(void)
 {
-    return content_widescreen ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
+    return content_aspect;
 }
 
 static void fit_scissor(RecompD3dPresenterDrawCommand *draw, const float center[2], const float scale[2])
@@ -565,6 +568,7 @@ static void create_device(void)
     }
     device_state = candidate;
     content_widescreen = (request.presentation.flags & 0x10u) != 0u;
+    content_aspect = content_widescreen ? recomp_kernel_widescreen_aspect() : 4.0f / 3.0f;
     write_initial_device(&request.presentation);
     if (recomp_d3d_frame_initialize(&frame_state, candidate.width, candidate.height) != RECOMP_D3D_FRAME_OK) {
         recomp_stop(2, "d3d8:frame-initialize");
