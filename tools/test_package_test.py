@@ -1,10 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
+from pathlib import Path
+from unittest import mock
 
+import package_test
 from package_test import PLATFORM_FILES, git, lifter_shipped, shipped
 
 
 class ReleaseSelectionTest(unittest.TestCase):
+    def test_windows_release_needs_the_launcher_icon(self):
+        # Without it the ZIP's exes lose their icon, and updating replaces the installed ones.
+        with mock.patch.object(package_test, "ICON", Path("missing.ico")), \
+                mock.patch("sys.argv", ["package_test.py", "0.0-test"]):
+            with self.assertRaisesRegex(SystemExit, "launcher"):
+                package_test.main()
+
     def test_platform_lists_name_tracked_files(self):
         # A renamed backend would otherwise ship to every platform.
         tracked = set(git("ls-files").decode().splitlines())
