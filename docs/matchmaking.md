@@ -157,7 +157,9 @@ or server gets no answer from a version 2 one.
 
 A list shows the newest rooms first, so an address that kept leaving and
 hosting again could keep its rooms above everyone else's. Each address
-opens at most 4 new rooms a minute, so filling a list for a minute takes
+opens at most 4 new rooms in each clock minute, so up to 8 around a
+minute's turn. A HOST past that gets no answer, and the host's heartbeat
+opens the room once the minute turns. Filling a list for a minute takes
 about three addresses together.
 
 ## In the game
