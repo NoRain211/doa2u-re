@@ -39,8 +39,12 @@ if(WIN32)
     file(DOWNLOAD https://repo1.maven.org/maven2/org/lwjgl/lwjgl-shaderc/3.4.3/lwjgl-shaderc-3.4.3-natives-windows.jar
         "${_shaderc_jar}"
         EXPECTED_HASH SHA256=e8e631d007b36edf1440cb4d42654a9b5c03bcb91b9c333c6a81ec6a3911f8bc)
+    # Restoring the jar's file times fails on some player drives; SDL3 above skips them too (CMP0135).
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+        set(_shaderc_touch TOUCH)
+    endif()
     file(ARCHIVE_EXTRACT INPUT "${_shaderc_jar}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/shaderc"
-        PATTERNS windows/x64/org/lwjgl/shaderc/shaderc.dll)
+        PATTERNS windows/x64/org/lwjgl/shaderc/shaderc.dll ${_shaderc_touch})
     set(RECOMP_SHADERC_DLL "${CMAKE_CURRENT_BINARY_DIR}/shaderc/windows/x64/org/lwjgl/shaderc/shaderc.dll")
     function(recomp_use_shader_compiler target)
         add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
