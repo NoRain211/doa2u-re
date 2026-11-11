@@ -12,7 +12,7 @@ class ReleaseSelectionTest(unittest.TestCase):
         # Without it the ZIP's exes lose their icon, and updating replaces the installed ones.
         with mock.patch.object(package_test, "ICON", Path("missing.ico")), \
                 mock.patch("sys.argv", ["package_test.py", "0.0-test"]):
-            with self.assertRaisesRegex(SystemExit, "launcher"):
+            with self.assertRaisesRegex(SystemExit, "without their icon"):
                 package_test.main()
 
     def test_platform_lists_name_tracked_files(self):
