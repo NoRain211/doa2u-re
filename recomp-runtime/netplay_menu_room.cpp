@@ -16,6 +16,7 @@ namespace netplay_menu {
 // The router forward, asked on its own thread; AskingLeft is asking for a room already left.
 enum class Upnp { Idle, Asking, Forwarded, NotForwarded, AskingLeft };
 static std::atomic<Upnp> upnpState{Upnp::Idle};
+static std::atomic<std::uint16_t> upnpPort{0u}; // the port the latest room wants forwarded
 static char upnpAddress[80];
 static std::string lanAddress;
 static const std::chrono::seconds RejoinEvery(3);
@@ -30,19 +31,26 @@ static void openRouterPort(std::uint16_t port)
     char lan[64];
     lanAddress = recomp_netplay_route_address(lan, sizeof lan) ? lan : "";
     Upnp idle = Upnp::Idle, left = Upnp::AskingLeft;
-    // A room left while its forward was being asked for takes that answer when it opens again.
-    // shortcut: the answer is for the port the first room asked with; ask again if the port setting can change in between.
+    upnpPort.store(port);
+    // A room left while its forward was being asked for takes that answer when it opens again,
+    // and the thread asks again if the port changed.
     if (upnpState.compare_exchange_strong(left, Upnp::Asking)) return;
     if (!upnpState.compare_exchange_strong(idle, Upnp::Asking)) return; // a forward is open or still being asked for
-    std::thread([port] {
-        char address[sizeof upnpAddress];
-        const bool forwarded = recomp_netplay_open_router_port(port, address, sizeof address);
-        std::memcpy(upnpAddress, address, sizeof address);
-        Upnp asking = Upnp::Asking;
-        if (upnpState.compare_exchange_strong(asking, forwarded ? Upnp::Forwarded : Upnp::NotForwarded)) return;
-        // The room closed meanwhile, so the forward closes with it.
-        if (forwarded) recomp_netplay_close_router_port();
-        upnpState.store(Upnp::Idle);
+    std::thread([] {
+        for (;;) {
+            const std::uint16_t asked = upnpPort.load();
+            char address[sizeof upnpAddress];
+            const bool forwarded = recomp_netplay_open_router_port(asked, address, sizeof address);
+            std::memcpy(upnpAddress, address, sizeof address);
+            Upnp asking = Upnp::Asking;
+            if (asked == upnpPort.load() &&
+                upnpState.compare_exchange_strong(asking, forwarded ? Upnp::Forwarded : Upnp::NotForwarded))
+                return;
+            // The room closed meanwhile, or opened again on another port, so this forward closes.
+            if (forwarded) recomp_netplay_close_router_port();
+            Upnp left = Upnp::AskingLeft;
+            if (upnpState.compare_exchange_strong(left, Upnp::Idle)) return;
+        }
     }).detach();
 }
 
