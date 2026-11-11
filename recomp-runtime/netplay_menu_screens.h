@@ -70,6 +70,7 @@ struct LobbyState {
 struct FindState {
     bool listOk = false, quick = false;
     int choice = 0;
+    std::uint32_t chosen = 0u; // the highlighted room's id; a newer room moves the others down the list
     std::uint32_t joining = 0u;
     std::vector<std::uint32_t> blockedRooms; // listed rooms of hosts this player blocked, this run
     Clock::time_point listedAt, joinStarted, askedAt, askingSince; // askingSince: when this socket began waiting for its first list
