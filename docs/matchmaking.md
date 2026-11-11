@@ -178,7 +178,8 @@ session run the same way over either path.
 
 - HOST ONLINE says HOST every 5 s while its room is up, open while nobody
   is in it, and LEAVE when the host leaves. A host back from a session
-  says closed while it keeps the seat for its last joiner, for up to 10 s.
+  says closed while it keeps the seat for its last joiner, for up to 10 s,
+  and answers no other caller until then.
   Its room's status says LISTED ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name

@@ -114,8 +114,8 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
             continue;
         }
         if (!netplay_from_peer(net, &from)) {
-            /* A joiner takes either endpoint the matchmaker gave. */
-            if (room->joined || (!room->hosting && !candidate)) continue;
+            /* A joiner takes either endpoint the matchmaker gave. A held seat waits for its last joiner. */
+            if (room->joined || room->held_until_ms != 0u || (!room->hosting && !candidate)) continue;
             if (!candidate && !room_caller_proved(net, room, &from, packet, now, digest, name)) continue;
             net->peer_address = from.sin_addr.s_addr;
             net->peer_port = from.sin_port;
