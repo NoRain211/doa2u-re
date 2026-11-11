@@ -29,12 +29,13 @@ enum {
 
 extern void sub_000C6B00(void);
 
-static bool enabled;
+static bool enabled, online_session;
 static uint32_t seed;
 
 void recomp_cpu_costume_install(bool online)
 {
     const char *value = getenv("RECOMP_RANDOM_CPU_COSTUMES");
+    online_session = online;
     enabled = !online && value != NULL && strcmp(value, "1") == 0;
     struct timespec now;
     timespec_get(&now, TIME_UTC); /* nanoseconds, so quick reboots still differ */
@@ -83,8 +84,22 @@ static bool wears_player_costume(uint8_t character, uint8_t costume)
     return false;
 }
 
+void recomp_cpu_costume_set_enabled(bool on)
+{
+    enabled = !online_session && on;
+}
+
+bool recomp_cpu_costume_enabled(void)
+{
+    return enabled;
+}
+
 static void fighter_costume(void)
 {
+    if (!enabled) {
+        sub_000C6B00();
+        return;
+    }
     const uint32_t entry = recomp_runtime.registers.esp;
     const uint8_t character = *recomp_memory(entry + 4u, 1u), index = *recomp_memory(entry + 8u, 1u);
     sub_000C6B00();
@@ -107,5 +122,6 @@ static void fighter_costume(void)
 
 RecompFunction recomp_cpu_costume_lookup_manual(uint32_t guest_address)
 {
-    return enabled && guest_address == FIGHTER_COSTUME ? fighter_costume : NULL;
+    /* Routed whenever it may be wanted, so a cached lookup still sees a later switch. */
+    return !online_session && guest_address == FIGHTER_COSTUME ? fighter_costume : NULL;
 }

@@ -1,12 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "host_diagnostics.h"
 #include "d3d8_adapter.h"
+#include "d3d_presenter.h"
 #include "dsound_api_adapter.h"
 #include "dsound_buffer_adapter.h"
 #include "guest_snapshot.h"
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
 #include "cpu_costume.h"
+#include "unlock_profile.h"
+#include "pc_settings.h"
+#include "runner_assets.h"
+#include "menu_quit.h"
+#include "pc_settings_store.h"
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
@@ -114,22 +120,75 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
     return recomp_netplay_session_back_pad(gamepad) || sampled;
 }
 
-/* Offer every costume and character. 0x87cfa8 points at the live profile.
-   The game's own award loops (0xdc640, 0xdc100) set each costume byte at
-   +0x2ed8 to that character's costume count from 0x6e0f08 (the select screen
-   shows min(byte, count)), and the three character flags at +0x2ed2 to 1.
-   Repeating them each frame also covers profiles loaded later. */
+/* Offer every costume and character without saving them (unlock_profile.c):
+   the live profile is unlocked in memory each frame, while its saves and
+   awards keep to what was earned, so turning this off gives it back. */
 static bool unlockAll = true; // --no-unlock-all leaves unlocks to play
-static void unlockProfile(std::uint32_t)
+
+/* PC SETTINGS in the game's Options menu (pc_settings.c) edits the launchers'
+   private/launcher.json, which run_game.py names in RECOMP_LAUNCHER_SETTINGS.
+   Unlocks and CPU Costumes change at once (offline only); the other rows
+   apply at the next launch. */
+static std::string launcherSettings;
+static RecompPcSettingsStore pcStore;
+
+static void pcSettingChanged(unsigned setting, unsigned choice, void *)
 {
-    const std::uint32_t profile = *recomp_memory_u32(0x0087cfa8u);
-    if (profile == 0u) return;
-    for (std::uint32_t i = 0; i < 15u; ++i) {
-        const std::uint8_t character = *recomp_memory(0x006959dcu + i, 1u);
-        const std::uint8_t slot = *recomp_memory(0x006959c0u + character, 1u);
-        *recomp_memory(profile + 0x2ed8u + slot, 1u) = *recomp_memory(0x006e0f08u + character, 1u);
+    switch (setting) {
+    case RECOMP_PC_UNLOCKS: unlockAll = choice == 0u; break;
+    case RECOMP_PC_CPU_COSTUMES: recomp_cpu_costume_set_enabled(choice == 1u); break;
+    case RECOMP_PC_FREE_CAMERA: recomp_free_camera_set_enabled(choice == 1u); break;
+    case RECOMP_PC_RESOLUTION:
+    case RECOMP_PC_MSAA:
+    case RECOMP_PC_SMAA: {
+        const unsigned height = RECOMP_PC_HEIGHTS[recomp_pc_settings_choice(RECOMP_PC_RESOLUTION)];
+        const unsigned samples = RECOMP_PC_SAMPLES[recomp_pc_settings_choice(RECOMP_PC_MSAA)];
+        recomp_d3d_presenter_set_quality(static_cast<float>(height) / 480.0f, samples,
+            recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u);
+        break;
     }
-    std::memset(recomp_memory(profile + 0x2ed2u, 3u), 1, 3u);
+    default: break;
+    }
+}
+
+static void pcSettingsClosed(void *)
+{
+    if (launcherSettings.empty()) return;
+    std::uint8_t choices[RECOMP_PC_SETTING_COUNT];
+    for (unsigned i = 0u; i < RECOMP_PC_SETTING_COUNT; ++i) choices[i] = recomp_pc_settings_choice(i);
+    if (!recomp_pc_settings_write(launcherSettings, pcStore, choices))
+        std::fprintf(stderr, "recomp runner: PC settings not saved; launcher settings unreadable or unwritable\n");
+}
+
+static void installPcSettings(bool online)
+{
+    const char *path = std::getenv("RECOMP_LAUNCHER_SETTINGS");
+    launcherSettings = path != nullptr ? path : "";
+    pcStore = {};
+#ifdef _WIN32
+    // The launchers' defaults: the primary display's height, and its shape for Ultrawide.
+    const int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
+    if (height > 0) pcStore.primaryHeight = height;
+    if (width * 9 > height * 16) pcStore.ultrawideShape = std::to_string(width) + ":" + std::to_string(height);
+#endif
+    std::uint8_t choices[RECOMP_PC_SETTING_COUNT];
+    recomp_pc_settings_read(launcherSettings, pcStore, choices);
+    // The rows that apply at once show what is running. Online turns the free camera
+    // and CPU costumes off for the session, so those rows keep the saved choice.
+    choices[RECOMP_PC_UNLOCKS] = unlockAll ? 0u : 1u;
+    if (!online) {
+        choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
+        choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
+    }
+    const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
+    recomp_pc_settings_install(&host, choices);
+    // The Vulkan renderer rebuilds its targets live; Direct3D 11 takes them at the next start.
+    const bool quality = recomp_d3d_presenter_quality_live();
+    for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA})
+        recomp_pc_settings_set_live(setting, quality);
+    // Online they show the page's next-start help; the choice applies at the next offline start.
+    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA})
+        recomp_pc_settings_set_live(setting, !online);
 }
 
 /* Dedication card shown each time the staff roll starts. The BMP is a private
@@ -278,7 +337,7 @@ static void showCard()
 
 static void onSwap(std::uint32_t frame)
 {
-    if (recomp_netplay_session_unlock_all(unlockAll)) unlockProfile(frame);
+    recomp_unlock_profile_frame(recomp_netplay_session_unlock_all(unlockAll));
     if (storyFinale) applyStoryFinale();
     recomp_netplay_session_on_swap(frame);
     if (!cardPending) return;
@@ -575,6 +634,10 @@ static void bootGuest()
     const bool online = recomp_netplay_session_enabled() || recomp_synctest_enabled();
     recomp_free_camera_install(online);
     recomp_cpu_costume_install(online);
+    recomp_unlock_profile_reset();
+    recomp_runner_assets_reset();
+    installPcSettings(online);
+    recomp_menu_quit_install();
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");

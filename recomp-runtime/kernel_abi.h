@@ -58,6 +58,26 @@ static inline void kernel_call_guest(
     recomp_runtime.registers.esp = saved_esp;
 }
 
+/* Calls a lifted function directly, past the manual hooks, with cdecl
+   arguments; returns EAX. ESP is restored as in kernel_call_guest. */
+static inline uint32_t kernel_call_lifted(
+    RecompFunction function,
+    const uint32_t *arguments,
+    unsigned count)
+{
+    uint32_t saved_esp = recomp_runtime.registers.esp;
+
+    for (unsigned i = count; i > 0u; --i) {
+        recomp_runtime.registers.esp -= 4u;
+        *recomp_memory_u32(recomp_runtime.registers.esp) = arguments[i - 1u];
+    }
+    recomp_runtime.registers.esp -= 4u;
+    *recomp_memory_u32(recomp_runtime.registers.esp) = 0u;
+    function();
+    recomp_runtime.registers.esp = saved_esp;
+    return recomp_runtime.registers.eax;
+}
+
 /* Resolves an encoded kernel thunk (0x8000xxxx) to its adapter. Declare this
    wherever it is called: an implicit declaration returns int and silently
    truncates the function pointer on a 64-bit host. */

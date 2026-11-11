@@ -14,6 +14,9 @@ extern "C" {
 /* RECOMP_RANDOM_CPU_COSTUMES=1 dresses CPU opponents in random unlocked
    costumes (issue #116). Off online, where both games must agree. */
 void recomp_cpu_costume_install(bool online);
+/* Turns random costumes on or off at once (PC Settings); still off online. */
+void recomp_cpu_costume_set_enabled(bool enabled);
+bool recomp_cpu_costume_enabled(void);
 RecompFunction recomp_cpu_costume_lookup_manual(uint32_t guest_address);
 
 #ifdef __cplusplus

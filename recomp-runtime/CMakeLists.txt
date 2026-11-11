@@ -203,6 +203,15 @@ add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)
 add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
 add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
+add_executable(recomp_unlock_profile_test unlock_profile.c unlock_profile_test.c)
+add_test(NAME recomp-runtime-unlock-profile COMMAND recomp_unlock_profile_test)
+add_executable(recomp_pc_settings_test pc_settings.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
+add_test(NAME recomp-runtime-pc-settings COMMAND recomp_pc_settings_test)
+add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runner_assets.c d3d_texture_model.c
+    menu_quit_test.c)
+add_test(NAME recomp-runtime-menu-quit COMMAND recomp_menu_quit_test)
+add_executable(recomp_pc_settings_store_test pc_settings_store.cpp pc_settings_store_test.cpp)
+add_test(NAME recomp-runtime-pc-settings-store COMMAND recomp_pc_settings_store_test)
 
 add_executable(recomp_d3d8_state_test d3d8_state_adapter.c d3d8_state_adapter_test.c
     d3d_light_model.c d3d_vertex_shader_model.c d3d_render_state_model.c)
@@ -220,6 +229,8 @@ add_executable(recomp_d3d_vertex_declaration_test
 add_test(NAME recomp-runtime-d3d-vertex-declaration COMMAND recomp_d3d_vertex_declaration_test)
 if(NOT MSVC)
     target_link_libraries(recomp_manual_test PRIVATE m)
+    target_link_libraries(recomp_pc_settings_test PRIVATE m)
+    target_link_libraries(recomp_menu_quit_test PRIVATE m)
     target_link_libraries(recomp_model_test PRIVATE m)
     target_link_libraries(recomp_d3d8_adapter_test PRIVATE m)
     target_link_libraries(recomp_d3d8_state_test PRIVATE m)
@@ -403,6 +414,24 @@ target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_keyboard)
 if(TARGET recomp_imgui)
     target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_imgui)
 endif()
+# xBRZ by Zenju (GPL-3.0; see NOTICE) redraws the game's 2D art larger once
+# per texture (texture_upscale.cpp). PPSSPP keeps a copy in ext/xbrz; the
+# build fetches it at one revision and patches out PPSSPP's own config header.
+set(_xbrz_url https://raw.githubusercontent.com/hrydgard/ppsspp/9f286ee4ca1093ba7ad3541d9c66b68fbeda0f23/ext/xbrz)
+set(_xbrz_dir "${CMAKE_CURRENT_BINARY_DIR}/xbrz")
+file(DOWNLOAD ${_xbrz_url}/xbrz.cpp "${_xbrz_dir}/xbrz.cpp"
+    EXPECTED_HASH SHA256=35283301d48ff518c8394c674195d086325697a51bf4d72213e636f1df213c7e)
+file(DOWNLOAD ${_xbrz_url}/config.h "${_xbrz_dir}/config.h"
+    EXPECTED_HASH SHA256=bbb7d3ab1c25851673a71c126188cc1f02dc483819f04af8a8241dac71e9fe1a)
+file(DOWNLOAD ${_xbrz_url}/xbrz.h "${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h"
+    EXPECTED_HASH SHA256=f0c59293edf8268abe7e749f017fe84c9ae38303aef2afc3244b2fdba9aeb69c)
+include("${CMAKE_CURRENT_SOURCE_DIR}/xbrz_patch.cmake")
+recomp_patch_xbrz("${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h" "${_xbrz_dir}/xbrz.h")
+target_sources(${_sdl_gpu_presenter} PRIVATE texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp")
+set_source_files_properties(texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" PROPERTIES INCLUDE_DIRECTORIES "${_xbrz_dir}")
+add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" texture_upscale_test.cpp)
+target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
+add_test(NAME recomp-runtime-texture-upscale COMMAND recomp_texture_upscale_test)
 if(WIN32)
     # Tests and the runner tell the inline SDL_GPU presenter from the Direct3D 11 one.
     target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)
@@ -644,7 +673,8 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c
+        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c unlock_profile.c pc_settings.c
+        pc_settings_store.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp)

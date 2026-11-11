@@ -54,6 +54,13 @@ int main(void)
     step(0u, 0u, 0, 0, 6115u, &pad);
     expect("input returns after release", step(0u, 0u, 1, 0, 6120u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[0] == 0xffu);
+    recomp_quit_prompt_request();
+    expect("a request counts as open at once", recomp_quit_prompt_open());
+    expect("a request opens at the next filter and hides the pad",
+        step(0u, 0u, 1, 0, 6130u, &pad) == RECOMP_QUIT_OPENED && pad.analog_buttons[0] == 0u);
+    step(0u, 0u, 0, 0, 6135u, &pad);
+    expect("B cancels a requested prompt", step(0u, 0u, 0, 1, 6140u, &pad) == RECOMP_QUIT_CANCELLED &&
+        !recomp_quit_prompt_open());
     step(3u, 0u, 0, 0, 6150u, &pad); /* ports stay latched from the prompt until let go */
     step(3u, 0x20u, 0, 0, 6200u, &pad);
     recomp_quit_prompt_filter(3u, NULL, 6300u);

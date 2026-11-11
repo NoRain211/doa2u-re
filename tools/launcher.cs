@@ -336,7 +336,7 @@ class LauncherForm : Form
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
-        unlock = Choice("Unlocks", "Earn offers only the default characters and costumes; a profile saved with Everything keeps them", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
+        unlock = Choice("Unlocks", "Earn offers only what the profile has earned; Everything is never saved to it", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
         freeCamera = Choice("Free Camera", "In game, F1 or a right-stick click flies the camera", new[] { "Off", "On" }, Game.Bool(settings, "freeCamera", false), 0);
         cpuCostumes = Choice("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", new[] { "Default", "Random" }, Game.Bool(settings, "randomCpuCostumes", false), 0);
         gameSource = Game.Str(settings, "game_source", null);

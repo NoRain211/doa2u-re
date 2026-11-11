@@ -176,6 +176,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_RANDOM_CPU_COSTUMES"], "1")
                 self.assertEqual(run(None, vrr=True), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_VRR"], "1")
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_LAUNCHER_SETTINGS"],
+                                 str(root / "private/launcher.json"))
                 self.assertEqual(run(None, vulkan=True), 0)
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
                 # A soft-reset relaunch starts one more runner in the same session log.

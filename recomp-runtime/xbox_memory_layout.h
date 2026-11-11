@@ -6,7 +6,11 @@
 
 /* The final MiB is reserved for bootstrap state, outside both allocators. */
 #define XBOX_GUEST_ALLOC_LIMIT 0x03f00000u
-#define XBOX_STARTUP_STACK_BASE XBOX_GUEST_ALLOC_LIMIT
+/* The runner's own guest data (menu text, layouts and sprites), which
+   runner_assets.c hands out at each boot; the startup stack follows it. */
+#define XBOX_RUNNER_ASSET_BASE XBOX_GUEST_ALLOC_LIMIT
+#define XBOX_RUNNER_ASSET_SIZE 0x20000u
+#define XBOX_STARTUP_STACK_BASE (XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE)
 #define XBOX_KERNEL_DATA_BASE 0x03ff0000u
 #define XBOX_KERNEL_DATA_SIZE 0x1000u
 #define XBOX_STARTUP_STACK_TOP (XBOX_KERNEL_DATA_BASE - 0x10u)

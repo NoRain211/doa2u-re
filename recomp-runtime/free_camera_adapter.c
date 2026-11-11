@@ -105,6 +105,7 @@ static const double MAX_STEP_SECONDS = 0.1;
 
 static struct {
     int enabled;              /* -1 until RECOMP_FREE_CAMERA is read */
+    bool installed;           /* recomp_free_camera_install ran this boot */
     bool online;              /* this boot plays an online session, a synctest or a replay */
     bool active, started;
     bool toggle_held, freeze_held, overlay_held, cycle_held, reset_held, aim_held, step_held, shot_held;
@@ -157,21 +158,41 @@ static void frozen_frame(uint32_t frame);
 static void hint_panel(void);
 static void set_active(bool active);
 
+static void set_hooks(bool on)
+{
+    recomp_input_host_set_capture_hook(on ? capture : NULL);
+    recomp_fiber_set_switch_hook(on ? recomp_scene_freeze_switch : NULL);
+    recomp_scene_freeze_set_frame_hook(on ? frozen_frame : NULL);
+}
+
 bool recomp_free_camera_install(bool online)
 {
-    if (!enabled()) return false;
     /* The camera and the freeze change one game's memory or timing only, so
        an online session would desync; a reboot into one drops them. */
     state.online = online;
+    state.installed = true;
+    if (!enabled()) return false;
     if (online) {
         set_active(false);
         fprintf(stderr, "recomp free camera: off for this session\n");
     }
-    recomp_input_host_set_capture_hook(online ? NULL : capture);
-    recomp_fiber_set_switch_hook(online ? NULL : recomp_scene_freeze_switch);
-    recomp_scene_freeze_set_frame_hook(online ? NULL : frozen_frame);
+    set_hooks(!online);
     return !online;
 }
+
+void recomp_free_camera_set_enabled(bool on)
+{
+    if (enabled() == on) return;
+    state.enabled = on ? 1 : 0;
+    if (state.online) return;
+    if (!on) {
+        if (recomp_scene_freeze_active()) recomp_scene_freeze_set(false);
+        if (state.active) set_active(false);
+    }
+    set_hooks(on);
+}
+
+bool recomp_free_camera_enabled(void) { return enabled() && !state.online; }
 
 static float stick(int16_t value)
 {
@@ -417,6 +438,11 @@ static uint32_t next_built(uint32_t object)
 /* 0x000399D0, the camera build: the object is in ESI. */
 static void camera_build(void)
 {
+    /* Installed for every offline boot: PC Settings can turn the camera on and off. */
+    if (!enabled()) {
+        sub_000399D0();
+        return;
+    }
     const uint32_t object = recomp_runtime.registers.esi;
     ++state.builds;
     if (state.take_at && state.builds == state.take_at && !state.active) set_active(true);
@@ -486,5 +512,5 @@ static void camera_build(void)
 
 RecompFunction recomp_free_camera_lookup_manual(uint32_t guest_address)
 {
-    return guest_address == CAMERA_BUILD && enabled() && !state.online ? camera_build : NULL;
+    return guest_address == CAMERA_BUILD && state.installed && !state.online ? camera_build : NULL;
 }

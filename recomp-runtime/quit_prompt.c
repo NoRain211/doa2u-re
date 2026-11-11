@@ -9,7 +9,7 @@ enum {
     STICK_IDLE = 7849, /* XInput's left-stick dead zone */
 };
 
-static bool open;
+static bool open, requested;
 static bool back_held[RECOMP_INPUT_PORT_COUNT];
 static uint64_t back_since[RECOMP_INPUT_PORT_COUNT];
 static bool latched[RECOMP_INPUT_PORT_COUNT]; /* swallowed until the pad is let go */
@@ -27,27 +27,36 @@ static bool pad_idle(const RecompInputGamepad *pad)
 
 bool recomp_quit_prompt_open(void)
 {
-    return open;
+    return open || requested;
+}
+
+void recomp_quit_prompt_request(void)
+{
+    requested = !open;
+}
+
+static RecompQuitEvent open_prompt(void)
+{
+    open = true;
+    requested = false;
+    for (unsigned i = 0u; i < RECOMP_INPUT_PORT_COUNT; ++i) latched[i] = true;
+    memset(back_held, 0, sizeof back_held);
+    return RECOMP_QUIT_OPENED;
 }
 
 RecompQuitEvent recomp_quit_prompt_filter(uint32_t port, RecompInputGamepad *pad, uint64_t now_ms)
 {
     if (port >= RECOMP_INPUT_PORT_COUNT) return RECOMP_QUIT_NONE;
+    RecompQuitEvent event = requested ? open_prompt() : RECOMP_QUIT_NONE;
     if (pad == NULL) {
         back_held[port] = false; /* a pad plugged in later starts a fresh hold */
-        return RECOMP_QUIT_NONE;
+        return event;
     }
-    RecompQuitEvent event = RECOMP_QUIT_NONE;
     if (!open) {
         const bool back = !latched[port] && (pad->buttons & BUTTON_BACK) != 0u;
         if (back && !back_held[port]) back_since[port] = now_ms;
         back_held[port] = back;
-        if (back && now_ms - back_since[port] >= HOLD_MS) {
-            open = true;
-            event = RECOMP_QUIT_OPENED;
-            for (unsigned i = 0u; i < RECOMP_INPUT_PORT_COUNT; ++i) latched[i] = true;
-            memset(back_held, 0, sizeof back_held);
-        }
+        if (back && now_ms - back_since[port] >= HOLD_MS) event = open_prompt();
     } else if (!latched[port]) {
         if (pad->analog_buttons[ANALOG_A] > RECOMP_INPUT_ANALOG_DOWN) {
             event = RECOMP_QUIT_CHOSEN;

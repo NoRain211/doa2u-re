@@ -763,19 +763,28 @@ online players need this build on both sides, which netplay's build check
 already requires.
 
 Every costume and character is offered. The game data pointer at `0x87cfa8`
-(observed `0x7feae0`) holds one costume byte per character at +0x2ed8, in the
+(observed `0x7feae0`) points 0xf200 into the active profile's 0x12118-byte
+save slot and holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start
 at 2; the select screen (`0x11e410`) shows `min(byte, count)` with counts from
 `0x6e0f08`. Characters 0x11, 0x18 and 0x15 need the flags at +0x2ed2, +0x2ed3
-and +0x2ed4 (`0x11e5f0`). After each Swap, the runner repeats the game's award
-loops (`0xdc640`, `0xdc100`): each costume byte becomes its count and the three
-flags become 1. Loaded profiles get the same values, and the next save stores
-them. Unlocks at +0x2ee7 to +0x2eeb (`0xdc4c0`) cover other content.
+and +0x2ed4 (`0x11e5f0`). After each Swap, `unlock_profile.c` records the
+live profile's 18 values as earned, then sets each costume byte to its count
+and the three flags to 1. The records sit in the reserved kernel page at
+`0x03ff0d00` (eight of 0x20 bytes), so rollback restores them. Every slot
+save goes through `0x21b50` or `0x21bb0` and every load through `0x21d90` or
+`0x21de0` (cdecl name, slot); the saves write the earned values and unlock
+again, and the loads drop the records of the slot they replace. The award
+entry `0xdc840` (costumes through `0xdc640` and `0xdc090`, flags through
+`0xdc100`) runs on the earned values, so awards and their notices still
+happen and are kept. A record whose profile no longer holds the unlocked
+values is taken as rewritten and recorded again. Unlocks at +0x2ee7 to
++0x2eeb (`0xdc4c0`) cover other content and are not touched.
 `--no-unlock-all` (runner and `run_game.py`) and the launchers' **Unlocks: Earn**
-(`unlockAll` in `launcher.json`) skip this step, so unlocks
-come only from the game's own award paths. Acceptance runs use it with a
-profile that has never run with the unlock on; earlier saves keep their
-unlocks.
+(`unlockAll` in `launcher.json`) turn it off: each recorded profile still
+holding the unlocked values gets its earned values back, so unlocks come only
+from the game's own award paths. Profiles saved by earlier builds keep the
+unlocks those builds saved.
 
 With `RECOMP_RANDOM_CPU_COSTUMES=1` (the launchers' **CPU Costumes: Random**,
 issue #116), `cpu_costume.c` wraps `battle_get_fighter_costume` (`0xc6b00`,
@@ -786,6 +795,56 @@ the second when the player wears the first, becomes a random unlocked group
 Other callers ask again during a run, so the pick hashes a per-boot seed with
 the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
 index. Story's own picks stay. Netplay and SyncTest boots leave it off.
+The hook is routed whenever it may be wanted and checks the setting itself,
+so PC Settings can switch it while the game runs.
+
+PC SETTINGS (`pc_settings.c`) is a row of the game's Options menu. The menu
+(`frontend_options_menu_update`, `0x11cfc0`) keeps a cursor per depth at
+`0xdf4ac8`, the depth at `0xdf4ad4` and the page at `0xdf4ad8`; page 0 is the
+top list, whose rows `0x11ac90` counts (7) and whose choices open pages 1 to 4
+or the Video and Warning scenes (`0x18`, `0x17`). The top list's labels are
+sprites of group 3 (`spOption`): `0x95a70` draws each through `0x97830` at x
+`0xf0`, y `0x5d` + 26 per row, the selected one also as a glow at x `0xf6`,
+y `0x56` + 26 per row, with ids per language (`0x3000d`, `0x3001b`, `0x30029`,
+`0x30045`, `0x30037`; glows 7 below), over seven bars (`0x976f0`, from y
+`0x5c`). The runner replaces page 0's input with the same calls for eight
+rows, PC SETTINGS at row 5; while `0x95a70` runs it moves Warning and Exit,
+their glows and colours down a row, adds an eighth bar and draws PC SETTINGS
+after Video. The help line (`0x91560`, messages `0xc4`-`0xca`) and the
+selected row's page preview (`0x95a10`) see the game's row for the rows
+after it.
+
+PC SETTINGS opens page 19, which no table uses. The page tables at
+`0x67af50` (reset), `0x67aff0` (draw) and `0x67afa0` (draw while leaving) get
+lookup keys for page 19's three functions, which do what page 8's do: rows
+through `0x91440`, values through `0x93270`, the cursor through `0x90f00`,
+reading the page's layout (`0x90ad0`, page 8's records 26 apart), labels and
+values (`0x910a0`, `0x91370`) and row count, all answered for page 19 by the
+runner. Its input moves through the rows (`0x11b8d0`), steps the selected
+value as the game's pages do (`0x11b9f0`) and goes back to the top list
+(`0x11bca0`). Text is UTF-16 in five languages (Japanese shows English), in
+message numbers from `0x7000`.
+
+The PC SETTINGS label is cut letter by letter from the other top-list labels
+(group 3), and its glow is that label padded 6 and 7, blurred (sigma 3.5),
+brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
+own art. They are made in the game's language once its label art is loaded.
+The settings read and write the launchers'
+`private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
+`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks and
+CPU Costumes apply at once, offline only, and the others at the next launch.
+
+QUIT GAME (`menu_quit.c`) is one more carousel position after the main
+menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
+`0x1343d0` read it), with mode `0x13`, which no entry uses and the mode
+switch ignores. Its confirm opens the runner's quit prompt; keeping on plays
+the cancel sound and runs the menu's own transition cancel (`0x135ae0`).
+
+Both features' guest data lives in the runner's asset area (128 KiB at
+`0x03f00000`, below the startup stack), which `runner_assets.c` hands out at
+each boot. It also owns their sprites, a group past the game's `0x1a5`
+(`0xaa970` rectangle, `0xaa9b0` texture and palette), and their message text
+(`0x6a3e0`).
 
 ## Input API contract
 

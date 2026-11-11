@@ -64,7 +64,7 @@ int recomp_kernel_memory_test(void)
     check("64 MiB total pages", before[1], 0x4000u);
     check("image reservation", before[8], xbox_HeapSnapshot().image_bytes / 0x1000u);
     check("bootstrap unavailable", before[2] <= (XBOX_GUEST_ALLOC_LIMIT - xbox_HeapSnapshot().image_bytes) / 0x1000u, 1u);
-    check("startup stack accounted", before[7] >= 240u, 1u);
+    check("startup stack accounted", before[7] >= (XBOX_STARTUP_STACK_TOP - XBOX_STARTUP_STACK_BASE) / 0x1000u, 1u);
     check("no guest cache pages", before[5], 0u);
 
     check("raw heap allocation", xbox_HeapAlloc(0x1000u, 0x1000u) != 0u, 1u);

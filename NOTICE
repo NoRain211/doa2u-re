@@ -44,6 +44,13 @@ SDL3 audio output, the launchers and the SDL_GPU presenter's resource
 handling) adapts committed source from NoRain211/doa3-re (commit 48d05e9) and
 NoRain211/doaxbv-re, under GPL-3.0-or-later.
 
+The Vulkan renderer redraws the game's 2D art larger with xBRZ by Zenju
+(HqMAME project), under the GNU General Public License version 3 with its
+author's MAME linking exception. The build fetches PPSSPP's copy
+(hrydgard/ppsspp, ext/xbrz, revision 9f286ee4ca1093ba7ad3541d9c66b68fbeda0f23),
+whose files carry their notices, and patches out PPSSPP's own configuration
+header with recomp-runtime/xbrz_patch.cmake.
+
 The free camera's overlay draws with Dear ImGui by Omar Cornut, release
 1.91.9 (ocornut/imgui), fetched at configuration under its MIT license, whose
 notices remain in the fetched source.

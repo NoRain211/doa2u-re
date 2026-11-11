@@ -71,9 +71,22 @@ keeps running.
   with the same choices. On release ZIPs after 0.1.10, the settings launcher on
   each platform can check GitHub for a newer release and install it from its
   **UPDATE** page; **Check At Start** turns the start-up check off.
+- **PC Settings in the game.** The game's own **Options** menu has a
+  **PC SETTINGS** row after **Video**, drawn and translated like the game's
+  rows, with the launcher's settings. **Unlocks**, **CPU Costumes** and
+  **Free Camera** change at once, and with the Vulkan renderer so do
+  **Resolution**, **MSAA** and **SMAA**; the others say they apply the next
+  time the game starts. Leaving the page saves them for the launcher too.
+- **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
+  drawn like the game's own, that asks before it closes the game.
+- **Sharper menus.** The Vulkan renderer redraws the game's 2D art (menus,
+  fonts, the HUD) at four times its size with xBRZ the first time each piece is
+  shown, so it stays smooth at high resolutions. `RECOMP_UI_UPSCALE=0` turns
+  it off.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
-  character and costume starts unlocked unless you choose **Earn** on the
-  launcher's **GAMEPLAY** page. The game's soft reset
+  character and costume is offered unless you choose **Earn** on the
+  launcher's **GAMEPLAY** page. Your profile only ever saves what you have
+  earned, so choosing **Earn** later gives it back as it was. The game's soft reset
   (Start + Back + both triggers) restarts it.
 - **Built from your disc.** `Launcher.exe` lifts the game from your ISO and
   refuses any executable other than the one the developers tested.
@@ -95,7 +108,7 @@ keeps running.
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
-| Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); the game saves the unlocks to your profile |
+| Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
 | Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
@@ -266,8 +279,11 @@ window. The build fetches pinned, hash-verified copies of SDL3,
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.
 `--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
-off the automatic character and costume unlock, so unlocks come from play;
-profiles already saved with the unlock keep it.
+off the automatic character and costume unlock, so unlocks come from play.
+With the unlock on, saves and the game's awards still keep to what each
+profile earned, so turning it off gives the profile back with its own
+unlocks. Profiles saved by builds before this change keep the unlocks those
+builds saved.
 
 `--random-cpu-costumes`, or **CPU Costumes: Random** on the **GAMEPLAY** page,
 dresses CPU opponents in Story, Time Attack, Survival and Team in random
