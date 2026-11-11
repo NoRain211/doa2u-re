@@ -2114,6 +2114,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
                 return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
             }
             expandLine(a, b, style, wide);
+            if (wide.size() > 65535u) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
         }
         if (wide.empty() || wide.size() > 65535u) return wide.empty() ? RECOMP_D3D_PRESENTER_OK
             : RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
