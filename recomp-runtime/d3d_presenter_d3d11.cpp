@@ -449,12 +449,16 @@ void toggleFullscreen(RecompD3dPresenter *presenter)
     } else {
         WINDOWPLACEMENT &placement = presenter->windowed_placement;
         if (placement.length == 0u) {
+            MONITORINFO monitor{sizeof monitor};
+            GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+            RECT origin{}; // Placement coordinates are relative to the primary monitor's work area.
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, &origin, 0);
             RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
                 static_cast<LONG>(presenter->config.height)};
             AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
             const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
-            const LONG left = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
-            const LONG top = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+            const LONG left = (monitor.rcWork.left + monitor.rcWork.right - width) / 2 - origin.left;
+            const LONG top = (monitor.rcWork.top + monitor.rcWork.bottom - height) / 2 - origin.top;
             placement.length = sizeof placement;
             placement.showCmd = SW_SHOWNORMAL;
             placement.rcNormalPosition = {left, top, left + width, top + height};

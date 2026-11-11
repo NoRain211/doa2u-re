@@ -96,8 +96,10 @@ static HWND presenterWindow()
 }
 
 // F11 and Alt+Enter switch the window between a captioned window and a borderless one over its monitor.
-static bool testFullscreenKeys()
+// A scaled presenter starts fullscreen and leaves it for a window centered in the monitor's work area.
+static bool testFullscreenKeys(bool start_fullscreen = false)
 {
+    _putenv_s("RECOMP_D3D_SCALE", start_fullscreen ? "2" : "1");
     RecompD3dPresenter *presenter = nullptr;
     if (!expect("create fullscreen", recomp_d3d_presenter_create(&config, &presenter))) return false;
     uint32_t swap = 1;
@@ -122,14 +124,25 @@ static bool testFullscreenKeys()
         passed &= fullscreen() == expected;
     };
     if (passed) {
-        passed &= !fullscreen();
-        press(WM_KEYDOWN, VK_F11, true);
-        press(WM_SYSKEYDOWN, VK_RETURN, false);
-        press(WM_SYSKEYDOWN, VK_RETURN, true);
-        press(WM_KEYDOWN, VK_F11, false);
+        passed &= fullscreen() == start_fullscreen;
+        press(WM_KEYDOWN, VK_F11, !start_fullscreen);
+        if (start_fullscreen) {
+            RECT rect{};
+            GetWindowRect(window, &rect);
+            MONITORINFO monitor{sizeof monitor};
+            GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+            const LONG dx = (rect.left + rect.right) - (monitor.rcWork.left + monitor.rcWork.right);
+            const LONG dy = (rect.top + rect.bottom) - (monitor.rcWork.top + monitor.rcWork.bottom);
+            if (std::abs(dx) > 1 || std::abs(dy) > 1) std::fprintf(stderr, "FAIL not centered dx=%ld dy=%ld\n", dx, dy);
+            passed &= std::abs(dx) <= 1 && std::abs(dy) <= 1;
+        }
+        press(WM_SYSKEYDOWN, VK_RETURN, start_fullscreen);
+        press(WM_SYSKEYDOWN, VK_RETURN, !start_fullscreen);
+        press(WM_KEYDOWN, VK_F11, start_fullscreen);
     }
     passed &= destroy(presenter);
-    if (passed) std::puts("PASS F11 and Alt+Enter toggle fullscreen");
+    _putenv_s("RECOMP_D3D_SCALE", "");
+    if (passed) std::puts(start_fullscreen ? "PASS F11 leaves fullscreen centered" : "PASS F11 and Alt+Enter toggle fullscreen");
     return passed;
 }
 #endif
@@ -2965,7 +2978,7 @@ int main()
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||
         !testDrawCoverage() || !testDrawCoverage(true) || !testQueuedDrawCoverage() ||
 #ifdef RECOMP_TEST_D3D11
-        !testFullscreenKeys() ||
+        !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
         !testTicks() || !testCapturedDraw() || !testMipSampler() || !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
