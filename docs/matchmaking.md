@@ -180,7 +180,8 @@ session run the same way over either path.
   Its room's status says LISTED ON FIND MATCH once the server answers.
 - FIND MATCH, below JOIN ONLINE on the Versus menu, lists up to six open
   rooms of the same build every 2 s, hiding names that fail the name
-  check. The highlight stays on its room when newer rooms push it down.
+  check. The highlight stays on its room when newer rooms push it down,
+  unless they push it past the sixth place.
   A joins the chosen room and Y quick-matches.
 - A host times each HOST until its HOSTED and says the latest time in its
   next HOST. FIND MATCH times each LIST until its ROOMS, ignores a ROOMS it
