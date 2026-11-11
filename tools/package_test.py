@@ -139,6 +139,9 @@ def main():
     if not args.version:
         parser.error("give a version, or --launchers DIR")
     suffix, readme = PLATFORMS[args.platform]
+    # v0.2.1 and v0.2.2 shipped icon-less exes from a tree without it, and updating stripped installed icons.
+    if args.platform == "windows" and not ICON.is_file():
+        raise SystemExit(f"Missing {ICON}: the release launchers would ship without their icon")
     if git("status", "--porcelain", "--untracked-files=no").strip():
         raise SystemExit("Commit first: the package is built from HEAD")
     pinned = git("ls-tree", "HEAD", SUBMODULE).split()[2].decode()

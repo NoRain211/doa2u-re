@@ -300,7 +300,8 @@ python tools/package_test.py 0.3.0-Alpha --platform linux
 
 It zips the files of committed HEAD that building and playing on that platform
 need, the pinned lifter's lift and licenses, and the photo from
-`private/release-assets/`. Developer notes, tests outside the build and other
+`private/release-assets/`. The Windows launchers embed `private/launcher-icon.ico`,
+and packaging stops without it. Developer notes, tests outside the build and other
 platforms' launchers and backends stay out; `tools/package_test.py` lists them.
 The Windows ZIP adds extract-xiso and its license
 with [test-release.md](docs/test-release.md) as `README.txt`; the macOS and
