@@ -279,11 +279,15 @@ bool updateRoom(std::uint16_t keys)
     }
     const bool peerAllowed = room.joined && !room.mismatch && !recomp_netplay_name_banned(room.name);
     if (menu.lobby.hosting) (void)takeLookup();
-    if (menu.lobby.hosting && menu.net.match.server_port != 0u && Clock::now() - menu.lobby.checkedIn >= std::chrono::seconds(5)) {
+    // Back from a session, the seat is the last joiner's until they return or the room gives up on them.
+    const bool open = !room.joined && !menu.lobby.starting && room.held_until_ms == 0u;
+    // A change is said at once, so a taken seat closes the room before the matchmaker's 10 s claim on it ends.
+    if (menu.lobby.hosting && menu.net.match.server_port != 0u &&
+        (open != menu.lobby.saidOpen || Clock::now() - menu.lobby.checkedIn >= std::chrono::seconds(5))) {
         menu.lobby.checkedIn = Clock::now();
-        // Back from a session, the seat is the last joiner's until they return or the room gives up on them.
-        recomp_netplay_match_host(&menu.net, menu.digest.data(), static_cast<std::uint8_t>(menu.delay),
-            !room.joined && !menu.lobby.starting && room.held_until_ms == 0u, menu.name.c_str());
+        menu.lobby.saidOpen = open;
+        recomp_netplay_match_host(&menu.net, menu.digest.data(), static_cast<std::uint8_t>(menu.delay), open,
+            menu.name.c_str());
     }
     // A relayed room that went silent may have lost its pair to a matchmaker restart. The host's
     // heartbeat lists its room again under the same ID, so the joiner asks for it again every 3 s.
