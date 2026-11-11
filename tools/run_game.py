@@ -46,33 +46,43 @@ def keyboard_map():
     return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" for action, key in bindings.items())
 
 
+def fill_disc(source, disc):
+    """Link, or copy where the drive has no hardlinks, each imported file the play disc lacks."""
+    copying = False
+    for path in source.rglob("*"):
+        relative = path.relative_to(source)
+        if relative.parts[0] == ".recomp-storage":
+            continue
+        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+            raise ValueError("Disc source contains a link")
+        destination = disc / relative
+        if not path.is_file() or destination.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(path, destination)
+        except OSError:
+            if not copying:
+                print("This drive has no hardlinks, so the game copies its disc files once "
+                      "(up to 4 GB). This can take several minutes; keep this window open.",
+                      flush=True)
+                copying = True
+            # FAT32 and exFAT have no hardlinks; an interrupted copy must not count as present.
+            partial = destination.with_name(destination.name + ".tmp")
+            shutil.copyfile(path, partial)
+            partial.replace(destination)
+
+
 def prepare_disc(source, disc):
     if disc.exists():
+        fill_disc(source, disc)  # Restores disc files an older play disc lacks; saves stay.
         return
     staging = disc.with_name(disc.name + ".tmp")
     if staging.exists():
         shutil.rmtree(staging)  # Left by an interrupted first launch; holds no saves.
     staging.mkdir(parents=True)
-    copying = False
     try:
-        for path in source.rglob("*"):
-            relative = path.relative_to(source)
-            if relative.parts[0] == ".recomp-storage":
-                continue
-            if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
-                raise ValueError("Disc source contains a link")
-            if path.is_file():
-                destination = staging / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(path, destination)
-                except OSError:
-                    if not copying:
-                        print("This drive has no hardlinks, so the first launch copies the disc "
-                              "(about 4 GB). This can take several minutes; keep this window open.",
-                              flush=True)
-                        copying = True
-                    shutil.copyfile(path, destination)  # FAT32 and exFAT have no hardlinks.
+        fill_disc(source, staging)
     except BaseException:
         shutil.rmtree(staging)  # Holds only links or copies of the import, so no saves are lost.
         raise

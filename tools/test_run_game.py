@@ -303,6 +303,24 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             prepare_disc(source, disc)
             self.assertEqual((disc / "local-save.txt").read_text(), "play save")
 
+    def test_restores_files_an_existing_play_disc_lacks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, disc = root / "source", root / "play"
+            (source / "DOA2").mkdir(parents=True)
+            (source / "DOA2/bgm.afs").write_text("synthetic music")
+            (source / "DOA2/voice.afs").write_text("synthetic voice")
+            (disc / "DOA2").mkdir(parents=True)
+            (disc / "DOA2/voice.afs").write_text("kept")
+            (disc / ".recomp-storage").mkdir()
+            (disc / ".recomp-storage/save.txt").write_text("play save")
+            with patch("run_game.os.link", side_effect=OSError(1, "Incorrect function")):
+                prepare_disc(source, disc)
+            self.assertEqual((disc / "DOA2/bgm.afs").read_text(), "synthetic music")
+            self.assertEqual((disc / "DOA2/voice.afs").read_text(), "kept")
+            self.assertEqual((disc / ".recomp-storage/save.txt").read_text(), "play save")
+            self.assertFalse((disc / "DOA2/bgm.afs.tmp").exists())
+
     def test_interrupted_staging_is_rebuilt(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
