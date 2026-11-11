@@ -153,9 +153,11 @@ the last second; it starts off.
 To rebind the keyboard, create `private/keyboard.json` with the buttons to
 change, for example `{"a": "Space", "b": "Ctrl", "start": "Tab"}`. Buttons are
 up, down, left, right, start, back, a, b, x, y, white, black, ltrig and rtrig;
-keys are A-Z, 0-9, F1-F10, F12, Up, Down, Left, Right, Enter, Backspace,
-Space, Tab, Shift, Ctrl and Esc. Buttons you leave out keep their keys. F11
-and Alt+Enter are reserved for fullscreen and cannot be bound. F3 keeps its
+keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, Enter, Backspace,
+Space, Tab, Shift, Ctrl and Esc. Buttons you leave out keep their keys,
+except that a key you give to one button leaves the button that had it. F10
+is a Windows system key, and F11 and Alt+Enter are reserved for fullscreen, so
+none of them can be bound. F3 keeps its
 readout and, with the free camera turned on, F1, F12 and P keep their jobs,
 so a button bound to one of those does both. The free camera's own keys stay
 fixed, and while it flies the keyboard is the camera's.

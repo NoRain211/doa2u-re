@@ -92,30 +92,42 @@ static struct { const char *name; uint8_t key; uint16_t button; int analog; } ke
 static void load_keymap(void)
 {
     static bool loaded;
+    bool bound[sizeof keymap / sizeof keymap[0]] = {false};
     if (loaded) return;
     loaded = true;
     const char *at = getenv("RECOMP_KEYMAP");
     while (at != NULL && *at != '\0') {
+        const char *next = strchr(at, ',');
         const char *equals = strchr(at, '=');
-        char *end = NULL;
-        const unsigned long key = equals != NULL ? strtoul(equals + 1, &end, 16) : 0ul;
-        if (equals == NULL) break;
-        for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
-            if (strlen(keymap[i].name) == (size_t)(equals - at) && strncmp(at, keymap[i].name, equals - at) == 0
-                && key > 0ul && key < RECOMP_INPUT_KEY_COUNT) keymap[i].key = (uint8_t)key;
+        if (equals != NULL && (next == NULL || equals < next)) { /* an entry without = is skipped */
+            const unsigned long key = strtoul(equals + 1, NULL, 16);
+            for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
+                if (strlen(keymap[i].name) == (size_t)(equals - at) && strncmp(at, keymap[i].name, equals - at) == 0
+                    && key > 0ul && key < RECOMP_INPUT_KEY_COUNT) {
+                    keymap[i].key = (uint8_t)key;
+                    bound[i] = true;
+                }
+            }
         }
-        at = strchr(end, ',');
-        if (at == NULL) break;
-        ++at;
+        at = next != NULL ? next + 1 : NULL;
     }
+    /* A key given to one button leaves the button that had it by default. */
+    for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i)
+        for (size_t j = 0; j < sizeof keymap / sizeof keymap[0]; ++j)
+            if (!bound[i] && bound[j] && keymap[i].key == keymap[j].key) keymap[i].key = 0u;
 }
 
-/* RECOMP_TEST_FOCUSED gives a test, which has no window, the keyboard. */
+/* recomp_input_host_test has no window; only its target defines RECOMP_INPUT_TEST_FOCUSED,
+   so RECOMP_TEST_FOCUSED never takes the focus check away in the game. */
 static bool test_focused(void)
 {
+#ifdef RECOMP_INPUT_TEST_FOCUSED
     static int set = -1;
     if (set < 0) set = getenv("RECOMP_TEST_FOCUSED") != NULL;
     return set != 0;
+#else
+    return false;
+#endif
 }
 
 static RecompInputGamepad keyboard_buttons; /* what the keymap pressed in port 0's last sample */
