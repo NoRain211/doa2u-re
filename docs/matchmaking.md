@@ -48,8 +48,8 @@ Only in memory, and the log holds only the status counts:
   the host's LAN endpoint, the build digest, name, input delay, whether
   its room is empty, its socket's nonce, the host's last round trip to the
   server, and when it was first and last heard. A room that is not heard
-  for 20 s is dropped. One address may hold 4 rooms, and the server holds
-  4,096.
+  for 20 s is dropped. One address may hold 4 rooms and open 4 new ones a
+  minute, and the server holds 4,096.
 - Each pair made by a join: the two public endpoints and nonces, kept 10
   minutes past their last relayed packet. Once an address holds 16 pair
   ends, as a joiner or a host, its other endpoints cannot join until one
@@ -156,6 +156,13 @@ a single address cannot empty the list.
 A list entry is 42 bytes, so a list holds 11 rooms. The host's round trip
 is its own HOST to HOSTED time from its last heartbeat; a version 1 runner
 or server gets no answer from a version 2 one.
+
+A list shows the newest rooms first, so an address that kept leaving and
+hosting again could keep its rooms above everyone else's. Each address
+opens at most 4 new rooms in each clock minute, so up to 8 around a
+minute's turn. A HOST past that gets no answer, and the host's heartbeat
+opens the room once the minute turns. Filling a list for a minute takes
+about three addresses together.
 
 ## In the game
 
