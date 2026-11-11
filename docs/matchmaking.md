@@ -184,7 +184,9 @@ wrap packets for a relayed peer. So the room, the session lobby and the
 session run the same way over either path.
 
 - HOST ONLINE says HOST every 5 s while its room is up, open while nobody
-  is in it, and LEAVE when the host leaves. A host back from a session
+  is in it, and LEAVE when the host leaves. It says HOST at once when its
+  room fills or opens again, so a taken seat leaves the list before the
+  server's 10 s claim on the room ends. A host back from a session
   says closed while it keeps the seat for its last joiner, for up to 10 s,
   and answers no other caller until then.
   Its room's status says LISTED ON FIND MATCH once the server answers.
