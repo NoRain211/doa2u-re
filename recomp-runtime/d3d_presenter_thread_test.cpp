@@ -99,7 +99,10 @@ static HWND presenterWindow()
 // A scaled presenter starts fullscreen and leaves it for a window centered in the monitor's work area.
 static bool testFullscreenKeys(bool start_fullscreen = false)
 {
-    _putenv_s("RECOMP_D3D_SCALE", start_fullscreen ? "2" : "1");
+    struct ScaleEnv { // cleared on every return, so a failure here leaves later tests unscaled
+        explicit ScaleEnv(const char *value) { _putenv_s("RECOMP_D3D_SCALE", value); }
+        ~ScaleEnv() { _putenv_s("RECOMP_D3D_SCALE", ""); }
+    } scale_env(start_fullscreen ? "2" : "1");
     RecompD3dPresenter *presenter = nullptr;
     if (!expect("create fullscreen", recomp_d3d_presenter_create(&config, &presenter))) return false;
     uint32_t swap = 1;
@@ -141,7 +144,6 @@ static bool testFullscreenKeys(bool start_fullscreen = false)
         press(WM_KEYDOWN, VK_F11, start_fullscreen);
     }
     passed &= destroy(presenter);
-    _putenv_s("RECOMP_D3D_SCALE", "");
     if (passed) std::puts(start_fullscreen ? "PASS F11 leaves fullscreen centered" : "PASS F11 and Alt+Enter toggle fullscreen");
     return passed;
 }

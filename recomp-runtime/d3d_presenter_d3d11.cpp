@@ -450,9 +450,13 @@ void toggleFullscreen(RecompD3dPresenter *presenter)
         WINDOWPLACEMENT &placement = presenter->windowed_placement;
         if (placement.length == 0u) {
             MONITORINFO monitor{sizeof monitor};
-            GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
             RECT origin{}; // Placement coordinates are relative to the primary monitor's work area.
-            SystemParametersInfoW(SPI_GETWORKAREA, 0, &origin, 0);
+            if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) ||
+                !SystemParametersInfoW(SPI_GETWORKAREA, 0, &origin, 0)) {
+                // Zeroed geometry would put the window off-screen; center on the primary screen instead.
+                monitor.rcWork = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+                origin = {};
+            }
             RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
                 static_cast<LONG>(presenter->config.height)};
             AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
