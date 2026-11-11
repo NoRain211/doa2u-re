@@ -105,7 +105,8 @@ static class Game
 
     public static bool IsIso(string path)
     {
-        return !string.IsNullOrEmpty(path) && path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(path);
+        return !string.IsNullOrEmpty(path) && File.Exists(path)
+            && (path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".xiso", StringComparison.OrdinalIgnoreCase));
     }
 
     // The release ZIP's bundled Python, else Python 3.12 or newer through the py launcher or PATH; null if there is none.
@@ -708,7 +709,7 @@ class LauncherForm : Form
             else if (r.Action == "game")
             {
                 if (build != null) { notice = "Wait for the build to finish"; return; }
-                using (var dialog = new OpenFileDialog { Title = "Dead or Alive Ultimate Disc 2 ISO", Filter = "Xbox ISO|*.iso|All files|*.*" })
+                using (var dialog = new OpenFileDialog { Title = "Dead or Alive Ultimate Disc 2 ISO", Filter = "Xbox ISO|*.iso;*.xiso|All files|*.*" })
                     if (dialog.ShowDialog() == DialogResult.OK) UseDisc(dialog.FileName);
             }
             else if (r.Action == "build") StartBuild();
