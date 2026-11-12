@@ -420,7 +420,13 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
     if (muted) return 1;
     if (audio_device == 0 || (wet_send && !reverb_ready)) return 0;
     SdlVoice &voice = voices[slot];
-    if (voice.stream && voice.channels != channels) return 0;
+    /* A suppressed replay can reuse this slot before its next audio arrives;
+       keep the route and let the submit replace the old stream. */
+    if (voice.stream && voice.channels != channels) {
+        routing[slot] = route;
+        ++routing_updates;
+        return 1;
+    }
     if (std::memcmp(&routing[slot], &route, sizeof route) == 0) return 1;
     // A voice switching between direct and routed output restarts its stream.
     if (voice.stream && !voice.routed) destroyVoice(voice);
