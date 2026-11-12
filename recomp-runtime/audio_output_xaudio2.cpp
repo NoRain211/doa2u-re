@@ -65,6 +65,7 @@ struct EngineCallback : IXAudio2EngineCallback {
 EngineCallback callback;
 IXAudio2 *engine;
 IXAudio2MasteringVoice *master;
+uint32_t master_speakers; /* the open master's channel count; 0 while closed */
 IXAudio2SubmixVoice *reverb_voice;
 OutputVoice voices[kVoiceCount];
 VoiceRouting routing[kVoiceCount];
@@ -96,6 +97,7 @@ void releaseOutput()
     if (master) master->DestroyVoice();
     recomp_audio_capture_save();
     master = nullptr;
+    master_speakers = 0u;
     if (engine) {
         XAUDIO2_PERFORMANCE_DATA performance{};
         engine->GetPerformanceData(&performance);
@@ -229,6 +231,9 @@ bool queueBuffer(OutputVoice &voice, uint32_t slot, const uint8_t *pcm,
 
 extern "C" uint32_t recomp_audio_output_speakers(void)
 {
+    /* Voice routing asks many times a frame, and getenv scans the whole
+       environment on Windows; an open output keeps the count it opened with. */
+    if (master_speakers != 0u) return master_speakers;
     const char *surround = std::getenv("RECOMP_AUDIO_SURROUND");
     return surround && std::strcmp(surround, "0") != 0 ? 6u : 2u;
 }
@@ -300,6 +305,7 @@ extern "C" void recomp_audio_output_initialize(void)
         disableOutput("CreateMasteringVoice", error);
         return;
     }
+    master_speakers = recomp_audio_output_speakers();
     error = master->SetVolume(static_cast<float>(gain));
     if (FAILED(error)) {
         disableOutput("MasterSetVolume", error);

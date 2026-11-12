@@ -10,8 +10,8 @@ extern "C" {
 /* DirectSound buffers use slots 0..255; native movie audio plays on 256. */
 enum { RECOMP_AUDIO_OUTPUT_MOVIE_SLOT = 256, RECOMP_AUDIO_OUTPUT_SLOTS = 257 };
 
-/* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Reads the
-   environment only, so it is valid before initialize and without a device.
+/* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Valid before
+   initialize and without a device; an open XAudio2 output keeps its count.
    The game's own setting (XC_AUDIO) may differ in a netplay session; the
    mix folds it to these speakers. */
 uint32_t recomp_audio_output_speakers(void);

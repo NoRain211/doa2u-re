@@ -747,7 +747,6 @@ static void clear(void)
         result.command.data.clear.clear_stencil = false;
     }
     recomp_d3d8_submit(&result.command);
-    fprintf(stderr, "recomp d3d8: Clear flags=%08" PRIx32 "\n", argument(entry, 2u));
     recomp_runtime.registers.esp = entry + 28u;
 }
 
@@ -818,7 +817,6 @@ static void swap(void)
     recomp_xapi_frame_clock_advance();
     if (recomp_d3d_frame_boundary_hook != NULL)
         recomp_d3d_frame_boundary_hook(result.command.data.present.swap_counter);
-    fprintf(stderr, "recomp d3d8: Swap frame=%u\n", result.command.data.present.swap_counter);
 }
 
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
