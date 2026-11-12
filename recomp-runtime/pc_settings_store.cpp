@@ -189,6 +189,23 @@ bool recomp_pc_settings_read(const std::string &path, const RecompPcSettingsStor
     return read;
 }
 
+std::uint32_t recomp_pc_settings_custom_life_bar(const std::string &path)
+{
+    Entries entries;
+    std::string content;
+    if (!read_file(path, &content) || !parse(content, &entries)) return 0xffffffu;
+    std::string hex = text(entries, "lifeBarCustom", "FFFFFF");
+    if (!hex.empty() && hex[0] == '#') hex.erase(0, 1);
+    if (hex.size() != 6u) return 0xffffffu;
+    std::uint32_t rgb = 0u;
+    for (const char c : hex) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return 0xffffffu;
+        rgb = rgb << 4 | static_cast<std::uint32_t>(std::isdigit(static_cast<unsigned char>(c)) ? c - '0'
+            : std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
+    }
+    return rgb;
+}
+
 bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsStore &store,
     const std::uint8_t choices[RECOMP_PC_SETTING_COUNT])
 {

@@ -139,7 +139,9 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_UNLOCKS: unlockAll = choice == 0u; break;
     case RECOMP_PC_CPU_COSTUMES: recomp_cpu_costume_set_enabled(choice == 1u); break;
     case RECOMP_PC_FREE_CAMERA: recomp_free_camera_set_enabled(choice == 1u); break;
-    case RECOMP_PC_LIFE_BAR: recomp_combo_hud_set_life_bar_colour(choice); break;
+    case RECOMP_PC_LIFE_BAR:
+        recomp_combo_hud_set_life_bar_colour(choice, recomp_pc_settings_custom_life_bar(launcherSettings));
+        break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA: {
@@ -183,7 +185,7 @@ static void installPcSettings(bool online)
         choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
         choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
     }
-    recomp_combo_hud_set_life_bar_colour(choices[RECOMP_PC_LIFE_BAR]);
+    recomp_combo_hud_set_life_bar_colour(choices[RECOMP_PC_LIFE_BAR], recomp_pc_settings_custom_life_bar(launcherSettings));
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
