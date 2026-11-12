@@ -470,6 +470,13 @@ static int quad_tests(void)
     invoke(0x348240u, 8u, 65536u, VERTICES, 28u);
     CHECK(submits == 4u && submitted.data.draw.index_count == 98304u &&
         submitted.data.draw.vertex_count == 65536u && captured_indices[98303] == UINT16_MAX);
+    /* The shared identity table survives indexed, rebased and quad draws. */
+    const uint16_t deep[3] = {400u, 200u, 300u};
+    recomp_guest_store(INDICES, deep, sizeof deep);
+    invoke(0x348450u, 5u, 3u, INDICES, 0u);
+    CHECK(captured_indices[0] == 200u && captured_indices[1] == 0u && captured_indices[2] == 100u);
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(captured_indices[0] == 0u && captured_indices[1] == 1u && captured_indices[2] == 2u);
     return 0;
 }
 
