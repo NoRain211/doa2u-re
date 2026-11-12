@@ -1,4 +1,4 @@
-Dead or Alive 2 Ultimate native Linux port - 0.3.1 Alpha
+Dead or Alive 2 Ultimate native Linux port - 0.3.2 Alpha
 ========================================================
 
 This is an early build. It contains no game files. You
