@@ -66,6 +66,9 @@ int main()
     recomp_audio_output_submit(0, pcm_mono_8.data(), 3, 44100, 2, 16, 0); // unaligned block
 
     // Test reset voice
+    const float stereo_dry[] = {1.0f, 0.0f, 0.0f, 1.0f};
+    const float silent_wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    CHECK(recomp_audio_output_set_voice_routing(1, 2, stereo_dry, silent_wet));
     recomp_audio_output_reset_voice(0);
     recomp_audio_output_reset_voice(1);
     recomp_audio_output_reset_voice(255);

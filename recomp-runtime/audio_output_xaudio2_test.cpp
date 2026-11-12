@@ -562,7 +562,7 @@ int main()
     check(!recomp_audio_output_set_reverb(nullptr) &&
         !recomp_audio_output_set_reverb(&invalid) &&
         !recomp_audio_output_set_voice_routing(10, 1, invalid_matrix, mono_wet) &&
-        !recomp_audio_output_set_voice_routing(10, 2, silent, silent) &&
+        !recomp_audio_output_set_voice_routing(10, 4, silent, silent) &&
         !recomp_audio_output_set_voice_routing(RECOMP_AUDIO_OUTPUT_SLOTS, 1, mono_dry, silent) &&
         recomp_audio_output_ready() && effect_parameter_calls == 1);
     invalid = reverb_parameters;
@@ -581,6 +581,23 @@ int main()
         voices[11].source->matrices[reverb_voice] == std::vector<float>(stereo_wet, stereo_wet + 4));
     recomp_audio_output_reset_voice(11);
     check(!routing[11].channels);
+
+    /* A suppressed replay can reuse a slot before its next audio arrives;
+       the new channel count takes effect when that audio replaces the voice. */
+    const float one_channel_dry[] = {1.0f, 0.0f};
+    check(recomp_audio_output_set_voice_routing(12, 1, one_channel_dry, silent));
+    recomp_audio_output_submit(12, pcm, sizeof pcm, 48000, 1, 16, 0);
+    source = voices[12].source;
+    check(source && source->format.nChannels == 1);
+    const unsigned stale_matrix_calls = source->matrix_calls;
+    check(recomp_audio_output_set_voice_routing(12, 2, stereo_dry, stereo_wet) &&
+        source->matrix_calls == stale_matrix_calls);
+    recomp_audio_output_submit(12, pcm, sizeof pcm, 48000, 2, 16, 0);
+    check(source->destroyed && voices[12].source->format.nChannels == 2 &&
+        voices[12].source->matrices[reverb_voice] ==
+            std::vector<float>(stereo_wet, stereo_wet + 4));
+    recomp_audio_output_reset_voice(12);
+
     const auto routed_submissions = submitted_buffers;
     recomp_audio_output_submit(10, pcm, sizeof pcm, 48000, 2, 16, 0);
     check(submitted_buffers == routed_submissions && recomp_audio_output_ready());
