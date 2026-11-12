@@ -1850,7 +1850,8 @@ void expandLine(LineVertex a, LineVertex b, const float *style, std::vector<Wide
         side[1] = 0.0f;
     }
     const unsigned layers = style[1] > 0.0f ? 4u : 2u;
-    std::vector<WideVertex> strip;
+    WideVertex strip[8];
+    unsigned count = 0u;
     for (unsigned i = 0u; i < layers; ++i) {
         const float offset = style[1] > 0.0f
             ? (i == 0u ? -(style[0] + 1.0f) * 0.5f : i == 1u ? -std::fabs(style[0] - 1.0f) * 0.5f
@@ -1862,11 +1863,11 @@ void expandLine(LineVertex a, LineVertex b, const float *style, std::vector<Wide
             clip[0] += side[0] * offset * style[2] * clip[3];
             clip[1] += side[1] * offset * style[3] * clip[3];
             float color[4] = {end->color[0], end->color[1], end->color[2], end->color[3] * coverage};
-            strip.push_back({clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3], 1.0f / clip[3],
-                packColor(color)});
+            strip[count++] = {clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3], 1.0f / clip[3],
+                packColor(color)};
         }
     }
-    for (size_t i = 2u; i < strip.size(); ++i) {
+    for (unsigned i = 2u; i < count; ++i) {
         out.push_back(strip[i - 2u]);
         out.push_back(strip[i - 1u]);
         out.push_back(strip[i]);
@@ -2070,8 +2071,10 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     const void *vertices = draw.vertex_bytes;
     uint32_t vertex_bytes = draw.vertex_stride * draw.vertex_count;
     uint32_t stride = draw.vertex_stride;
-    std::vector<uint16_t> expanded_indices;
-    std::vector<WideVertex> wide;
+    // Reused across draws (rain sends thousands of line draws); queueDraw copies both.
+    static thread_local std::vector<uint16_t> expanded_indices;
+    static thread_local std::vector<WideVertex> wide;
+    wide.clear();
     const void *indices = draw.index_bytes;
     uint32_t index_count = draw.index_count;
     if (draw.primitive_type == 7u) {
@@ -2111,6 +2114,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
                 return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
             }
             expandLine(a, b, style, wide);
+            if (wide.size() > 65535u) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
         }
         if (wide.empty() || wide.size() > 65535u) return wide.empty() ? RECOMP_D3D_PRESENTER_OK
             : RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
