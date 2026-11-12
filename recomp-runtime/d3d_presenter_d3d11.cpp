@@ -296,6 +296,10 @@ struct RecompD3dPresenter {
     ID3D11DeviceContext1 *context1 = nullptr;
     ID3D11Buffer *constant_ring = nullptr;
     UINT constant_ring_used = 0u;
+    /* Ring slot holding the previous draw's constants and a copy of them, so an
+       unchanged draw rebinds the slot instead of uploading it again. */
+    UINT constant_last_offset = ~0u;
+    float constant_last[kRecompD3dDrawConstantFloats];
     RasterStateEntry raster_states[kRasterStateSlots]{};
     uint32_t raster_state_count = 0u, next_raster_state_slot = 0u;
     UINT draw_vertex_capacity = 0u;
@@ -555,6 +559,7 @@ void releaseGraphics(RecompD3dPresenter *presenter)
     presenter->raster_state_count = presenter->next_raster_state_slot = 0u;
     releaseCom(presenter->draw_constant_buffer);
     releaseCom(presenter->constant_ring);
+    presenter->constant_last_offset = ~0u;
     releaseCom(presenter->context1);
     releaseCom(presenter->draw_index_buffer);
     releaseCom(presenter->draw_vertex_buffer);
@@ -668,17 +673,28 @@ void createConstantRing(RecompD3dPresenter *presenter)
     if (FAILED(presenter->device->CreateBuffer(&desc, nullptr, &presenter->constant_ring)))
         releaseCom(presenter->context1);
     presenter->constant_ring_used = kConstantRingBytes;
+    presenter->constant_last_offset = ~0u;
 }
 
 /* Writes a draw's constants and binds them to the vertex, geometry and pixel stages. */
 bool bindDrawConstants(RecompD3dPresenter *presenter, const float *constants)
 {
     const UINT size = kRecompD3dDrawConstantFloats * sizeof(float);
+    ID3D11Buffer *const ring = presenter->constant_ring;
+    if (ring != nullptr && presenter->constant_last_offset != ~0u &&
+        std::memcmp(presenter->constant_last, constants, size) == 0) {
+        const UINT first = presenter->constant_last_offset / 16u, count = kConstantSlotBytes / 16u;
+        presenter->context1->VSSetConstantBuffers1(0u, 1u, &ring, &first, &count);
+        presenter->context1->GSSetConstantBuffers1(0u, 1u, &ring, &first, &count);
+        presenter->context1->PSSetConstantBuffers1(0u, 1u, &ring, &first, &count);
+        return true;
+    }
     ID3D11Buffer *buffer = presenter->constant_ring != nullptr
         ? presenter->constant_ring : presenter->draw_constant_buffer;
     const bool wrap = presenter->constant_ring == nullptr ||
         presenter->constant_ring_used + kConstantSlotBytes > kConstantRingBytes;
     if (wrap) presenter->constant_ring_used = 0u;
+    presenter->constant_last_offset = ~0u; // a discard drops the old slot
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(presenter->context->Map(buffer, 0u,
             wrap ? D3D11_MAP_WRITE_DISCARD : D3D11_MAP_WRITE_NO_OVERWRITE, 0u, &mapped)))
@@ -692,6 +708,8 @@ bool bindDrawConstants(RecompD3dPresenter *presenter, const float *constants)
         return true;
     }
     const UINT first = presenter->constant_ring_used / 16u, count = kConstantSlotBytes / 16u;
+    presenter->constant_last_offset = presenter->constant_ring_used;
+    std::memcpy(presenter->constant_last, constants, size);
     presenter->context1->VSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
     presenter->context1->GSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
     presenter->context1->PSSetConstantBuffers1(0u, 1u, &buffer, &first, &count);
