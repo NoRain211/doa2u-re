@@ -1828,8 +1828,10 @@ static bool testStageBump()
 }
 
 // Water bump pass: t1 at oT1 + M1 n, s = dot(expand oD0, expand t3)^8, then
-// r0 = s + oD1 t1.a - 1 + t3.a t1.
-static bool testStageWater()
+// r0 = max(0, s + oD1 t1.a - 1) + t3.a t1. With dark set, a flat environment
+// texel turns the highlight off, so the first sum is negative and must clamp
+// to 0 instead of darkening the reflection (the safari stage's distant water).
+static bool testStageWater(bool dark)
 {
     char folder[MAX_PATH], path[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "wtr", 0, path)) return false;
@@ -1843,7 +1845,8 @@ static bool testStageWater()
         struct Vertex { float x, y, z; uint32_t color; float uv[8]; };
         const uint16_t indices[] = {0, 1, 2, 3};
         // Opaque red at u = 0.25; half-alpha green where the +64 U offset lands.
-        const uint32_t reflection[2] = {0xffff0000u, 0x8000ff00u}, environment = 0x808080ffu;
+        const uint32_t reflection[2] = {0xffff0000u, 0x8000ff00u};
+        const uint32_t environment = dark ? 0x80808080u : 0x808080ffu;
         const uint8_t map[2] = {0x40u, 0x00u};
         const uint32_t xyzw = 0x1bu;
         Vertex quad[4]{};
@@ -1903,10 +1906,12 @@ static bool testStageWater()
         passed &= expect("destroy water", d3d_backend_destroy(&presenter));
         if (FILE *file = std::fopen(path, "rb")) {
             // s = 1, t1 = green at 0.502 alpha, t3.a = 0.502: r0 = (0.25, 0.5, 0).
+            // Dark: s = 0, so the first sum (-0.75, -1, -1) clamps to 0: r0 = (0, 0.5, 0).
             unsigned char bgr[3]{};
             std::fseek(file, 54 + (239 - 120) * 960 + 160 * 3, SEEK_SET);
             passed &= std::fread(bgr, 1, 3, file) == 3;
-            const bool pixel_ok = bgr[0] < 4 && std::abs(bgr[1] - 128) <= 4 && std::abs(bgr[2] - 64) <= 4;
+            const int red = dark ? 0 : 64;
+            const bool pixel_ok = bgr[0] < 4 && std::abs(bgr[1] - 128) <= 4 && std::abs(bgr[2] - red) <= 4;
             if (!pixel_ok) std::fprintf(stderr, "FAIL stage water pixel BGR=%u,%u,%u\n", bgr[0], bgr[1], bgr[2]);
             passed &= pixel_ok;
             std::fclose(file);
@@ -1914,7 +1919,9 @@ static bool testStageWater()
     }
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     DeleteFileA(path);
-    if (passed) std::puts("PASS stage water bump: offset reflection, oD1 and dot^8 highlight");
+    if (passed)
+        std::puts(dark ? "PASS stage water bump: unlit sum clamps before the reflection"
+                       : "PASS stage water bump: offset reflection, oD1 and dot^8 highlight");
     return passed;
 }
 
@@ -2996,7 +3003,7 @@ int main()
         !testScaledMsaaDepthBias() || !testProgramMaxSlt() ||
         !testProgramLitSge() ||
         !testStageBump() ||
-        !testStageWater() ||
+        !testStageWater(false) || !testStageWater(true) ||
         !testVisibility() ||
         !testClose(false) || !testClose(true)) return 1;
     std::puts("PASS presenter render thread");
