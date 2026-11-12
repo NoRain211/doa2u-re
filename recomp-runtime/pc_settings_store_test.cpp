@@ -62,7 +62,7 @@ int main()
         c[RECOMP_PC_AUDIO] == 1u && c[RECOMP_PC_INTRO] == 1u && c[RECOMP_PC_UNLOCKS] == 1u &&
         c[RECOMP_PC_CPU_COSTUMES] == 1u && c[RECOMP_PC_FREE_CAMERA] == 1u);
 
-    // Saving with Ultrawide still chosen keeps that shape and every other key.
+    // Saving with 21:9 still chosen keeps that shape and every other key.
     c[RECOMP_PC_MSAA] = 0u;
     expect("write", recomp_pc_settings_write(path, store, c));
     std::string saved = read(path);
@@ -76,7 +76,7 @@ int main()
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u);
 
-    // 32:9, then Ultrawide again: the monitor's own shape.
+    // 32:9, then 21:9 again: the monitor's own shape.
     c[RECOMP_PC_SCREEN] = 4u;
     recomp_pc_settings_write(path, store, c);
     expect("32:9", read(path).find("\"screen\":\"32:9\"") != std::string::npos);

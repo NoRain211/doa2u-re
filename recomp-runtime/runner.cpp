@@ -166,10 +166,11 @@ static void installPcSettings(bool online)
     launcherSettings = path != nullptr ? path : "";
     pcStore = {};
 #ifdef _WIN32
-    // The launchers' defaults: the primary display's height, and its shape for Ultrawide.
+    // The launchers' defaults: the primary display's height, and its shape for 21:9
+    // when it is a 21:9 display (wider than 16:9, narrower than 3:1).
     const int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
     if (height > 0) pcStore.primaryHeight = height;
-    if (width * 9 > height * 16) pcStore.ultrawideShape = std::to_string(width) + ":" + std::to_string(height);
+    if (width * 9 > height * 16 && width < height * 3) pcStore.ultrawideShape = std::to_string(width) + ":" + std::to_string(height);
 #endif
     std::uint8_t choices[RECOMP_PC_SETTING_COUNT];
     recomp_pc_settings_read(launcherSettings, pcStore, choices);

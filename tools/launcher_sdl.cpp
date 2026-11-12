@@ -28,7 +28,7 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
-const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE", "32:9"};
+const char *const kScreens[] = {"4:3", "16:9", "16:10", "21:9", "32:9"};
 
 enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
 // One row per Item, in Item order: its label and how many values it cycles through.
@@ -65,7 +65,7 @@ struct Settings {
     int height = 0;
     int msaa = 8;
     bool smaa = true;
-    std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"
+    std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or a 21:9 "W:H"
     bool surround = false;
     bool skip_intro = false;
     bool check_updates = true;
@@ -340,7 +340,7 @@ struct Launcher {
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
-            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // ULTRAWIDE fits only small
+            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // the longest value fits only small
             text(left + 20, kValueY + (scale == 2 ? 0 : 4), value, selected ? kWhite : Color{232, 222, 212}, scale);
             text(left + 24 + value.size() * 8 * scale, kValueY + 4, ">", arrow);
         }
@@ -424,7 +424,7 @@ int main(int argc, char **argv)
     launcher.choice[MSAA] = static_cast<int>(std::upper_bound(std::begin(kSamples), std::end(kSamples),
         std::max(settings.msaa, 1)) - std::begin(kSamples)) - 1;
     launcher.choice[SMAA] = settings.smaa ? 1 : 0;
-    launcher.choice[WIDESCREEN] = 3; // a saved ultrawide "W:H"
+    launcher.choice[WIDESCREEN] = 3; // a saved 21:9 "W:H"
     for (int i = 0; i < static_cast<int>(std::size(kScreens)); ++i) {
         if (settings.screen == kScreens[i]) launcher.choice[WIDESCREEN] = i;
     }
@@ -435,7 +435,7 @@ int main(int argc, char **argv)
     launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
     launcher.choice[CPU_COSTUMES] = settings.random_cpu_costumes ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
-    // A plain exit keeps an untouched 16x/32x MSAA or ultrawide shape; play saves what the rows show.
+    // A plain exit keeps an untouched 16x/32x MSAA or 21:9 shape; play saves what the rows show.
     const Settings loaded = settings;
     const int shown_msaa = launcher.choice[MSAA], shown_screen = launcher.choice[WIDESCREEN];
 
@@ -542,9 +542,10 @@ int main(int argc, char **argv)
         settings.smaa = launcher.choice[SMAA] != 0;
         settings.screen = kScreens[launcher.choice[WIDESCREEN]];
         if (launcher.choice[WIDESCREEN] == 3) {
-            // The primary screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+            // The primary screen's own shape when it is a 21:9 display (wider than 16:9,
+            // narrower than 3:1, so not 32:9), else 21:9 as 2560x1080 (64:27).
             const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
-            settings.screen = mode != nullptr && mode->w * 9 > mode->h * 16
+            settings.screen = mode != nullptr && mode->w * 9 > mode->h * 16 && mode->w < mode->h * 3
                 ? std::to_string(mode->w) + ":" + std::to_string(mode->h) : "64:27";
         }
         settings.surround = launcher.choice[SURROUND] != 0;

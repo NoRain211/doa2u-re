@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, ultrawide or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -110,7 +110,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
-| Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
+| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
@@ -265,7 +265,8 @@ setting, and the presenter shows that image at 16:9.
 widescreen mode in another shape: the runner widens the game's projection to
 it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
-launcher's **16:10**, **Ultrawide** (the primary monitor's own shape) and
+launcher's **16:10**, **21:9** (the primary monitor's own shape on a 21:9
+display, else 64:27) and
 **32:9** choices set it. Online sessions and replays use the host's 4:3 or
 16:9 mode, fitted with black bars, as both sides must compute the same
 frames. Above 480p the Direct3D 11 window fills the screen borderless in
