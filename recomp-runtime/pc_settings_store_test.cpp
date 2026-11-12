@@ -78,10 +78,10 @@ int main()
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u);
 
     // A life bar colour saves by name and reads back.
-    c[RECOMP_PC_LIFE_BAR] = RECOMP_LIFE_BAR_BLUE;
+    c[RECOMP_PC_LIFE_BAR] = 10u;
     recomp_pc_settings_write(path, store, c);
     expect("life bar saved", read(path).find("\"lifeBarColour\":\"blue\"") != std::string::npos);
-    expect("life bar read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_LIFE_BAR] == RECOMP_LIFE_BAR_BLUE);
+    expect("life bar read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_LIFE_BAR] == 10u);
     expect("custom colour default", recomp_pc_settings_custom_life_bar(path) == 0xffffffu);
 
     // 32:9, then 21:9 again: the monitor's own shape.

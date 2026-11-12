@@ -15,22 +15,22 @@ extern "C" {
    own "N HIT COMBO !", Sparring's critical-stun segment over the life bars,
    and PC Settings' life bar colour. */
 
-/* The life bar colours PC Settings offers, in its row's order. Custom takes
-   launcher.json's lifeBarCustom, an RRGGBB hex colour. */
-enum RecompLifeBarColour {
-    RECOMP_LIFE_BAR_DEFAULT,
-    RECOMP_LIFE_BAR_RED,
-    RECOMP_LIFE_BAR_ORANGE,
-    RECOMP_LIFE_BAR_YELLOW,
-    RECOMP_LIFE_BAR_BLUE,
-    RECOMP_LIFE_BAR_PURPLE,
-    RECOMP_LIFE_BAR_PINK,
-    RECOMP_LIFE_BAR_CUSTOM,
-    RECOMP_LIFE_BAR_COLOURS
+/* The life bar colours PC Settings offers, in its row's order: the game's own,
+   16 to pick from, and Custom, launcher.json's lifeBarCustom (RRGGBB). */
+enum {
+    RECOMP_LIFE_BAR_DEFAULT = 0,
+    RECOMP_LIFE_BAR_CUSTOM = 17,
+    RECOMP_LIFE_BAR_COLOURS = 18,
 };
 /* launcher.json's names for them. */
 static const char *const RECOMP_LIFE_BAR_NAMES[RECOMP_LIFE_BAR_COLOURS] = {
-    "default", "red", "orange", "yellow", "blue", "purple", "pink", "custom",
+    "default", "red", "orange", "gold", "yellow", "lime", "green", "teal", "cyan",
+    "sky", "blue", "indigo", "purple", "magenta", "pink", "white", "silver", "custom",
+};
+/* Their colours, 0xRRGGBB; 0 for Default and Custom. */
+static const uint32_t RECOMP_LIFE_BAR_RGB[RECOMP_LIFE_BAR_COLOURS] = {
+    0u, 0xff2a2au, 0xff8a1eu, 0xffc21eu, 0xfff23au, 0xa6ff2eu, 0x2ee05au, 0x1ec8aau, 0x2ee6ffu,
+    0x6ab8ffu, 0x2e62ffu, 0x6a3cf0u, 0xa64cffu, 0xff3cf0u, 0xff7ac8u, 0xffffffu, 0xb4b8c8u, 0u,
 };
 
 /* Call at each boot. Online every addition stays off and the life bar keeps

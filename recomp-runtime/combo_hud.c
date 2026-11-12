@@ -3,9 +3,9 @@
 #include "d3d8_resource_adapter.h"
 #include "d3d_texture_model.h"
 #include "kernel_abi.h"
+#include "runner_assets.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* Battle modes 9 and 10 are Sparring and its Training: the fight HUD (0xba120)
@@ -183,16 +183,19 @@ static void draw_damage(uint32_t scratch, unsigned side)
     put16(ORIGIN_X, 0u);
     put16(ORIGIN_Y, 0x220u);
     *recomp_memory(SPRITE_MODE, 1u) = *recomp_memory(DEMO_FLAG, 1u) == 1u ? 4u : 2u;
-    unsigned value = damage > 9999u ? 9999u : damage, x = units;
-    do {
-        draw_sprite(scratch, DIGIT_SPRITE + value % 10u, x, y);
-        value /= 10u;
-        x -= DIGIT_STEP;
-    } while (value > 0u);
+    /* Its first digit under the counter's first, the rest to the right. */
+    const unsigned value = damage > 9999u ? 9999u : damage;
+    const unsigned digits = value >= 1000u ? 4u : value >= 100u ? 3u : value >= 10u ? 2u : 1u;
+    const unsigned first = units - (counter_hits(side) >= 10u ? DIGIT_STEP : 0u);
+    unsigned rest = value;
+    for (unsigned i = digits; i > 0u; --i) {
+        draw_sprite(scratch, DIGIT_SPRITE + rest % 10u, first + DIGIT_STEP * (i - 1u), y);
+        rest /= 10u;
+    }
     put32(SPRITE_SCALE, 0x3f800000u);
     call(UI_RESET, NULL, 0u);
     /* Text is placed in screen pixels; the sprites' origin is 0x220 / 16 = 34 down. */
-    draw_label(scratch + 0x10u, damage_word(scratch + 0x40u), units + DIGIT_STEP + 2u, 34u + y + 4u);
+    draw_label(scratch + 0x10u, damage_word(scratch + 0x40u), first + DIGIT_STEP * digits + 2u, 34u + y + 4u);
 }
 
 static void popups_first(void)
@@ -219,11 +222,15 @@ static void popups_last(void)
 
 /* ---- Life bars -------------------------------------------------------- */
 
-/* The life texture as the game loaded it, to colour from and restore. */
-static uint32_t life_texture, life_bytes_at, life_byte_count;
-static uint8_t *life_original;
-static uint8_t *life_written;
-static uint32_t life_written_rgb = 0xffffffffu;
+/* The life texture is 8-bit, each texture page an entry {texture, palette}
+   (0xaa9b0) whose palette 0xb072c binds. Its colours come from that palette,
+   which other HUD pages may share, so a coloured bar gets a palette of its
+   own in the runner's guest memory, the game's colours recoloured; Default
+   puts the game's palette back. */
+static uint32_t life_entry;          /* the page entry */
+static uint32_t game_palette;        /* the palette the game gave the page */
+static uint32_t own_palette, own_colours;
+static uint32_t own_rgb = 0xffffffffu;
 
 static unsigned brightness(const uint8_t *bgra)
 {
@@ -231,74 +238,58 @@ static unsigned brightness(const uint8_t *bgra)
     return bg > bgra[2] ? bg : bgra[2];
 }
 
-/* Re-colours the life texture to life_rgb, keeping each texel's alpha and its
-   brightness relative to the brightest texel, or restores the game's own. */
 static void colour_life_texture(void)
 {
     const uint32_t pages = *recomp_memory_u32(TEXTURE_PAGES + 4u * LIFE_PAGE_GROUP);
     if (pages == 0u) return;
-    const uint32_t texture = *recomp_memory_u32(pages + 8u * LIFE_PAGE);
-    RecompD3dTextureDesc desc;
-    uint32_t address;
-    const bool described = texture != 0u && recomp_d3d8_resource_describe(texture, &desc);
-    if (!described || desc.bits_per_pixel != 32u || desc.width == 0u || desc.height == 0u ||
-        desc.width > 256u || desc.height > 256u || !recomp_d3d_texture_resolve_cpu_address(desc.data, &address)) {
+    const uint32_t entry = pages + 8u * LIFE_PAGE;
+    const uint32_t bound = *recomp_memory_u32(entry + 4u);
+    if (bound == 0u) {
         static bool reported;
         if (!reported) {
             reported = true;
-            fprintf(stderr, "recomp combo hud: life texture 0x%08x is not 32-bit (format 0x%02x); colour unchanged\n",
-                texture, described ? desc.format_byte : 0u);
+            fprintf(stderr, "recomp combo hud: life texture has no palette; colour unchanged\n");
         }
         return;
     }
-    const uint32_t count = desc.width * desc.height * 4u;
-    uint8_t *bytes = recomp_memory(address, count);
-    /* A new texture, or the game reloaded it: what is there is the original. */
-    const bool reloaded = texture != life_texture || address != life_bytes_at || count != life_byte_count ||
-        life_written == NULL || memcmp(bytes, life_written, count) != 0;
-    if (reloaded) {
-        free(life_original);
-        free(life_written);
-        life_original = malloc(count);
-        life_written = malloc(count);
-        if (life_original == NULL || life_written == NULL) {
-            free(life_original);
-            free(life_written);
-            life_original = life_written = NULL;
-            return;
-        }
-        memcpy(life_original, bytes, count);
-        memcpy(life_written, bytes, count);
-        life_texture = texture;
-        life_bytes_at = address;
-        life_byte_count = count;
-        life_written_rgb = 0u;
+    /* A new page or a reloaded group: what is bound is the game's. */
+    if (entry != life_entry || (bound != own_palette && bound != game_palette) || own_palette == 0u) {
+        if (entry != life_entry || bound != own_palette) game_palette = bound;
+        life_entry = entry;
+        own_rgb = 0xffffffffu;
     }
-    if (life_written_rgb == life_rgb) return;
-    memcpy(life_written, life_original, count);
-    if (life_rgb != 0u) {
+    if (life_rgb == 0u) {
+        if (bound != game_palette) *recomp_memory_u32(entry + 4u) = game_palette;
+        return;
+    }
+    if (own_palette == 0u) own_palette = recomp_runner_palette(&own_colours);
+    uint32_t game_colours;
+    if (own_palette == 0u ||
+        !recomp_d3d_texture_resolve_cpu_address(*recomp_memory_u32(game_palette + 4u), &game_colours)) return;
+    if (own_rgb != life_rgb || bound != own_palette) {
+        const uint8_t *from = recomp_memory(game_colours, 1024u);
+        uint8_t *to = recomp_memory(own_colours, 1024u);
         unsigned brightest = 1u;
-        for (uint32_t i = 0u; i < count; i += 4u)
-            if (brightness(life_original + i) > brightest) brightest = brightness(life_original + i);
+        for (unsigned i = 0u; i < 1024u; i += 4u)
+            if (from[i + 3u] != 0u && brightness(from + i) > brightest) brightest = brightness(from + i);
         const unsigned r = life_rgb >> 16 & 255u, g = life_rgb >> 8 & 255u, b = life_rgb & 255u;
-        for (uint32_t i = 0u; i < count; i += 4u) {
-            const unsigned v = brightness(life_original + i);
-            life_written[i] = (uint8_t)(b * v / brightest);
-            life_written[i + 1u] = (uint8_t)(g * v / brightest);
-            life_written[i + 2u] = (uint8_t)(r * v / brightest);
+        for (unsigned i = 0u; i < 1024u; i += 4u) {
+            const unsigned v = brightness(from + i);
+            const unsigned scaled = v > brightest ? brightest : v;
+            to[i] = (uint8_t)(b * scaled / brightest);
+            to[i + 1u] = (uint8_t)(g * scaled / brightest);
+            to[i + 2u] = (uint8_t)(r * scaled / brightest);
+            to[i + 3u] = from[i + 3u];
         }
+        own_rgb = life_rgb;
+        *recomp_memory_u32(entry + 4u) = own_palette;
     }
-    memcpy(bytes, life_written, count);
-    life_written_rgb = life_rgb;
 }
 
 void recomp_combo_hud_set_life_bar_colour(unsigned colour, uint32_t custom_rgb)
 {
-    static const uint32_t colours[RECOMP_LIFE_BAR_COLOURS] = {
-        0u, 0xff3030u, 0xff9020u, 0xffe030u, 0x3080ffu, 0xa040ffu, 0xff60c0u, 0u,
-    };
     if (colour >= RECOMP_LIFE_BAR_COLOURS) colour = RECOMP_LIFE_BAR_DEFAULT;
-    life_rgb = colour == RECOMP_LIFE_BAR_CUSTOM ? custom_rgb & 0xffffffu : colours[colour];
+    life_rgb = colour == RECOMP_LIFE_BAR_CUSTOM ? custom_rgb & 0xffffffu : RECOMP_LIFE_BAR_RGB[colour];
     if (colour == RECOMP_LIFE_BAR_CUSTOM && life_rgb == 0u) life_rgb = 0x010101u; /* black, not the default */
 }
 
@@ -347,9 +338,9 @@ void recomp_combo_hud_install(bool online)
     hud_moved = false;
     memset(latched_damage, 0, sizeof latched_damage);
     memset(latched_hits, 0, sizeof latched_hits);
-    life_texture = 0u;
-    free(life_written);
-    life_written = NULL;
+    /* The asset area is reset after this, each boot. */
+    life_entry = game_palette = own_palette = own_colours = 0u;
+    own_rgb = 0xffffffffu;
 }
 
 RecompFunction recomp_combo_hud_lookup_manual(uint32_t guest_address)

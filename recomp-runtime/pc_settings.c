@@ -100,13 +100,13 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 8u};
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
     [RECOMP_PC_LIFE_BAR] = true,
 };
 static bool live[PC_ROWS];
-enum { MAX_CHOICES = 8, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELPS = 3 };
+enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELPS = 3 };
 
 typedef struct Language {
     const recomp_utf16 *label;  /* the top-list row, in capitals */
@@ -130,7 +130,8 @@ static const Language LANGUAGES[5] = {
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"},
-      {u"Default", u"Red", u"Orange", u"Yellow", u"Blue", u"Purple", u"Pink", u"Custom"}},
+      {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
+       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}},
      {u"Graphics, audio and gameplay settings for this PC.", u"Takes effect immediately.",
       u"Takes effect the next time the game starts."}},
     {u"PARAM\u00c8TRES PC",
@@ -140,7 +141,8 @@ static const Language LANGUAGES[5] = {
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"},
-      {u"Normale", u"Rouge", u"Orange", u"Jaune", u"Bleue", u"Violette", u"Rose", u"Perso."}},
+      {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
+       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}},
      {u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
       u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu."}},
     {u"PC-EINSTELLUNGEN",
@@ -150,7 +152,8 @@ static const Language LANGUAGES[5] = {
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"},
-      {u"Standard", u"Rot", u"Orange", u"Gelb", u"Blau", u"Lila", u"Rosa", u"Eigene"}},
+      {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
+       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}},
      {u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
       u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart."}},
     {u"IMPOSTAZIONI PC",
@@ -160,7 +163,8 @@ static const Language LANGUAGES[5] = {
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"},
-      {u"Predefinita", u"Rossa", u"Arancione", u"Gialla", u"Blu", u"Viola", u"Rosa", u"Personale"}},
+      {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
+       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}},
      {u"Impostazioni grafiche, audio e di gioco di questo PC.", u"Effettivo immediatamente.",
       u"Effettivo al prossimo avvio del gioco."}},
     {u"CONFIG. PC",
@@ -170,7 +174,8 @@ static const Language LANGUAGES[5] = {
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"},
-      {u"Normal", u"Roja", u"Naranja", u"Amarilla", u"Azul", u"Morada", u"Rosa", u"Propia"}},
+      {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
+       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}},
      {u"Opciones de gr\u00e1ficos, audio y juego de este PC.", u"Se aplica de inmediato.",
       u"Se aplica la pr\u00f3xima vez que inicies el juego."}},
 };

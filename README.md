@@ -81,8 +81,8 @@ keeps running.
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
   breaks, as Sparring's bar does. Online both stay off.
-- **Life bar colour.** PC SETTINGS' **Life Bar** row recolours the life bars
-  red, orange, yellow, blue, purple or pink, or **Custom**: any colour, set as
+- **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
+  colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
