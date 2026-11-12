@@ -7,6 +7,7 @@
 #include "guest_snapshot.h"
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
+#include "combo_hud.h"
 #include "cpu_costume.h"
 #include "unlock_profile.h"
 #include "pc_settings.h"
@@ -138,6 +139,7 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_UNLOCKS: unlockAll = choice == 0u; break;
     case RECOMP_PC_CPU_COSTUMES: recomp_cpu_costume_set_enabled(choice == 1u); break;
     case RECOMP_PC_FREE_CAMERA: recomp_free_camera_set_enabled(choice == 1u); break;
+    case RECOMP_PC_LIFE_BAR: recomp_combo_hud_set_life_bar_colour(choice); break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA: {
@@ -181,6 +183,7 @@ static void installPcSettings(bool online)
         choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
         choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
     }
+    recomp_combo_hud_set_life_bar_colour(choices[RECOMP_PC_LIFE_BAR]);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
@@ -635,6 +638,7 @@ static void bootGuest()
     const bool online = recomp_netplay_session_enabled() || recomp_synctest_enabled();
     recomp_free_camera_install(online);
     recomp_cpu_costume_install(online);
+    recomp_combo_hud_install(online);
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
     installPcSettings(online);

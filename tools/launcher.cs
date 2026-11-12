@@ -282,6 +282,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
+    string lifeBarColour; // chosen in the game's PC Settings; kept as saved
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
@@ -347,6 +348,7 @@ class LauncherForm : Form
         freeCamera = Choice("Free Camera", "In game, F1 or a right-stick click flies the camera", new[] { "Off", "On" }, Game.Bool(settings, "freeCamera", false), 0);
         cpuCostumes = Choice("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", new[] { "Default", "Random" }, Game.Bool(settings, "randomCpuCostumes", false), 0);
         gameSource = Game.Str(settings, "game_source", null);
+        lifeBarColour = Game.Str(settings, "lifeBarColour", "default");
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
@@ -454,7 +456,8 @@ class LauncherForm : Form
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
             { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
-            { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource } };
+            { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
+            { "lifeBarColour", lifeBarColour } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }

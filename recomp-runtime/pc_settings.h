@@ -26,6 +26,7 @@ enum RecompPcSetting {
     RECOMP_PC_UNLOCKS,       /* Everything, Earn */
     RECOMP_PC_CPU_COSTUMES,  /* Default, Random */
     RECOMP_PC_FREE_CAMERA,   /* Off, On */
+    RECOMP_PC_LIFE_BAR,      /* Default, Red, Green, Blue, Purple, Pink (combo_hud.h) */
     RECOMP_PC_SETTING_COUNT
 };
 

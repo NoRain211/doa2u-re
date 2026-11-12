@@ -77,6 +77,12 @@ keeps running.
   **Free Camera** change at once, and so do **Resolution**, **MSAA** and
   **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
+- **Combo counter.** Outside Sparring, a combo shows its hits and damage on
+  the attacker's side, with Sparring's combo bar under them; while the
+  opponent is in a critical stun, the bar's blinking segment is the damage
+  left before the stun breaks. Online it stays off.
+- **Life bar colour.** PC SETTINGS' **Life Bar** row tints the life bars red,
+  green, blue, purple or pink, at once.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,

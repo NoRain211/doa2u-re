@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "pc_settings_store.h"
+#include "combo_hud.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -75,6 +76,12 @@ int main()
     std::uint8_t again[RECOMP_PC_SETTING_COUNT];
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u);
+
+    // A life bar colour saves by name and reads back.
+    c[RECOMP_PC_LIFE_BAR] = RECOMP_LIFE_BAR_BLUE;
+    recomp_pc_settings_write(path, store, c);
+    expect("life bar saved", read(path).find("\"lifeBarColour\":\"blue\"") != std::string::npos);
+    expect("life bar read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_LIFE_BAR] == RECOMP_LIFE_BAR_BLUE);
 
     // 32:9, then 21:9 again: the monitor's own shape.
     c[RECOMP_PC_SCREEN] = 4u;

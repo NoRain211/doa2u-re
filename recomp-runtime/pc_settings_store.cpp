@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings_store.h"
+#include "combo_hud.h"
 
 #include <cctype>
 #include <cstdio>
@@ -149,6 +150,10 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_UNLOCKS] = boolean(entries, "unlockAll", true) ? 0u : 1u;
     choices[RECOMP_PC_CPU_COSTUMES] = boolean(entries, "randomCpuCostumes", false) ? 1u : 0u;
     choices[RECOMP_PC_FREE_CAMERA] = boolean(entries, "freeCamera", false) ? 1u : 0u;
+    const std::string colour = text(entries, "lifeBarColour", RECOMP_LIFE_BAR_NAMES[0]);
+    choices[RECOMP_PC_LIFE_BAR] = RECOMP_LIFE_BAR_DEFAULT;
+    for (std::uint8_t i = 0u; i < RECOMP_LIFE_BAR_COLOURS; ++i)
+        if (colour == RECOMP_LIFE_BAR_NAMES[i]) choices[RECOMP_PC_LIFE_BAR] = i;
 }
 
 bool read_file(const std::string &path, std::string *out)
@@ -210,6 +215,8 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     put(&entries, "unlockAll", flag(choices[RECOMP_PC_UNLOCKS] == 0u));
     put(&entries, "randomCpuCostumes", flag(choices[RECOMP_PC_CPU_COSTUMES] == 1u));
     put(&entries, "freeCamera", flag(choices[RECOMP_PC_FREE_CAMERA] == 1u));
+    put(&entries, "lifeBarColour", std::string("\"") +
+        RECOMP_LIFE_BAR_NAMES[choices[RECOMP_PC_LIFE_BAR] % RECOMP_LIFE_BAR_COLOURS] + "\"");
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;
