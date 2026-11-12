@@ -3357,6 +3357,8 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     created->window = SDL_CreateWindow(unpacedRun() ? "DOA2U Recomp (unpaced)" : "DOA2U Recomp",
         static_cast<int>(fit.width), static_cast<int>(fit.height), flags);
     if (created->window == nullptr) return fail("window");
+    // Take the focus from the launcher: an unfocused window gets no pad input.
+    if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
             SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)

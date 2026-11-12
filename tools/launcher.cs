@@ -162,6 +162,8 @@ static class Game
         return process;
     }
 
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int processId);
+
     // Plays with the saved settings and waits for the game to exit; returns why it failed, or null.
     public static string Play()
     {
@@ -171,6 +173,9 @@ static class Game
         Directory.CreateDirectory(logs);
         string log = Path.Combine(logs, "launcher-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".log");
         int code;
+        // The launcher holds the foreground, so let the game's window take it: an
+        // unfocused game window gets no pad input from Windows (seen on a GPD Win 5).
+        try { AllowSetForegroundWindow(-1); } catch (EntryPointNotFoundException) { }
         using (var writer = new StreamWriter(log, false, new UTF8Encoding(false)))
         {
             var sync = new object();
