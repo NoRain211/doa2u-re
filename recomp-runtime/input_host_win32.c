@@ -160,10 +160,12 @@ static void load_map(bool pad, const char *at)
         const char *equals = strchr(at, '=');
         if (equals != NULL && (next == NULL || equals < next)) { /* an entry without = is skipped */
             const char *value = equals + 1;
-            const int source = parse_source(pad, value, next != NULL ? (size_t)(next - value) : strlen(value));
+            const size_t length = next != NULL ? (size_t)(next - value) : strlen(value);
+            /* An empty value means no button, not the default one. */
+            const int source = length == 0 ? -1 : parse_source(pad, value, length);
             for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
                 if (strlen(bindings[i].name) == (size_t)(equals - at) &&
-                    strncmp(at, bindings[i].name, equals - at) == 0 && source >= 0) {
+                    strncmp(at, bindings[i].name, equals - at) == 0 && (length == 0 || source >= 0)) {
                     bindings[i].source[pad] = source;
                     bound[i] = true;
                 }

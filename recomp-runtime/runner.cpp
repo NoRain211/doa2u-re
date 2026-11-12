@@ -97,7 +97,11 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
 static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
 {
     quitPrompt(port, sampled ? gamepad : nullptr);
-    if (!sampled || recomp_quit_prompt_open()) return;
+    if (!sampled) {
+        recomp_rebind_release(port); // an unplugged pad cannot let go of a button
+        return;
+    }
+    if (recomp_quit_prompt_open()) return;
     recomp_rebind_filter(port, gamepad);
     recomp_netplay_menu_filter(port, gamepad);
 }

@@ -119,8 +119,9 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             (root / "private").mkdir()
             with patch("run_game.ROOT", root):
                 self.assertEqual(keyboard_map(), "")
-                (root / "private/keyboard.json").write_text('{"a": "space", "start": "F5", "up": "W"}')
-                self.assertEqual(keyboard_map(), "a=20,start=74,up=57")
+                (root / "private/keyboard.json").write_text(
+                    '{"a": "space", "start": "F5", "up": "W", "y": ""}')
+                self.assertEqual(keyboard_map(), "a=20,start=74,up=57,y=")
                 for bad in ('{"jump": "Z"}', '{"a": "Home"}', '{"a": "F10"}', '{"a": "F11"}', '[1]', '{"a":'):
                     (root / "private/keyboard.json").write_text(bad)
                     with self.assertRaises(ValueError):
@@ -132,8 +133,9 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             (root / "private").mkdir()
             with patch("run_game.ROOT", root):
                 self.assertEqual(controller_map(), "")
-                (root / "private/controller.json").write_text('{"a": "lb", "white": "A", "start": "touchpad"}')
-                self.assertEqual(controller_map(), "a=LB,white=A,start=Touchpad")
+                (root / "private/controller.json").write_text(
+                    '{"a": "lb", "white": "A", "start": "touchpad", "y": ""}')
+                self.assertEqual(controller_map(), "a=LB,white=A,start=Touchpad,y=")
                 for bad in ('{"jump": "A"}', '{"a": "Guide"}', '{"a": 1}', '[1]', '{"a":'):
                     (root / "private/controller.json").write_text(bad)
                     with self.assertRaises(ValueError):
@@ -198,9 +200,19 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
-                execute.side_effect = [runner(4), runner(0)]
+                (root / "private/keyboard.json").write_text('{"a": "Space"}')
+                launches = []
+
+                def relaunch(*_args, **_kwargs):
+                    launches.append(1)
+                    (root / "private/keyboard.json").write_text('{"a": "Enter"}')
+                    return runner(4 if len(launches) == 1 else 0)
+
+                execute.side_effect = relaunch
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_count, 2)
+                self.assertEqual([call.kwargs["env"]["RECOMP_KEYMAP"]
+                                  for call in execute.call_args_list], ["a=20", "a=d"])
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
             self.assertEqual(len(logs), 11)

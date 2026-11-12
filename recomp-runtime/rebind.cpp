@@ -6,7 +6,10 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <string>
+#include <system_error>
 
 namespace {
 
@@ -47,24 +50,33 @@ void listen(int request)
     }
 }
 
-void save(const char *variable, bool pad)
+bool save(const char *variable, bool pad)
 {
     const char *path = std::getenv(variable);
     if (path == nullptr || *path == '\0') {
         std::fprintf(stderr, "recomp rebind: %s is not set; the change lasts until the game closes\n", variable);
-        return;
+        return true;
     }
-    std::ofstream file(path, std::ios::trunc);
+    const std::string target(path), temporary = target + ".tmp";
+    std::ofstream file(temporary, std::ios::trunc);
     const char *separator = "{\n";
     for (unsigned binding = 0u; binding < RECOMP_INPUT_BIND_COUNT; ++binding) {
         const char *name = recomp_rebind_name(binding, pad);
-        if (name == nullptr) continue; // a button left with nothing keeps nothing
-        file << separator << "  \"" << recomp_input_host_binding_name(binding) << "\": \"" << name << '"';
+        file << separator << "  \"" << recomp_input_host_binding_name(binding) << "\": \""
+             << (name != nullptr ? name : "") << '"';
         separator = ",\n";
     }
     file << (*separator == '{' ? "{}\n" : "\n}\n");
     file.close();
-    if (file.fail()) std::fprintf(stderr, "recomp rebind: cannot save %s\n", path);
+    if (!file.fail()) {
+        std::error_code error;
+        std::filesystem::rename(temporary, target, error); // replaces an existing target
+        if (!error) return true;
+    }
+    std::fprintf(stderr, "recomp rebind: cannot save %s\n", path);
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    return false;
 }
 
 } // namespace
@@ -87,9 +99,10 @@ const char *recomp_rebind_name(unsigned binding, bool pad)
 
 void recomp_rebind_save(void)
 {
-    if (!changed.exchange(false)) return;
-    save("RECOMP_KEYBOARD_SETTINGS", false);
-    save("RECOMP_CONTROLLER_SETTINGS", true);
+    if (!changed.load()) return;
+    const bool keyboard = save("RECOMP_KEYBOARD_SETTINGS", false);
+    const bool controller = save("RECOMP_CONTROLLER_SETTINGS", true);
+    if (keyboard && controller) changed = false;
 }
 
 void recomp_rebind_filter(uint32_t port, RecompInputGamepad *pad)
@@ -109,4 +122,9 @@ void recomp_rebind_filter(uint32_t port, RecompInputGamepad *pad)
         settling = down;
     }
     if (request != 0 || settling) *pad = RecompInputGamepad{};
+}
+
+void recomp_rebind_release(uint32_t port)
+{
+    if (port < RECOMP_INPUT_PORT_COUNT) held[port] = false;
 }

@@ -46,25 +46,27 @@ def bindings_file(name, example):
 
 
 def keyboard_map():
-    """RECOMP_KEYMAP text for private/keyboard.json, e.g. {"a": "Space", "start": "Enter"}; "" if absent."""
+    """RECOMP_KEYMAP text for private/keyboard.json, e.g. {"a": "Space", "y": ""}; "" if absent."""
     bindings = bindings_file("keyboard.json", '{"a": "Space"}')
     for action, key in bindings.items():
-        if action not in KEY_ACTIONS or not isinstance(key, str) or key.upper() not in KEY_CODES:
+        if action not in KEY_ACTIONS or not isinstance(key, str) or (key and key.upper() not in KEY_CODES):
             raise ValueError(f"private/keyboard.json: cannot bind {action!r} to {key!r}; buttons are "
                              f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, "
-                             "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc")
-    return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" for action, key in bindings.items())
+                             "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc, or \"\" to unbind")
+    return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" if key else f"{action}="
+                    for action, key in bindings.items())
 
 
 def controller_map():
-    """RECOMP_PADMAP text for private/controller.json, e.g. {"a": "LB", "white": "A"}; "" if absent."""
+    """RECOMP_PADMAP text for private/controller.json, e.g. {"a": "LB", "y": ""}; "" if absent."""
     names = {name.upper(): name for name in PAD_NAMES}
     bindings = bindings_file("controller.json", '{"a": "LB"}')
     for action, button in bindings.items():
-        if action not in KEY_ACTIONS or not isinstance(button, str) or button.upper() not in names:
+        if action not in KEY_ACTIONS or not isinstance(button, str) or (button and button.upper() not in names):
             raise ValueError(f"private/controller.json: cannot bind {action!r} to {button!r}; buttons are "
-                             f"{', '.join(KEY_ACTIONS)}; controller buttons are {', '.join(PAD_NAMES)}")
-    return ",".join(f"{action}={names[button.upper()]}" for action, button in bindings.items())
+                             f"{', '.join(KEY_ACTIONS)}; controller buttons are {', '.join(PAD_NAMES)}, "
+                             'or "" to unbind')
+    return ",".join(f"{action}={names.get(button.upper(), '')}" for action, button in bindings.items())
 
 
 def prepare_disc(source, disc):
@@ -186,12 +188,6 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             env[name] = value if isinstance(value, str) else str(int(value))
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
-    keymap = keyboard_map()
-    if keymap:
-        env.setdefault("RECOMP_KEYMAP", keymap)
-    padmap = controller_map()
-    if padmap:
-        env.setdefault("RECOMP_PADMAP", padmap)
     # The game's Rebind screen (Options, Controller) saves both files here.
     env["RECOMP_KEYBOARD_SETTINGS"] = str(ROOT / "private/keyboard.json")
     env["RECOMP_CONTROLLER_SETTINGS"] = str(ROOT / "private/controller.json")
@@ -274,8 +270,15 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             code = RELAUNCH
             # The game's soft reset relaunches its own XBE; a fresh runner is that cold boot.
             while code == RELAUNCH:
+                launch_env = env.copy()
+                keymap = keyboard_map()
+                if keymap:
+                    launch_env.setdefault("RECOMP_KEYMAP", keymap)
+                padmap = controller_map()
+                if padmap:
+                    launch_env.setdefault("RECOMP_PADMAP", padmap)
                 with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      env=env, encoding="utf-8", errors="surrogateescape") as child:
+                                      env=launch_env, encoding="utf-8", errors="surrogateescape") as child:
                     copy = threading.Thread(target=lambda: log.writelines(map(redact_private, child.stdout)))
                     copy.start()
                     try:

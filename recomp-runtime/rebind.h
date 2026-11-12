@@ -31,6 +31,9 @@ void recomp_rebind_save(void);
 /* Sees each sampled pad first: while it listens, and after a change until
    every button is up, the game gets an idle pad. */
 void recomp_rebind_filter(uint32_t port, RecompInputGamepad *pad);
+/* A pad that was not sampled is not holding a button: settling ends even if
+   the pad was unplugged while one was down. */
+void recomp_rebind_release(uint32_t port);
 
 #ifdef __cplusplus
 }
