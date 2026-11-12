@@ -5,6 +5,7 @@
 #include "d3d8_resource_adapter.h"
 #include "d3d8_draw_adapter.h"
 #include "combo_hud.h"
+#include "hit_voice.h"
 #include "cpu_costume.h"
 #include "dsound_api_adapter.h"
 #include "fiber_adapter.h"
@@ -246,6 +247,8 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (function == NULL) function = recomp_cpu_costume_lookup_manual(guest_address);
     /* The combo counter, critical bar and life bar colour (combo_hud.c). */
     if (function == NULL) function = recomp_combo_hud_lookup_manual(guest_address);
+    /* The fighters' hit grunts and KO cries (hit_voice.c). */
+    if (function == NULL) function = recomp_hit_voice_lookup_manual(guest_address);
     /* Unlock Everything keeps saves and awards to what was earned. */
     if (function == NULL) function = recomp_unlock_profile_lookup_manual(guest_address);
     /* PC SETTINGS in the game's Options menu. */

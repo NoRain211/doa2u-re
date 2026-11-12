@@ -74,6 +74,7 @@ struct Settings {
     bool free_camera = false;
     std::string life_bar_colour = "default"; // chosen in the game's PC Settings; kept as saved
     std::string life_bar_custom = "FFFFFF";
+    bool hit_voices = true;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -114,6 +115,7 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "randomCpuCostumes", value)) settings.random_cpu_costumes = value == "true";
     if (jsonValue(text, "lifeBarColour", value) && value.size() > 2) settings.life_bar_colour = value.substr(1, value.size() - 2);
     if (jsonValue(text, "lifeBarCustom", value) && value.size() > 2) settings.life_bar_custom = value.substr(1, value.size() - 2);
+    if (jsonValue(text, "hitVoices", value)) settings.hit_voices = value != "false";
     return settings;
 }
 
@@ -131,7 +133,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false")
          << ",\n  \"randomCpuCostumes\": " << (settings.random_cpu_costumes ? "true" : "false")
          << ",\n  \"lifeBarColour\": \"" << settings.life_bar_colour << '"'
-         << ",\n  \"lifeBarCustom\": \"" << settings.life_bar_custom << "\"\n}\n";
+         << ",\n  \"lifeBarCustom\": \"" << settings.life_bar_custom << '"'
+         << ",\n  \"hitVoices\": " << (settings.hit_voices ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
 

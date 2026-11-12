@@ -84,6 +84,13 @@ keeps running.
 - **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
+- **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
+  of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
+  decodes its hit grunts and KO cries for all 15 fighters into
+  `private\doa4-voice`, and the game plays them: light hits draw the short
+  grunts, heavy ones the long, and a KO the knock-down cries. It needs an
+  ffmpeg with XMA support. PC SETTINGS' **Hit Voices** row turns them off.
+  Online they stay off, since a rollback would replay them.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,

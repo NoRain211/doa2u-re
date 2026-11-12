@@ -7,8 +7,13 @@
 extern "C" {
 #endif
 
-/* DirectSound buffers use slots 0..255; native movie audio plays on 256. */
-enum { RECOMP_AUDIO_OUTPUT_MOVIE_SLOT = 256, RECOMP_AUDIO_OUTPUT_SLOTS = 257 };
+/* DirectSound buffers use slots 0..255; native movie audio plays on 256, and
+   the fighters' hit voices (hit_voice.c) on 257 and 258. */
+enum {
+    RECOMP_AUDIO_OUTPUT_MOVIE_SLOT = 256,
+    RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT = 257,
+    RECOMP_AUDIO_OUTPUT_SLOTS = 259
+};
 
 /* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Valid before
    initialize and without a device; an open XAudio2 output keeps its count.

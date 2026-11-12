@@ -29,6 +29,7 @@
     "private/README.md",
     "recomp-runtime/**",
     "tools/extract_iso.py",
+    "tools/import_doa4_voices.py",
     "tools/test_extract_iso.py",
     "tools/matchmaker.py",
     "tools/matchmaker.service",

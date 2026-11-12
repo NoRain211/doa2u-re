@@ -222,7 +222,7 @@ int main(void)
 {
     recomp_runtime.registers.esp = STACK;
     make_layout();
-    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0};
+    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
@@ -230,10 +230,10 @@ int main(void)
     uint32_t page = 19u;
     const uint32_t layout = hook(0x00090ad0u, &page, 1u);
     expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 10u * 28u) == ((0x5du + 260u) << 16 | 0x10au));
-    expect("layout values", rd32(layout + 12u * 28u) == (0x5du << 16 | 0x1e0u) &&
-        rd32(layout + 12u * 28u + 0x14u) == 0x40001u && rd32(layout + 23u * 28u + 0x18u) == 0x883ec0u);
-    expect("layout end", rd32(layout + 24u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
-        layout + 22u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
+    expect("layout values", rd32(layout + 13u * 28u) == (0x5du << 16 | 0x1e0u) &&
+        rd32(layout + 13u * 28u + 0x14u) == 0x40001u && rd32(layout + 25u * 28u + 0x18u) == 0x883ec0u);
+    expect("layout end", rd32(layout + 26u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
+        layout + 26u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
     expect("page tables", rd32(0x0067af50u + 4u * 19u) != 0u && rd32(0x0067aff0u + 4u * 19u) != 0u &&
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
@@ -252,7 +252,7 @@ int main(void)
     page = 0u;
     expect("top rows", hook(0x0011ac90u, &page, 1u) == 8u && hook(0x0011ad10u, &page, 1u) == 8u);
     page = 19u;
-    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 12u);
+    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 13u);
     page = 8u;
     expect("game rows", hook(0x0011ac90u, &page, 1u) == 4u);
 
@@ -310,7 +310,7 @@ int main(void)
     /* The preview of the selected row's page, and the help line. */
     wr16(CURSORS, 5u);
     hook(0x00095a10u, &context, 1u);
-    expect("pc preview", preview_count == 12u && rd16(CURSORS) == 5u);
+    expect("pc preview", preview_count == 13u && rd16(CURSORS) == 5u);
     wr16(CURSORS, 7u);
     hook(0x00095a10u, &context, 1u);
     expect("exit preview", preview_count == 4u); /* the game's page 7 */
@@ -373,10 +373,10 @@ int main(void)
     wr16(CURSORS + 2u, 3u);
     const uint32_t draw = rd32(0x0067aff0u + 4u * 19u);
     hook(draw, &context, 1u);
-    expect("labels", label_count == 12u && ascii(labels[0]) == 'R' && ascii(labels[10]) == 'F');
-    expect("values", value_count == 12u && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
+    expect("labels", label_count == 13u && ascii(labels[0]) == 'R' && ascii(labels[10]) == 'F');
+    expect("values", value_count == 13u && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
         ascii(values[RECOMP_PC_UNLOCKS]) == 'E' && rd16(values[RECOMP_PC_UNLOCKS] + 2u) == 'a'); /* Earn */
-    expect("cursor mark", cursor_marks == 1u && layout_walked == 24u && cursor_visible == 1u);
+    expect("cursor mark", cursor_marks == 1u && layout_walked == 26u && cursor_visible == 1u);
     expect("sprites intact", rd32(rd32(hook(0x000aa9b0u, &white_id, 1u)) + 12u) == 0x05810b2au);
     language = 3u; /* German */
     hook(draw, &context, 1u);

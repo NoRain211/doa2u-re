@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "combo_hud.h"
+#include "hit_voice.h"
 #include "d3d8_resource_adapter.h"
 #include "d3d_texture_model.h"
 #include "kernel_abi.h"
@@ -208,6 +209,7 @@ static void popups_first(void)
 static void popups_last(void)
 {
     sub_000B8810();
+    recomp_hit_voice_pump(); /* keeps a KO cry fed after the life stops changing */
     if (hud_moved) put32(HUD_Y, *recomp_memory_u32(HUD_Y) - LINE);
     hud_moved = false;
     if (!fight_hud()) return;
