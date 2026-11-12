@@ -78,10 +78,23 @@ void recomp_debug_service(uint32_t service, uint32_t arg_va);
 /* FS state stays outside guest physical allocations, including page zero. */
 #define XBOX_FS_BASE XBOX_PCR_BASE
 
+/* A direct call takes a manual hook over the generated body. Hooks change only
+   with boot settings, so each call site keeps its target until a reboot moves
+   recomp_program_lookup_generation; asking the hook chain on every call cost
+   about 9% of the game thread on busy stages. The lifter emits literal va and
+   fn for each expansion, so a site's cached target stays valid. Guest code runs
+   one thread at a time, so the site's two statics need no lock. */
+extern uint32_t recomp_program_lookup_generation;
 #define RECOMP_ABI_CALL(va, fn) do { \
-    RecompFunction manual = recomp_lookup_manual((uint32_t)(va)); \
-    if (manual != NULL) manual(); \
-    else (fn)(); \
+    static RecompFunction recomp_site_target; \
+    static uint32_t recomp_site_generation; \
+    uint32_t recomp_site_boot = recomp_program_lookup_generation; \
+    if (recomp_site_generation != recomp_site_boot) { \
+        RecompFunction manual = recomp_lookup_manual((uint32_t)(va)); \
+        recomp_site_target = manual != NULL ? manual : (fn); \
+        recomp_site_generation = recomp_site_boot; \
+    } \
+    recomp_site_target(); \
 } while (0)
 #define RECOMP_ICALL_SAFE_AT(address, saved_esp, site) \
     RECOMP_ICALL_SAFE(address, saved_esp)
