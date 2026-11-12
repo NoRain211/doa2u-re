@@ -5,6 +5,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
+#include "texture_upscale.h"
 #include "widescreen.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -188,6 +189,7 @@ struct TextureEntry {
     uint32_t mip_levels;
     uint8_t palette[kPaletteBytes];
     uint64_t fingerprint;
+    uint32_t scale;  // texture_upscale.h: the 2D art's redrawn copy
     ID3D11ShaderResourceView *view;
 };
 
@@ -227,6 +229,7 @@ struct RenderTargetEntry {
     bool resolved;  // sample_view holds every write since the last resolve
     uint64_t bytes;
     uint32_t host_width, host_height;
+    bool scaled;    // sized by the render scale (it has its own depth)
 };
 
 /* Depth belongs to its guest storage, which can serve several color targets. */
@@ -372,6 +375,18 @@ namespace {
 RecompD3dPresenter *active_presenter;
 
 static bool immediate_present;
+
+/* PC Settings' quality, set from the game thread and applied by the
+   presenter after a present (applyQuality). */
+struct QualityRequest {
+    float scale = 1.0f;
+    uint32_t msaa = 1u;
+    bool smaa = false;
+    unsigned generation = 0u;
+};
+static std::mutex quality_lock;
+static QualityRequest quality_request;
+static unsigned quality_applied = 0u;
 
 /* The display aspect: RECOMP_D3D_WIDESCREEN's shape (16:9 for 1), else 4:3.
    The game renders 4:3 or that shape anamorphic into its backbuffer; a
@@ -1235,6 +1250,7 @@ RecompD3dPresenterError bindTarget(
             created.bytes = bytes;
             created.host_width = host_width;
             created.host_height = host_height;
+            created.scaled = scaled;
             try {
                 presenter->render_targets.push_back(created);
             } catch (const std::bad_alloc &) {
@@ -2263,9 +2279,13 @@ void unindexTexture(RecompD3dPresenter *presenter, uint32_t slot)
 }
 
 
+/* 2D draws (pretransformed vertices: menus, fonts, the HUD) may take a copy
+   of their texture redrawn larger by texture_upscale.cpp, as the Vulkan
+   renderer does; only 32-bit swizzled art qualifies (A8R8G8B8 and P8). */
 ID3D11ShaderResourceView *lookupTexture(
     RecompD3dPresenter *presenter,
-    const RecompD3dPresenterDrawCommand &draw)
+    const RecompD3dPresenterDrawCommand &draw,
+    bool two_d = false)
 {
     const RecompD3dTextureDesc &desc = draw.texture;
     const bool volume = desc.volume_depth != 0u;
@@ -2331,6 +2351,11 @@ ID3D11ShaderResourceView *lookupTexture(
             draw.texture_byte_count)) {
         return nullptr;
     }
+    const uint32_t scale = two_d && !volume && !compressed && !linear_bgra && !desc.linear &&
+            hostTextureFormat(desc.format_byte) == DXGI_FORMAT_B8G8R8A8_UNORM &&
+            desc.width * 4u <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION &&
+            desc.height * 4u <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
+        ? recomp_texture_upscale_factor(desc.width, desc.height) : 1u;
     const auto cached = presenter->texture_index.equal_range(desc.data);
     const bool fingerprinted = !linear_bgra && draw.texture_bytes != nullptr;
     const uint64_t fingerprint = fingerprinted
@@ -2340,7 +2365,7 @@ ID3D11ShaderResourceView *lookupTexture(
 
         if (entry.format_byte == desc.format_byte &&
             entry.width == desc.width && entry.height == desc.height && entry.volume_depth == desc.volume_depth &&
-            entry.mip_levels == levels &&
+            entry.mip_levels == levels && entry.scale == scale &&
             (!palettized || std::memcmp(entry.palette, draw.palette_bytes, kPaletteBytes) == 0)) {
             if (fingerprinted && entry.fingerprint != fingerprint) {
                 static unsigned reported;
@@ -2456,8 +2481,27 @@ ID3D11ShaderResourceView *lookupTexture(
         }
     }
 
+    /* The larger copy keeps a mip chain, so art drawn smaller than it stays
+       smooth; its mips are generated, so it is a render target too. */
+    std::vector<uint8_t> upscaled;
+    const bool larger = scale > 1u && !volume && initial.pSysMem == unswizzled.data() &&
+        unswizzled.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
+        recomp_texture_upscale(unswizzled.data(), desc.width, desc.height, scale, upscaled);
     ID3D11Resource *texture = nullptr;
-    if (volume) {
+    if (larger) {
+        texture_desc.Width = desc.width * scale;
+        texture_desc.Height = desc.height * scale;
+        texture_desc.MipLevels = 0u;
+        texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texture_desc.Usage = D3D11_USAGE_DEFAULT;
+        texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        texture_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+        ID3D11Texture2D *created = nullptr;
+        if (FAILED(presenter->device->CreateTexture2D(&texture_desc, nullptr, &created))) return nullptr;
+        presenter->context->UpdateSubresource(created, 0u, nullptr, upscaled.data(),
+            texture_desc.Width * 4u, 0u);
+        texture = created;
+    } else if (volume) {
         D3D11_TEXTURE3D_DESC volume_desc{};
         volume_desc.Width = desc.width;
         volume_desc.Height = desc.height;
@@ -2482,6 +2526,7 @@ ID3D11ShaderResourceView *lookupTexture(
     if (FAILED(view_result)) {
         return nullptr;
     }
+    if (larger) presenter->context->GenerateMips(view);
 
     // ponytail: FIFO eviction; track recent use if upload churn is costly.
     const uint32_t slot = presenter->next_texture_slot;
@@ -2502,6 +2547,7 @@ ID3D11ShaderResourceView *lookupTexture(
     entry.mip_levels = levels;
     if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
     entry.fingerprint = fingerprint;
+    entry.scale = scale;
     entry.view = view;
     try {
         presenter->texture_index.emplace(desc.data, slot);
@@ -2729,7 +2775,7 @@ RecompD3dPresenterError submitDraw(
 
     const UINT index_size = draw_index_count * 2u;
     ID3D11ShaderResourceView *texture_view =
-        draw.has_texture ? lookupTexture(presenter, draw) : nullptr;
+        draw.has_texture ? lookupTexture(presenter, draw, layout.pretransformed) : nullptr;
     /* A second cache lookup can evict the first entry. Keep its view alive
        until the context takes its own reference. */
     const bool has_second_texture = draw.has_alpha_mask || draw.has_reflection ||
@@ -3611,6 +3657,227 @@ void saveScreenshot(RecompD3dPresenter *presenter, ID3D11Texture2D *source)
     releaseCom(back_buffer);
 }
 
+/* The largest sample count up to requested that both the color and the
+   depth format support, as createGraphics chooses it. */
+UINT supportedSamples(RecompD3dPresenter *presenter, UINT requested)
+{
+    UINT samples = 1u;
+    for (UINT count = 2u; count <= 32u && count <= requested; count *= 2u) {
+        UINT quality = 0u, depth_quality = 0u;
+        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, count, &quality);
+        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, count, &depth_quality);
+        if (quality != 0u && depth_quality != 0u) samples = count;
+    }
+    return samples;
+}
+
+/* A color target of width x height with samples, its render view and a
+   single-sample view to sample (the same texture when samples is 1). */
+bool createColorTarget(RecompD3dPresenter *presenter, UINT width, UINT height, UINT samples,
+    ID3D11RenderTargetView *&render, ID3D11ShaderResourceView *&sample)
+{
+    render = nullptr;
+    sample = nullptr;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = desc.ArraySize = 1u;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = samples;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET | (samples == 1u ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u);
+    ID3D11Texture2D *texture = nullptr;
+    HRESULT result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
+    if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(texture, nullptr, &render);
+    if (SUCCEEDED(result) && samples > 1u) {
+        releaseCom(texture);
+        desc.SampleDesc.Count = 1u;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
+    }
+    if (SUCCEEDED(result)) result = presenter->device->CreateShaderResourceView(texture, nullptr, &sample);
+    releaseCom(texture);
+    if (FAILED(result)) {
+        releaseCom(render);
+        releaseCom(sample);
+        return false;
+    }
+    return true;
+}
+
+/* Draws source over all of target (width x height), filtered, with the VRR
+   output's full-screen shader. */
+void blitPicture(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source,
+    ID3D11RenderTargetView *target, UINT width, UINT height)
+{
+    auto *context = presenter->context;
+    const D3D11_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height),
+        0.0f, 1.0f};
+    context->ClearState();
+    context->RSSetViewports(1u, &viewport);
+    context->OMSetRenderTargets(1u, &target, nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(presenter->vrr_vs, nullptr, 0u);
+    context->PSSetShader(presenter->vrr_ps, nullptr, 0u);
+    context->PSSetSamplers(0u, 1u, &presenter->vrr_sampler);
+    context->PSSetShaderResources(0u, 1u, &source);
+    context->Draw(3u, 0u);
+    context->ClearState();
+}
+
+/* Applies PC Settings' quality between frames, as the Vulkan renderer does.
+   SMAA only switches its pass. A new scale or MSAA rebuilds the main target,
+   its depth and output, and every offscreen target sized by them, carrying
+   each picture over (rendered pixels have no CPU copy); the back buffer
+   copies and SMAA's buffers are made again at the new size when next used,
+   and scaled depth targets when next bound. */
+void applyQuality(RecompD3dPresenter *presenter)
+{
+    // An open occlusion count draws into a target of the old size.
+    if (presenter->visibility_active != nullptr) return;
+    QualityRequest want;
+    {
+        std::lock_guard<std::mutex> lock(quality_lock);
+        if (quality_request.generation == quality_applied) return;
+        want = quality_request;
+        quality_applied = want.generation;
+    }
+    presenter->smaa = want.smaa;
+    const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
+    const UINT msaa = supportedSamples(presenter, std::clamp(want.msaa, 1u, 32u));
+    if (scale == presenter->scale && msaa == presenter->msaa) return;
+
+    auto *context = presenter->context;
+    context->ClearState();
+    // The current picture, single-sampled, in the old output texture.
+    {
+        ID3D11Resource *picture = nullptr, *output = nullptr;
+        presenter->render_target_view->GetResource(&picture);
+        presenter->vrr_source->GetResource(&output);
+        if (presenter->msaa > 1u) context->ResolveSubresource(output, 0u, picture, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
+        else context->CopyResource(output, picture);
+        releaseCom(output);
+        releaseCom(picture);
+    }
+    const float old_scale = presenter->scale;
+    const UINT old_msaa = presenter->msaa;
+    presenter->scale = scale;
+    presenter->msaa = msaa;
+    const UINT width = mainWidth(presenter), height = mainHeight(presenter);
+
+    // The main target, its output and depth.
+    ID3D11RenderTargetView *main_render = nullptr, *output_render = nullptr;
+    ID3D11ShaderResourceView *main_sample = nullptr, *output_sample = nullptr;
+    ID3D11Texture2D *depth_texture = nullptr;
+    ID3D11DepthStencilView *depth_view = nullptr;
+    bool created = createColorTarget(presenter, width, height, msaa, main_render, main_sample) &&
+        createColorTarget(presenter, width, height, 1u, output_render, output_sample);
+    if (created) {
+        D3D11_TEXTURE2D_DESC depth_desc{};
+        depth_desc.Width = width;
+        depth_desc.Height = height;
+        depth_desc.MipLevels = depth_desc.ArraySize = 1u;
+        depth_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depth_desc.SampleDesc.Count = msaa;
+        depth_desc.Usage = D3D11_USAGE_DEFAULT;
+        depth_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        created = SUCCEEDED(presenter->device->CreateTexture2D(&depth_desc, nullptr, &depth_texture)) &&
+            SUCCEEDED(presenter->device->CreateDepthStencilView(depth_texture, nullptr, &depth_view));
+    }
+    releaseCom(main_sample); // the main target is sampled through its copies
+    if (!created) {
+        std::fprintf(stderr, "recomp d3d presenter: quality %ux%u msaa=%u unavailable\n", width, height, msaa);
+        releaseCom(main_render);
+        releaseCom(output_render);
+        releaseCom(output_sample);
+        releaseCom(depth_view);
+        releaseCom(depth_texture);
+        presenter->scale = old_scale;
+        presenter->msaa = old_msaa;
+    } else {
+        blitPicture(presenter, presenter->vrr_source, main_render, width, height);
+        context->ClearDepthStencilView(depth_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0u);
+        releaseCom(presenter->render_target_view);
+        releaseCom(presenter->vrr_target_view);
+        releaseCom(presenter->vrr_source);
+        releaseCom(presenter->depth_view);
+        releaseCom(presenter->depth_texture);
+        presenter->render_target_view = main_render;
+        presenter->vrr_target_view = output_render;
+        presenter->vrr_source = output_sample;
+        presenter->depth_texture = depth_texture;
+        presenter->depth_view = depth_view;
+
+        // Main-sized and scaled offscreen targets, as bindTarget sizes them.
+        for (RenderTargetEntry &entry : presenter->render_targets) {
+            const bool host_main = entry.desc.width == presenter->config.width &&
+                entry.desc.height == presenter->config.height;
+            if (!host_main && !entry.scaled) continue;
+            if (entry.multisampled && !entry.resolved) {
+                ID3D11Resource *rendered = nullptr, *resolved = nullptr;
+                entry.render_view->GetResource(&rendered);
+                entry.sample_view->GetResource(&resolved);
+                context->ResolveSubresource(resolved, 0u, rendered, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
+                releaseCom(rendered);
+                releaseCom(resolved);
+            }
+            const UINT host_width = host_main ? width : scaledSize(presenter, entry.desc.width);
+            const UINT host_height = host_main ? height : scaledSize(presenter, entry.desc.height);
+            const UINT samples = host_main ? msaa : 1u;
+            ID3D11RenderTargetView *render = nullptr;
+            ID3D11ShaderResourceView *sample = nullptr;
+            if (!createColorTarget(presenter, host_width, host_height, samples, render, sample))
+                continue; // keeps its old size
+            blitPicture(presenter, entry.sample_view, render, host_width, host_height);
+            releaseCom(entry.render_view);
+            releaseCom(entry.sample_view);
+            entry.render_view = render;
+            entry.sample_view = sample;
+            entry.multisampled = samples > 1u;
+            entry.resolved = false;
+            entry.host_width = host_width;
+            entry.host_height = host_height;
+        }
+        // Depths sized by the scale or samples are made again when bound.
+        for (auto it = presenter->depth_targets.begin(); it != presenter->depth_targets.end();) {
+            if (it->host_main || it->host_width != it->desc.width) {
+                releaseCom(it->view);
+                presenter->target_bytes -= it->bytes;
+                it = presenter->depth_targets.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        releaseCom(presenter->back_buffer_sample);
+        releaseCom(presenter->back_buffer_copy);
+        const bool had_previous = presenter->previous_frame != nullptr;
+        releaseCom(presenter->previous_frame_sample);
+        releaseCom(presenter->previous_frame);
+        if (had_previous) {
+            RecompD3dTextureDesc desc{};
+            desc.format_byte = 0x12u;
+            desc.linear = true;
+            desc.width = presenter->config.width;
+            desc.height = presenter->config.height;
+            lookupBackBufferTexture(presenter, desc, true); // remade from this picture
+        }
+        releaseSmaa(presenter);
+        // A 480-line picture is windowed and a scaled one fills the screen, as at start.
+        if ((old_scale > 1.0f) != (scale > 1.0f) && presenter->fullscreen != (scale > 1.0f))
+            toggleFullscreen(presenter);
+    }
+    context->ClearState();
+    context->OMSetRenderTargets(1u, &presenter->render_target_view, presenter->depth_view);
+    const D3D11_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(mainWidth(presenter)),
+        static_cast<float>(mainHeight(presenter)), 0.0f, 1.0f};
+    context->RSSetViewports(1u, &viewport);
+    presenter->target_scale_x = viewport.Width / presenter->config.width;
+    presenter->target_scale_y = viewport.Height / presenter->config.height;
+    presenter->target_samples = presenter->msaa;
+    std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
+        mainWidth(presenter), mainHeight(presenter), presenter->msaa, presenter->smaa ? 1 : 0);
+}
+
 RecompD3dPresenterError submitPresent(
     RecompD3dPresenter *presenter,
     const RecompD3dPresenterPresentCommand &present)
@@ -3894,6 +4161,7 @@ RecompD3dPresenterError submitPresent(
             static_cast<unsigned>(presenter->present_count));
         presenter->first_present_reported = true;
     }
+    applyQuality(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
 
@@ -4304,15 +4572,20 @@ void d3d_backend_set_immediate_present(bool enabled)
     immediate_present = enabled;
 }
 
-/* The swap chain, its VRR output and the targets are sized at creation, so
-   PC Settings' quality rows apply at the next start here. */
-void d3d_backend_set_quality(float, uint32_t, bool)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
 {
+    std::lock_guard<std::mutex> lock(quality_lock);
+    quality_request.scale = scale;
+    quality_request.msaa = msaa;
+    quality_request.smaa = smaa;
+    ++quality_request.generation;
+    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d\n",
+        scale, msaa, smaa ? 1 : 0);
 }
 
 bool d3d_backend_quality_live()
 {
-    return false;
+    return true;
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(

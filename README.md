@@ -74,12 +74,12 @@ keeps running.
 - **PC Settings in the game.** The game's own **Options** menu has a
   **PC SETTINGS** row after **Video**, drawn and translated like the game's
   rows, with the launcher's settings. **Unlocks**, **CPU Costumes** and
-  **Free Camera** change at once, and with the Vulkan renderer so do
-  **Resolution**, **MSAA** and **SMAA**; the others say they apply the next
+  **Free Camera** change at once, and so do **Resolution**, **MSAA** and
+  **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
-- **Sharper menus.** The Vulkan renderer redraws the game's 2D art (menus,
+- **Sharper menus.** Both renderers redraw the game's 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
   shown, so it stays smooth at high resolutions. `RECOMP_UI_UPSCALE=0` turns
   it off.
