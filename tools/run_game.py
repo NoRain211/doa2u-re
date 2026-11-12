@@ -26,24 +26,45 @@ KEY_CODES = {**{c: ord(c) for c in string.ascii_uppercase + string.digits},
              **{f"F{n}": 0x6f + n for n in range(1, 13) if n not in (10, 11)},
              "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0d, "SHIFT": 0x10, "CTRL": 0x11, "ESC": 0x1b,
              "SPACE": 0x20, "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28}
+# Host pad buttons that private/controller.json may bind, as input_host_win32.c names them;
+# A, B, X and Y are by position, so Cross is A on a PlayStation pad.
+PAD_NAMES = ("A", "B", "X", "Y", "Back", "Start", "LB", "RB", "LT", "RT", "LS", "RS",
+             "Up", "Down", "Left", "Right", "Misc", "P1", "P2", "P3", "P4", "Touchpad")
+
+
+def bindings_file(name, example):
+    """The object in private/<name>, which the game's Rebind screen also writes; {} if absent."""
+    try:
+        bindings = json.loads((ROOT / "private" / name).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as error:
+        raise ValueError(f"private/{name} is not valid JSON: {error}")
+    if not isinstance(bindings, dict):
+        raise ValueError(f"private/{name} must be an object such as {example}")
+    return bindings
 
 
 def keyboard_map():
     """RECOMP_KEYMAP text for private/keyboard.json, e.g. {"a": "Space", "start": "Enter"}; "" if absent."""
-    try:
-        bindings = json.loads((ROOT / "private/keyboard.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return ""
-    except (OSError, ValueError) as error:
-        raise ValueError(f"private/keyboard.json is not valid JSON: {error}")
-    if not isinstance(bindings, dict):
-        raise ValueError("private/keyboard.json must be an object such as {\"a\": \"Space\"}")
+    bindings = bindings_file("keyboard.json", '{"a": "Space"}')
     for action, key in bindings.items():
         if action not in KEY_ACTIONS or not isinstance(key, str) or key.upper() not in KEY_CODES:
             raise ValueError(f"private/keyboard.json: cannot bind {action!r} to {key!r}; buttons are "
                              f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, "
                              "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc")
     return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" for action, key in bindings.items())
+
+
+def controller_map():
+    """RECOMP_PADMAP text for private/controller.json, e.g. {"a": "LB", "white": "A"}; "" if absent."""
+    names = {name.upper(): name for name in PAD_NAMES}
+    bindings = bindings_file("controller.json", '{"a": "LB"}')
+    for action, button in bindings.items():
+        if action not in KEY_ACTIONS or not isinstance(button, str) or button.upper() not in names:
+            raise ValueError(f"private/controller.json: cannot bind {action!r} to {button!r}; buttons are "
+                             f"{', '.join(KEY_ACTIONS)}; controller buttons are {', '.join(PAD_NAMES)}")
+    return ",".join(f"{action}={names[button.upper()]}" for action, button in bindings.items())
 
 
 def prepare_disc(source, disc):
@@ -168,6 +189,12 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     keymap = keyboard_map()
     if keymap:
         env.setdefault("RECOMP_KEYMAP", keymap)
+    padmap = controller_map()
+    if padmap:
+        env.setdefault("RECOMP_PADMAP", padmap)
+    # The game's Rebind screen (Options, Controller) saves both files here.
+    env["RECOMP_KEYBOARD_SETTINGS"] = str(ROOT / "private/keyboard.json")
+    env["RECOMP_CONTROLLER_SETTINGS"] = str(ROOT / "private/controller.json")
     # The game's PC SETTINGS page saves the launchers' choices here.
     env["RECOMP_LAUNCHER_SETTINGS"] = str(ROOT / "private/launcher.json")
     # Both presenters keep compiled draw shaders here and load them at the next start.

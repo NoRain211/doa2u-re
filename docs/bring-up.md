@@ -859,7 +859,10 @@ An explicit XInputPoll binding remains unresolved.
 The shared SDL host maps four gamepads and keeps a keyboard controller on
 port zero. Enter is Start, arrows are the D-pad, Z/X are A/B, A/S are X/Y,
 Q/W are White/Black and E/R are the triggers. Keyboard input requires window
-focus. `--input-start-pulse-at <poll>` sends a one-sample Start edge through
+focus. Options, Controller, Rebind opens the game's Button Config screen on
+the keys and host pad buttons (`pc_settings.c`, `rebind.cpp`); `RECOMP_KEYMAP`
+and `RECOMP_PADMAP` carry them in from
+`run_game.py`. `--input-start-pulse-at <poll>` sends a one-sample Start edge through
 ordinary controller sampling; it can be repeated up to four times. The bounded
 probe accepts the same option. Input scripts do not alter game-owned state.
 The runner and bounded probe also accept `--input-analog-pulse-at <poll>

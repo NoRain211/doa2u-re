@@ -77,44 +77,136 @@ static bool trace_enabled(void)
     return enabled != 0;
 }
 
-/* The keys that press pad buttons for port 0. RECOMP_KEYMAP="name=hexVK,..."
-   (built by run_game.py from private/keyboard.json) replaces the defaults. */
-static struct { const char *name; uint8_t key; uint16_t button; int analog; } keymap[] = {
-    {"up", VK_UP, XBOX_DPAD_UP, -1}, {"down", VK_DOWN, XBOX_DPAD_DOWN, -1},
-    {"left", VK_LEFT, XBOX_DPAD_LEFT, -1}, {"right", VK_RIGHT, XBOX_DPAD_RIGHT, -1},
-    {"start", VK_RETURN, XBOX_START, -1}, {"back", VK_BACK, XBOX_BACK, -1},
-    {"x", 'A', 0, RECOMP_INPUT_ANALOG_X}, {"y", 'S', 0, RECOMP_INPUT_ANALOG_Y},
-    {"a", 'Z', 0, RECOMP_INPUT_ANALOG_A}, {"b", 'X', 0, RECOMP_INPUT_ANALOG_B},
-    {"white", 'Q', 0, RECOMP_INPUT_ANALOG_WHITE}, {"black", 'W', 0, RECOMP_INPUT_ANALOG_BLACK},
-    {"ltrig", 'E', 0, RECOMP_INPUT_ANALOG_LTRIG}, {"rtrig", 'R', 0, RECOMP_INPUT_ANALOG_RTRIG},
+/* Host pad buttons a binding can take, named as private/controller.json
+   spells them (run_game.py's PAD_NAMES). SDL names face buttons by position,
+   so Cross/Circle/Square/Triangle are A/B/X/Y. */
+enum {
+    PAD_A, PAD_B, PAD_X, PAD_Y, PAD_BACK, PAD_START, PAD_LB, PAD_RB, PAD_LT, PAD_RT, PAD_LS, PAD_RS,
+    PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT, PAD_MISC, PAD_P1, PAD_P2, PAD_P3, PAD_P4, PAD_TOUCHPAD, PAD_SOURCES
+};
+static const struct { const char *name; int button, axis; } pad_sources[PAD_SOURCES] = {
+    [PAD_A] = {"A", SDL_GAMEPAD_BUTTON_SOUTH, -1}, [PAD_B] = {"B", SDL_GAMEPAD_BUTTON_EAST, -1},
+    [PAD_X] = {"X", SDL_GAMEPAD_BUTTON_WEST, -1}, [PAD_Y] = {"Y", SDL_GAMEPAD_BUTTON_NORTH, -1},
+    [PAD_BACK] = {"Back", SDL_GAMEPAD_BUTTON_BACK, -1}, [PAD_START] = {"Start", SDL_GAMEPAD_BUTTON_START, -1},
+    [PAD_LB] = {"LB", SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, -1}, [PAD_RB] = {"RB", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, -1},
+    [PAD_LT] = {"LT", -1, SDL_GAMEPAD_AXIS_LEFT_TRIGGER}, [PAD_RT] = {"RT", -1, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER},
+    [PAD_LS] = {"LS", SDL_GAMEPAD_BUTTON_LEFT_STICK, -1}, [PAD_RS] = {"RS", SDL_GAMEPAD_BUTTON_RIGHT_STICK, -1},
+    [PAD_UP] = {"Up", SDL_GAMEPAD_BUTTON_DPAD_UP, -1}, [PAD_DOWN] = {"Down", SDL_GAMEPAD_BUTTON_DPAD_DOWN, -1},
+    [PAD_LEFT] = {"Left", SDL_GAMEPAD_BUTTON_DPAD_LEFT, -1}, [PAD_RIGHT] = {"Right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT, -1},
+    [PAD_MISC] = {"Misc", SDL_GAMEPAD_BUTTON_MISC1, -1}, [PAD_P1] = {"P1", SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, -1},
+    [PAD_P2] = {"P2", SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, -1}, [PAD_P3] = {"P3", SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, -1},
+    [PAD_P4] = {"P4", SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, -1}, [PAD_TOUCHPAD] = {"Touchpad", SDL_GAMEPAD_BUTTON_TOUCHPAD, -1},
 };
 
-static void load_keymap(void)
+/* Keys a binding can take, named as private/keyboard.json spells them
+   (run_game.py's KEY_CODES). F10 is a Windows system key and F11 toggles
+   fullscreen, so neither is here. */
+static const struct { uint8_t key; const char *name; } named_keys[] = {
+    {0x08, "Backspace"}, {0x09, "Tab"}, {0x0d, "Enter"}, {0x10, "Shift"}, {0x11, "Ctrl"}, {0x1b, "Esc"},
+    {0x20, "Space"}, {0x25, "Left"}, {0x26, "Up"}, {0x27, "Right"}, {0x28, "Down"},
+    {0x70, "F1"}, {0x71, "F2"}, {0x72, "F3"}, {0x73, "F4"}, {0x74, "F5"}, {0x75, "F6"}, {0x76, "F7"},
+    {0x77, "F8"}, {0x78, "F9"}, {0x7b, "F12"},
+};
+static const char alnum_names[36][2] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C",
+    "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X",
+    "Y", "Z"};
+
+/* Each pad button's key for port 0 and host pad button for every port:
+   source[0] the key, source[1] the pad button, -1 for none. */
+static struct {
+    const char *name;
+    uint16_t button;
+    int analog;
+    int defaults[2], source[2];
+} bindings[RECOMP_INPUT_BIND_COUNT] = {
+    {"up", XBOX_DPAD_UP, -1, {VK_UP, PAD_UP}}, {"down", XBOX_DPAD_DOWN, -1, {VK_DOWN, PAD_DOWN}},
+    {"left", XBOX_DPAD_LEFT, -1, {VK_LEFT, PAD_LEFT}}, {"right", XBOX_DPAD_RIGHT, -1, {VK_RIGHT, PAD_RIGHT}},
+    {"start", XBOX_START, -1, {VK_RETURN, PAD_START}}, {"back", XBOX_BACK, -1, {VK_BACK, PAD_BACK}},
+    {"a", 0, RECOMP_INPUT_ANALOG_A, {'Z', PAD_A}}, {"b", 0, RECOMP_INPUT_ANALOG_B, {'X', PAD_B}},
+    {"x", 0, RECOMP_INPUT_ANALOG_X, {'A', PAD_X}}, {"y", 0, RECOMP_INPUT_ANALOG_Y, {'S', PAD_Y}},
+    /* White sits left of Black on the Xbox pad, as Q is left of W. */
+    {"white", 0, RECOMP_INPUT_ANALOG_WHITE, {'Q', PAD_LB}}, {"black", 0, RECOMP_INPUT_ANALOG_BLACK, {'W', PAD_RB}},
+    {"ltrig", 0, RECOMP_INPUT_ANALOG_LTRIG, {'E', PAD_LT}}, {"rtrig", 0, RECOMP_INPUT_ANALOG_RTRIG, {'R', PAD_RT}},
+};
+
+const char *recomp_input_host_source_name(bool pad, int source)
 {
-    static bool loaded;
-    bool bound[sizeof keymap / sizeof keymap[0]] = {false};
-    if (loaded) return;
-    loaded = true;
-    const char *at = getenv("RECOMP_KEYMAP");
+    if (pad) return source >= 0 && source < PAD_SOURCES ? pad_sources[source].name : NULL;
+    if (source >= 'A' && source <= 'Z') return alnum_names[source - 'A' + 10];
+    if (source >= '0' && source <= '9') return alnum_names[source - '0'];
+    for (size_t i = 0; i < sizeof named_keys / sizeof named_keys[0]; ++i)
+        if (named_keys[i].key == source) return named_keys[i].name;
+    return NULL;
+}
+
+/* A RECOMP_KEYMAP (hex keys) or RECOMP_PADMAP (pad button names) value. */
+static int parse_source(bool pad, const char *value, size_t length)
+{
+    if (!pad) {
+        const unsigned long key = strtoul(value, NULL, 16);
+        return key > 0ul && key < RECOMP_INPUT_KEY_COUNT &&
+            recomp_input_host_source_name(false, (int)key) != NULL ? (int)key : -1;
+    }
+    for (int i = 0; i < PAD_SOURCES; ++i)
+        if (strlen(pad_sources[i].name) == length && strncmp(value, pad_sources[i].name, length) == 0) return i;
+    return -1;
+}
+
+static void load_map(bool pad, const char *at)
+{
+    bool bound[RECOMP_INPUT_BIND_COUNT] = {false};
     while (at != NULL && *at != '\0') {
         const char *next = strchr(at, ',');
         const char *equals = strchr(at, '=');
         if (equals != NULL && (next == NULL || equals < next)) { /* an entry without = is skipped */
-            const unsigned long key = strtoul(equals + 1, NULL, 16);
-            for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
-                if (strlen(keymap[i].name) == (size_t)(equals - at) && strncmp(at, keymap[i].name, equals - at) == 0
-                    && key > 0ul && key < RECOMP_INPUT_KEY_COUNT) {
-                    keymap[i].key = (uint8_t)key;
+            const char *value = equals + 1;
+            const int source = parse_source(pad, value, next != NULL ? (size_t)(next - value) : strlen(value));
+            for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
+                if (strlen(bindings[i].name) == (size_t)(equals - at) &&
+                    strncmp(at, bindings[i].name, equals - at) == 0 && source >= 0) {
+                    bindings[i].source[pad] = source;
                     bound[i] = true;
                 }
             }
         }
         at = next != NULL ? next + 1 : NULL;
     }
-    /* A key given to one button leaves the button that had it by default. */
-    for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i)
-        for (size_t j = 0; j < sizeof keymap / sizeof keymap[0]; ++j)
-            if (!bound[i] && bound[j] && keymap[i].key == keymap[j].key) keymap[i].key = 0u;
+    /* A source given to one button leaves the button that had it by default. */
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
+        for (size_t j = 0; j < RECOMP_INPUT_BIND_COUNT; ++j)
+            if (!bound[i] && bound[j] && bindings[i].source[pad] == bindings[j].source[pad]) bindings[i].source[pad] = -1;
+}
+
+static void load_bindings(void)
+{
+    static bool loaded;
+    if (loaded) return;
+    loaded = true;
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) memcpy(bindings[i].source, bindings[i].defaults, sizeof bindings[i].source);
+    load_map(false, getenv("RECOMP_KEYMAP"));
+    load_map(true, getenv("RECOMP_PADMAP"));
+}
+
+const char *recomp_input_host_binding_name(unsigned binding)
+{
+    return binding < RECOMP_INPUT_BIND_COUNT ? bindings[binding].name : NULL;
+}
+
+int recomp_input_host_bound(unsigned binding, bool pad)
+{
+    load_bindings();
+    return binding < RECOMP_INPUT_BIND_COUNT ? bindings[binding].source[pad] : -1;
+}
+
+void recomp_input_host_bind(unsigned binding, bool pad, int source)
+{
+    load_bindings();
+    if (binding >= RECOMP_INPUT_BIND_COUNT) return;
+    if (source < 0) source = bindings[binding].defaults[pad];
+    if (recomp_input_host_source_name(pad, source) == NULL) return;
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
+        if (bindings[i].source[pad] == source) bindings[i].source[pad] = bindings[binding].source[pad];
+    bindings[binding].source[pad] = source;
 }
 
 /* recomp_input_host_test has no window; only its target defines RECOMP_INPUT_TEST_FOCUSED,
@@ -262,9 +354,14 @@ static void trace_sample(
     ++lines;
 }
 
-static uint8_t button_pressure(SDL_Gamepad *gamepad, SDL_GamepadButton button)
+/* How far a host pad button is pressed: 0 or 0xff, or 0..0xff for a trigger. */
+static uint8_t source_value(SDL_Gamepad *gamepad, int source)
 {
-    return SDL_GetGamepadButton(gamepad, button) ? 0xffu : 0u;
+    if (source < 0 || source >= PAD_SOURCES) return 0u;
+    /* SDL triggers are 0..32767; the guest expects 0..255. */
+    if (pad_sources[source].axis >= 0)
+        return (uint8_t)(SDL_GetGamepadAxis(gamepad, (SDL_GamepadAxis)pad_sources[source].axis) >> 7);
+    return SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)pad_sources[source].button) ? 0xffu : 0u;
 }
 
 /* SDL Y axes point down; XInput Y axes point up. */
@@ -276,37 +373,17 @@ static int16_t up_axis(SDL_Gamepad *gamepad, SDL_GamepadAxis axis)
 
 static void read_pad(SDL_Gamepad *host, RecompInputGamepad *gamepad)
 {
-    static const struct { SDL_GamepadButton button; uint16_t mask; } digital[] = {
-        {SDL_GAMEPAD_BUTTON_DPAD_UP, XBOX_DPAD_UP},
-        {SDL_GAMEPAD_BUTTON_DPAD_DOWN, XBOX_DPAD_DOWN},
-        {SDL_GAMEPAD_BUTTON_DPAD_LEFT, XBOX_DPAD_LEFT},
-        {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, XBOX_DPAD_RIGHT},
-        {SDL_GAMEPAD_BUTTON_START, XBOX_START},
-        {SDL_GAMEPAD_BUTTON_BACK, XBOX_BACK},
-        {SDL_GAMEPAD_BUTTON_LEFT_STICK, XBOX_LEFT_THUMB},
-        {SDL_GAMEPAD_BUTTON_RIGHT_STICK, XBOX_RIGHT_THUMB},
-    };
-    for (size_t i = 0; i < sizeof digital / sizeof digital[0]; ++i) {
-        if (SDL_GetGamepadButton(host, digital[i].button)) {
-            gamepad->buttons |= digital[i].mask;
+    load_bindings();
+    if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_LEFT_STICK)) gamepad->buttons |= XBOX_LEFT_THUMB;
+    if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) gamepad->buttons |= XBOX_RIGHT_THUMB;
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
+        const uint8_t value = source_value(host, bindings[i].source[1]);
+        if (bindings[i].button != 0u) {
+            if (value > RECOMP_INPUT_ANALOG_DOWN) gamepad->buttons |= bindings[i].button;
+        } else if (value > gamepad->analog_buttons[bindings[i].analog]) {
+            gamepad->analog_buttons[bindings[i].analog] = value;
         }
     }
-    /* SDL names face buttons by position, so Cross/Circle/Square/Triangle
-       land on the Xbox A/B/X/Y slots. */
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_A] = button_pressure(host, SDL_GAMEPAD_BUTTON_SOUTH);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_B] = button_pressure(host, SDL_GAMEPAD_BUTTON_EAST);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_X] = button_pressure(host, SDL_GAMEPAD_BUTTON_WEST);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_Y] = button_pressure(host, SDL_GAMEPAD_BUTTON_NORTH);
-    /* White sits left of Black on the Xbox pad, as Q is left of W. */
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_WHITE] =
-        button_pressure(host, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_BLACK] =
-        button_pressure(host, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    /* SDL triggers are 0..32767; the guest expects 0..255. */
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] =
-        (uint8_t)(SDL_GetGamepadAxis(host, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) >> 7);
-    gamepad->analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] =
-        (uint8_t)(SDL_GetGamepadAxis(host, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >> 7);
     gamepad->thumb_lx = SDL_GetGamepadAxis(host, SDL_GAMEPAD_AXIS_LEFTX);
     gamepad->thumb_ly = up_axis(host, SDL_GAMEPAD_AXIS_LEFTY);
     gamepad->thumb_rx = SDL_GetGamepadAxis(host, SDL_GAMEPAD_AXIS_RIGHTX);
@@ -357,11 +434,11 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
     }
 
     recomp_input_keyboard_sample(keyboard);
-    load_keymap();
-    for (size_t i = 0; i < sizeof keymap / sizeof keymap[0]; ++i) {
-        if (!pressed(keymap[i].key)) continue;
-        if (keymap[i].button != 0u) keyboard_buttons.buttons |= keymap[i].button;
-        else keyboard_buttons.analog_buttons[keymap[i].analog] = 0xffu;
+    load_bindings();
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
+        if (bindings[i].source[0] < 0 || !pressed(bindings[i].source[0])) continue;
+        if (bindings[i].button != 0u) keyboard_buttons.buttons |= bindings[i].button;
+        else keyboard_buttons.analog_buttons[bindings[i].analog] = 0xffu;
     }
     gamepad->buttons |= keyboard_buttons.buttons;
     for (unsigned i = 0; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; ++i)
@@ -375,6 +452,23 @@ bool recomp_input_host_pad_connected(uint32_t port)
     if (port >= RECOMP_INPUT_PORT_COUNT) return false;
     if (port == 0u && test_unplug_file() != NULL) return !test_unplugged();
     return pads[port] != NULL;
+}
+
+int recomp_input_host_take_press(bool pad)
+{
+    static bool was[2][RECOMP_INPUT_KEY_COUNT];
+    int found = -1;
+    const int count = pad ? PAD_SOURCES : RECOMP_INPUT_KEY_COUNT;
+    const bool keys = focused() || test_focused();
+    for (int source = 0; source < count; ++source) {
+        bool down = false;
+        if (!pad) down = keys && recomp_input_host_source_name(false, source) != NULL && pressed(source);
+        for (uint32_t port = 0u; pad && port < RECOMP_INPUT_PORT_COUNT; ++port)
+            down = down || (pads[port] != NULL && source_value(pads[port], source) > RECOMP_INPUT_ANALOG_DOWN);
+        if (down && !was[pad][source] && found < 0) found = source;
+        was[pad][source] = down;
+    }
+    return found;
 }
 
 bool recomp_input_host_key(RecompInputHostKey key)

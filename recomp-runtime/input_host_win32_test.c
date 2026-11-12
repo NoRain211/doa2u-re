@@ -5,9 +5,17 @@
 #include <SDL3/SDL.h>
 
 #include <stdio.h>
+#include <string.h>
 
 #define CHECK(condition) do { if (!(condition)) { \
     fprintf(stderr, "FAIL %s:%d %s\n", __FILE__, __LINE__, #condition); return 1; } } while (0)
+
+static int pad_source(const char *name)
+{
+    for (int i = 0; recomp_input_host_source_name(true, i) != NULL; ++i)
+        if (strcmp(recomp_input_host_source_name(true, i), name) == 0) return i;
+    return -1;
+}
 
 static uint32_t rumbled[2];
 
@@ -30,12 +38,38 @@ static SDL_Joystick *attach(uintptr_t index, SDL_JoystickID *id)
     return *id != 0 ? SDL_OpenJoystick(*id) : NULL;
 }
 
-/* CMake runs this with RECOMP_KEYMAP=a=20,bogus,start=74,x=53 and RECOMP_TEST_FOCUSED=1:
+/* CMake runs this with RECOMP_KEYMAP=a=20,bogus,start=74,x=53,up=79,down=7a and
+   RECOMP_TEST_FOCUSED=1:
    Space is A, F5 is Start and S is X. The keys those had press nothing, and Y, which had S,
-   has no key. "bogus" has no key and is skipped without losing the entries after it. */
+   has no key. "bogus" has no key and is skipped without losing the entries after it; F10 and
+   F11 cannot be bound.
+   RECOMP_PADMAP=b=RT,start=Nope gives B the right trigger, which leaves R Trigger with
+   none; Start keeps its own button, as Nope names none. */
 static int keymap(void)
 {
     RecompInputGamepad pad, keys;
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_A, false) == 0x20 &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_Y, false) == -1);
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_B, true) == pad_source("RT") &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_RTRIG, true) == -1 &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_START, true) == pad_source("Start"));
+    CHECK(strcmp(recomp_input_host_source_name(false, 0x74), "F5") == 0 &&
+          strcmp(recomp_input_host_source_name(false, 'Q'), "Q") == 0 &&
+          recomp_input_host_source_name(false, 0x79) == NULL); /* F10 */
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_UP, false) == 0x26 &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_DOWN, false) == 0x28);
+    /* A key binding swaps with the key that had it; its default gives it back. */
+    recomp_input_host_bind(RECOMP_INPUT_BIND_B, false, 'Q');
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_B, false) == 'Q' &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_WHITE, false) == 'X');
+    recomp_input_keyboard_reset();
+    recomp_input_keyboard_event('Q', true);
+    CHECK(recomp_input_host_sample(0u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0xffu);
+    CHECK(recomp_input_host_take_press(false) == 'Q' && recomp_input_host_take_press(false) == -1);
+    recomp_input_host_bind(RECOMP_INPUT_BIND_B, false, -1);
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_B, false) == 'X' &&
+          recomp_input_host_bound(RECOMP_INPUT_BIND_WHITE, false) == 'Q');
     recomp_input_keyboard_reset();
     recomp_input_keyboard_event('Z', true);
     recomp_input_keyboard_event(0x0du, true);
@@ -152,6 +186,37 @@ int main(int argc, char **argv)
     CHECK(pad.buttons == 0x00a0u); /* BACK | RIGHT_THUMB */
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0xffu);
     CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_X] == 0u);
+
+    /* The Rebind screen hears a fresh press on any pad, once. */
+    (void)recomp_input_host_take_press(true); /* what is already held */
+    CHECK(recomp_input_host_take_press(true) == -1);
+    SDL_SetJoystickVirtualButton(second, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, false);
+    CHECK(recomp_input_host_sample(1u, &pad));
+    CHECK(recomp_input_host_take_press(true) == -1);
+    SDL_SetJoystickVirtualButton(second, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, true);
+    CHECK(recomp_input_host_sample(1u, &pad));
+    CHECK(recomp_input_host_take_press(true) == pad_source("RB"));
+    CHECK(recomp_input_host_take_press(true) == -1);
+    /* B takes RB, and Black, which had RB, takes B's old East. */
+    recomp_input_host_bind(RECOMP_INPUT_BIND_B, true, pad_source("RB"));
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_BLACK, true) == pad_source("B"));
+    CHECK(recomp_input_host_sample(1u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0xffu && pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0xffu);
+    SDL_SetJoystickVirtualButton(second, SDL_GAMEPAD_BUTTON_EAST, false);
+    CHECK(recomp_input_host_sample(1u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0xffu && pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0u);
+    recomp_input_host_bind(RECOMP_INPUT_BIND_B, true, -1); /* the default again */
+    CHECK(recomp_input_host_sample(1u, &pad));
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_B] == 0u && pad.analog_buttons[RECOMP_INPUT_ANALOG_BLACK] == 0xffu);
+    /* A trigger pulled past halfway presses a digital button. */
+    recomp_input_host_bind(RECOMP_INPUT_BIND_START, true, pad_source("LT"));
+    CHECK(recomp_input_host_sample(1u, &pad) && (pad.buttons & 0x0010u) != 0u);
+    CHECK(pad.analog_buttons[RECOMP_INPUT_ANALOG_LTRIG] == 0u);
+    recomp_input_host_bind(RECOMP_INPUT_BIND_START, true, -1);
+    CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_LTRIG, true) == pad_source("LT"));
+    SDL_SetJoystickVirtualButton(second, SDL_GAMEPAD_BUTTON_EAST, true);
+    CHECK(recomp_input_host_sample(1u, &pad) && pad.buttons == 0x00a0u);
+
     recomp_input_host_set_vibration(1u, 0x1234u, 0x5678u);
     CHECK(rumbled[1] == 0x12345678u && rumbled[0] == 0u);
     recomp_input_host_stop_vibration();
