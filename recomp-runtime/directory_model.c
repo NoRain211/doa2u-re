@@ -40,16 +40,50 @@ void recomp_directory_reset(RecompDirectoryModel *model)
     }
 }
 
+/* NTFS lists names in upcased ordinal order, but FAT, exFAT and readdir list
+   them as created. The guest opens files in listing order, so netplay peers
+   on different drives desynced until every host listed in NTFS order.
+   shortcut: matches NTFS order for ASCII names only; upgrade to UTF-16 upcase
+   order if a disc ships non-ASCII names. */
+static unsigned char ascii_upper(unsigned char c)
+{
+    return c >= 'a' && c <= 'z' ? (unsigned char)(c - 'a' + 'A') : c;
+}
+
+static int name_order(const char *a, const char *b)
+{
+    const unsigned char *x = (const unsigned char *)a;
+    const unsigned char *y = (const unsigned char *)b;
+    while (*x != '\0' && ascii_upper(*x) == ascii_upper(*y)) {
+        ++x;
+        ++y;
+    }
+    return ascii_upper(*x) - ascii_upper(*y);
+}
+
 bool recomp_directory_add(
     RecompDirectoryModel *model,
     const RecompDirectoryEntry *entry)
 {
     if (model == NULL || entry == NULL || entry->name[0] == '\0' ||
-        model->count >= RECOMP_DIRECTORY_MAX_ENTRIES ||
         memchr(entry->name, '\0', sizeof entry->name) == NULL) {
         return false;
     }
-    model->entries[model->count++] = *entry;
+    size_t at = model->count;
+    if (at == RECOMP_DIRECTORY_MAX_ENTRIES) {
+        model->truncated = true;
+        if (name_order(entry->name, model->entries[at - 1u].name) >= 0) {
+            return true;
+        }
+        --at;
+    } else {
+        ++model->count;
+    }
+    while (at > 0u && name_order(entry->name, model->entries[at - 1u].name) < 0) {
+        model->entries[at] = model->entries[at - 1u];
+        --at;
+    }
+    model->entries[at] = *entry;
     return true;
 }
 

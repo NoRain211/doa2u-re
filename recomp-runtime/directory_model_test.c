@@ -106,6 +106,45 @@ int recomp_directory_model_test(void)
     passed &= recomp_directory_next(&model, "*.dat", &entry) &&
         strcmp(entry.name, "profile.dat") == 0;
 
+    /* exFAT hands names over as created; the guest must still see NTFS order. */
+    recomp_directory_reset(&model);
+    passed &= add_entry(&model, "datadvd.afs", 1u, 0x80u);
+    passed &= add_entry(&model, "DOA_G4.sfd", 1u, 0x80u);
+    passed &= add_entry(&model, "doa2_op.sfd", 1u, 0x80u);
+    passed &= add_entry(&model, "bgm.afs", 1u, 0x80u);
+    passed &= add_entry(&model, "2_VI_WIDE_B.sfd", 1u, 0x80u);
+    {
+        static const char *const sorted[] = {
+            "2_VI_WIDE_B.sfd", "bgm.afs", "datadvd.afs", "doa2_op.sfd", "DOA_G4.sfd",
+        };
+        for (size_t i = 0u; i < sizeof sorted / sizeof sorted[0]; ++i) {
+            passed &= recomp_directory_next(&model, NULL, &entry) &&
+                strcmp(entry.name, sorted[i]) == 0;
+        }
+        passed &= !recomp_directory_next(&model, NULL, &entry);
+    }
+
+    /* The host's order must not choose which names survive the 64-entry cap. */
+    recomp_directory_reset(&model);
+    for (unsigned i = RECOMP_DIRECTORY_MAX_ENTRIES + 16u; i > 0u; --i) {
+        char name[16];
+
+        snprintf(name, sizeof name, "file%03u", i);
+        passed &= add_entry(&model, name, i, 0x80u);
+    }
+    passed &= model.count == RECOMP_DIRECTORY_MAX_ENTRIES;
+    passed &= model.truncated;
+    for (size_t i = 0u; i < RECOMP_DIRECTORY_MAX_ENTRIES; ++i) {
+        char name[16];
+
+        snprintf(name, sizeof name, "file%03u", (unsigned)i + 1u);
+        passed &= strcmp(model.entries[i].name, name) == 0;
+    }
+    passed &= add_entry(&model, "zzz.bin", 1u, 0x80u);
+    passed &= model.count == RECOMP_DIRECTORY_MAX_ENTRIES &&
+        strcmp(model.entries[RECOMP_DIRECTORY_MAX_ENTRIES - 1u].name,
+            "file064") == 0;
+
     {
         static const struct {
             const char *pattern;
