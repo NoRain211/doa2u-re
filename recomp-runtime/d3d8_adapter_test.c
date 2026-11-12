@@ -244,7 +244,8 @@ RecompD3dPresenterError recomp_d3d_presenter_destroy(
 static uint32_t saved_display, freed_display;
 uint32_t recomp_kernel_av_get_saved_data_address(void) { return saved_display; }
 static float widescreen_aspect = 16.0f / 9.0f;
-float recomp_kernel_widescreen_aspect(void) { return widescreen_aspect; }
+static unsigned widescreen_aspect_reads;
+float recomp_kernel_widescreen_aspect(void) { ++widescreen_aspect_reads; return widescreen_aspect; }
 void recomp_kernel_av_set_saved_data_address(uint32_t address) { saved_display = address; }
 uint32_t recomp_kernel_allocate_contiguous(
     uint32_t size, uint32_t highest_address, uint32_t alignment, uint32_t protect)
@@ -347,16 +348,23 @@ static int create(void)
     return call(0x34a470u, arguments, 6u, NULL);
 }
 
-/* Another screen shape fits the 16:9 HUD layer, scissor included; an indexed
-   draw's bounds come from the vertices it uses. */
-static int fit_tests(void)
+/* CreateDevice reads the screen shape along with the game's widescreen flag. */
+static int create_wide(float aspect)
 {
     reset_fixture();
     RecompD3dPresentationParameters wide;
     memcpy(&wide, recomp_memory(PARAMETERS, sizeof wide), sizeof wide);
     wide.flags |= 0x10u;
     memcpy(recomp_memory(PARAMETERS, sizeof wide), &wide, sizeof wide);
-    int passed = create();
+    widescreen_aspect = aspect;
+    return create();
+}
+
+/* Another screen shape fits the 16:9 HUD layer, scissor included; an indexed
+   draw's bounds come from the vertices it uses. */
+static int fit_tests(void)
+{
+    int passed = create_wide(32.0f / 9.0f);
     /* A 200-wide quad, plus two unused vertices spanning the target. */
     const float vertices[6][4] = {{100.0f, 0.0f, 0.0f, 1.0f}, {300.0f, 0.0f, 0.0f, 1.0f},
         {100.0f, 100.0f, 0.0f, 1.0f}, {300.0f, 100.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f},
@@ -373,13 +381,14 @@ static int fit_tests(void)
     draw.has_scissor = true;
     const int32_t full[4] = {0, 0, 720, 480};
     memcpy(draw.scissor, full, sizeof full);
-    widescreen_aspect = 32.0f / 9.0f;
+    widescreen_aspect_reads = 0u;
     recomp_d3d8_fit_2d_layer(&draw);
     passed &= expect("ultrawide narrows the HUD layer and its scissor about the center",
         draw.layer_scale[0] == 0.5f && draw.layer_scale[1] == 1.0f && draw.scissor[0] == 180 &&
         draw.scissor[1] == 0 && draw.scissor[2] == 540 && draw.scissor[3] == 480);
+    passed &= expect("a draw reuses the shape CreateDevice read", widescreen_aspect_reads == 0u);
+    passed &= create_wide(1.6f);
     memcpy(draw.scissor, full, sizeof full);
-    widescreen_aspect = 1.6f;
     recomp_d3d8_fit_2d_layer(&draw);
     passed &= expect("16:10 shortens the HUD layer and its scissor about the center",
         draw.layer_scale[0] == 1.0f && fabsf(draw.layer_scale[1] - 0.9f) < 1e-5f && draw.scissor[0] == 0 &&
@@ -397,7 +406,7 @@ static int fit_tests(void)
     view.program_count = 1u;
     view.program_constants[58][0] = 100.0f;
     view.program_constants[59][0] = 200.0f;
-    widescreen_aspect = 32.0f / 9.0f;
+    passed &= create_wide(32.0f / 9.0f);
     recomp_d3d8_fit_3d_viewport(&view);
     passed &= expect("ultrawide moves a 3D panel view toward the center with its scissor",
         view.viewport[0] == 180.0f && view.viewport[2] == 200.0f && view.viewport[1] == 0.0f &&
