@@ -559,11 +559,13 @@ static uint32_t register_file_handle(
                         entry.attributes = session_attributes(data.dwFileAttributes);
                         if (!recomp_directory_add(
                                 &file_handles[i].directory, &entry)) {
-                            fprintf(stderr, "recomp kernel: directory '%s' lists only its first %u entries\n",
-                                host_path, (unsigned)RECOMP_DIRECTORY_MAX_ENTRIES);
                             break;
                         }
                     } while (FindNextFileA(find, &data));
+                    if (file_handles[i].directory.truncated) {
+                        fprintf(stderr, "recomp kernel: directory '%s' lists only its first %u entries\n",
+                            host_path, (unsigned)RECOMP_DIRECTORY_MAX_ENTRIES);
+                    }
                     FindClose(find);
                 }
             }

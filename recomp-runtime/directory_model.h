@@ -24,10 +24,12 @@ typedef struct RecompDirectoryEntry {
 typedef struct RecompDirectoryModel {
     RecompDirectoryEntry entries[RECOMP_DIRECTORY_MAX_ENTRIES];
     size_t count;
+    bool truncated;
     size_t cursor;
 } RecompDirectoryModel;
 
 void recomp_directory_reset(RecompDirectoryModel *model);
+/* False only for an invalid entry; a full model keeps its smallest 64 names. */
 bool recomp_directory_add(
     RecompDirectoryModel *model,
     const RecompDirectoryEntry *entry);

@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <time.h>
 #include <errno.h>
 #include <limits.h>
@@ -42,16 +41,23 @@ typedef struct RecompFindHandle {
 } RecompFindHandle;
 
 /* NTFS lists a directory in upcased ordinal name order; readdir order is
-   arbitrary, and the guest sees listings in the order they are returned. */
+   arbitrary, and the guest sees listings in the order they are returned.
+   shortcut: matches NTFS order for ASCII names only; upgrade to UTF-16 upcase
+   order if a disc ships non-ASCII names. */
+static unsigned char ascii_upper(unsigned char c)
+{
+    return c >= 'a' && c <= 'z' ? (unsigned char)(c - 'a' + 'A') : c;
+}
+
 static int ntfs_name_order(const struct dirent **a, const struct dirent **b)
 {
     const unsigned char *x = (const unsigned char *)(*a)->d_name;
     const unsigned char *y = (const unsigned char *)(*b)->d_name;
-    while (*x != '\0' && toupper(*x) == toupper(*y)) {
+    while (*x != '\0' && ascii_upper(*x) == ascii_upper(*y)) {
         ++x;
         ++y;
     }
-    return toupper(*x) - toupper(*y);
+    return ascii_upper(*x) - ascii_upper(*y);
 }
 
 #ifdef __APPLE__
