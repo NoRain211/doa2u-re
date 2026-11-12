@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <new>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -17,8 +16,21 @@ public:
     D3dCapturePacket() = default;
     D3dCapturePacket(const D3dCapturePacket &) = delete;
     D3dCapturePacket &operator=(const D3dCapturePacket &) = delete;
-    D3dCapturePacket(D3dCapturePacket &&) noexcept = default;
-    D3dCapturePacket &operator=(D3dCapturePacket &&) noexcept = default;
+    // The move empties spans_, so the source's span count must reset with it.
+    D3dCapturePacket(D3dCapturePacket &&other) noexcept
+        : entries_(std::move(other.entries_)), commands_(std::move(other.commands_)),
+          payload_(std::move(other.payload_)), spans_(std::move(other.spans_)),
+          span_count_(std::exchange(other.span_count_, 0u)), sealed_(other.sealed_) {}
+    D3dCapturePacket &operator=(D3dCapturePacket &&other) noexcept
+    {
+        entries_ = std::move(other.entries_);
+        commands_ = std::move(other.commands_);
+        payload_ = std::move(other.payload_);
+        spans_ = std::move(other.spans_);
+        span_count_ = std::exchange(other.span_count_, 0u);
+        sealed_ = other.sealed_;
+        return *this;
+    }
 
     RecompD3dPresenterError add(const RecompD3dPresenterCommand &command);
     RecompD3dPresenterError addRelease(uint32_t base, uint32_t size);
@@ -59,17 +71,22 @@ private:
         alignas(8) RecompD3dPresenterCommand value;
         size_t offsets[8];
     };
-    struct Span { size_t size; size_t offset; };
+    // offset == SIZE_MAX marks an empty slot.
+    struct Span { uint64_t key; size_t size; size_t offset; };
 
     RecompD3dPresenterError addRecord(Kind kind, uint32_t base, uint32_t size);
+    void insertSpan(uint64_t key, size_t size, size_t offset);
+    void clearSpans();
 
     std::vector<Entry> entries_;
     std::vector<CapturedCommand> commands_;
     // Word storage keeps indices and vertex data aligned after relocation.
     // resize() appends uninitialized words; add() overwrites the used bytes.
     std::vector<uint64_t, NoInitAllocator<uint64_t>> payload_;
-    // Keyed by source, size and sampled bytes; memcmp still confirms each reuse.
-    std::unordered_multimap<uint64_t, Span> spans_;
+    // Open-addressing table keyed by source, size and sampled bytes; memcmp still
+    // confirms each reuse. Slots persist across clear(), so a frame allocates nothing.
+    std::vector<Span> spans_;
+    size_t span_count_ = 0u;
     bool sealed_ = false;
 };
 
