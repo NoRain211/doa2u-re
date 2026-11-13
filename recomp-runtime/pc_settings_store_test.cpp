@@ -49,18 +49,18 @@ int main()
     expect("missing file", !recomp_pc_settings_read(path, store, c));
     expect("defaults", c[RECOMP_PC_RESOLUTION] == 3u && c[RECOMP_PC_MSAA] == 5u && c[RECOMP_PC_SMAA] == 1u &&
         c[RECOMP_PC_SCREEN] == 1u && c[RECOMP_PC_RENDERER] == 0u && c[RECOMP_PC_INTRO] == 0u &&
-        c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u);
+        c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u && c[RECOMP_PC_DEDICATION] == 0u);
 
     // A launcher's file, with keys the page does not own.
     write(path, "{\"height\":2160,\"msaa\":8,\"smaa\":false,\"widescreen\":true,\"screen\":\"2560:1080\","
         "\"vulkan\":true,\"vrr\":false,\"skipIntro\":true,\"surround\":true,\"unlockAll\":false,"
-        "\"freeCamera\":true,\"randomCpuCostumes\":true,\"checkUpdates\":true,"
+        "\"freeCamera\":true,\"randomCpuCostumes\":true,\"dedicationCard\":false,\"checkUpdates\":true,"
         "\"game_source\":\"D:\\\\Games\\\\doa2.iso\",\"window\":{\"x\":1,\"y\":[2,3]}}");
     expect("read", recomp_pc_settings_read(path, store, c));
     expect("values", c[RECOMP_PC_RESOLUTION] == 4u && c[RECOMP_PC_MSAA] == 3u && c[RECOMP_PC_SMAA] == 0u &&
         c[RECOMP_PC_SCREEN] == 3u && c[RECOMP_PC_RENDERER] == 1u && c[RECOMP_PC_VRR] == 0u &&
         c[RECOMP_PC_AUDIO] == 1u && c[RECOMP_PC_INTRO] == 1u && c[RECOMP_PC_UNLOCKS] == 1u &&
-        c[RECOMP_PC_CPU_COSTUMES] == 1u && c[RECOMP_PC_FREE_CAMERA] == 1u);
+        c[RECOMP_PC_CPU_COSTUMES] == 1u && c[RECOMP_PC_FREE_CAMERA] == 1u && c[RECOMP_PC_DEDICATION] == 1u);
 
     // Saving with Ultrawide still chosen keeps that shape and every other key.
     c[RECOMP_PC_MSAA] = 0u;
@@ -70,11 +70,12 @@ int main()
     expect("keeps others", saved.find("\"game_source\":\"D:\\\\Games\\\\doa2.iso\"") != std::string::npos &&
         saved.find("\"checkUpdates\":true") != std::string::npos &&
         saved.find("\"window\":{\"x\":1,\"y\":[2,3]}") != std::string::npos);
+    expect("dedication", saved.find("\"dedicationCard\":false") != std::string::npos);
     expect("msaa off", saved.find("\"msaa\":1") != std::string::npos);
     expect("no temporary file", !std::filesystem::exists(path + ".tmp"));
     std::uint8_t again[RECOMP_PC_SETTING_COUNT];
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
-        again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u);
+        again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u && again[RECOMP_PC_DEDICATION] == 1u);
 
     // 32:9, then Ultrawide again: the monitor's own shape.
     c[RECOMP_PC_SCREEN] = 4u;

@@ -191,10 +191,11 @@ static void installPcSettings(bool online)
         recomp_pc_settings_set_live(setting, !online);
 }
 
-/* Dedication card shown each time the staff roll starts. The BMP is a private
-   input named by RECOMP_DEDICATION_CARD. Music table entry 17 (0x6a0c3c,
-   "Staffroll") points at its track's file name at +8; the guest's first read
-   of that entry in an AFS archive starts the roll. */
+/* Dedication card shown each time the staff roll starts, unless the PC
+   SETTINGS row hides it. The BMP is a private input named by
+   RECOMP_DEDICATION_CARD. Music table entry 17 (0x6a0c3c, "Staffroll") points
+   at its track's file name at +8; the guest's first read of that entry in an
+   AFS archive starts the roll. */
 static std::vector<std::uint32_t> cardPixels;
 static std::uint32_t cardWidth, cardHeight;
 static std::map<std::string, std::uint64_t> staffrollOffsets; // per archive; 0 if absent
@@ -254,7 +255,8 @@ static void noteRead(const char *hostPath, std::uint64_t offset)
     const auto [entry, added] = staffrollOffsets.try_emplace(hostPath, 0u);
     if (added) entry->second = afsEntryOffset(hostPath,
         reinterpret_cast<const char *>(recomp_memory(*recomp_memory_u32(0x006a0c44u), 32u)));
-    if (entry->second != 0u && offset == entry->second) cardPending = true;
+    if (entry->second != 0u && offset == entry->second &&
+        recomp_pc_settings_choice(RECOMP_PC_DEDICATION) == 0u) cardPending = true;
 }
 
 /* --story-finale debug shortcut: every live Story CPU is held at 1 life, and

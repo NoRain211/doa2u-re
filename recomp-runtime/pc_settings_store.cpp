@@ -149,6 +149,7 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_UNLOCKS] = boolean(entries, "unlockAll", true) ? 0u : 1u;
     choices[RECOMP_PC_CPU_COSTUMES] = boolean(entries, "randomCpuCostumes", false) ? 1u : 0u;
     choices[RECOMP_PC_FREE_CAMERA] = boolean(entries, "freeCamera", false) ? 1u : 0u;
+    choices[RECOMP_PC_DEDICATION] = boolean(entries, "dedicationCard", true) ? 0u : 1u;
 }
 
 bool read_file(const std::string &path, std::string *out)
@@ -210,6 +211,7 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     put(&entries, "unlockAll", flag(choices[RECOMP_PC_UNLOCKS] == 0u));
     put(&entries, "randomCpuCostumes", flag(choices[RECOMP_PC_CPU_COSTUMES] == 1u));
     put(&entries, "freeCamera", flag(choices[RECOMP_PC_FREE_CAMERA] == 1u));
+    put(&entries, "dedicationCard", flag(choices[RECOMP_PC_DEDICATION] == 0u));
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;

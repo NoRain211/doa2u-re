@@ -12,7 +12,7 @@ import threading
 import uuid
 
 from build_game import ROOT, program_manifest, runner_path, selected_xbe
-import dedication_card
+import dedication_card as card_builder
 from extract_iso import redact_private, sha256
 
 RELAUNCH = 4  # runner exit code for XLaunchNewImage of the game's own XBE
@@ -149,7 +149,7 @@ def open_launcher():
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None,
-        random_cpu_costumes=None):
+        random_cpu_costumes=None, dedication_card=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -211,12 +211,16 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
         raise ValueError("Play disc belongs to a different game import")
     card = ROOT / "private/dedication.bmp"
     photo = ROOT / "private/dedication-photo.jpg"
-    if not card.is_file() and photo.is_file():
+    # The launcher's Hide choice is in launcher.json, which the runner reads;
+    # build the card anyway so PC SETTINGS can turn it back on in this run.
+    if dedication_card is not False and not card.is_file() and photo.is_file():
         try:
-            dedication_card.build(selected.parent, photo, card)
+            card_builder.build(selected.parent, photo, card)
         except (ImportError, OSError, ValueError) as error:
             print(f"Dedication card skipped: {error}", file=sys.stderr)
-    if card.is_file():
+    if dedication_card is False:
+        env.pop("RECOMP_DEDICATION_CARD", None)
+    elif card.is_file():
         env["RECOMP_DEDICATION_CARD"] = str(card)
     logs = ROOT / ("private/play-logs" if seconds is None else "private/boot-logs")
     logs.mkdir(exist_ok=True)
@@ -305,6 +309,8 @@ if __name__ == "__main__":
                         help="Skip the logo and opening movies at boot")
     parser.add_argument("--no-unlock-all", dest="unlock_all", action="store_false",
                         help="Leave character and costume unlocks to play, for acceptance runs")
+    parser.add_argument("--dedication-card", action=argparse.BooleanOptionalAction, default=None,
+                        help="Show the staff roll's dedication card (--no-dedication-card hides it)")
     parser.add_argument("--saved", action="store_true",
                         help="Use the choices saved by the launcher in private/launcher.json")
     parser.add_argument("--launcher", action="store_true",
@@ -326,7 +332,8 @@ if __name__ == "__main__":
                              args.unlock_all and saved.get("unlock_all", True),
                              pick("surround", args.surround), pick("vrr", args.vrr),
                              bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
-                             pick("random_cpu_costumes", args.random_cpu_costumes)))
+                             pick("random_cpu_costumes", args.random_cpu_costumes),
+                             args.dedication_card))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

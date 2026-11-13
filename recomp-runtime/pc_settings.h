@@ -26,6 +26,7 @@ enum RecompPcSetting {
     RECOMP_PC_UNLOCKS,       /* Everything, Earn */
     RECOMP_PC_CPU_COSTUMES,  /* Default, Random */
     RECOMP_PC_FREE_CAMERA,   /* Off, On */
+    RECOMP_PC_DEDICATION,    /* Show, Hide */
     RECOMP_PC_SETTING_COUNT
 };
 

@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera') {
+foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera', 'dedication') {
     $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
     $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
 }
@@ -59,6 +59,8 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                 self.assertEqual(result.returncode, 0, result.stderr)
                 with patch("run_game.ROOT", root):
                     saved = saved_settings()
+                choices = json.loads((root / "private/launcher.json").read_text())
+                self.assertEqual(choices["dedicationCard"], not last)
                 if last:
                     self.assertEqual(saved.pop("widescreen"), "32:9")  # the last Screen choice
                 self.assertEqual(saved, expected)
@@ -180,6 +182,17 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                                  str(root / "private/launcher.json"))
                 self.assertEqual(run(None, vulkan=True), 0)
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
+                (root / "private/dedication.bmp").write_bytes(b"card")
+                self.assertEqual(run(None), 0)
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_DEDICATION_CARD"],
+                                 str(root / "private/dedication.bmp"))
+                self.assertEqual(run(None, dedication_card=False), 0)
+                self.assertNotIn("RECOMP_DEDICATION_CARD", execute.call_args.kwargs["env"])
+                # A photo without a card lets run_game build it; this synthetic disc fails
+                # that build, which stays a skipped card rather than a failed run.
+                (root / "private/dedication.bmp").unlink()
+                (root / "private/dedication-photo.jpg").write_bytes(b"photo")
+                self.assertEqual(run(None), 0)
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
                 execute.side_effect = [runner(4), runner(0)]
@@ -187,7 +200,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_count, 2)
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
-            self.assertEqual(len(logs), 11)
+            self.assertEqual(len(logs), 14)
             self.assertIn("runner_sha256=hash", logs[0].read_text())
             # glob's order is the file system's; the relaunch runs print nothing.
             self.assertTrue(any(f"open ~{os.sep}doa2u" in log.read_text() for log in logs))

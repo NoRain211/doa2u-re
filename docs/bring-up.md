@@ -96,7 +96,9 @@ the held time from the guest clock. A new press of any pad button or mapped
 key fades the card out early; a button still held from the fight must be
 released first. In Kasumi's Story the track is first read
 after the final KO's white flash, so the card plays just before the ending,
-which carries the staff credits over it.
+which carries the staff credits over it. **Dedication: Hide** on the launchers'
+**GAMEPLAY** page or the game's **PC SETTINGS** page, or `--no-dedication-card`,
+skips it.
 
 `--story-finale` (runner and `run_game.py`) holds every live Story CPU at 1
 life and sets the stage to 5 at the first CPU KO, so the game's own advance
@@ -831,8 +833,9 @@ brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
 own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
-`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks and
-CPU Costumes apply at once, offline only, and the others at the next launch.
+`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks, CPU
+Costumes, Free Camera and Dedication apply at once (the first three offline
+only), and the others at the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
