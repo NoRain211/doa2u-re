@@ -309,8 +309,8 @@ if __name__ == "__main__":
                         help="Skip the logo and opening movies at boot")
     parser.add_argument("--no-unlock-all", dest="unlock_all", action="store_false",
                         help="Leave character and costume unlocks to play, for acceptance runs")
-    parser.add_argument("--dedication-card", action=argparse.BooleanOptionalAction, default=None,
-                        help="Show the staff roll's dedication card (--no-dedication-card hides it)")
+    parser.add_argument("--no-dedication-card", action="store_true",
+                        help="Hide the staff roll's dedication card for this run")
     parser.add_argument("--saved", action="store_true",
                         help="Use the choices saved by the launcher in private/launcher.json")
     parser.add_argument("--launcher", action="store_true",
@@ -333,7 +333,7 @@ if __name__ == "__main__":
                              pick("surround", args.surround), pick("vrr", args.vrr),
                              bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
-                             args.dedication_card))
+                             False if args.no_dedication_card else None))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)
