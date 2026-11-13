@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings.h"
 #include "button_config.h"
-#include "input_host_win32.h"
 #include "kernel_abi.h"
 #include "runner_assets.h"
 
