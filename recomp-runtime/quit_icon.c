@@ -86,15 +86,31 @@ static void shape_span(const Shape *s, float *top, float *bottom)
     }
 }
 
-void recomp_quit_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
-    uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
+/* The Jukebox picture: a record, its label and hole, and a quaver in front
+   of it at the right, in the same greys and outlines. */
+static const Shape JUKEBOX_SHAPES[] = {
+    /* The record, darker than the other pictures' objects, and its grooves. */
+    {SHAPE_CIRCLE, {{54, 60}}, 0, 42.0f, 3.0f, 130, 62},
+    {SHAPE_CIRCLE, {{54, 60}}, 0, 33.0f, 0, 96, 52},
+    {SHAPE_CIRCLE, {{54, 60}}, 0, 26.0f, 0, 118, 60},
+    /* Its label and the hole. */
+    {SHAPE_CIRCLE, {{54, 60}}, 0, 14.0f, 3.0f, 250, 170},
+    {SHAPE_CIRCLE, {{54, 60}}, 0, 3.5f, 0, 51, 51},
+    /* The quaver: stem, flag, head. */
+    {SHAPE_POLYGON, {{99, 18}, {106, 18}, {106, 100}, {99, 100}}, 4, 0, 3.0f, 252, 150},
+    {SHAPE_POLYGON, {{106, 18}, {117, 27}, {123, 42}, {120, 55}, {114, 41}, {106, 36}}, 6, 0, 3.0f, 252, 170},
+    {SHAPE_CIRCLE, {{93, 100}}, 0, 13.0f, 3.0f, 252, 150},
+};
+
+static void draw_shapes(const Shape *list, int shapes, float squeeze,
+    uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
 {
-    enum { N = QUIT_ICON_SIZE, SS = 4 };
+    enum { N = QUIT_ICON_SIZE, SS = 4, MAX_SHAPES = 16 };
     const float FIT = 0.88f; /* the design's margin, as the other pictures leave */
     static float shape_alpha[N * N], shape_grey[N * N];
-    const int shapes = (int)(sizeof SHAPES / sizeof SHAPES[0]);
-    float tops[sizeof SHAPES / sizeof SHAPES[0]], bottoms[sizeof SHAPES / sizeof SHAPES[0]];
-    for (int i = 0; i < shapes; ++i) shape_span(&SHAPES[i], &tops[i], &bottoms[i]);
+    float tops[MAX_SHAPES], bottoms[MAX_SHAPES];
+    if (shapes > MAX_SHAPES) shapes = MAX_SHAPES;
+    for (int i = 0; i < shapes; ++i) shape_span(&list[i], &tops[i], &bottoms[i]);
     if (!(squeeze > 0.0f)) squeeze = 1.0f;
     for (int y = 0; y < N; ++y)
         for (int x = 0; x < N; ++x) {
@@ -105,13 +121,13 @@ void recomp_quit_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICO
                     const Point p = {64.0f + ((float)x + (sx + 0.5f) / SS - 64.0f) / (squeeze * FIT),
                         66.0f + ((float)y + (sy + 0.5f) / SS - 66.0f) / FIT};
                     for (int i = shapes - 1; i >= 0; --i) {
-                        const int hit = shape_hit(&SHAPES[i], p);
+                        const int hit = shape_hit(&list[i], p);
                         if (hit == 0) continue;
                         float value = OUTLINE; /* the pictures' outline grey */
                         if (hit == 2) {
                             const float span = bottoms[i] - tops[i];
                             const float t = span > 0.0f ? (p.y - tops[i]) / span : 0.0f;
-                            value = SHAPES[i].top + (SHAPES[i].bottom - SHAPES[i].top) * (t < 0 ? 0 : t > 1 ? 1 : t);
+                            value = list[i].top + (list[i].bottom - list[i].top) * (t < 0 ? 0 : t > 1 ? 1 : t);
                         }
                         a += 1.0f;
                         g += value;
@@ -126,4 +142,16 @@ void recomp_quit_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICO
         grey[i] = (uint8_t)lrintf(value < 0 ? 0 : value > 255 ? 255 : value);
         alpha[i] = (uint8_t)lrintf(shape_alpha[i] * 255.0f);
     }
+}
+
+void recomp_quit_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
+    uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
+{
+    draw_shapes(SHAPES, (int)(sizeof SHAPES / sizeof SHAPES[0]), squeeze, grey, alpha);
+}
+
+void recomp_jukebox_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
+    uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
+{
+    draw_shapes(JUKEBOX_SHAPES, (int)(sizeof JUKEBOX_SHAPES / sizeof JUKEBOX_SHAPES[0]), squeeze, grey, alpha);
 }

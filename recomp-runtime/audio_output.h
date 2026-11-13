@@ -7,12 +7,14 @@
 extern "C" {
 #endif
 
-/* DirectSound buffers use slots 0..255; native movie audio plays on 256, and
-   the fighters' hit voices (hit_voice.c) on 257 and 258. */
+/* DirectSound buffers use slots 0..255; native movie audio plays on 256,
+   the fighters' hit voices (hit_voice.c) on 257 and 258, and the Jukebox
+   (jukebox.c) on 259. */
 enum {
     RECOMP_AUDIO_OUTPUT_MOVIE_SLOT = 256,
     RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT = 257,
-    RECOMP_AUDIO_OUTPUT_SLOTS = 259
+    RECOMP_AUDIO_OUTPUT_JUKEBOX_SLOT = 259,
+    RECOMP_AUDIO_OUTPUT_SLOTS = 260
 };
 
 /* 6 when RECOMP_AUDIO_SURROUND is set and not "0", otherwise 2. Valid before

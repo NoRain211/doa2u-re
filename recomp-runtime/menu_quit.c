@@ -6,6 +6,7 @@
 #include "runner_assets.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,7 +23,12 @@
    one, and the two readers answer for that position without touching the
    list, which may already be full. Its mode, 0x13, is one no entry uses and
    the switch ignores, so the confirm sound opens the runner's quit prompt
-   (quit_prompt.c) instead, which takes the pads while it asks. */
+   (quit_prompt.c) instead, which takes the pads while it asks.
+
+   The Jukebox (jukebox.c), when the runner turns it on, is one more position
+   before Quit Game with Options' mode (0xa): its confirm enters Options as
+   that entry's does, having asked for the Jukebox's page, which Options
+   (pc_settings.c) then opens alone; leaving it returns to this menu. */
 
 extern void sub_00134330(void);
 extern void sub_001343A0(void);
@@ -47,6 +53,8 @@ enum {
        plays the "not available" sound for anything but 2. Mode 0x13 is in
        that table, always 2, no entry's, and the switch does nothing for it. */
     QUIT_MODE = 0x13,
+    OPTIONS_MODE = 0x0a,
+    MENU_CONTEXT = 0x00df5698u,     /* +0x120: the carousel position */
     SOUND_CONFIRM = 0x24, SOUND_CANCEL = 0x29,
     LABEL_LOG_W = 7, LABEL_LOG_H = 5, PICTURE_LOG = 7, /* 128x32 and 128x128 */
     LABEL_W = 1 << LABEL_LOG_W, LABEL_H = 1 << LABEL_LOG_H, WORD_H = 24,
@@ -78,12 +86,27 @@ static const recomp_utf16 *const HELP[6] = {
     u"Esci dal gioco e torna al desktop.", u"Salir del juego y volver al escritorio.",
 };
 
+static const recomp_utf16 *const JUKEBOX_HELP[6] = {
+    u"Listen to the music of DOA2U, and of DOA3 and DOA4 from your own discs.",
+    u"Listen to the music of DOA2U, and of DOA3 and DOA4 from your own discs.",
+    u"\u00c9couter la musique de DOA2U, et de DOA3 et DOA4 depuis vos disques.",
+    u"Die Musik von DOA2U h\u00f6ren, und die von DOA3 und DOA4 von deinen Discs.",
+    u"Ascolta la musica di DOA2U, e di DOA3 e DOA4 dai tuoi dischi.",
+    u"Escucha la m\u00fasica de DOA2U, y la de DOA3 y DOA4 de tus discos.",
+};
+
 /* ---- State -------------------------------------------------------- */
 
 static uint32_t entry;           /* the 28-byte menu entry, in the runner's asset area */
 static int quit_position = -1;   /* the carousel position, once listed */
 static bool in_update, label_made;
 static bool asking;              /* the quit prompt is open for Quit Game */
+
+static void (*jukebox_request)(void); /* NULL: no Jukebox entry */
+static void (*menu_probe)(void);      /* a developer's probe, in the menu's context */
+static uint32_t jukebox_entry;
+static int jukebox_position = -1;
+static bool jukebox_label_made;
 
 /* ---- Guest helpers -------------------------------------------------- */
 
@@ -101,11 +124,12 @@ static uint8_t picture_index(uint8_t grey, uint8_t alpha)
     return a == 0u ? 0u : (uint8_t)(a * 8u + (grey * 7u + 127u) / 255u);
 }
 
-static void write_picture(unsigned slot, float squeeze)
+static void write_picture(unsigned slot, float squeeze, bool jukebox)
 {
     static uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE];
     static uint8_t pixels[QUIT_ICON_SIZE * QUIT_ICON_SIZE];
-    recomp_quit_icon_draw(squeeze, grey, alpha);
+    if (jukebox) recomp_jukebox_icon_draw(squeeze, grey, alpha);
+    else recomp_quit_icon_draw(squeeze, grey, alpha);
     for (uint32_t i = 0u; i < QUIT_ICON_SIZE * QUIT_ICON_SIZE; ++i) pixels[i] = picture_index(grey[i], alpha[i]);
     recomp_runner_sprite_pixels(slot, pixels);
 }
@@ -255,6 +279,107 @@ static bool make_label(void)
     return true;
 }
 
+/* ---- The Jukebox's label ------------------------------------------------ */
+
+/* The menu's words hold no J, K, B or X, so JUKEBOX is drawn: each letter is
+   strokes (polylines in a 10 x 15 box, y down), slanted as the words are,
+   with the body in the words' greys brightening left to right, their dark
+   outline, and the shadow make_label casts. */
+typedef struct Stroke { int count; float x[8], y[8]; } Stroke;
+typedef struct Glyph { float width; int count; Stroke strokes[3]; } Glyph;
+static const Glyph JUKEBOX_GLYPHS[7] = {
+    {8.0f, 1, {{6, {7, 7, 6.4f, 4, 1.6f, 1}, {0, 11, 13.6f, 15, 13.6f, 11.5f}}}},                  /* J */
+    {10.0f, 1, {{7, {1, 1, 1.8f, 5, 8.2f, 9, 9}, {0, 10, 13.8f, 15, 13.8f, 10, 0}}}},                /* U */
+    {10.0f, 3, {{2, {1, 1}, {0, 15}}, {2, {9, 2}, {0, 8}}, {2, {4.5f, 9.5f}, {6.2f, 15}}}},          /* K */
+    {8.0f, 2, {{4, {8, 1, 1, 8}, {0, 0, 15, 15}}, {2, {1, 6.5f}, {7.5f, 7.5f}}}},                    /* E */
+    {9.0f, 3, {{2, {1, 1}, {0, 15}}, {7, {1, 5.5f, 7.5f, 8, 7.5f, 5.5f, 1}, {0, 0, 1, 3.6f, 6.1f, 7.3f, 7.3f}},
+               {7, {1, 6, 8.3f, 9, 8.3f, 6, 1}, {7.3f, 7.3f, 8.5f, 11.1f, 13.8f, 15, 15}}}},          /* B */
+    {10.0f, 2, {{8, {5, 2.2f, 1, 1.4f, 3, 5, 7.8f, 9}, {0, 1.3f, 5, 10.8f, 14, 15, 13.7f, 10}},
+                {4, {9, 8.6f, 7, 5}, {10, 4.2f, 1, 0}}}},                                             /* O */
+    {10.0f, 2, {{2, {1, 9}, {0, 15}}, {2, {9, 1}, {0, 15}}}},                                       /* X */
+};
+
+static float segment_distance_xy(float px, float py, float ax, float ay, float bx, float by)
+{
+    const float dx = bx - ax, dy = by - ay, length = dx * dx + dy * dy;
+    float t = length > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / length : 0.0f;
+    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+    const float ex = ax + t * dx - px, ey = ay + t * dy - py;
+    return sqrtf(ex * ex + ey * ey);
+}
+
+/* The palette entry nearest a colour and alpha. */
+static uint8_t nearest_index(uint32_t palette_data, unsigned grey, unsigned alpha)
+{
+    unsigned best = 0u, best_distance = 1u << 30;
+    for (unsigned i = 1u; i < 256u; ++i) {
+        const uint32_t argb = u32(palette_data + 4u * i);
+        if (shadow_colour(argb)) continue;
+        const int a = (int)(argb >> 24), r = (int)((argb >> 16) & 0xffu), g = (int)((argb >> 8) & 0xffu), b = (int)(argb & 0xffu);
+        const int dg = (r + g + b) / 3 - (int)grey, da = a - (int)alpha, chroma = abs(r - g) + abs(g - b);
+        const unsigned d = (unsigned)(dg * dg + 4 * da * da + 8 * chroma * chroma);
+        if (d < best_distance) { best_distance = d; best = i; }
+    }
+    return (uint8_t)best;
+}
+
+static bool make_jukebox_label(void)
+{
+    enum { SS = 4, TOP = 4 };
+    const float HALF = 1.45f, OUTLINE = 1.1f, GAP = 3.0f, WIDE = 1.1f, OUTLINE_GREY = 40.0f;
+    RecompGameSprite first;
+    if (!recomp_game_sprite(PIECES[0].sprite, WORD_H, &first)) return false;
+    const uint32_t palette_data = first.colours;
+    static uint8_t image[LABEL_H][LABEL_W];
+    memset(image, 0, sizeof image);
+    /* Every stroke's segments, placed and slanted. */
+    float seg[64][4];
+    int segs = 0;
+    float pen = 1.0f + LEAN * (float)WORD_H;
+    for (int g = 0; g < 7; ++g) {
+        const Glyph *glyph = &JUKEBOX_GLYPHS[g];
+        for (int k = 0; k < glyph->count; ++k) {
+            const Stroke *stroke = &glyph->strokes[k];
+            for (int i = 0; i + 1 < stroke->count && segs < 64; ++i) {
+                const float y0 = TOP + stroke->y[i], y1 = TOP + stroke->y[i + 1];
+                seg[segs][0] = pen + WIDE * stroke->x[i] + LEAN * (float)(WORD_H - 1) - LEAN * y0;
+                seg[segs][1] = y0;
+                seg[segs][2] = pen + WIDE * stroke->x[i + 1] + LEAN * (float)(WORD_H - 1) - LEAN * y1;
+                seg[segs][3] = y1;
+                ++segs;
+            }
+        }
+        pen += WIDE * glyph->width + GAP;
+    }
+    const int width = (int)pen + 8 < LABEL_W ? (int)pen + 8 : LABEL_W;
+    for (int y = 0; y < WORD_H; ++y)
+        for (int x = 0; x < width; ++x) {
+            int body = 0, line = 0;
+            for (int sy = 0; sy < SS; ++sy)
+                for (int sx = 0; sx < SS; ++sx) {
+                    const float px = (float)x + (sx + 0.5f) / SS, py = (float)y + (sy + 0.5f) / SS;
+                    float d = 1e9f;
+                    for (int i = 0; i < segs; ++i) {
+                        const float e = segment_distance_xy(px, py, seg[i][0], seg[i][1], seg[i][2], seg[i][3]);
+                        if (e < d) d = e;
+                    }
+                    if (d <= HALF) ++body;
+                    else if (d <= HALF + OUTLINE) ++line;
+                }
+            const float cover = (float)(body + line) / (SS * SS);
+            if (cover <= 0.05f) continue;
+            const float b = (float)body / (float)(body + line);
+            const float grey = OUTLINE_GREY + (255.0f * brightness_ramp((float)x) - OUTLINE_GREY) * b;
+            image[y][x] = nearest_index(palette_data, (unsigned)lrintf(grey), (unsigned)lrintf(255.0f * cover));
+        }
+    cast_shadow(palette_data, image);
+    recomp_runner_sprite_pixels(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, &image[0][0]);
+    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, width, WORD_H);
+    recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, first.palette);
+    fprintf(stderr, "recomp menu jukebox: label made, %d pixels wide\n", width);
+    return true;
+}
+
 /* ---- Install -------------------------------------------------------- */
 
 void recomp_menu_quit_install(void)
@@ -283,9 +408,39 @@ void recomp_menu_quit_install(void)
     for (unsigned i = 0u; i < 2u; ++i) {
         recomp_runner_sprite(pictures[i], PICTURE_LOG, PICTURE_LOG, palette);
         recomp_runner_sprite_size(pictures[i], QUIT_ICON_SIZE, QUIT_ICON_SIZE);
-        write_picture(pictures[i], i == 0u ? 1.0f : 0.75f);
+        write_picture(pictures[i], i == 0u ? 1.0f : 0.75f, false);
     }
     recomp_runner_text_set(RECOMP_RUNNER_TEXT_QUIT, HELP);
+
+    jukebox_entry = 0u;
+    jukebox_position = -1;
+    jukebox_label_made = false;
+    if (jukebox_request == NULL) return;
+    jukebox_entry = recomp_runner_alloc(28u, 4u);
+    const uint32_t jukebox_ids[4] = {OPTIONS_MODE, recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL),
+        recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_JUKEBOX_PICTURE),
+        recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_JUKEBOX_WIDE)};
+    for (unsigned i = 0u; i < 4u; ++i) set_u32(jukebox_entry + 4u * i, jukebox_ids[i]);
+    /* Its pictures share Quit Game's palette; its label takes the menu's. */
+    recomp_runner_sprite(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, LABEL_LOG_W, LABEL_LOG_H, palette);
+    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, 1, WORD_H);
+    const unsigned jukebox_pictures[2] = {RECOMP_RUNNER_SPRITE_JUKEBOX_PICTURE, RECOMP_RUNNER_SPRITE_JUKEBOX_WIDE};
+    for (unsigned i = 0u; i < 2u; ++i) {
+        recomp_runner_sprite(jukebox_pictures[i], PICTURE_LOG, PICTURE_LOG, palette);
+        recomp_runner_sprite_size(jukebox_pictures[i], QUIT_ICON_SIZE, QUIT_ICON_SIZE);
+        write_picture(jukebox_pictures[i], i == 0u ? 1.0f : 0.75f, true);
+    }
+    recomp_runner_text_set(RECOMP_RUNNER_TEXT_JUKEBOX, JUKEBOX_HELP);
+}
+
+void recomp_menu_quit_set_jukebox(void (*request)(void))
+{
+    jukebox_request = request;
+}
+
+void recomp_menu_quit_set_probe(void (*probe)(void))
+{
+    menu_probe = probe;
 }
 
 /* ---- The carousel --------------------------------------------------- */
@@ -293,8 +448,9 @@ void recomp_menu_quit_install(void)
 static void menu_build(void)
 {
     sub_00134330();
-    quit_position = -1;
-    const uint8_t count = *recomp_memory(MENU_COUNT, 1u);
+    quit_position = jukebox_position = -1;
+    uint8_t count = *recomp_memory(MENU_COUNT, 1u);
+    if (jukebox_request != NULL && count < 0xfeu) jukebox_position = count++;
     if (count >= 0xffu) return;
     quit_position = count;
     *recomp_memory(MENU_COUNT, 1u) = (uint8_t)(count + 1u);
@@ -309,6 +465,15 @@ static int clamped(uint32_t position)
 
 static void menu_entry(void)
 {
+    if (menu_probe != NULL) menu_probe();
+    if (jukebox_position >= 0 && clamped(kernel_arg(1u)) == jukebox_position) {
+        RecompGameSprite word;
+        if (!jukebox_label_made) jukebox_label_made = make_jukebox_label();
+        else if (recomp_game_sprite(PIECES[0].sprite, WORD_H, &word)) /* reloaded art */
+            recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, word.palette);
+        kernel_return_caller_cleanup(jukebox_entry);
+        return;
+    }
     if (quit_position >= 0 && clamped(kernel_arg(1u)) == quit_position) {
         RecompGameSprite word;
         if (!label_made) label_made = make_label();
@@ -322,6 +487,10 @@ static void menu_entry(void)
 
 static void menu_mode(void)
 {
+    if (jukebox_position >= 0 && clamped(*recomp_memory(kernel_arg(1u) + 0x120u, 1u)) == jukebox_position) {
+        kernel_return_caller_cleanup(OPTIONS_MODE);
+        return;
+    }
     if (quit_position >= 0 && clamped(*recomp_memory(kernel_arg(1u) + 0x120u, 1u)) == quit_position) {
         kernel_return_caller_cleanup(QUIT_MODE);
         return;
@@ -332,6 +501,8 @@ static void menu_mode(void)
 static void menu_help(void)
 {
     if (kernel_arg(1u) == QUIT_MODE) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_QUIT);
+    else if (jukebox_position >= 0 && clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == jukebox_position)
+        kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_JUKEBOX);
     else sub_001345C0();
 }
 
@@ -343,6 +514,11 @@ static void play_sound(void)
         asking = true;
         recomp_quit_prompt_request();
         fprintf(stderr, "recomp menu quit: asking\n");
+    }
+    if (in_update && kernel_arg(1u) == SOUND_CONFIRM && jukebox_position >= 0 &&
+        clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == jukebox_position) {
+        jukebox_request();
+        fprintf(stderr, "recomp menu jukebox: entering Options for the Jukebox\n");
     }
     sub_000FED70();
 }
