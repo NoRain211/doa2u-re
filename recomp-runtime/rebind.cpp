@@ -4,7 +4,6 @@
 #include "input_host_win32.h"
 
 #include <atomic>
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -14,6 +13,7 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <process.h>
 #include <share.h>
 #include <sys/stat.h>
 #else
@@ -67,25 +67,24 @@ bool save(const char *variable, bool pad)
         std::fprintf(stderr, "recomp rebind: %s is not set; the change lasts until the game closes\n", variable);
         return true;
     }
-    const std::string target(path), temporary = target + ".tmp";
+    const std::string target(path);
+    // A per-save name keeps O_EXCL from colliding with a live writer, and a
+    // crashed save's orphan from blocking later saves.
+    static std::atomic<unsigned> attempt{0};
+    const std::string temporary = target + ".tmp." +
+#ifdef _WIN32
+        std::to_string(_getpid())
+#else
+        std::to_string(getpid())
+#endif
+        + "." + std::to_string(attempt.fetch_add(1u));
 #ifdef _WIN32
     int fd = -1;
-    int error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+    const int error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
         _SH_DENYNO, _S_IREAD | _S_IWRITE);
-    if (error != 0 && errno == EEXIST) {
-        std::error_code ignored;
-        std::filesystem::remove(temporary, ignored); // a stale .tmp must not block saving forever
-        error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-            _SH_DENYNO, _S_IREAD | _S_IWRITE);
-    }
     std::FILE *file = error == 0 ? _fdopen(fd, "wb") : nullptr;
 #else
     int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0 && errno == EEXIST) {
-        std::error_code ignored;
-        std::filesystem::remove(temporary, ignored); // a stale .tmp must not block saving forever
-        fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-    }
     std::FILE *file = fd >= 0 ? fdopen(fd, "wb") : nullptr;
 #endif
     bool written = file != nullptr;
