@@ -4,6 +4,7 @@
 #include "input_host_win32.h"
 
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -69,11 +70,22 @@ bool save(const char *variable, bool pad)
     const std::string target(path), temporary = target + ".tmp";
 #ifdef _WIN32
     int fd = -1;
-    const bool opened = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-        _SH_DENYNO, _S_IREAD | _S_IWRITE) == 0;
-    std::FILE *file = opened ? _fdopen(fd, "wb") : nullptr;
+    int error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+        _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    if (error != 0 && errno == EEXIST) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored); // a stale .tmp must not block saving forever
+        error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+            _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    }
+    std::FILE *file = error == 0 ? _fdopen(fd, "wb") : nullptr;
 #else
-    const int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0 && errno == EEXIST) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored); // a stale .tmp must not block saving forever
+        fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    }
     std::FILE *file = fd >= 0 ? fdopen(fd, "wb") : nullptr;
 #endif
     bool written = file != nullptr;
