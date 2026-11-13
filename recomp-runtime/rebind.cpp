@@ -7,9 +7,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <system_error>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -58,17 +67,35 @@ bool save(const char *variable, bool pad)
         return true;
     }
     const std::string target(path), temporary = target + ".tmp";
-    std::ofstream file(temporary, std::ios::trunc);
+#ifdef _WIN32
+    int fd = -1;
+    const bool opened = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+        _SH_DENYNO, _S_IREAD | _S_IWRITE) == 0;
+    std::FILE *file = opened ? _fdopen(fd, "wb") : nullptr;
+#else
+    const int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    std::FILE *file = fd >= 0 ? fdopen(fd, "wb") : nullptr;
+#endif
+    bool written = file != nullptr;
     const char *separator = "{\n";
-    for (unsigned binding = 0u; binding < RECOMP_INPUT_BIND_COUNT; ++binding) {
-        const char *name = recomp_rebind_name(binding, pad);
-        file << separator << "  \"" << recomp_input_host_binding_name(binding) << "\": \""
-             << (name != nullptr ? name : "") << '"';
-        separator = ",\n";
+    if (file != nullptr) {
+        for (unsigned binding = 0u; binding < RECOMP_INPUT_BIND_COUNT; ++binding) {
+            const char *name = recomp_rebind_name(binding, pad);
+            std::fprintf(file, "%s  \"%s\": \"%s\"", separator, recomp_input_host_binding_name(binding),
+                name != nullptr ? name : "");
+            separator = ",\n";
+        }
+        std::fprintf(file, "%s", *separator == '{' ? "{}\n" : "\n}\n");
+        written = std::ferror(file) == 0;
+        written = std::fclose(file) == 0 && written;
+    } else {
+#ifdef _WIN32
+        if (fd >= 0) _close(fd);
+#else
+        if (fd >= 0) close(fd);
+#endif
     }
-    file << (*separator == '{' ? "{}\n" : "\n}\n");
-    file.close();
-    if (!file.fail()) {
+    if (written) {
         std::error_code error;
         std::filesystem::rename(temporary, target, error); // replaces an existing target
         if (!error) return true;
@@ -99,10 +126,10 @@ const char *recomp_rebind_name(unsigned binding, bool pad)
 
 void recomp_rebind_save(void)
 {
-    if (!changed.load()) return;
+    if (!changed.exchange(false)) return;
     const bool keyboard = save("RECOMP_KEYBOARD_SETTINGS", false);
     const bool controller = save("RECOMP_CONTROLLER_SETTINGS", true);
-    if (keyboard && controller) changed = false;
+    if (!keyboard || !controller) changed = true; // retry at the next save, keeping changes made meanwhile
 }
 
 void recomp_rebind_filter(uint32_t port, RecompInputGamepad *pad)

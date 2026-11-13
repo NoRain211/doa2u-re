@@ -12,6 +12,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* The game thread reads binding names and sources while the sampler rebinds. */
+#ifdef _WIN32
+static SRWLOCK bindings_lock = SRWLOCK_INIT;
+#define lock_bindings() AcquireSRWLockExclusive(&bindings_lock)
+#define unlock_bindings() ReleaseSRWLockExclusive(&bindings_lock)
+#else
+#include <pthread.h>
+static pthread_mutex_t bindings_lock = PTHREAD_MUTEX_INITIALIZER;
+#define lock_bindings() pthread_mutex_lock(&bindings_lock)
+#define unlock_bindings() pthread_mutex_unlock(&bindings_lock)
+#endif
+
 enum {
     XBOX_DPAD_UP = 0x0001u,
     XBOX_DPAD_DOWN = 0x0002u,
@@ -181,12 +193,17 @@ static void load_map(bool pad, const char *at)
 
 static void load_bindings(void)
 {
+    lock_bindings();
     static bool loaded;
-    if (loaded) return;
+    if (loaded) {
+        unlock_bindings();
+        return;
+    }
     loaded = true;
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) memcpy(bindings[i].source, bindings[i].defaults, sizeof bindings[i].source);
     load_map(false, getenv("RECOMP_KEYMAP"));
     load_map(true, getenv("RECOMP_PADMAP"));
+    unlock_bindings();
 }
 
 const char *recomp_input_host_binding_name(unsigned binding)
@@ -197,18 +214,27 @@ const char *recomp_input_host_binding_name(unsigned binding)
 int recomp_input_host_bound(unsigned binding, bool pad)
 {
     load_bindings();
-    return binding < RECOMP_INPUT_BIND_COUNT ? bindings[binding].source[pad] : -1;
+    if (binding >= RECOMP_INPUT_BIND_COUNT) return -1;
+    lock_bindings();
+    const int source = bindings[binding].source[pad];
+    unlock_bindings();
+    return source;
 }
 
 void recomp_input_host_bind(unsigned binding, bool pad, int source)
 {
     load_bindings();
     if (binding >= RECOMP_INPUT_BIND_COUNT) return;
+    lock_bindings();
     if (source < 0) source = bindings[binding].defaults[pad];
-    if (recomp_input_host_source_name(pad, source) == NULL) return;
+    if (recomp_input_host_source_name(pad, source) == NULL) {
+        unlock_bindings();
+        return;
+    }
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
         if (bindings[i].source[pad] == source) bindings[i].source[pad] = bindings[binding].source[pad];
     bindings[binding].source[pad] = source;
+    unlock_bindings();
 }
 
 /* recomp_input_host_test has no window; only its target defines RECOMP_INPUT_TEST_FOCUSED,
@@ -375,11 +401,15 @@ static int16_t up_axis(SDL_Gamepad *gamepad, SDL_GamepadAxis axis)
 
 static void read_pad(SDL_Gamepad *host, RecompInputGamepad *gamepad)
 {
+    int sources[RECOMP_INPUT_BIND_COUNT];
     load_bindings();
+    lock_bindings();
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) sources[i] = bindings[i].source[1];
+    unlock_bindings();
     if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_LEFT_STICK)) gamepad->buttons |= XBOX_LEFT_THUMB;
     if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) gamepad->buttons |= XBOX_RIGHT_THUMB;
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
-        const uint8_t value = source_value(host, bindings[i].source[1]);
+        const uint8_t value = source_value(host, sources[i]);
         if (bindings[i].button != 0u) {
             if (value > RECOMP_INPUT_ANALOG_DOWN) gamepad->buttons |= bindings[i].button;
         } else if (value > gamepad->analog_buttons[bindings[i].analog]) {
@@ -436,9 +466,13 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
     }
 
     recomp_input_keyboard_sample(keyboard);
+    int sources[RECOMP_INPUT_BIND_COUNT];
     load_bindings();
+    lock_bindings();
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) sources[i] = bindings[i].source[0];
+    unlock_bindings();
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
-        if (bindings[i].source[0] < 0 || !pressed(bindings[i].source[0])) continue;
+        if (sources[i] < 0 || !pressed(sources[i])) continue;
         if (bindings[i].button != 0u) keyboard_buttons.buttons |= bindings[i].button;
         else keyboard_buttons.analog_buttons[bindings[i].analog] = 0xffu;
     }
