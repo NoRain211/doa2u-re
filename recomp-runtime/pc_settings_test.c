@@ -229,11 +229,15 @@ int main(void)
     /* The layout: 12 row records, 12 value records, then the end word. */
     uint32_t page = 19u;
     const uint32_t layout = hook(0x00090ad0u, &page, 1u);
-    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 11u * 28u) == ((0x5du + 286u) << 16 | 0x10au));
-    expect("layout values", rd32(layout + 12u * 28u) == (0x5du << 16 | 0x1e0u) &&
-        rd32(layout + 12u * 28u + 0x14u) == 0x40001u && rd32(layout + 23u * 28u + 0x18u) == 0x883ec0u);
-    expect("layout end", rd32(layout + 24u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
-        layout + 24u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
+    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) &&
+        rd32(layout + (RECOMP_PC_SETTING_COUNT - 1u) * 28u) ==
+        ((0x5du + (RECOMP_PC_SETTING_COUNT - 1u) * 26u) << 16 | 0x10au));
+    expect("layout values", rd32(layout + RECOMP_PC_SETTING_COUNT * 28u) == (0x5du << 16 | 0x1e0u) &&
+        rd32(layout + RECOMP_PC_SETTING_COUNT * 28u + 0x14u) == 0x40001u &&
+        rd32(layout + (2u * RECOMP_PC_SETTING_COUNT - 1u) * 28u + 0x18u) == 0x883ec0u);
+    expect("layout end", rd32(layout + 2u * RECOMP_PC_SETTING_COUNT * 28u) == 0u &&
+        layout >= XBOX_RUNNER_ASSET_BASE &&
+        layout + 2u * RECOMP_PC_SETTING_COUNT * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
     expect("page tables", rd32(0x0067af50u + 4u * 19u) != 0u && rd32(0x0067aff0u + 4u * 19u) != 0u &&
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
@@ -253,7 +257,7 @@ int main(void)
     page = 0u;
     expect("top rows", hook(0x0011ac90u, &page, 1u) == 8u && hook(0x0011ad10u, &page, 1u) == 8u);
     page = 19u;
-    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 12u);
+    expect("pc rows", hook(0x0011ac90u, &page, 1u) == RECOMP_PC_SETTING_COUNT);
     page = 8u;
     expect("game rows", hook(0x0011ac90u, &page, 1u) == 4u);
 
@@ -311,7 +315,7 @@ int main(void)
     /* The preview of the selected row's page, and the help line. */
     wr16(CURSORS, 5u);
     hook(0x00095a10u, &context, 1u);
-    expect("pc preview", preview_count == 12u && rd16(CURSORS) == 5u);
+    expect("pc preview", preview_count == RECOMP_PC_SETTING_COUNT && rd16(CURSORS) == 5u);
     wr16(CURSORS, 7u);
     hook(0x00095a10u, &context, 1u);
     expect("exit preview", preview_count == 4u); /* the game's page 7 */
@@ -374,11 +378,11 @@ int main(void)
     wr16(CURSORS + 2u, 3u);
     const uint32_t draw = rd32(0x0067aff0u + 4u * 19u);
     hook(draw, &context, 1u);
-    expect("labels", label_count == 12u && ascii(labels[0]) == 'R' && ascii(labels[10]) == 'F' &&
+    expect("labels", label_count == RECOMP_PC_SETTING_COUNT && ascii(labels[0]) == 'R' && ascii(labels[10]) == 'F' &&
         ascii(labels[11]) == 'D');
-    expect("values", value_count == 12u && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
+    expect("values", value_count == RECOMP_PC_SETTING_COUNT && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
         ascii(values[RECOMP_PC_UNLOCKS]) == 'E' && rd16(values[RECOMP_PC_UNLOCKS] + 2u) == 'a'); /* Earn */
-    expect("cursor mark", cursor_marks == 1u && layout_walked == 24u && cursor_visible == 1u);
+    expect("cursor mark", cursor_marks == 1u && layout_walked == 2u * RECOMP_PC_SETTING_COUNT && cursor_visible == 1u);
     expect("sprites intact", rd32(rd32(hook(0x000aa9b0u, &white_id, 1u)) + 12u) == 0x05810b2au);
     language = 3u; /* German */
     hook(draw, &context, 1u);
@@ -387,7 +391,8 @@ int main(void)
     const uint32_t key[2] = {19u, 0u};
     expect("labels only while drawing", hook(0x000910a0u, key, 2u) == 0x9999u);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
-    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 23u * 28u + 0xcu) == 0u);
+    expect("enter resets", rd32(layout + 0xcu) == 0u &&
+        rd32(layout + (2u * RECOMP_PC_SETTING_COUNT - 1u) * 28u + 0xcu) == 0u);
 
     /* A new language remakes the label (Italian, which needs the Z of OPZIONI). */
     language = 4u;

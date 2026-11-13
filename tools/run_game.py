@@ -149,7 +149,7 @@ def open_launcher():
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None,
-        random_cpu_costumes=None, dedication_card=None):
+        random_cpu_costumes=None, hide_dedication=False):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -213,12 +213,12 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     photo = ROOT / "private/dedication-photo.jpg"
     # The launcher's Hide choice is in launcher.json, which the runner reads;
     # build the card anyway so PC SETTINGS can turn it back on in this run.
-    if dedication_card is not False and not card.is_file() and photo.is_file():
+    if not hide_dedication and not card.is_file() and photo.is_file():
         try:
             card_builder.build(selected.parent, photo, card)
         except (ImportError, OSError, ValueError) as error:
             print(f"Dedication card skipped: {error}", file=sys.stderr)
-    if dedication_card is False:
+    if hide_dedication:
         env.pop("RECOMP_DEDICATION_CARD", None)
     elif card.is_file():
         env["RECOMP_DEDICATION_CARD"] = str(card)
@@ -333,7 +333,7 @@ if __name__ == "__main__":
                              pick("surround", args.surround), pick("vrr", args.vrr),
                              bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
-                             False if args.no_dedication_card else None))
+                             args.no_dedication_card))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

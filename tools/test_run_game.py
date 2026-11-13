@@ -186,7 +186,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_DEDICATION_CARD"],
                                  str(root / "private/dedication.bmp"))
-                self.assertEqual(run(None, dedication_card=False), 0)
+                self.assertEqual(run(None, hide_dedication=True), 0)
                 self.assertNotIn("RECOMP_DEDICATION_CARD", execute.call_args.kwargs["env"])
                 # A photo without a card lets run_game build it; this synthetic disc fails
                 # that build, which stays a skipped card rather than a failed run.
