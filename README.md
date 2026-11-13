@@ -164,11 +164,23 @@ a readout of the frame rate, the average frame time and the slowest frame of
 the last second; it starts off. F11 or Alt+Enter switches between a window and
 borderless fullscreen.
 
-To rebind the keyboard, create `private/keyboard.json` with the buttons to
-change, for example `{"a": "Space", "b": "Ctrl", "start": "Tab"}`. Buttons are
-up, down, left, right, start, back, a, b, x, y, white, black, ltrig and rtrig;
-keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, Enter, Backspace,
-Space, Tab, Shift, Ctrl and Esc. Buttons you leave out keep their keys,
+To rebind, open **Options**, **Controller**, **Rebind**. This opens the game's
+Button Config screen with **Keyboard** and **Controller** in its left list.
+Choose one, pick a button's plate, press A, then press the new key or
+controller button; a press on the other device cancels. The key or button
+swaps with the Xbox button that had it. Left/Right turns the plates to Up,
+Down, Left, Right, Start and Back. **Default** restores that device's
+defaults, B goes back, and leaving the screen saves. Controller buttons apply
+to every controller.
+
+Rebind saves to `private/keyboard.json` and `private/controller.json`, which
+you can also write by hand with the buttons to change, for example
+`{"a": "Space", "b": "Ctrl", "start": "Tab"}` or `{"a": "LB", "white": "A"}`.
+Buttons are up, down, left, right, start, back, a, b, x, y, white, black,
+ltrig and rtrig; keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, Enter,
+Backspace, Space, Tab, Shift, Ctrl and Esc; controller buttons are A, B, X and
+Y (by position, so Cross is A), Back, Start, LB, RB, LT, RT, LS, RS, Up, Down,
+Left, Right, Misc, P1-P4 and Touchpad. Buttons you leave out keep their keys,
 except that a key you give to one button leaves the button that had it. F10
 is a Windows system key, and F11 and Alt+Enter are reserved for fullscreen, so
 none of them can be bound. F3 keeps its

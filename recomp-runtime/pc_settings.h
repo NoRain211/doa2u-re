@@ -49,6 +49,16 @@ typedef struct RecompPcSettingsHost {
     void (*changed)(unsigned setting, unsigned choice, void *context);
     /* The page closed: the host saves the choices. */
     void (*closed)(void *context);
+    /* REBIND, the Controller page's row, opens the game's Button Config
+       screen on the keyboard's and host pads' bindings (input_host_win32.h):
+       what presses a binding (NULL for nothing), listening for a new key
+       (pad false) or pad button, giving them all their defaults, and the
+       screen closing, when the host saves. rebind.h has these. */
+    const char *(*bound)(unsigned binding, bool pad);
+    void (*listen)(unsigned binding, bool pad);
+    bool (*listening)(void);
+    void (*reset)(bool pad);
+    void (*rebind_closed)(void);
     void *context;
 } RecompPcSettingsHost;
 

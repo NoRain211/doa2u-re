@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings.h"
+#include "button_config.h"
 #include "kernel_abi.h"
 #include "runner_assets.h"
 
@@ -22,7 +23,8 @@
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
    no table uses. Its label is made from letters cut out of the other labels'
    own art (group 3), with the same blue glow, as two runner sprites; its
-   text is runner text (runner_assets.c). */
+   text is runner text (runner_assets.c). The Controller page's Rebind row and
+   the Button Config screen it opens are button_config.c. */
 enum {
     PC_ROW = 5,
     TOP_ROWS = 8,
@@ -53,6 +55,7 @@ enum {
     PAGE_LAYOUT = 0x00090ad0u,
     PAGE_TEXT = 0x000910a0u,
     VALUE_TEXT = 0x00091370u,
+    PAGE_CURSOR = 0x00090f00u,
 
     /* Page 19's entries: lookup keys, never read as memory. */
     PC_ENTER = 0x03fffff0u,
@@ -171,15 +174,30 @@ static const Language *language_text(unsigned language)
 }
 
 /* Message numbers from RECOMP_RUNNER_TEXT_PC: rows, then each row's values,
-   then the help lines. */
-enum { MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES, MSG_COUNT = MSG_HELP + HELPS };
+   then the help lines. Button Config's follow them (button_config.c). */
+enum {
+    MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES,
+    MSG_COUNT = MSG_HELP + HELPS
+};
 
-static const recomp_utf16 *message_text(const Language *text, unsigned message)
+/* Registers each message's text in every language; a row's unused values are NULL. */
+static void install_texts(void)
 {
-    if (message < MSG_VALUES) return text->rows[message - MSG_ROWS];
-    if (message < MSG_HELP)
-        return text->values[(message - MSG_VALUES) / MAX_CHOICES][(message - MSG_VALUES) % MAX_CHOICES];
-    return text->help[message - MSG_HELP];
+    static const recomp_utf16 *texts[5][MSG_COUNT];
+    for (unsigned l = 0u; l < 5u; ++l) {
+        const Language *t = &LANGUAGES[l];
+        unsigned m = 0u;
+        for (unsigned row = 0u; row < PC_ROWS; ++row) texts[l][m++] = t->rows[row];
+        for (unsigned row = 0u; row < PC_ROWS; ++row)
+            for (unsigned choice = 0u; choice < MAX_CHOICES; ++choice) texts[l][m++] = t->values[row][choice];
+        for (unsigned help = 0u; help < HELPS; ++help) texts[l][m++] = t->help[help];
+    }
+    for (unsigned m = 0u; m < MSG_COUNT; ++m) {
+        if (texts[0][m] == NULL) continue; /* a row's unused value */
+        const recomp_utf16 *text[6];
+        for (unsigned l = 0u; l < 6u; ++l) text[l] = texts[l >= 2u ? l - 1u : 0u][m];
+        recomp_runner_text_set(RECOMP_RUNNER_TEXT_PC + m, text);
+    }
 }
 
 /* The top list's sprites in each language: white rows, then glows. */
@@ -251,12 +269,8 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
     }
     set_u32(layout + 28u * LAYOUT_RECORDS, 0u);
 
-    for (unsigned m = 0u; m < MSG_COUNT; ++m) {
-        if (message_text(&LANGUAGES[0], m) == NULL) continue; /* a row's unused value */
-        const recomp_utf16 *text[6];
-        for (unsigned l = 0u; l < 6u; ++l) text[l] = message_text(language_text(l), m);
-        recomp_runner_text_set(RECOMP_RUNNER_TEXT_PC + m, text);
-    }
+    install_texts();
+    recomp_button_config_install(&host, RECOMP_RUNNER_TEXT_PC + MSG_COUNT);
 
     /* Two P8 sprites (white label, glow), each palette one colour at every alpha. */
     for (unsigned i = 0u; i < 2u; ++i) {
@@ -522,6 +536,8 @@ static void options_update(void)
     } else if (u16(PAGE) == PC_PAGE) {
         pc_input();
         kernel_return_caller_cleanup(1u);
+    } else if (recomp_button_config_input()) {
+        kernel_return_caller_cleanup(1u);
     } else {
         sub_0011CFC0();
     }
@@ -530,8 +546,10 @@ static void options_update(void)
 static void row_count(void (*original)(void))
 {
     const uint16_t page = (uint16_t)kernel_arg(1u);
+    uint32_t rows;
     if (page == 0u) kernel_return_caller_cleanup(TOP_ROWS);
     else if (page == PC_PAGE) kernel_return_caller_cleanup(PC_ROWS);
+    else if (recomp_button_config_rows(page, &rows)) kernel_return_caller_cleanup(rows);
     else original();
 }
 static void row_count_main(void) { row_count(sub_0011AC90); }
@@ -613,21 +631,24 @@ static void help(void)
 {
     const uint16_t page = (uint16_t)kernel_arg(1u), row = (uint16_t)kernel_arg(2u);
     uint32_t args[3] = {kernel_arg(1u), kernel_arg(2u), kernel_arg(3u)};
-    unsigned help_line = HELPS; /* the game's own */
+    unsigned message = 0u; /* the game's own */
     if (page == 0u) {
         if (row == PC_ROW) {
             args[1] = 0u;
-            help_line = HELP_TOP;
+            message = RECOMP_RUNNER_TEXT_PC + MSG_HELP + HELP_TOP;
         } else if (row > PC_ROW) {
             args[1] = game_row(row);
         }
     } else if (page == PC_PAGE) {
         args[0] = 0u;
         args[1] = 0u;
-        help_line = row < PC_ROWS && live[row] ? HELP_NOW : HELP_NEXT;
+        message = RECOMP_RUNNER_TEXT_PC + MSG_HELP +
+            (row < PC_ROWS && live[row] ? HELP_NOW : HELP_NEXT);
+    } else {
+        message = recomp_button_config_help(page, row, args);
     }
     /* The help line draws message 0xc4 for the row passed. */
-    if (help_line < HELPS) recomp_runner_text_redirect(0xc4u, RECOMP_RUNNER_TEXT_PC + MSG_HELP + help_line);
+    if (message != 0u) recomp_runner_text_redirect(0xc4u, message);
     const uint32_t eax = kernel_call_lifted(sub_00091560, args, 3u);
     recomp_runner_text_redirect(0u, 0u);
     kernel_return_caller_cleanup(eax);
@@ -637,14 +658,26 @@ static void help(void)
 
 static void page_layout(void)
 {
-    if ((uint16_t)kernel_arg(1u) == PC_PAGE) kernel_return_caller_cleanup(layout);
+    const uint16_t page = (uint16_t)kernel_arg(1u);
+    const uint32_t own = recomp_button_config_layout(page);
+    if (page == PC_PAGE) kernel_return_caller_cleanup(layout);
+    else if (own != 0u) kernel_return_caller_cleanup(own);
     else sub_00090AD0();
+}
+
+/* 0x90f00 (context, layout, value mask, cursor, rows, visible). */
+static void page_cursor(void)
+{
+    const uint32_t own = recomp_button_config_cursor(kernel_arg(2u));
+    if (own != 0u) set_arg(2u, own);
+    sub_00090F00();
 }
 
 /* 0x910a0 (page, row) for labels; for values 0x93270 asks 0x91370 (page,
    value row) for a kind and then 0x910a0 (kind, choice) for the text. */
 static void page_text(void)
 {
+    if (recomp_button_config_text()) return;
     if (drawing_pc) {
         const uint16_t key = (uint16_t)kernel_arg(1u);
         if (key == PC_PAGE && kernel_arg(2u) < PC_ROWS) {
@@ -714,10 +747,11 @@ RecompFunction recomp_pc_settings_lookup_manual(uint32_t guest_address)
     case PAGE_LAYOUT: return page_layout;
     case PAGE_TEXT: return page_text;
     case VALUE_TEXT: return value_text;
+    case PAGE_CURSOR: return page_cursor;
     case PC_ENTER: return pc_enter;
     case PC_DRAW: return pc_draw;
     case PC_LEAVE: return pc_leave;
-    default: return NULL;
+    default: return recomp_button_config_lookup_manual(guest_address);
     }
 }
 

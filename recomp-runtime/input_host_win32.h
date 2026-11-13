@@ -26,6 +26,32 @@ void recomp_input_host_set_capture_hook(RecompInputCaptureHook hook);
    The free camera leaves them out while it flies. */
 void recomp_input_host_keyboard_buttons(RecompInputGamepad *pressed_buttons);
 
+/* The pad buttons the keyboard and host pads press, in the Rebind screen's
+   order. RECOMP_KEYMAP="a=20,..." (hex virtual keys) and RECOMP_PADMAP="a=LB,..."
+   (host pad button names), built by run_game.py from private/keyboard.json and
+   private/controller.json, replace the defaults; a key or button given to one
+   leaves the one that had it by default. The stick clicks stay fixed. */
+typedef enum RecompInputBinding {
+    RECOMP_INPUT_BIND_UP, RECOMP_INPUT_BIND_DOWN, RECOMP_INPUT_BIND_LEFT, RECOMP_INPUT_BIND_RIGHT,
+    RECOMP_INPUT_BIND_START, RECOMP_INPUT_BIND_BACK, RECOMP_INPUT_BIND_A, RECOMP_INPUT_BIND_B,
+    RECOMP_INPUT_BIND_X, RECOMP_INPUT_BIND_Y, RECOMP_INPUT_BIND_WHITE, RECOMP_INPUT_BIND_BLACK,
+    RECOMP_INPUT_BIND_LTRIG, RECOMP_INPUT_BIND_RTRIG, RECOMP_INPUT_BIND_COUNT
+} RecompInputBinding;
+/* Its name in the JSON files: "up", "a", "ltrig"... */
+const char *recomp_input_host_binding_name(unsigned binding);
+/* What presses a binding: a virtual-key code, or a host pad button (an index
+   for recomp_input_host_source_name) when pad; -1 for nothing. */
+int recomp_input_host_bound(unsigned binding, bool pad);
+/* Gives source (-1: the binding's default) to the binding; one that had
+   source takes the binding's old one, so no button loses its key. Call where
+   pads are sampled. */
+void recomp_input_host_bind(unsigned binding, bool pad, int source);
+/* A source's name as the JSON files spell it; NULL when it cannot be bound. */
+const char *recomp_input_host_source_name(bool pad, int source);
+/* The first bindable key, or host pad button on any pad, pressed since the
+   last call; -1 for none. Call where pads are sampled. */
+int recomp_input_host_take_press(bool pad);
+
 /* Keys the runtime reads for itself. */
 typedef enum RecompInputHostKey {
     RECOMP_INPUT_HOST_KEY_F1,

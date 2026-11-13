@@ -209,7 +209,7 @@ add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
 add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
 add_executable(recomp_unlock_profile_test unlock_profile.c unlock_profile_test.c)
 add_test(NAME recomp-runtime-unlock-profile COMMAND recomp_unlock_profile_test)
-add_executable(recomp_pc_settings_test pc_settings.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
+add_executable(recomp_pc_settings_test pc_settings.c button_config.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
 add_test(NAME recomp-runtime-pc-settings COMMAND recomp_pc_settings_test)
 add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runner_assets.c d3d_texture_model.c
     menu_quit_test.c)
@@ -310,7 +310,7 @@ endif()
 if(TEST recomp-runtime-input-host-sdl)
     add_test(NAME recomp-runtime-input-host-keymap COMMAND recomp_input_host_test keymap)
     set_tests_properties(recomp-runtime-input-host-keymap PROPERTIES
-        ENVIRONMENT "RECOMP_KEYMAP=a=20,bogus,start=74,x=53;RECOMP_TEST_FOCUSED=1")
+        ENVIRONMENT "RECOMP_KEYMAP=a=20,bogus,start=74,x=53,up=79,down=7a;RECOMP_PADMAP=b=RT,start=Nope;RECOMP_TEST_FOCUSED=1")
 endif()
 if(WIN32)
     add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_xtalk_xapo.cpp
@@ -677,7 +677,8 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c unlock_profile.c pc_settings.c
+        netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c unlock_profile.c pc_settings.c
+        button_config.c
         pc_settings_store.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
