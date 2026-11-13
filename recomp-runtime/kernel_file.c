@@ -4,6 +4,7 @@
 #include "device_model.h"
 #include "symbolic_link_model.h"
 #include "save_transaction.h"
+#include "mod_loader.h"
 #include "stop_report.h"
 
 #include <ctype.h>
@@ -56,6 +57,7 @@ typedef struct FileHandleEntry {
     int write_attributes;
     int delete_on_close;
     RecompReadFilter read_filter;
+    const RecompModOverlay *overlay; /* a mod's archive served over this file (mod_loader.h) */
     uint32_t save_owner;
     uint32_t delete_owner;
     unsigned reads_pending; /* Close waits for these to finish. */
@@ -71,6 +73,7 @@ static FileHandleEntry file_handles[MAX_FILE_HANDLES];
    during DVD and disk DMA. The reading thread resumes when its bytes are in. */
 typedef struct HostRead {
     HANDLE handle;
+    const RecompModOverlay *overlay;
     uint64_t offset;
     void *buffer;
     DWORD length;
@@ -117,6 +120,25 @@ static BOOL read_at(HANDLE handle, uint64_t offset, void *buffer, DWORD length,
 #endif
 }
 
+static bool overlay_base_read(void *context, uint64_t offset, void *buffer, uint32_t length, uint32_t *read)
+{
+    DWORD got = 0u;
+    const BOOL ok = read_at((HANDLE)context, offset, buffer, (DWORD)length, &got);
+    *read = got;
+    return ok != FALSE;
+}
+
+/* A plain host read, or a mod's overlay over the host file. */
+static BOOL read_from(HANDLE handle, const RecompModOverlay *overlay, uint64_t offset, void *buffer, DWORD length,
+    DWORD *bytes_read)
+{
+    if (overlay == NULL) return read_at(handle, offset, buffer, length, bytes_read);
+    uint32_t got = 0u;
+    const bool ok = recomp_mod_overlay_read(overlay, overlay_base_read, (void *)handle, offset, buffer, length, &got);
+    *bytes_read = got;
+    return ok ? TRUE : FALSE;
+}
+
 #ifdef _WIN32
 static DWORD WINAPI read_worker(LPVOID unused)
 #else
@@ -132,7 +154,7 @@ static void *read_worker(void *unused)
         ++reads_running;
         unlock_reads();
         DWORD bytes_read = 0u;
-        BOOL ok = read_at(read->handle, read->offset, read->buffer, read->length, &bytes_read);
+        BOOL ok = read_from(read->handle, read->overlay, read->offset, read->buffer, read->length, &bytes_read);
         lock_reads();
         read->bytes_read = bytes_read;
         read->ok = ok;
@@ -167,7 +189,7 @@ static void run_host_read(HostRead *read)
     }
     if (read_worker_state != 1) {
         unlock_reads();
-        read->ok = read_at(read->handle, read->offset, read->buffer, read->length,
+        read->ok = read_from(read->handle, read->overlay, read->offset, read->buffer, read->length,
             &read->bytes_read);
         return;
     }
@@ -465,6 +487,65 @@ static uint32_t session_attributes(uint32_t host)
     return kept != 0u ? kept : FILE_ATTRIBUTE_NORMAL;
 }
 
+/* ---- Mods (mod_loader.h) ---------------------------------------------- */
+
+static bool mod_write_access(uint32_t desired_access)
+{
+    /* GENERIC_WRITE, GENERIC_ALL, FILE_WRITE_DATA, FILE_APPEND_DATA */
+    return (desired_access & (0x40000000u | 0x10000000u | 0x2u | 0x4u)) != 0u;
+}
+
+static bool mod_key_of(const char *host_path, char *key, size_t key_size)
+{
+    char root[MAX_PATH_LEN];
+    if (!recomp_mod_loader_active() || recomp_disc_root_path == NULL || host_path == NULL) return false;
+    copy_root(root, sizeof root);
+    return recomp_mod_key(root, host_path, key, key_size);
+}
+
+static const RecompModOverlay *mod_overlay_for(HANDLE handle, const char *host_path)
+{
+    char key[MAX_PATH_LEN];
+    LARGE_INTEGER size;
+    if (handle == INVALID_HANDLE_VALUE || !mod_key_of(host_path, key, sizeof key) ||
+        !GetFileSizeEx(handle, &size)) {
+        return NULL;
+    }
+    const RecompModOverlay *overlay = recomp_mod_overlay(key, (uint64_t)size.QuadPart);
+    if (overlay != NULL) fprintf(stderr, "recomp mods: serving %s through its overlay\n", key);
+    return overlay;
+}
+
+/* A directory listing shows a modded file at the size the game will read. */
+static uint64_t mod_listed_size(const char *directory, const char *name, uint64_t size)
+{
+    char path[MAX_PATH_LEN], key[MAX_PATH_LEN];
+    if (!recomp_mod_loader_active()) return size;
+    snprintf(path, sizeof path, "%s\\%s", directory, name);
+    if (!mod_key_of(path, key, sizeof key)) return size;
+    const char *replacement = recomp_mod_replacement(key);
+    if (replacement != NULL) {
+        WIN32_FILE_ATTRIBUTE_DATA data;
+        if (GetFileAttributesExA(replacement, GetFileExInfoStandard, &data))
+            return (uint64_t)data.nFileSizeLow | (uint64_t)data.nFileSizeHigh << 32u;
+        return size;
+    }
+    const RecompModOverlay *overlay = recomp_mod_overlay(key, size);
+    return overlay != NULL ? recomp_mod_overlay_size(overlay) : size;
+}
+
+/* A mod's whole file in place of a disc file (or the Z: cache's copy of
+   one) opened for reading. */
+static void mod_redirect(char *host_path, size_t host_path_size, uint32_t desired_access)
+{
+    char key[MAX_PATH_LEN];
+    if (mod_write_access(desired_access) || !mod_key_of(host_path, key, sizeof key)) return;
+    const char *replacement = recomp_mod_replacement(key);
+    if (replacement == NULL || strlen(replacement) >= host_path_size) return;
+    fprintf(stderr, "recomp mods: %s from %s\n", key, replacement);
+    strcpy(host_path, replacement);
+}
+
 static uint32_t register_file_handle(
     HANDLE host_handle,
     FileHandleKind kind,
@@ -498,6 +579,8 @@ static uint32_t register_file_handle(
                 (file_handles[i].delete_access || file_handles[i].write_attributes);
             file_handles[i].delete_on_close = 0;
             file_handles[i].read_filter = NULL;
+            file_handles[i].overlay = kind == FILE_HANDLE_HOST_FILE && !mod_write_access(desired_access)
+                ? mod_overlay_for(host_handle, host_path) : NULL;
             file_handles[i].save_owner = file_handles[i].save_owned ? current_save_owner() : 0u;
             file_handles[i].delete_owner = 0u;
             file_handles[i].host_handle = host_handle;
@@ -554,6 +637,7 @@ static uint32_t register_file_handle(
                         }
                         size = (uint64_t)data.nFileSizeLow |
                             (uint64_t)data.nFileSizeHigh << 32u;
+                        size = mod_listed_size(host_path, data.cFileName, size);
                         entry.size = size;
                         entry.allocation_size = (size + 4095u) & ~4095ull;
                         entry.attributes = session_attributes(data.dwFileAttributes);
@@ -1431,6 +1515,7 @@ static const char *resolve_and_open(
         return "profile-path-delete-pending";
     }
     DWORD open_error;
+    mod_redirect(host_path, MAX_PATH_LEN, desired_access);
     if (try_open_host_file(host_path, MAX_PATH_LEN, out_host_handle,
             profile_access(host_path, desired_access), share_access, &open_error)) {
         return *out_is_writable ? "host-save-file-open" : "host-disc-file-open";
@@ -1787,6 +1872,7 @@ static void bridge_nt_query_information_file(void)
             policy = "host-file-information-failed";
             break;
         }
+        if (!directory && entry->overlay != NULL) size.QuadPart = (LONGLONG)recomp_mod_overlay_size(entry->overlay);
         if (profile_metadata && file_information_class == FILE_BASIC_INFORMATION &&
             length < 0x28u) {
             status = 0xc0000004u; /* STATUS_INFO_LENGTH_MISMATCH */
@@ -2400,13 +2486,14 @@ static void bridge_nt_read_file(void)
             : (void *)recomp_memory(buffer, length);
         HostRead read = {
             .handle = file_handles[i].host_handle,
+            .overlay = file_handles[i].overlay,
             .offset = read_offset,
             .buffer = host_buffer,
             .length = length,
         };
         if ((file_handles[i].sharing_access & FILE_SHARE_WRITE) != 0u ||
             length == 0u || synchronous_reads) {
-            read.ok = read_at(read.handle, read.offset, read.buffer, read.length,
+            read.ok = read_from(read.handle, read.overlay, read.offset, read.buffer, read.length,
                 &read.bytes_read);
         } else {
             ++file_handles[i].reads_pending;
