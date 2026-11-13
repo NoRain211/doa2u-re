@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -117,33 +118,62 @@ Settings loadSettings(const std::string &path)
     return settings;
 }
 
-// The flat object's keys and raw values, in file order.
-std::vector<std::pair<std::string, std::string>> jsonEntries(const std::string &text)
+// One past a string token at at (a quote), or false when it never ends.
+bool jsonString(const std::string &text, size_t &at)
 {
-    std::vector<std::pair<std::string, std::string>> entries;
-    size_t at = 0;
-    while ((at = text.find('"', at)) != std::string::npos) {
-        const size_t key_end = text.find('"', ++at);
-        if (key_end == std::string::npos) break;
-        const std::string key = text.substr(at, key_end - at);
-        const size_t colon = text.find(':', key_end);
-        if (colon == std::string::npos) break;
-        size_t start = text.find_first_not_of(" \t\r\n", colon + 1);
-        if (start == std::string::npos) break;
-        size_t end;
-        if (text[start] == '"') {
-            end = text.find('"', start + 1);
-            if (end == std::string::npos) break;
-            ++end;
-        } else {
-            end = text.find_first_of(",}", start);
-            if (end == std::string::npos) end = text.size();
-            while (end > start && std::string(" \t\r\n").find(text[end - 1]) != std::string::npos) --end;
-        }
-        entries.emplace_back(key, text.substr(start, end - start));
-        at = end;
+    if (at >= text.size() || text[at] != '"') return false;
+    for (++at; at < text.size(); ++at) {
+        if (text[at] == '\\') { ++at; continue; }
+        if (text[at] == '"') { ++at; return true; }
     }
-    return entries;
+    return false;
+}
+
+// The object's top-level keys and raw values, in file order. Values are copied
+// verbatim, so nested objects and arrays survive; false means malformed.
+bool jsonEntries(const std::string &text, std::vector<std::pair<std::string, std::string>> &entries)
+{
+    size_t at = text.find_first_not_of(" \t\r\n");
+    if (at == std::string::npos || text[at] != '{') return false;
+    ++at;
+    for (;;) {
+        at = text.find_first_not_of(" \t\r\n", at);
+        if (at == std::string::npos) return false;
+        if (text[at] == '}') return true;
+        const size_t key_start = at;
+        if (!jsonString(text, at)) return false;
+        const std::string key = text.substr(key_start + 1, at - key_start - 2);
+        at = text.find_first_not_of(" \t\r\n", at);
+        if (at == std::string::npos || text[at] != ':') return false;
+        at = text.find_first_not_of(" \t\r\n", ++at);
+        if (at == std::string::npos) return false;
+        const size_t value_start = at;
+        int depth = 0;
+        bool quoted = false;
+        for (; at < text.size(); ++at) {
+            const char c = text[at];
+            if (quoted) {
+                if (c == '\\') ++at;
+                else if (c == '"') quoted = false;
+            } else if (c == '"') {
+                quoted = true;
+            } else if (c == '{' || c == '[') {
+                ++depth;
+            } else if (c == '}' || c == ']') {
+                if (depth == 0) break; // the object's own brace
+                --depth;
+            } else if (c == ',' && depth == 0) {
+                break;
+            }
+        }
+        if (at >= text.size()) return false;
+        size_t value_end = at;
+        while (value_end > value_start && std::string(" \t\r\n").find(text[value_end - 1]) != std::string::npos)
+            --value_end;
+        entries.emplace_back(key, text.substr(value_start, value_end - value_start));
+        if (text[at] == '}') return true;
+        ++at; // the comma
+    }
 }
 
 bool saveSettings(const std::string &path, const Settings &settings)
@@ -152,10 +182,15 @@ bool saveSettings(const std::string &path, const Settings &settings)
     // and run_game.py read keys this launcher does not write (vulkan, vrr,
     // game_source, window...), so keep every entry it does not own.
     std::vector<std::pair<std::string, std::string>> entries;
-    {
-        std::ifstream existing(path);
-        entries = jsonEntries(
-            std::string{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()});
+    std::ifstream existing(path, std::ios::binary);
+    if (existing.is_open()) {
+        const std::string text{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
+        // Never rewrite what this cannot read: the file is shared, and a save
+        // that drops the others' keys is worse than no save.
+        if (!jsonEntries(text, entries)) return false;
+    } else {
+        std::error_code error;
+        if (std::filesystem::exists(path, error) || error) return false;
     }
     const auto put = [&entries](const char *key, const std::string &value) {
         for (auto &entry : entries)
