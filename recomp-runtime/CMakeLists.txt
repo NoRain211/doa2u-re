@@ -209,7 +209,7 @@ add_executable(recomp_stage_select_test stage_select.c stage_select_test.c)
 add_test(NAME recomp-runtime-stage-select COMMAND recomp_stage_select_test)
 add_executable(recomp_unlock_profile_test unlock_profile.c unlock_profile_test.c)
 add_test(NAME recomp-runtime-unlock-profile COMMAND recomp_unlock_profile_test)
-add_executable(recomp_pc_settings_test pc_settings.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
+add_executable(recomp_pc_settings_test pc_settings.c button_config.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
 add_test(NAME recomp-runtime-pc-settings COMMAND recomp_pc_settings_test)
 add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runner_assets.c d3d_texture_model.c
     menu_quit_test.c)
@@ -678,6 +678,7 @@ if(RECOMP_PROGRAM_DIR)
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c unlock_profile.c pc_settings.c
+        button_config.c
         pc_settings_store.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
