@@ -257,6 +257,7 @@ struct RecompD3dPresenter {
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
     uint32_t msaa = 1u;         // RECOMP_D3D_MSAA: main target sample count
+    unsigned quality_applied = 0u; // last PC Settings quality generation applied
     float target_scale_x = 1.0f, target_scale_y = 1.0f; // bound target / guest size
     uint32_t target_samples = 1u; // MSAA samples of the bound target
     // Occlusion queries: the open BEGIN, ended ones in submission order, reusable ones.
@@ -386,7 +387,6 @@ struct QualityRequest {
 };
 static std::mutex quality_lock;
 static QualityRequest quality_request;
-static unsigned quality_applied = 0u;
 
 /* The display aspect: RECOMP_D3D_WIDESCREEN's shape (16:9 for 1), else 4:3.
    The game renders 4:3 or that shape anamorphic into its backbuffer; a
@@ -3738,14 +3738,17 @@ void applyQuality(RecompD3dPresenter *presenter)
     QualityRequest want;
     {
         std::lock_guard<std::mutex> lock(quality_lock);
-        if (quality_request.generation == quality_applied) return;
+        if (quality_request.generation == presenter->quality_applied) return;
         want = quality_request;
-        quality_applied = want.generation;
     }
+    const bool old_smaa = presenter->smaa;
     presenter->smaa = want.smaa;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const UINT msaa = supportedSamples(presenter, std::clamp(want.msaa, 1u, 32u));
-    if (scale == presenter->scale && msaa == presenter->msaa) return;
+    if (scale == presenter->scale && msaa == presenter->msaa) {
+        presenter->quality_applied = want.generation;
+        return;
+    }
 
     auto *context = presenter->context;
     context->ClearState();
@@ -3794,6 +3797,7 @@ void applyQuality(RecompD3dPresenter *presenter)
         releaseCom(depth_texture);
         presenter->scale = old_scale;
         presenter->msaa = old_msaa;
+        presenter->smaa = old_smaa;
     } else {
         blitPicture(presenter, presenter->vrr_source, main_render, width, height);
         context->ClearDepthStencilView(depth_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0u);
@@ -3865,6 +3869,7 @@ void applyQuality(RecompD3dPresenter *presenter)
         // A 480-line picture is windowed and a scaled one fills the screen, as at start.
         if ((old_scale > 1.0f) != (scale > 1.0f) && presenter->fullscreen != (scale > 1.0f))
             toggleFullscreen(presenter);
+        presenter->quality_applied = want.generation;
     }
     context->ClearState();
     context->OMSetRenderTargets(1u, &presenter->render_target_view, presenter->depth_view);
