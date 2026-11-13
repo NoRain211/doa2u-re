@@ -2894,6 +2894,43 @@ static bool testQueuedDrawCoverage()
     else std::fprintf(stderr, "FAIL queued coverage result\n");
     return passed;
 }
+
+/* A 4:3 high-resolution target into a smaller window exercises the present mips. */
+static bool testPresentDownscale()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "dn", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "0");
+    _putenv_s("RECOMP_D3D_SCALE", "6");
+    const RecompD3dPresenterConfig downscale_config = {
+        720u, 480u, RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM,
+        RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8};
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create present downscale", d3d_backend_create(&downscale_config, &presenter));
+    if (passed) {
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff336699u;
+        passed &= expect("downscale clear", d3d_backend_submit(presenter, &clear));
+        RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        present.data.present = {5u, 1u};
+        passed &= expect("downscale present", d3d_backend_submit(presenter, &present));
+    }
+    d3d_backend_destroy(&presenter);
+    if (FILE *file = std::fopen(path, "rb")) {
+        uint32_t width = 0u, height = 0u;
+        std::fseek(file, 18, SEEK_SET);
+        passed &= std::fread(&width, 4, 1, file) == 1 && std::fread(&height, 4, 1, file) == 1;
+        std::fclose(file);
+        passed &= width == 3840u && height == 2880u;
+    } else passed = false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    _putenv_s("RECOMP_D3D_SCALE", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS 4:3 high-resolution present downscales into a smaller window");
+    return passed;
+}
 // A full-frame MSAA target sampled, redrawn and sampled again must show the redraw.
 static bool testResampledMsaaTarget()
 {
@@ -2998,7 +3035,7 @@ int main()
         !testStageBump() ||
         !testStageWater() ||
         !testVisibility() ||
-        !testClose(false) || !testClose(true)) return 1;
+        !testClose(false) || !testClose(true) || !testPresentDownscale()) return 1;
     std::puts("PASS presenter render thread");
     return 0;
 }

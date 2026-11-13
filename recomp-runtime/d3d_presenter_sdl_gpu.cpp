@@ -286,6 +286,8 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *main_resolve = nullptr;  // main_color itself without MSAA
     SDL_GPUTexture *main_depth = nullptr;
     bool main_resolved = true;
+    SDL_GPUTexture *present_texture = nullptr;  // main picture with mips, for a smaller window
+    uint32_t present_width = 0u, present_height = 0u;
     SDL_GPUTexture *back_buffer_copy = nullptr;   // GetBackBuffer(0) snapshots
     SDL_GPUTexture *previous_frame = nullptr;     // GetBackBuffer(-1)
     bool copy_mips = false;
@@ -396,6 +398,13 @@ uint32_t scaledSize(const RecompD3dPresenter *presenter, uint32_t guest)
     return std::min(static_cast<uint32_t>(guest * presenter->scale + 0.5f), kMaxTextureSize);
 }
 
+uint32_t mipLevels(uint32_t width, uint32_t height)
+{
+    uint32_t levels = 1u;
+    while (((std::max)(width, height) >> levels) != 0u) ++levels;
+    return levels;
+}
+
 uint32_t sampleCount(SDL_GPUSampleCount samples)
 {
     switch (samples) {
@@ -448,6 +457,46 @@ SDL_GPUTexture *createTexture(RecompD3dPresenter *presenter, SDL_GPUTextureType 
     info.num_levels = levels;
     info.sample_count = samples;
     return SDL_CreateGPUTexture(presenter->device, &info);
+}
+
+/* The mip whose texels cover the window's pixels, so the blit averages what it
+   drops instead of taking one bilinear tap from level 0. */
+uint32_t presentMipLevel(uint32_t width, uint32_t height,
+    uint32_t destination_width, uint32_t destination_height)
+{
+    if (destination_width == 0u || destination_height == 0u) return 0u;
+    const float ratio = (std::max)(static_cast<float>(width) / destination_width,
+        static_cast<float>(height) / destination_height);
+    if (ratio < 2.0f) return 0u;
+    const uint32_t last = mipLevels(width, height) - 1u;
+    return (std::min)(static_cast<uint32_t>(std::floor(std::log2(ratio))), last);
+}
+
+bool ensurePresentTexture(RecompD3dPresenter *presenter)
+{
+    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
+    if (presenter->present_texture != nullptr && presenter->present_width == width &&
+        presenter->present_height == height) return true;
+    if (presenter->present_texture != nullptr) {
+        SDL_ReleaseGPUTexture(presenter->device, presenter->present_texture);
+        presenter->present_texture = nullptr;
+    }
+    presenter->present_width = presenter->present_height = 0u;
+    presenter->present_texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+        width, height, 1u, mipLevels(width, height));
+    if (presenter->present_texture == nullptr) {
+        static bool reported;
+        if (!reported) {
+            reported = true;
+            std::fprintf(stderr, "recomp d3d presenter: present mips unavailable: %s\n", SDL_GetError());
+        }
+        return false;
+    }
+    presenter->present_width = width;
+    presenter->present_height = height;
+    return true;
 }
 
 /* Resolves a multisampled color target into its single-sample twin with an
@@ -856,10 +905,8 @@ SDL_GPUTexture *lookupBackBufferTexture(RecompD3dPresenter *presenter,
     if (created) {
         /* An upscaled copy keeps mips so a guest downsample (the 256x256
            depth-of-field source) averages its footprint like the Xbox did. */
-        uint32_t levels = 1u;
-        if (presenter->copy_mips) {
-            while ((std::max(mainWidth(presenter), mainHeight(presenter)) >> levels) != 0u) ++levels;
-        }
+        const uint32_t levels = presenter->copy_mips
+            ? mipLevels(mainWidth(presenter), mainHeight(presenter)) : 1u;
         copy = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
             SDL_GPU_TEXTUREUSAGE_SAMPLER | (levels > 1u ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0u),
             mainWidth(presenter), mainHeight(presenter), 1u, levels);
@@ -2873,10 +2920,33 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
             height = static_cast<int>(swap_width / source_aspect + 0.5f);
             y = (static_cast<int>(swap_height) - height) / 2;
         }
+        SDL_GPUTexture *source = shown;
+        uint32_t source_width = mainWidth(presenter), source_height = mainHeight(presenter);
+        uint32_t mip = presentMipLevel(source_width, source_height,
+            static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+        if (mip != 0u && ensurePresentTexture(presenter)) {
+            if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+                const SDL_GPUTextureLocation copy_source{shown, 0u, 0u, 0u, 0u, 0u};
+                const SDL_GPUTextureLocation copy_destination{presenter->present_texture,
+                    0u, 0u, 0u, 0u, 0u};
+                SDL_CopyGPUTextureToTexture(pass, &copy_source, &copy_destination,
+                    source_width, source_height, 1u, false);
+                SDL_EndGPUCopyPass(pass);
+                SDL_GenerateMipmapsForGPUTexture(commands, presenter->present_texture);
+                source = presenter->present_texture;
+                source_width >>= mip;
+                source_height >>= mip;
+            } else {
+                mip = 0u;
+            }
+        } else {
+            mip = 0u;
+        }
         SDL_GPUBlitInfo blit{};
-        blit.source.texture = shown;
-        blit.source.w = mainWidth(presenter);
-        blit.source.h = mainHeight(presenter);
+        blit.source.texture = source;
+        blit.source.mip_level = mip;
+        blit.source.w = source_width;
+        blit.source.h = source_height;
         blit.destination.texture = swapchain;
         blit.destination.x = static_cast<Uint32>(x);
         blit.destination.y = static_cast<Uint32>(y);
@@ -3022,8 +3092,9 @@ void releasePresenter(RecompD3dPresenter *presenter)
     for (SDL_GPUTexture *texture : presenter->smaa_textures) {
         if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
     }
-    for (SDL_GPUTexture *texture : {presenter->gamma_target, presenter->back_buffer_copy, presenter->previous_frame,
-            presenter->white_texture, presenter->white_volume, presenter->main_depth}) {
+    for (SDL_GPUTexture *texture : {presenter->gamma_target, presenter->present_texture,
+            presenter->back_buffer_copy, presenter->previous_frame, presenter->white_texture,
+            presenter->white_volume, presenter->main_depth}) {
         if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
     }
     if (presenter->main_resolve != nullptr && presenter->main_resolve != presenter->main_color)
@@ -3257,10 +3328,11 @@ void applyQuality(RecompD3dPresenter *presenter)
         }
     }
     for (SDL_GPUTexture **texture : {&presenter->back_buffer_copy, &presenter->previous_frame,
-            &presenter->gamma_target}) {
+            &presenter->gamma_target, &presenter->present_texture}) {
         if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
         *texture = nullptr;
     }
+    presenter->present_width = presenter->present_height = 0u;
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     presenter->gamma_pipeline = nullptr;
     if (presenter->gamma_enabled && !ensureGammaPass(presenter)) presenter->gamma_enabled = false;
