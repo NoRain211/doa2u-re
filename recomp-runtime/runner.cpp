@@ -182,7 +182,7 @@ static void installPcSettings(bool online)
     }
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
-    // The Vulkan renderer rebuilds its targets live; Direct3D 11 takes them at the next start.
+    // Both renderers rebuild their targets live (applyQuality in each presenter).
     const bool quality = recomp_d3d_presenter_quality_live();
     for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA})
         recomp_pc_settings_set_live(setting, quality);

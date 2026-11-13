@@ -1,3 +1,4 @@
+#include "d3d_presenter_d3d11.h"
 #include "d3d_presenter_backend.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
@@ -5,6 +6,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
+#include "texture_upscale.h"
 #include "widescreen.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -61,12 +63,6 @@ bool unpacedRun()
     return value != nullptr && std::strcmp(value, "1") == 0;
 }
 
-struct FrameRateCounter {
-    ULONGLONG start_ms = 0;
-    uint32_t frames = 0;
-    bool started = false;
-};
-
 bool sampleFrameRate(FrameRateCounter &counter, ULONGLONG now, double &fps, double &ms)
 {
     if (!counter.started) {
@@ -92,318 +88,9 @@ LRESULT CALLBACK presenterWindowProc(
     WPARAM wparam,
     LPARAM lparam);
 
-template <typename T>
-void releaseCom(T *&object)
-{
-    if (object != nullptr) {
-        object->Release();
-        object = nullptr;
-    }
-}
-
-/* Compiled state for one FVF. */
-/* ponytail: 16 pipelines cover the measured ten-pipeline pool working set.
-   Revisit the bound if another scene exceeds it and causes compilation churn. */
-constexpr uint32_t kDrawPipelineSlots = 16u;
-
-struct DrawPipeline {
-    uint32_t fvf;
-    uint32_t program_count;
-    uint32_t program[136][4];
-    bool used;
-    bool failed;
-    bool scaled_depth_bias;
-    bool sample_depth_bias;
-    bool coverage_only;
-    bool projected_stages;
-    ID3D11VertexShader *vertex_shader;
-    ID3D11GeometryShader *geometry_shader;
-    ID3D11PixelShader *pixel_shader;
-    ID3D11InputLayout *input_layout;
-};
-
-/* Depth-stencil states are few and repeat every frame, so they are cached by
-   the guest state that produced them rather than rebuilt per draw. */
-constexpr uint32_t kDepthStateSlots = 16u;
-
-struct DepthStateEntry {
-    bool used;
-    bool test_enable;
-    bool write_enable;
-    RecompD3dCompareFunc func;
-    bool stencil_enable;
-    RecompD3dCompareFunc stencil_func;
-    uint32_t stencil_read_mask;
-    uint32_t stencil_write_mask;
-    RecompD3dStencilOp stencil_fail;
-    RecompD3dStencilOp stencil_zfail;
-    RecompD3dStencilOp stencil_pass;
-    ID3D11DepthStencilState *state;
-};
-
-constexpr uint32_t kRasterStateSlots = 16u;
-struct RasterStateEntry {
-    RecompD3dCullMode cull;
-    int32_t bias;
-    float slope;
-    ID3D11RasterizerState *state;
-};
-
-constexpr uint32_t kBlendStateSlots = 16u;
-
-struct BlendStateEntry {
-    bool used;
-    bool enable;
-    RecompD3dBlendFactor src;
-    RecompD3dBlendFactor dst;
-    RecompD3dBlendOp op;
-    uint8_t color_write_mask;
-    ID3D11BlendState *state;
-};
-
-constexpr uint32_t kSamplerSlots = 64u;
-
-struct SamplerEntry {
-    D3D11_TEXTURE_ADDRESS_MODE u, v, w;
-    bool point_mip_filter;
-    float mip_lod_bias;
-    ID3D11SamplerState *state;
-};
-
-/* Guest textures are cached by address and shape. Linear movie buffers are
-   rewritten in place, so their pixels are refreshed whenever sampled.
-   Map and menu screens sample about 300 textures per frame; a FIFO smaller
-   than one frame's set evicts each texture before its next use and rebuilds
-   all of them every frame. */
-constexpr uint32_t kTextureSlots = 4096u;
-constexpr uint32_t kPaletteBytes = 256u * 4u;
-
-struct TextureEntry {
-    bool used;
-    uint32_t data;
-    uint32_t format_byte;
-    uint32_t width;
-    uint32_t height;
-    uint32_t volume_depth;
-    uint32_t mip_levels;
-    uint8_t palette[kPaletteBytes];
-    uint64_t fingerprint;
-    ID3D11ShaderResourceView *view;
-};
-
-/* A guest buffer can be refilled with another texture of the same size and
-   format without being freed (item previews reuse theirs), so a hit must also
-   match the texels.
-   Small spans hash every byte; repeated whole-word samples can cancel changes.
-   shortcut: larger spans sample 128 words; hash all bytes if a missed rewrite is observed. */
-uint64_t textureFingerprint(const void *bytes, uint32_t count)
-{
-    const auto *data = static_cast<const uint8_t *>(bytes);
-    uint64_t hash = 0xcbf29ce484222325ull ^ count;
-    if (count <= 1024u) {
-        for (uint32_t i = 0u; i < count; ++i) hash = (hash ^ data[i]) * 0x100000001b3ull;
-        return hash;
-    }
-    constexpr uint32_t kSamples = 128u;
-    for (uint32_t i = 0u; i < kSamples; ++i) {
-        uint64_t word;
-        std::memcpy(&word, data + static_cast<uint64_t>(count - 8u) * i / (kSamples - 1u), 8u);
-        hash = (hash ^ word) * 0x100000001b3ull;
-    }
-    return hash;
-}
-
-/* Rendered pixels have no CPU copy to re-upload after texture FIFO eviction.
-   Retain targets until their guest backing storage is released.
-   shortcut: retain at most 64 MiB of guest target storage; add suballocation
-   retirement if scene targets exhaust this budget. Host storage scales with AA/resolution. */
-constexpr uint64_t kTargetByteLimit = 64u * 1024u * 1024u;
-
-struct RenderTargetEntry {
-    RecompD3dTextureDesc desc;
-    ID3D11RenderTargetView *render_view;
-    ID3D11ShaderResourceView *sample_view;
-    bool multisampled;
-    bool resolved;  // sample_view holds every write since the last resolve
-    uint64_t bytes;
-    uint32_t host_width, host_height;
-};
-
-/* Depth belongs to its guest storage, which can serve several color targets. */
-
-struct DepthTargetEntry {
-    RecompD3dTextureDesc desc;
-    ID3D11DepthStencilView *view;
-    bool host_main;  // created at the scaled/MSAA main target size
-    uint64_t bytes;
-    uint32_t host_width;
-};
-
-} // namespace
-
-struct RecompD3dPresenter {
-    RecompD3dPresenterConfig config{};
-    DWORD owner_thread = 0;
-    HINSTANCE instance = nullptr;
-    bool owns_window_class = false;
-    HWND window = nullptr;
-    bool close_requested = false;
-    bool fullscreen = false;           // borderless over the monitor; F11 and Alt+Enter toggle it
-    WINDOWPLACEMENT windowed_placement{}; // where leaving fullscreen returns; length 0 = unset
-    bool widescreen = false;
-    uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
-    float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
-    uint32_t msaa = 1u;         // RECOMP_D3D_MSAA: main target sample count
-    float target_scale_x = 1.0f, target_scale_y = 1.0f; // bound target / guest size
-    uint32_t target_samples = 1u; // MSAA samples of the bound target
-    // Occlusion queries: the open BEGIN, ended ones in submission order, reusable ones.
-    struct VisibilityQuery { ID3D11Query *query; uint32_t index; float samples_per_pixel; };
-    ID3D11Query *visibility_active = nullptr;
-    std::vector<VisibilityQuery> visibility_pending;
-    std::vector<ID3D11Query *> visibility_free;
-    bool smaa = false;          // RECOMP_D3D_SMAA: post-process the output
-    ID3D11VertexShader *smaa_vs[3]{};   // edges, weights, blend
-    ID3D11PixelShader *smaa_ps[3]{};
-    ID3D11ShaderResourceView *smaa_views[6]{}; // -, edges, area, search, weights, output
-    ID3D11RenderTargetView *smaa_targets[3]{}; // edges, weights, output
-    ID3D11SamplerState *smaa_samplers[2]{};   // linear, point
-    ID3D11Device *device = nullptr;
-    ID3D11DeviceContext *context = nullptr;
-    IDXGISwapChain *swap_chain = nullptr;
-    ID3D11RenderTargetView *render_target_view = nullptr;
-    ID3D11RenderTargetView *present_target_view = nullptr;
-    // VRR only: main-sized output, downscaled into the window-sized swap chain.
-    ID3D11RenderTargetView *vrr_target_view = nullptr;
-    ID3D11ShaderResourceView *vrr_source = nullptr;
-    ID3D11VertexShader *vrr_vs = nullptr;
-    ID3D11PixelShader *vrr_ps = nullptr;
-    ID3D11SamplerState *vrr_sampler = nullptr;
-    ID3D11VertexShader *gamma_vertex_shader = nullptr;
-    ID3D11PixelShader *gamma_pixel_shader = nullptr;
-    ID3D11Buffer *gamma_buffer = nullptr;
-    bool gamma_enabled = false;
-    ID3D11Texture2D *back_buffer_copy = nullptr;
-    ID3D11ShaderResourceView *back_buffer_sample = nullptr;
-    ID3D11Texture2D *previous_frame = nullptr;
-    ID3D11ShaderResourceView *previous_frame_sample = nullptr;
-    ID3D11Texture2D *depth_texture = nullptr;
-    ID3D11DepthStencilView *depth_view = nullptr;
-    ID3D11Buffer *draw_vertex_buffer = nullptr;
-    ID3D11Buffer *draw_index_buffer = nullptr;
-    ID3D11Buffer *draw_constant_buffer = nullptr;
-    /* D3D11.1 ring of per-draw constants, bound by offset; null falls back to
-       draw_constant_buffer, which renames on every draw. */
-    ID3D11DeviceContext1 *context1 = nullptr;
-    ID3D11Buffer *constant_ring = nullptr;
-    UINT constant_ring_used = 0u;
-    /* Ring slot holding the previous draw's constants and a copy of them, so an
-       unchanged draw rebinds the slot instead of uploading it again. */
-    UINT constant_last_offset = ~0u;
-    float constant_last[kRecompD3dDrawConstantFloats];
-    RasterStateEntry raster_states[kRasterStateSlots]{};
-    uint32_t raster_state_count = 0u, next_raster_state_slot = 0u;
-    UINT draw_vertex_capacity = 0u;
-    UINT draw_index_capacity = 0u;
-    UINT draw_vertex_used = 0u;
-    UINT draw_index_used = 0u;
-    /* One pipeline per FVF. A failure is recorded against its own FVF so a
-       stream this seam cannot build never disables the ones it can. */
-    DrawPipeline draw_pipelines[kDrawPipelineSlots]{};
-    uint32_t draw_pipeline_count = 0u;
-    uint32_t next_draw_pipeline_slot = 0u;
-    std::atomic<bool> precompile_stop{false};
-    std::thread precompile;
-    DepthStateEntry depth_states[kDepthStateSlots]{};
-    uint32_t depth_state_count = 0u;
-    uint32_t next_depth_state_slot = 0u;
-    BlendStateEntry blend_states[kBlendStateSlots]{};
-    uint32_t blend_state_count = 0u;
-    uint32_t next_blend_state_slot = 0u;
-    std::vector<TextureEntry> textures = std::vector<TextureEntry>(kTextureSlots);
-    std::unordered_multimap<uint32_t, uint32_t> texture_index; // guest address -> slot
-    uint32_t texture_count = 0u;
-    uint32_t next_texture_slot = 0u;
-    std::vector<RenderTargetEntry> render_targets;
-    std::vector<DepthTargetEntry> depth_targets;
-    uint64_t target_bytes = 0u;
-    ID3D11SamplerState *draw_sampler = nullptr;
-    SamplerEntry samplers[kSamplerSlots]{};
-    uint32_t sampler_count = 0u;
-    uint32_t next_sampler_slot = 0u;
-    ID3D11SamplerState *filter_sampler = nullptr;
-    ID3D11SamplerState *program_mask_sampler = nullptr;
-    bool draw_shared_ready = false;
-    bool draw_shared_failed = false;
-    uint32_t draw_count = 0u;
-    bool first_draw_reported = false;
-    const char *driver_name = "unknown";
-    HRESULT create_result = E_FAIL;
-    uint32_t present_count = 0;
-    bool performance_counter = false;
-    FrameRateCounter frame_rate;
-    // RECOMP_PERF_COUNTER pacing: present-to-present gaps within the second.
-    double last_present_ms = 0.0;
-    double present_call_max_ms = 0.0;
-    double texture_create_ms = 0.0;  // cache-miss texture builds within the second
-    unsigned textures_created = 0u;
-    std::vector<double> present_gaps;
-    // Display refreshes each present stayed on screen (DXGI statistics), 1..8+.
-    unsigned refresh_holds[9]{};
-    UINT last_stat_present = 0u, last_stat_refresh = 0u;
-    /* RECOMP_D3D_PRESENT_LOG: one CSV row of raw DXGI counters per present,
-       in QPC ticks, to line up with a PresentMon --qpc_time capture. */
-    FILE *present_log = nullptr;
-    UINT sync_interval = 1u;
-    std::chrono::steady_clock::time_point next_refresh_check{};
-    bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
-    long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
-    bool first_present_reported = false;
-    unsigned frame_dump_count = 0u;
-    ULONGLONG next_frame_dump_ms = 0u;
-    /* RECOMP_D3D_DRAW_LOG names a trigger file: when it appears, the next
-       frame's draws are logged, that frame is saved beside it, and it is deleted. */
-    const char *draw_log_trigger = nullptr;
-    bool draw_log_active = false;
-    unsigned draw_log_index = 0u;
-};
-
-namespace {
-
 RecompD3dPresenter *active_presenter;
 
 static bool immediate_present;
-
-/* The display aspect: RECOMP_D3D_WIDESCREEN's shape (16:9 for 1), else 4:3.
-   The game renders 4:3 or that shape anamorphic into its backbuffer; a
-   netplay session takes the host's 4:3 or 16:9, and submitPresent fits it in. */
-uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
-{
-    return static_cast<uint32_t>(presenter->widescreen
-        ? (height * presenter->aspect_w + presenter->aspect_h - 1u) / presenter->aspect_h
-        : (height * 4u + 1u) / 3u);
-}
-
-/* A scaled main target renders at the display aspect, so the anamorphic guest
-   width gets full horizontal detail too. Scale 1 keeps the guest size. */
-uint32_t mainHeight(const RecompD3dPresenter *presenter)
-{
-    return static_cast<uint32_t>(presenter->config.height * presenter->scale + 0.5f);
-}
-
-uint32_t mainWidth(const RecompD3dPresenter *presenter)
-{
-    return presenter->scale == 1.0f
-        ? presenter->config.width : presentClientWidth(presenter, mainHeight(presenter));
-}
-
-/* Offscreen scenes with their own depth (water reflections) scale too; their samplers use
-   normalized UVs. Depthless filter chains (bloom, haze) keep guest size: their taps are one
-   guest texel apart, so scaling them leaves gaps between taps and a sharp halo. */
-uint32_t scaledSize(const RecompD3dPresenter *presenter, uint32_t guest)
-{
-    return (std::min)(static_cast<uint32_t>(guest * presenter->scale + 0.5f),
-        static_cast<uint32_t>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION));
-}
 
 /* A scaled window covers the primary screen, whatever its shape; scale 1
    keeps a 480-line window. (DOA3 port, issue #45 there.) */
@@ -434,49 +121,6 @@ D3D11_VIEWPORT fitViewport(float aspect, UINT width, UINT height)
     const float w = (std::min)(fitted, static_cast<float>(width));
     const float h = fitted <= width ? static_cast<float>(height) : std::round(width / aspect);
     return {std::floor((width - w) / 2.0f), std::floor((height - h) / 2.0f), w, h, 0.0f, 1.0f};
-}
-
-/* Borderless fullscreen on the window's monitor. The swap chain follows the
-   client size on the next present. A window that started fullscreen (scale > 1)
-   leaves it for a centered 480-line window. */
-void toggleFullscreen(RecompD3dPresenter *presenter)
-{
-    HWND window = presenter->window;
-    if (!presenter->fullscreen) {
-        MONITORINFO monitor{sizeof monitor};
-        GetWindowPlacement(window, &presenter->windowed_placement);
-        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
-        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-        SetWindowPos(window, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
-            monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-            SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
-    } else {
-        WINDOWPLACEMENT &placement = presenter->windowed_placement;
-        if (placement.length == 0u) {
-            MONITORINFO monitor{sizeof monitor};
-            RECT origin{}; // Placement coordinates are relative to the primary monitor's work area.
-            if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) ||
-                !SystemParametersInfoW(SPI_GETWORKAREA, 0, &origin, 0)) {
-                // Zeroed geometry would put the window off-screen; center on the primary screen instead.
-                monitor.rcWork = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
-                origin = {};
-            }
-            RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
-                static_cast<LONG>(presenter->config.height)};
-            AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
-            const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
-            const LONG left = (monitor.rcWork.left + monitor.rcWork.right - width) / 2 - origin.left;
-            const LONG top = (monitor.rcWork.top + monitor.rcWork.bottom - height) / 2 - origin.top;
-            placement.length = sizeof placement;
-            placement.showCmd = SW_SHOWNORMAL;
-            placement.rcNormalPosition = {left, top, left + width, top + height};
-        }
-        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-        SetWindowPlacement(window, &placement);
-        SetWindowPos(window, nullptr, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-    }
-    presenter->fullscreen = !presenter->fullscreen;
 }
 
 LRESULT CALLBACK presenterWindowProc(
@@ -521,15 +165,6 @@ bool configSupported(const RecompD3dPresenterConfig &config)
         config.color_format ==
             RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM &&
         config.depth_format == RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8;
-}
-
-void releaseSmaa(RecompD3dPresenter *presenter)
-{
-    for (auto &shader : presenter->smaa_vs) releaseCom(shader);
-    for (auto &shader : presenter->smaa_ps) releaseCom(shader);
-    for (auto &view : presenter->smaa_views) releaseCom(view);
-    for (auto &view : presenter->smaa_targets) releaseCom(view);
-    for (auto &sampler : presenter->smaa_samplers) releaseCom(sampler);
 }
 
 void releaseGraphics(RecompD3dPresenter *presenter)
@@ -1235,6 +870,7 @@ RecompD3dPresenterError bindTarget(
             created.bytes = bytes;
             created.host_width = host_width;
             created.host_height = host_height;
+            created.scaled = scaled;
             try {
                 presenter->render_targets.push_back(created);
             } catch (const std::bad_alloc &) {
@@ -2156,62 +1792,6 @@ void copyGuestBuffer(RecompD3dPresenter *presenter, ID3D11Resource *target)
     releaseCom(source);
 }
 
-ID3D11ShaderResourceView *lookupBackBufferTexture(
-    RecompD3dPresenter *presenter,
-    const RecompD3dTextureDesc &desc,
-    bool previous_frame = false)
-{
-    /* 3D scenes use a horizontally supersampled guest back buffer (1440x480
-       for 720x480 output). The host keeps one resolved buffer, and linear
-       UVs are normalised by the guest size, so whole multiples map onto it. */
-    if (desc.format_byte != 0x12u || !desc.linear || desc.depth ||
-        desc.width == 0u || desc.height == 0u ||
-        desc.width % presenter->config.width != 0u ||
-        desc.height % presenter->config.height != 0u ||
-        presenter->render_target_view == nullptr) return nullptr;
-
-    ID3D11Texture2D *&copy = previous_frame ? presenter->previous_frame : presenter->back_buffer_copy;
-    ID3D11ShaderResourceView *&sample =
-        previous_frame ? presenter->previous_frame_sample : presenter->back_buffer_sample;
-    /* An upscaled copy keeps mips so a guest downsample (the 256x256
-       depth-of-field source) averages its footprint like the Xbox did. */
-    const bool mips = presenter->scale != 1.0f;
-    const bool created = copy == nullptr;
-    if (created) {
-        D3D11_TEXTURE2D_DESC texture_desc{};
-        texture_desc.Width = mainWidth(presenter);
-        texture_desc.Height = mainHeight(presenter);
-        texture_desc.MipLevels = mips ? 0u : 1u;
-        texture_desc.ArraySize = 1u;
-        texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        texture_desc.SampleDesc.Count = 1u;
-        texture_desc.Usage = D3D11_USAGE_DEFAULT;
-        texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
-            (mips ? D3D11_BIND_RENDER_TARGET : 0u);
-        texture_desc.MiscFlags = mips ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0u;
-        HRESULT result = presenter->device->CreateTexture2D(
-            &texture_desc, nullptr, &copy);
-        if (SUCCEEDED(result)) {
-            result = presenter->device->CreateShaderResourceView(copy, nullptr, &sample);
-        }
-        if (FAILED(result)) {
-            releaseCom(sample);
-            releaseCom(copy);
-            return nullptr;
-        }
-    }
-    /* Present refreshes the previous frame; until the first one, use this frame. */
-    if (previous_frame && !created) return sample;
-    /* Sampling observes the current render buffer at this draw, even if the
-       preceding draw sampled an older copy. Keep the copy outside the FIFO. */
-    ID3D11ShaderResourceView *none = nullptr;
-    presenter->context->PSSetShaderResources(0u, 1u, &none);
-    copyGuestBuffer(presenter, copy);
-    /* Every view exposes the chain; refresh it with each new snapshot. */
-    if (mips) presenter->context->GenerateMips(sample);
-    return sample;
-}
-
 /* Xbox D3DTADDRESS WRAP..BORDER (1..4) share D3D11's values and CLAMPTOEDGE
    clamps. The casino Zack sprite draws V 0..2 with CLAMP; wrap shows it twice. */
 ID3D11SamplerState *lookupDrawSampler(RecompD3dPresenter *presenter,
@@ -2263,9 +1843,25 @@ void unindexTexture(RecompD3dPresenter *presenter, uint32_t slot)
 }
 
 
+/* 2D draws (pretransformed vertices: menus, fonts, the HUD) may take a copy
+   of their texture redrawn larger by texture_upscale.cpp, as the Vulkan
+   renderer does; only 32-bit swizzled art qualifies (A8R8G8B8 and P8). */
+uint32_t upscaleFactor(const RecompD3dPresenterDrawCommand &draw)
+{
+    const RecompD3dTextureDesc &desc = draw.texture;
+    const bool compressed = desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ||
+        desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 || desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5;
+    return desc.volume_depth == 0u && !compressed && desc.format_byte != 0x12u && !desc.linear &&
+            hostTextureFormat(desc.format_byte) == DXGI_FORMAT_B8G8R8A8_UNORM &&
+            desc.width * 4u <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION &&
+            desc.height * 4u <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
+        ? recomp_texture_upscale_factor(desc.width, desc.height) : 1u;
+}
+
 ID3D11ShaderResourceView *lookupTexture(
     RecompD3dPresenter *presenter,
-    const RecompD3dPresenterDrawCommand &draw)
+    const RecompD3dPresenterDrawCommand &draw,
+    uint32_t scale = 1u)
 {
     const RecompD3dTextureDesc &desc = draw.texture;
     const bool volume = desc.volume_depth != 0u;
@@ -2340,7 +1936,7 @@ ID3D11ShaderResourceView *lookupTexture(
 
         if (entry.format_byte == desc.format_byte &&
             entry.width == desc.width && entry.height == desc.height && entry.volume_depth == desc.volume_depth &&
-            entry.mip_levels == levels &&
+            entry.mip_levels == levels && entry.scale == scale &&
             (!palettized || std::memcmp(entry.palette, draw.palette_bytes, kPaletteBytes) == 0)) {
             if (fingerprinted && entry.fingerprint != fingerprint) {
                 static unsigned reported;
@@ -2456,8 +2052,27 @@ ID3D11ShaderResourceView *lookupTexture(
         }
     }
 
+    /* The larger copy keeps a mip chain, so art drawn smaller than it stays
+       smooth; its mips are generated, so it is a render target too. */
+    std::vector<uint8_t> upscaled;
+    const bool larger = scale > 1u && !volume && initial.pSysMem == unswizzled.data() &&
+        unswizzled.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
+        recomp_texture_upscale(unswizzled.data(), desc.width, desc.height, scale, upscaled);
     ID3D11Resource *texture = nullptr;
-    if (volume) {
+    if (larger) {
+        texture_desc.Width = desc.width * scale;
+        texture_desc.Height = desc.height * scale;
+        texture_desc.MipLevels = 0u;
+        texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texture_desc.Usage = D3D11_USAGE_DEFAULT;
+        texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        texture_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+        ID3D11Texture2D *created = nullptr;
+        if (FAILED(presenter->device->CreateTexture2D(&texture_desc, nullptr, &created))) return nullptr;
+        presenter->context->UpdateSubresource(created, 0u, nullptr, upscaled.data(),
+            texture_desc.Width * 4u, 0u);
+        texture = created;
+    } else if (volume) {
         D3D11_TEXTURE3D_DESC volume_desc{};
         volume_desc.Width = desc.width;
         volume_desc.Height = desc.height;
@@ -2482,6 +2097,7 @@ ID3D11ShaderResourceView *lookupTexture(
     if (FAILED(view_result)) {
         return nullptr;
     }
+    if (larger) presenter->context->GenerateMips(view);
 
     // ponytail: FIFO eviction; track recent use if upload churn is costly.
     const uint32_t slot = presenter->next_texture_slot;
@@ -2502,6 +2118,7 @@ ID3D11ShaderResourceView *lookupTexture(
     entry.mip_levels = levels;
     if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
     entry.fingerprint = fingerprint;
+    entry.scale = scale;
     entry.view = view;
     try {
         presenter->texture_index.emplace(desc.data, slot);
@@ -2728,8 +2345,8 @@ RecompD3dPresenterError submitDraw(
     }
 
     const UINT index_size = draw_index_count * 2u;
-    ID3D11ShaderResourceView *texture_view =
-        draw.has_texture ? lookupTexture(presenter, draw) : nullptr;
+    ID3D11ShaderResourceView *texture_view = draw.has_texture
+        ? lookupTexture(presenter, draw, layout.pretransformed ? upscaleFactor(draw) : 1u) : nullptr;
     /* A second cache lookup can evict the first entry. Keep its view alive
        until the context takes its own reference. */
     const bool has_second_texture = draw.has_alpha_mask || draw.has_reflection ||
@@ -3894,6 +3511,7 @@ RecompD3dPresenterError submitPresent(
             static_cast<unsigned>(presenter->present_count));
         presenter->first_present_reported = true;
     }
+    applyQuality(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
 
@@ -3931,6 +3549,114 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
 }
 
 } // namespace
+
+/* Borderless fullscreen on the window's monitor. The swap chain follows the
+   client size on the next present. A window that started fullscreen (scale > 1)
+   leaves it for a centered 480-line window. */
+void toggleFullscreen(RecompD3dPresenter *presenter)
+{
+    HWND window = presenter->window;
+    if (!presenter->fullscreen) {
+        MONITORINFO monitor{sizeof monitor};
+        GetWindowPlacement(window, &presenter->windowed_placement);
+        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(window, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+            monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+            SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    } else {
+        WINDOWPLACEMENT &placement = presenter->windowed_placement;
+        if (placement.length == 0u) {
+            MONITORINFO monitor{sizeof monitor};
+            RECT origin{}; // Placement coordinates are relative to the primary monitor's work area.
+            if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) ||
+                !SystemParametersInfoW(SPI_GETWORKAREA, 0, &origin, 0)) {
+                // Zeroed geometry would put the window off-screen; center on the primary screen instead.
+                monitor.rcWork = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+                origin = {};
+            }
+            RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
+                static_cast<LONG>(presenter->config.height)};
+            AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
+            const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
+            const LONG left = (monitor.rcWork.left + monitor.rcWork.right - width) / 2 - origin.left;
+            const LONG top = (monitor.rcWork.top + monitor.rcWork.bottom - height) / 2 - origin.top;
+            placement.length = sizeof placement;
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = {left, top, left + width, top + height};
+        }
+        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPlacement(window, &placement);
+        SetWindowPos(window, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+    presenter->fullscreen = !presenter->fullscreen;
+}
+
+void releaseSmaa(RecompD3dPresenter *presenter)
+{
+    for (auto &shader : presenter->smaa_vs) releaseCom(shader);
+    for (auto &shader : presenter->smaa_ps) releaseCom(shader);
+    for (auto &view : presenter->smaa_views) releaseCom(view);
+    for (auto &view : presenter->smaa_targets) releaseCom(view);
+    for (auto &sampler : presenter->smaa_samplers) releaseCom(sampler);
+}
+
+ID3D11ShaderResourceView *lookupBackBufferTexture(
+    RecompD3dPresenter *presenter,
+    const RecompD3dTextureDesc &desc,
+    bool previous_frame)
+{
+    /* 3D scenes use a horizontally supersampled guest back buffer (1440x480
+       for 720x480 output). The host keeps one resolved buffer, and linear
+       UVs are normalised by the guest size, so whole multiples map onto it. */
+    if (desc.format_byte != 0x12u || !desc.linear || desc.depth ||
+        desc.width == 0u || desc.height == 0u ||
+        desc.width % presenter->config.width != 0u ||
+        desc.height % presenter->config.height != 0u ||
+        presenter->render_target_view == nullptr) return nullptr;
+
+    ID3D11Texture2D *&copy = previous_frame ? presenter->previous_frame : presenter->back_buffer_copy;
+    ID3D11ShaderResourceView *&sample =
+        previous_frame ? presenter->previous_frame_sample : presenter->back_buffer_sample;
+    /* An upscaled copy keeps mips so a guest downsample (the 256x256
+       depth-of-field source) averages its footprint like the Xbox did. */
+    const bool mips = presenter->scale != 1.0f;
+    const bool created = copy == nullptr;
+    if (created) {
+        D3D11_TEXTURE2D_DESC texture_desc{};
+        texture_desc.Width = mainWidth(presenter);
+        texture_desc.Height = mainHeight(presenter);
+        texture_desc.MipLevels = mips ? 0u : 1u;
+        texture_desc.ArraySize = 1u;
+        texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texture_desc.SampleDesc.Count = 1u;
+        texture_desc.Usage = D3D11_USAGE_DEFAULT;
+        texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
+            (mips ? D3D11_BIND_RENDER_TARGET : 0u);
+        texture_desc.MiscFlags = mips ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0u;
+        HRESULT result = presenter->device->CreateTexture2D(
+            &texture_desc, nullptr, &copy);
+        if (SUCCEEDED(result)) {
+            result = presenter->device->CreateShaderResourceView(copy, nullptr, &sample);
+        }
+        if (FAILED(result)) {
+            releaseCom(sample);
+            releaseCom(copy);
+            return nullptr;
+        }
+    }
+    /* Present refreshes the previous frame; until the first one, use this frame. */
+    if (previous_frame && !created) return sample;
+    /* Sampling observes the current render buffer at this draw, even if the
+       preceding draw sampled an older copy. Keep the copy outside the FIFO. */
+    ID3D11ShaderResourceView *none = nullptr;
+    presenter->context->PSSetShaderResources(0u, 1u, &none);
+    copyGuestBuffer(presenter, copy);
+    /* Every view exposes the chain; refresh it with each new snapshot. */
+    if (mips) presenter->context->GenerateMips(sample);
+    return sample;
+}
 
 RecompD3dPresenterError d3d_backend_create(
     const RecompD3dPresenterConfig *config,
@@ -4302,17 +4028,6 @@ RecompD3dPresenterError d3d_backend_destroy(
 void d3d_backend_set_immediate_present(bool enabled)
 {
     immediate_present = enabled;
-}
-
-/* The swap chain, its VRR output and the targets are sized at creation, so
-   PC Settings' quality rows apply at the next start here. */
-void d3d_backend_set_quality(float, uint32_t, bool)
-{
-}
-
-bool d3d_backend_quality_live()
-{
-    return false;
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(

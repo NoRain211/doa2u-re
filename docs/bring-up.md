@@ -506,8 +506,9 @@ Water draws in an unanalyzed function at 0x26c980 with program 0x7add80
 pixel shader that FUN_0026bd20 builds: t0 PROJECT2D, t1 and t3 BUMPENVMAP of
 t0, no t2 (texture modes 0x300c1). Its seven combiners compute s =
 max(0, dot(expand v0, expand t3))^8, r0 = v1 * t1.a, r0 = (s - 0.5) +
-(r0 - 0.5), r0 += t3.a * t1 and r0.a = t3.a * v0.a, with the stage effect's
-final combiner. The draw binds one of the 17 V8U8 maps on stage 0, the water
+(r0 - 0.5), r0 = max(0, r0) + t3.a * t1 (combiner 5 reads r0 unsigned, so a
+negative sum clamps to 0 rather than darkening the reflection) and r0.a =
+t3.a * v0.a, with the stage effect's final combiner. The draw binds one of the 17 V8U8 maps on stage 0, the water
 reflection target (FUN_0026d610) on stage 1 and a filtered environment map
 (0xe5b0a8) on stage 3, with matrices on stages 1 and 3, fog off and
 SPECULARENABLE on. The adapter matches those words and reuses the bump path

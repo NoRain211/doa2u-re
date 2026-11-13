@@ -400,7 +400,7 @@ set(RECOMP_PRESENTER_SHARED d3d_draw_shader.cpp d3d_vertex_program.cpp d3d_draw_
 set(RECOMP_PRESENTER_SHARED ${RECOMP_PRESENTER_SHARED} overlay_imgui_panel.cpp overlay_text.c screenshot.c)
 if(WIN32)
     add_library(recomp_d3d_presenter STATIC
-        d3d_presenter_d3d11.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp overlay_d3d11.cpp
+        d3d_presenter_d3d11.cpp d3d_presenter_quality.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp overlay_d3d11.cpp
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     # screenshot.c asks the shell for the Pictures folder.
@@ -431,7 +431,13 @@ file(DOWNLOAD ${_xbrz_url}/xbrz.h "${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h"
     EXPECTED_HASH SHA256=f0c59293edf8268abe7e749f017fe84c9ae38303aef2afc3244b2fdba9aeb69c)
 include("${CMAKE_CURRENT_SOURCE_DIR}/xbrz_patch.cmake")
 recomp_patch_xbrz("${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h" "${_xbrz_dir}/xbrz.h")
-target_sources(${_sdl_gpu_presenter} PRIVATE texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp")
+# One copy serves both renderers (Windows links the Direct3D 11 and Vulkan ones together).
+add_library(recomp_texture_upscale STATIC texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp")
+target_include_directories(recomp_texture_upscale PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_texture_upscale)
+if(WIN32)
+    target_link_libraries(recomp_d3d_presenter PUBLIC recomp_texture_upscale)
+endif()
 set_source_files_properties(texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" PROPERTIES INCLUDE_DIRECTORIES "${_xbrz_dir}")
 add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" texture_upscale_test.cpp)
 target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
