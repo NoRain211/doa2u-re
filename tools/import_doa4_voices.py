@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Decode the fighters' hit grunts and KO cries from your own Dead or Alive 4.
+"""Decode every voice clip of the fighters from your own Dead or Alive 4.
 
 DOA2U's fighters make no sound when hit. recomp-runtime/hit_voice.c plays
-DOA4's instead, from clips this tool decodes out of the snd.afs on your
-extracted DOA4 disc into private/doa4-voice/<prefix>/hit_NN.wav and
-ko_NN.wav. Nothing it writes may be committed.
-
-snd.afs (AFS, little-endian) holds a big-endian XACT 2 wave bank and sound
-bank per character, the waves as XMA1. In each sound bank the cues
-<prefix>_down_03a..m are the short hit grunts and <prefix>_down_04 onward the
-longer knock-down cries, which serve as KO cries. Needs an ffmpeg with the
-xma1 decoder (any ordinary build) on PATH or given with --ffmpeg.
+DOA4 clips instead, the ones you choose. This tool decodes every wave of the
+15 fighters' voice banks from the snd.afs on your extracted DOA4 disc into
+private/doa4-voice-all/<prefix>/<prefix>_NNN_<cue>.wav, named after the
+first cue that plays it, with index.csv listing each clip's length and cues.
+Copy or rename the ones you want into <prefix>/selections/ as
+<name>_HIT_LV1_NN.wav (light hits), _HIT_LV2_ (medium), _HIT_LV3_ (heavy) and
+<name>_KO_NN.wav; a fighter without a selections folder stays silent.
+Nothing it writes may be committed. Needs an ffmpeg with the xma1 decoder
+(any ordinary build) on PATH or given with --ffmpeg.
 
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs
 """
 import argparse
+import csv
 import os
-import re
 import struct
 import subprocess
 import sys
@@ -27,7 +27,7 @@ import tempfile
 # the wave bank is the entry before it.
 BANKS = {
     "zac": 8, "tin": 10, "jan": 12, "ein": 14, "ryu": 16, "kas": 18, "gen": 20, "hel": 22,
-    "leo": 24, "bas": 26, "lei": 28, "aya": 30, "tng": 32, "bay": 34, "hak": 44,
+    "leo": 24, "bas": 26, "lei": 28, "aya": 30, "tng": 32, "bay": 34, "kor": 36,
 }
 
 
@@ -84,36 +84,42 @@ def xma1_riff(raw, channels, rate):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("snd_afs", help="snd.afs from your extracted DOA4 disc")
-    parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "private", "doa4-voice"))
+    parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "private", "doa4-voice-all"))
     parser.add_argument("--ffmpeg", default="ffmpeg")
     args = parser.parse_args()
     entries = afs_entries(args.snd_afs)
+    rows = []
     with open(args.snd_afs, "rb") as afs, tempfile.TemporaryDirectory() as scratch:
         def read(index):
             offset, length = entries[index]
             afs.seek(offset)
             return afs.read(length)
 
-        for prefix, index in BANKS.items():
-            waves, cues = wave_bank(read(index - 1)), cue_waves(read(index))
-            pools = {
-                "hit": sorted({w for c, w in cues.items() if re.fullmatch(prefix + r"_down_03[a-z]", c)}),
-                "ko": sorted({w for c, w in cues.items() if re.fullmatch(prefix + r"_down_(0[4-9]|1\d)[a-z]?", c)}),
-            }
+        for prefix, index in sorted(BANKS.items()):
+            bank = read(index - 1)
+            waves, cues = wave_bank(bank), cue_waves(read(index))
+            names = {}
+            for cue, wave in cues.items():
+                names.setdefault(wave, []).append(cue[len(prefix) + 1:] if cue.startswith(prefix + "_") else cue)
             folder = os.path.join(args.out, prefix)
             os.makedirs(folder, exist_ok=True)
-            bank = read(index - 1)
-            for kind, pool in pools.items():
-                for n, wave in enumerate(pool):
-                    offset, length, channels, rate = waves[wave]
-                    source = os.path.join(scratch, "clip.wav")
-                    with open(source, "wb") as file:
-                        file.write(xma1_riff(bank[offset:offset + length], channels, rate))
-                    subprocess.run([args.ffmpeg, "-v", "error", "-y", "-i", source, "-ac", "1", "-ar", "48000",
-                        "-c:a", "pcm_s16le", os.path.join(folder, f"{kind}_{n:02d}.wav")], check=True)
-            print(f"{prefix}: {len(pools['hit'])} hit, {len(pools['ko'])} KO clips")
+            for n, (offset, length, channels, rate) in enumerate(waves):
+                labels = sorted(names.get(n, []))
+                source = os.path.join(scratch, "clip.wav")
+                with open(source, "wb") as file:
+                    file.write(xma1_riff(bank[offset:offset + length], channels, rate))
+                name = f"{prefix}_{n:03d}" + (f"_{labels[0]}" if labels else "") + ".wav"
+                target = os.path.join(folder, name)
+                subprocess.run([args.ffmpeg, "-v", "error", "-y", "-i", source, "-ac", "1", "-ar", "48000",
+                    "-c:a", "pcm_s16le", target], check=True)
+                frames = (os.path.getsize(target) - 44) // 2
+                rows.append([prefix, n, name, f"{frames / 48000:.2f}", " ".join(labels)])
+            print(f"{prefix}: {len(waves)} clips")
+    with open(os.path.join(args.out, "index.csv"), "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["character", "wave", "file", "seconds", "cues"])
+        writer.writerows(rows)
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

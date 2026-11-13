@@ -50,6 +50,7 @@
     "tools/dedication_card.py",
     "tools/test_dedication_card.py",
     "tools/launcher.cs",
+    "tools/voice_editor.cs",
     "tools/launcher-background.jpg",
     "tools/launcher-background.png",
     "tools/test_run_game.py",

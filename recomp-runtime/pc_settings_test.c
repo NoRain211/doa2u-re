@@ -222,18 +222,18 @@ int main(void)
 {
     recomp_runtime.registers.esp = STACK;
     make_layout();
-    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
-    /* The layout: 11 row records, 11 value records, then the end word. */
+    /* The layout: 8 row records (Page and a view's seven), 8 value records, then the end word. */
     uint32_t page = 19u;
     const uint32_t layout = hook(0x00090ad0u, &page, 1u);
-    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 10u * 28u) == ((0x5du + 260u) << 16 | 0x10au));
-    expect("layout values", rd32(layout + 13u * 28u) == (0x5du << 16 | 0x1e0u) &&
-        rd32(layout + 13u * 28u + 0x14u) == 0x40001u && rd32(layout + 25u * 28u + 0x18u) == 0x883ec0u);
-    expect("layout end", rd32(layout + 26u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
-        layout + 26u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
+    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 7u * 28u) == ((0x5du + 182u) << 16 | 0x10au));
+    expect("layout values", rd32(layout + 8u * 28u) == (0x5du << 16 | 0x1e0u) &&
+        rd32(layout + 8u * 28u + 0x14u) == 0x40001u && rd32(layout + 15u * 28u + 0x18u) == 0x883ec0u);
+    expect("layout end", rd32(layout + 16u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
+        layout + 16u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
     expect("page tables", rd32(0x0067af50u + 4u * 19u) != 0u && rd32(0x0067aff0u + 4u * 19u) != 0u &&
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
@@ -248,11 +248,11 @@ int main(void)
     expect("renderer rows", recomp_pc_settings_applies_now(RECOMP_PC_MSAA) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) && recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
 
-    /* Row counts: the top list has eight rows, page 19 eleven, others the game's. */
+    /* Row counts: the top list has eight rows, page 19 eight (Page and seven), others the game's. */
     page = 0u;
     expect("top rows", hook(0x0011ac90u, &page, 1u) == 8u && hook(0x0011ad10u, &page, 1u) == 8u);
     page = 19u;
-    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 13u);
+    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 8u);
     page = 8u;
     expect("game rows", hook(0x0011ac90u, &page, 1u) == 4u);
 
@@ -310,7 +310,7 @@ int main(void)
     /* The preview of the selected row's page, and the help line. */
     wr16(CURSORS, 5u);
     hook(0x00095a10u, &context, 1u);
-    expect("pc preview", preview_count == 13u && rd16(CURSORS) == 5u);
+    expect("pc preview", preview_count == 8u && rd16(CURSORS) == 5u);
     wr16(CURSORS, 7u);
     hook(0x00095a10u, &context, 1u);
     expect("exit preview", preview_count == 4u); /* the game's page 7 */
@@ -321,9 +321,11 @@ int main(void)
     const uint32_t warning_help[3] = {0u, 6u, 0u};
     hook(0x00091560u, warning_help, 3u);
     expect("warning help", help_cursor == 5u && help_text == 0x1234u);
-    const uint32_t page_help[3] = {19u, RECOMP_PC_UNLOCKS, 0u};
-    hook(0x00091560u, page_help, 3u);
-    expect("live help", help_page == 0u && ascii(help_text) == 'T' && rd16(help_text + 12u) == 'e'); /* "Takes effect immediately." */
+    const uint32_t page_row_help[3] = {19u, 0u, 0u}, resolution_help[3] = {19u, 1u, 0u};
+    hook(0x00091560u, page_row_help, 3u);
+    expect("page help", help_page == 0u && ascii(help_text) == 'L'); /* "Left or right ..." */
+    hook(0x00091560u, resolution_help, 3u);
+    expect("next help", help_page == 0u && ascii(help_text) == 'T' && rd16(help_text + 26u) == 't'); /* "Takes effect the next ..." */
     const uint32_t message[2] = {0xc4u, 0xffu};
     expect("help only while drawing", hook(0x0006a3e0u, message, 2u) == 0x1234u);
     /* Texts other modules add through runner_assets: per language, past PC Settings' own. */
@@ -358,12 +360,24 @@ int main(void)
     hook(0x0011cfc0u, none, 2u);
     expect("other pages", original_update == 1u);
 
-    /* Page 19: change a value, then leave. */
-    wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, RECOMP_PC_UNLOCKS - 1u); nav_delta = 1; step_delta = 1;
+    /* Page 19: the Page row turns to the second view, a value there changes,
+       confirm on the Page row turns back, then leave. */
+    wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 1;
+    hook(0x0011cfc0u, none, 2u);
+    expect("page turns", changed_setting == 99u);
+    wr16(CURSORS + 2u, 1u); nav_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     expect("pc change", changed_setting == RECOMP_PC_UNLOCKS && changed_choice == 1u &&
         recomp_pc_settings_choice(RECOMP_PC_UNLOCKS) == 1u);
-    nav_delta = 0; step_delta = 0; back_pressed = 1u;
+    const uint32_t unlocks_help[3] = {19u, 2u, 0u};
+    hook(0x00091560u, unlocks_help, 3u);
+    expect("live help", ascii(help_text) == 'T' && rd16(help_text + 26u) == 'i'); /* "Takes effect immediately." */
+    wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 0; confirm_pressed = 1u;
+    hook(0x0011cfc0u, none, 2u);
+    confirm_pressed = 0u;
+    hook(0x00091560u, resolution_help, 3u);
+    expect("confirm turns back", rd16(help_text + 26u) == 't'); /* row 1 is Resolution again */
+    back_pressed = 1u;
     hook(0x0011cfc0u, none, 2u);
     expect("pc close", closed == 1u && rd16(DEPTH) == 0u && rd16(PAGE) == 0u);
     back_pressed = 0u;
@@ -373,19 +387,25 @@ int main(void)
     wr16(CURSORS + 2u, 3u);
     const uint32_t draw = rd32(0x0067aff0u + 4u * 19u);
     hook(draw, &context, 1u);
-    expect("labels", label_count == 13u && ascii(labels[0]) == 'R' && ascii(labels[10]) == 'F');
-    expect("values", value_count == 13u && ascii(values[RECOMP_PC_SCREEN]) == '3' && /* 32:9 */
-        ascii(values[RECOMP_PC_UNLOCKS]) == 'E' && rd16(values[RECOMP_PC_UNLOCKS] + 2u) == 'a'); /* Earn */
-    expect("cursor mark", cursor_marks == 1u && layout_walked == 26u && cursor_visible == 1u);
+    expect("labels", label_count == 8u && ascii(labels[0]) == 'P' && ascii(labels[1]) == 'R' && ascii(labels[7]) == 'A');
+    expect("values", value_count == 8u && ascii(values[0]) == '1' && ascii(values[1u + RECOMP_PC_SCREEN]) == '3'); /* 32:9 */
+    expect("cursor mark", cursor_marks == 1u && layout_walked == 16u && cursor_visible == 1u);
     expect("sprites intact", rd32(rd32(hook(0x000aa9b0u, &white_id, 1u)) + 12u) == 0x05810b2au);
     language = 3u; /* German */
     hook(draw, &context, 1u);
-    expect("german", ascii(labels[0]) == 'A' && rd16(labels[0] + 8u) == 0xf6u); /* "Aufl\u00f6sung" */
+    expect("german", ascii(labels[0]) == 'S' && ascii(labels[1]) == 'A' && rd16(labels[1] + 8u) == 0xf6u); /* "Aufl\u00f6sung" */
+    /* The second view: Intro Movies to KO Replay. */
+    wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); step_delta = 1;
+    hook(0x0011cfc0u, none, 2u);
+    step_delta = 0;
+    hook(draw, &context, 1u);
+    expect("second view", ascii(labels[1]) == 'I' && ascii(values[0]) == '2' &&
+        ascii(values[1u + RECOMP_PC_UNLOCKS - 7u]) == 'E' && rd16(values[1u + RECOMP_PC_UNLOCKS - 7u] + 2u) == 'r'); /* Erspielen */
     expect("leave draw", rd32(0x0067afa0u + 4u * 19u) != draw);
     const uint32_t key[2] = {19u, 0u};
     expect("labels only while drawing", hook(0x000910a0u, key, 2u) == 0x9999u);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
-    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 21u * 28u + 0xcu) == 0u);
+    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 15u * 28u + 0xcu) == 0u);
 
     /* A new language remakes the label (Italian, which needs the Z of OPZIONI). */
     language = 4u;

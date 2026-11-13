@@ -20,7 +20,8 @@
    row count.
 
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
-   no table uses. Its label is made from letters cut out of the other labels'
+   no table uses. Its settings are split over two views of seven, under a
+   Page row (1 / 2, 2 / 2) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
    own art (group 3), with the same blue glow, as two runner sprites; its
    text is runner text (runner_assets.c). */
 enum {
@@ -28,6 +29,9 @@ enum {
     TOP_ROWS = 8,
     PC_PAGE = 19,
     PC_ROWS = RECOMP_PC_SETTING_COUNT,
+    PER_VIEW = 7,
+    VIEWS = 2,
+    SHOWN = PER_VIEW + 1,          /* the Page row, then a view's settings */
     VALUE_KIND = 0x7e00,           /* 0x910a0 keys for each row's values, outside its 1-28 */
 
     CURSORS = 0x00df4ac8u,
@@ -64,7 +68,7 @@ enum {
    (x 0x1e0), then a zero word; the cursor (0x90f00) walks and animates all of
    them. The labels are P8 sprites of 256x32 (2^8 x 2^5). */
 enum {
-    LAYOUT_RECORDS = 2u * RECOMP_PC_SETTING_COUNT,
+    LAYOUT_RECORDS = 2u * SHOWN,
     LABEL_LOG_W = 8,
     LABEL_LOG_H = 5,
     LABEL_W = 1 << LABEL_LOG_W,
@@ -100,20 +104,23 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 2u};
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
-    [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_HIT_VOICES] = true,
+    [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
 };
 static bool live[PC_ROWS];
-enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELPS = 3 };
+enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELPS = 4 };
+_Static_assert(PER_VIEW * VIEWS == PC_ROWS, "every setting is on one view");
 
 typedef struct Language {
     const recomp_utf16 *label;  /* the top-list row, in capitals */
     const recomp_utf16 *rows[PC_ROWS];
     const recomp_utf16 *values[PC_ROWS][MAX_CHOICES];
     const recomp_utf16 *help[HELPS];
+    const recomp_utf16 *page;   /* the Page row */
 } Language;
+static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 2", u"2 / 2"};
 
 /* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
@@ -126,58 +133,68 @@ static const Language LANGUAGES[5] = {
     {u"PC SETTINGS",
      {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Audio Output",
       u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera",
-      u"Life Bar", u"Hit Voices"},
+      u"Life Bar", u"Hit Voices", u"KO Replay"},
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
-       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"On"}},
+       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
      {u"Graphics, audio and gameplay settings for this PC.", u"Takes effect immediately.",
-      u"Takes effect the next time the game starts."}},
+      u"Takes effect the next time the game starts.",
+      u"Left or right shows the other page of settings."},
+     u"Page"},
     {u"PARAM\u00c8TRES PC",
      {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Sortie audio",
       u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre",
-      u"Barre de vie", u"Voix des coups"},
+      u"Barre de vie", u"Voix des coups", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
-       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Oui"}},
+       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
      {u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
-      u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu."}},
+      u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu.",
+      u"Gauche ou droite affiche l'autre page de param\u00e8tres."},
+     u"Page"},
     {u"PC-EINSTELLUNGEN",
      {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Audioausgabe",
       u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera",
-      u"Lebensleiste", u"Treffer-Stimmen"},
+      u"Lebensleiste", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
-       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Ein"}},
+       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
      {u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
-      u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart."}},
+      u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart.",
+      u"Links oder rechts zeigt die andere Einstellungsseite."},
+     u"Seite"},
     {u"IMPOSTAZIONI PC",
      {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Uscita audio",
       u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera",
-      u"Barra vita", u"Voci dei colpi"},
+      u"Barra vita", u"Voci dei colpi", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
-       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"S\u00ec"}},
+       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
      {u"Impostazioni grafiche, audio e di gioco di questo PC.", u"Effettivo immediatamente.",
-      u"Effettivo al prossimo avvio del gioco."}},
+      u"Effettivo al prossimo avvio del gioco.",
+      u"Sinistra o destra mostra l'altra pagina di impostazioni."},
+     u"Pagina"},
     {u"CONFIG. PC",
      {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Salida de audio",
       u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre",
-      u"Barra de vida", u"Voces de golpes"},
+      u"Barra de vida", u"Voces de golpes", u"Repetici\u00f3n K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
-       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"S\u00ed"}},
+       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
      {u"Opciones de gr\u00e1ficos, audio y juego de este PC.", u"Se aplica de inmediato.",
-      u"Se aplica la pr\u00f3xima vez que inicies el juego."}},
+      u"Se aplica la pr\u00f3xima vez que inicies el juego.",
+      u"Izquierda o derecha muestra la otra p\u00e1gina de opciones."},
+     u"P\u00e1gina"},
 };
 
 /* The game's language (0x212e0): Japanese, English, French, German, Italian, Spanish. */
@@ -187,15 +204,21 @@ static const Language *language_text(unsigned language)
 }
 
 /* Message numbers from RECOMP_RUNNER_TEXT_PC: rows, then each row's values,
-   then the help lines. */
-enum { MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES, MSG_COUNT = MSG_HELP + HELPS };
+   then the help lines, the Page row and its values. */
+enum {
+    MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES,
+    MSG_PAGE = MSG_HELP + HELPS, MSG_VIEWS = MSG_PAGE + 1, MSG_COUNT = MSG_VIEWS + VIEWS
+};
+_Static_assert(RECOMP_RUNNER_TEXT_PC + MSG_COUNT <= RECOMP_RUNNER_TEXT_QUIT, "PC text stays below the next module's");
 
 static const recomp_utf16 *message_text(const Language *text, unsigned message)
 {
     if (message < MSG_VALUES) return text->rows[message - MSG_ROWS];
     if (message < MSG_HELP)
         return text->values[(message - MSG_VALUES) / MAX_CHOICES][(message - MSG_VALUES) % MAX_CHOICES];
-    return text->help[message - MSG_HELP];
+    if (message < MSG_PAGE) return text->help[message - MSG_HELP];
+    if (message == MSG_PAGE) return text->page;
+    return VIEW_TEXT[message - MSG_VIEWS];
 }
 
 /* The top list's sprites in each language: white rows, then glows. */
@@ -205,7 +228,9 @@ static const uint32_t GLOW_BASE[6] = {0x30006u, 0x30006u, 0x30014u, 0x30022u, 0x
 /* ---- State -------------------------------------------------------- */
 
 static RecompPcSettingsHost host;
-static uint32_t values;          /* guest u16 per row: the choices */
+static uint32_t values;          /* guest u16 per setting: the choices */
+static uint32_t shown;           /* guest u16 per shown row: the view, then its settings' choices */
+static unsigned view;            /* which seven settings page 19 shows */
 static uint32_t layout;          /* guest page layout: LAYOUT_RECORDS of 28 bytes, then 0 */
 static bool drawing_top;
 static bool drawing_pc;          /* page 19's own draw is running */
@@ -239,6 +264,15 @@ uint8_t recomp_pc_settings_choice(unsigned setting)
     return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;
 }
 
+/* The setting a shown row stands for, or -1 for the Page row. */
+static int setting_at(unsigned row) { return row == 0u || row >= SHOWN ? -1 : (int)(view * PER_VIEW + row - 1u); }
+
+static void refresh_shown(void)
+{
+    set_u16(shown, (uint16_t)view);
+    for (unsigned row = 1u; row < SHOWN; ++row) set_u16(shown + 2u * row, u16(values + 2u * (unsigned)setting_at(row)));
+}
+
 static void reset_layout(void)
 {
     for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) set_u32(layout + record * 28u + 0xcu, 0u);
@@ -251,15 +285,17 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
     drawing_pc = false;
     label_language = -1;
     memcpy(live, ALWAYS_LIVE, sizeof live);
+    view = 0u;
     values = recomp_runner_alloc(2u * PC_ROWS, 4u);
+    shown = recomp_runner_alloc(2u * SHOWN, 4u);
     layout = recomp_runner_alloc(28u * LAYOUT_RECORDS + 4u, 4u);
     for (unsigned row = 0u; row < PC_ROWS; ++row)
         set_u16(values + 2u * row, choices[row] < CHOICES[row] ? choices[row] : 0u);
 
     /* Page 8's row record (0) and value record (4), 26 apart, then the end. */
     for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) {
-        const unsigned row = record % PC_ROWS;
-        const bool value = record >= PC_ROWS;
+        const unsigned row = record % SHOWN;
+        const bool value = record >= SHOWN;
         const uint32_t to = layout + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
         memcpy(recomp_memory(to, 28u), recomp_memory(LAYOUT_TEMPLATE + 28u * (value ? 4u : 0u), 28u), 28u);
         set_u32(to, at);
@@ -485,6 +521,7 @@ static void top_input(void)
     }
     if ((call1(sub_0011BDA0, 1u) & 0xffu) == 0u) return;
     if (row == PC_ROW) {
+        view = 0u;
         set_u16(DEPTH, 1u);
         set_u16(CURSORS + 2u, 0u);
         set_u16(PAGE, PC_PAGE);
@@ -510,7 +547,7 @@ static void top_input(void)
 
 static void pc_input(void)
 {
-    const uint32_t count = PC_ROWS;
+    const uint32_t count = SHOWN;
     const uint32_t navigate[2] = {CURSORS + 2u, count};
     kernel_call_lifted(sub_0011B8D0, navigate, 2u);
     const uint16_t row = u16(CURSORS + 2u);
@@ -521,13 +558,28 @@ static void pc_input(void)
         if (host.closed != NULL) host.closed(host.context);
         return;
     }
-    if (row >= PC_ROWS) return;
-    const uint32_t value = values + 2u * row;
+    if (row >= SHOWN) return;
+    const int setting = setting_at(row);
+    if (setting < 0) {
+        /* The Page row: left, right or confirm turns to the other view. */
+        refresh_shown();
+        const uint32_t step[4] = {shown, VIEWS, 1u, 0u};
+        kernel_call_lifted(sub_0011B9F0, step, 4u);
+        unsigned next = u16(shown) % VIEWS;
+        if (next == view && (call1(sub_0011BDA0, 1u) & 0xffu) != 0u) next = (view + 1u) % VIEWS;
+        if (next != view) {
+            view = next;
+            reset_layout();
+        }
+        refresh_shown();
+        return;
+    }
+    const uint32_t value = values + 2u * (unsigned)setting;
     const uint16_t before = u16(value);
-    const uint32_t step[4] = {value, CHOICES[row], 1u, 0u};
+    const uint32_t step[4] = {value, CHOICES[setting], 1u, 0u};
     kernel_call_lifted(sub_0011B9F0, step, 4u);
     const uint16_t after = u16(value);
-    if (after != before && host.changed != NULL) host.changed(row, after, host.context);
+    if (after != before && host.changed != NULL) host.changed((unsigned)setting, after, host.context);
 }
 
 static void options_update(void)
@@ -547,7 +599,7 @@ static void row_count(void (*original)(void))
 {
     const uint16_t page = (uint16_t)kernel_arg(1u);
     if (page == 0u) kernel_return_caller_cleanup(TOP_ROWS);
-    else if (page == PC_PAGE) kernel_return_caller_cleanup(PC_ROWS);
+    else if (page == PC_PAGE) kernel_return_caller_cleanup(SHOWN);
     else original();
 }
 static void row_count_main(void) { row_count(sub_0011AC90); }
@@ -640,7 +692,8 @@ static void help(void)
     } else if (page == PC_PAGE) {
         args[0] = 0u;
         args[1] = 0u;
-        help_line = row < PC_ROWS && live[row] ? HELP_NOW : HELP_NEXT;
+        const int setting = setting_at(row);
+        help_line = row == 0u ? HELP_PAGE : setting >= 0 && live[setting] ? HELP_NOW : HELP_NEXT;
     }
     /* The help line draws message 0xc4 for the row passed. */
     if (help_line < HELPS) recomp_runner_text_redirect(0xc4u, RECOMP_RUNNER_TEXT_PC + MSG_HELP + help_line);
@@ -663,24 +716,30 @@ static void page_text(void)
 {
     if (drawing_pc) {
         const uint16_t key = (uint16_t)kernel_arg(1u);
-        if (key == PC_PAGE && kernel_arg(2u) < PC_ROWS) {
-            kernel_return_caller_cleanup(text_for(MSG_ROWS + kernel_arg(2u)));
+        if (key == PC_PAGE && kernel_arg(2u) < SHOWN) {
+            const int setting = setting_at(kernel_arg(2u));
+            kernel_return_caller_cleanup(text_for(setting < 0 ? MSG_PAGE : MSG_ROWS + (unsigned)setting));
             return;
         }
-        if (key >= VALUE_KIND && key < VALUE_KIND + PC_ROWS) {
-            const uint32_t row = key - VALUE_KIND, choice = kernel_arg(2u) & 0xffffu;
-            const uint32_t value = choice < CHOICES[row] ? choice : 0u;
-            kernel_return_caller_cleanup(text_for(MSG_VALUES + row * MAX_CHOICES + value));
+        if (key >= VALUE_KIND && key < VALUE_KIND + SHOWN) {
+            const int setting = setting_at(key - VALUE_KIND);
+            const uint32_t choice = kernel_arg(2u) & 0xffffu;
+            if (setting < 0) {
+                kernel_return_caller_cleanup(text_for(MSG_VIEWS + (choice < VIEWS ? choice : 0u)));
+                return;
+            }
+            const uint32_t value = choice < CHOICES[setting] ? choice : 0u;
+            kernel_return_caller_cleanup(text_for(MSG_VALUES + (unsigned)setting * MAX_CHOICES + value));
             return;
         }
     }
     sub_000910A0();
 }
 
-/* Every PC row has a value, so the value row is the row. */
+/* Every shown row has a value, so the value row is the row. */
 static void value_text(void)
 {
-    if ((uint16_t)kernel_arg(1u) == PC_PAGE && kernel_arg(2u) < PC_ROWS)
+    if ((uint16_t)kernel_arg(1u) == PC_PAGE && kernel_arg(2u) < SHOWN)
         kernel_return_caller_cleanup(VALUE_KIND + kernel_arg(2u));
     else sub_00091370();
 }
@@ -695,20 +754,21 @@ static void pc_enter(void)
 static void pc_page_draw(uint32_t visible)
 {
     const uint32_t context = kernel_arg(1u), fade = *recomp_memory_u32(context + 0x10u);
-    const uint32_t cursor = u16(CURSORS + 2u), mask = (1u << PC_ROWS) - 1u;
+    const uint32_t cursor = u16(CURSORS + 2u), mask = (1u << SHOWN) - 1u;
     static unsigned reported;
     if (reported < 2u) {
         fprintf(stderr, "recomp pc settings: page draws, visible %u, cursor %u\n", visible, cursor);
         ++reported;
     }
+    refresh_shown();
     drawing_pc = true;
     const uint32_t rows[4] = {PC_PAGE, cursor, fade, visible};
     kernel_call_lifted(sub_00091440, rows, 4u);
-    const uint32_t value_args[6] = {PC_PAGE, cursor, fade, mask, values, visible};
+    const uint32_t value_args[6] = {PC_PAGE, cursor, fade, mask, shown, visible};
     kernel_call_lifted(sub_00093270, value_args, 6u);
     /* (context, layout, value mask, cursor, rows, visible): the bars and the
        cursor slide out from the left while visible and back while not. */
-    const uint32_t mark[6] = {context, layout, mask, cursor, PC_ROWS, visible};
+    const uint32_t mark[6] = {context, layout, mask, cursor, SHOWN, visible};
     const uint32_t eax = kernel_call_lifted(sub_00090F00, mark, 6u);
     drawing_pc = false;
     kernel_return_caller_cleanup(eax);

@@ -146,6 +146,11 @@ RecompFunction recomp_hit_voice_lookup_manual(uint32_t address)
     (void)address;
     return NULL;
 }
+RecompFunction recomp_ko_replay_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
 RecompFunction recomp_unlock_profile_lookup_manual(uint32_t address)
 {
     (void)address;

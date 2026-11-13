@@ -73,7 +73,9 @@ keeps running.
   **UPDATE** page; **Check At Start** turns the start-up check off.
 - **PC Settings in the game.** The game's own **Options** menu has a
   **PC SETTINGS** row after **Video**, drawn and translated like the game's
-  rows, with the launcher's settings. **Unlocks**, **CPU Costumes** and
+  rows, with the launcher's settings over two pages: the top **Page** row
+  (left, right or confirm) turns from the display and audio settings to the
+  gameplay ones. **Unlocks**, **CPU Costumes** and
   **Free Camera** change at once, and so do **Resolution**, **MSAA** and
   **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
@@ -86,11 +88,30 @@ keeps running.
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
   of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
-  decodes its hit grunts and KO cries for all 15 fighters into
-  `private\doa4-voice`, and the game plays them: light hits draw the short
-  grunts, heavy ones the long, and a KO the knock-down cries. It needs an
-  ffmpeg with XMA support. PC SETTINGS' **Hit Voices** row turns them off.
-  Online they stay off, since a rollback would replay them.
+  decodes every voice clip of all 15 fighters into
+  `private\doa4-voice-all\<fighter>`. Put the ones you want in that
+  fighter's `selections` folder, named `..._HIT_LV1_01.wav`, `_HIT_LV2_`,
+  `_HIT_LV3_` (light, medium and heavy hits) and `..._KO_01.wav`, and the game
+  plays them: grunts follow the damage taken (a heavy hit always, a combo
+  once or twice), at least 0.7 seconds apart, and a KO always cries, in the
+  KO replay too. Fighters without a `selections` folder stay
+  silent. **VoiceEditor.exe** (built from `tools\voice_editor.cs` beside the
+  launchers) does this for you: pick a fighter, add clips to its light,
+  medium, heavy and KO lists from any WAV, play them, and tune how often
+  they play; a running game picks up changes within a second. Hits are
+  graded by the move's base damage, before combo scaling. It needs an
+  ffmpeg with XMA support. PC SETTINGS' **Hit Voices**
+  row sets them Off, Quiet, Normal or Loud. Online they stay off, since a
+  rollback would replay them.
+- **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**
+  (the default), a few frames after the KO hit the fight stands still and
+  the game's own multi-angle replay, which DOA2U otherwise keeps for a human
+  winner's few special moves, shows the hit three times from three cameras,
+  the last at 85% speed, as Tekken Tag Tournament does; then the fall plays
+  out live and the round moves on. KOs by the stage (hazards, fences,
+  falls into another area) get no replay at all. **Original** keeps DOA2U's
+  own replays.
+  Offline only.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,

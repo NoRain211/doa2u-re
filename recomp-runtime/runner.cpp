@@ -9,6 +9,7 @@
 #include "free_camera_adapter.h"
 #include "combo_hud.h"
 #include "hit_voice.h"
+#include "ko_replay.h"
 #include "cpu_costume.h"
 #include "unlock_profile.h"
 #include "pc_settings.h"
@@ -143,7 +144,8 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_LIFE_BAR:
         recomp_combo_hud_set_life_bar_colour(choice, recomp_pc_settings_custom_life_bar(launcherSettings));
         break;
-    case RECOMP_PC_HIT_VOICES: recomp_hit_voice_set_enabled(choice == 1u); break;
+    case RECOMP_PC_HIT_VOICES: recomp_hit_voice_set_choice(choice); break;
+    case RECOMP_PC_KO_REPLAY: recomp_ko_replay_set_enabled(choice == 1u); break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA: {
@@ -166,8 +168,9 @@ static void pcSettingsClosed(void *)
         std::fprintf(stderr, "recomp runner: PC settings not saved; launcher settings unreadable or unwritable\n");
 }
 
-/* The DOA4 clips tools/import_doa4_voices.py decodes: RECOMP_HIT_VOICES, or
-   doa4-voice beside private/launcher.json. */
+/* The DOA4 clips tools/import_doa4_voices.py decodes and the player picks
+   into <prefix>/selections: RECOMP_HIT_VOICES, or doa4-voice-all beside
+   private/launcher.json. */
 static void installHitVoices(bool online)
 {
     std::string directory;
@@ -176,7 +179,7 @@ static void installHitVoices(bool online)
     } else if (const char *settings = std::getenv("RECOMP_LAUNCHER_SETTINGS"); settings != nullptr && *settings != '\0') {
         directory = settings;
         const std::size_t slash = directory.find_last_of("/\\");
-        directory = (slash == std::string::npos ? std::string(".") : directory.substr(0, slash)) + "/doa4-voice";
+        directory = (slash == std::string::npos ? std::string(".") : directory.substr(0, slash)) + "/doa4-voice-all";
     }
     recomp_hit_voice_install(online, directory.c_str());
 }
@@ -203,7 +206,8 @@ static void installPcSettings(bool online)
         choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
     }
     recomp_combo_hud_set_life_bar_colour(choices[RECOMP_PC_LIFE_BAR], recomp_pc_settings_custom_life_bar(launcherSettings));
-    recomp_hit_voice_set_enabled(choices[RECOMP_PC_HIT_VOICES] == 1u);
+    recomp_hit_voice_set_choice(choices[RECOMP_PC_HIT_VOICES]);
+    recomp_ko_replay_set_enabled(choices[RECOMP_PC_KO_REPLAY] == 1u);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
@@ -361,6 +365,8 @@ static void showCard()
 
 static void onSwap(std::uint32_t frame)
 {
+    recomp_ko_replay_frame(); // steers the replay before hit_voice listens to it
+    recomp_hit_voice_frame();
     recomp_unlock_profile_frame(recomp_netplay_session_unlock_all(unlockAll));
     if (storyFinale) applyStoryFinale();
     recomp_netplay_session_on_swap(frame);
@@ -660,6 +666,7 @@ static void bootGuest()
     recomp_cpu_costume_install(online);
     recomp_combo_hud_install(online);
     installHitVoices(online);
+    recomp_ko_replay_install(online);
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
     installPcSettings(online);

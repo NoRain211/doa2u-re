@@ -75,6 +75,8 @@ struct Settings {
     std::string life_bar_colour = "default"; // chosen in the game's PC Settings; kept as saved
     std::string life_bar_custom = "FFFFFF";
     bool hit_voices = true;
+    std::string hit_voice_volume = "normal";
+    std::string ko_replay = "dynamic";
 };
 
 struct Color { Uint8 r, g, b; };
@@ -116,6 +118,8 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "lifeBarColour", value) && value.size() > 2) settings.life_bar_colour = value.substr(1, value.size() - 2);
     if (jsonValue(text, "lifeBarCustom", value) && value.size() > 2) settings.life_bar_custom = value.substr(1, value.size() - 2);
     if (jsonValue(text, "hitVoices", value)) settings.hit_voices = value != "false";
+    if (jsonValue(text, "hitVoiceVolume", value) && value.size() > 2) settings.hit_voice_volume = value.substr(1, value.size() - 2);
+    if (jsonValue(text, "koReplay", value) && value.size() > 2) settings.ko_replay = value.substr(1, value.size() - 2);
     return settings;
 }
 
@@ -134,7 +138,9 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"randomCpuCostumes\": " << (settings.random_cpu_costumes ? "true" : "false")
          << ",\n  \"lifeBarColour\": \"" << settings.life_bar_colour << '"'
          << ",\n  \"lifeBarCustom\": \"" << settings.life_bar_custom << '"'
-         << ",\n  \"hitVoices\": " << (settings.hit_voices ? "true" : "false") << "\n}\n";
+         << ",\n  \"hitVoices\": " << (settings.hit_voices ? "true" : "false")
+         << ",\n  \"hitVoiceVolume\": \"" << settings.hit_voice_volume << '"'
+         << ",\n  \"koReplay\": \"" << settings.ko_replay << "\"\n}\n";
     return static_cast<bool>(file);
 }
 
