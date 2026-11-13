@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "fighters": {
+    "aya": {
+      "name": "Ayane",
+      "tuning": {"medium_from": "22", "heavy_from": "35", "heavy_always": "1", "meter_low": "28", "meter_high": "46", "gap_ms": "700", "volume_db": "0.0"},
+      "clips": [
+        {"file": "ayane_HIT_LV1_01.wav", "wave": 68, "cue": "down_03a"},
+        {"file": "ayane_HIT_LV1_02.wav", "wave": 74, "cue": "down_03g"},
+        {"file": "ayane_HIT_LV2_01.wav", "wave": 73, "cue": "down_03f"},
+        {"file": "ayane_HIT_LV2_02.wav", "wave": 72, "cue": "down_03e"},
+        {"file": "ayane_HIT_LV3_01.wav", "wave": 69, "cue": "down_03b"},
+        {"file": "ayane_HIT_LV3_02.wav", "wave": 70, "cue": "down_03c"},
+        {"file": "ayane_HIT_LV3_03.wav", "wave": 75, "cue": "down_03h"},
+        {"file": "ayane_KO_01.wav", "wave": 71, "cue": "down_03d"},
+        {"file": "ayane_KO_02.wav", "wave": 78, "cue": "down_03k"},
+        {"file": "ayane_KO_03.wav", "wave": 79, "cue": "down_03l"},
+        {"file": "ayane_KO_04.wav", "wave": 80, "cue": "down_03m"}
+      ]
+    },
+    "bas": {
+      "name": "Bass",
+      "clips": [
+        {"file": "bass_HIT_LV1_01.wav", "wave": 84, "cue": "down_03a"},
+        {"file": "bass_HIT_LV1_02.wav", "wave": 85, "cue": "down_03b"},
+        {"file": "bass_HIT_LV1_03.wav", "wave": 86, "cue": "down_03c"},
+        {"file": "bass_HIT_LV1_04.wav", "wave": 84, "cue": "down_03a"},
+        {"file": "bass_HIT_LV1_05.wav", "wave": 85, "cue": "down_03b"},
+        {"file": "bass_HIT_LV1_06.wav", "wave": 86, "cue": "down_03c"},
+        {"file": "bass_HIT_LV2_01.wav", "wave": 87, "cue": "down_03d"},
+        {"file": "bass_HIT_LV2_02.wav", "wave": 88, "cue": "down_03e"},
+        {"file": "bass_HIT_LV3_01.wav", "wave": 89, "cue": "down_03f"},
+        {"file": "bass_HIT_LV3_02.wav", "wave": 90, "cue": "down_03g"},
+        {"file": "bass_KO_01.wav", "wave": 91, "cue": "down_03h"},
+        {"file": "bass_KO_02.wav", "wave": 93, "cue": "down_03j"},
+        {"file": "bass_KO_03.wav", "wave": 95, "cue": "down_03l"}
+      ]
+    },
+    "bay": {
+      "name": "Bayman",
+      "clips": [
+        {"file": "bayman_HIT_LV1_01.wav", "wave": 76, "cue": "down_03c"},
+        {"file": "bayman_HIT_LV1_02.wav", "wave": 78, "cue": "down_03e"},
+        {"file": "bayman_HIT_LV1_03.wav", "wave": 81, "cue": "down_03h"},
+        {"file": "bayman_HIT_LV1_04.wav", "wave": 83, "cue": "down_03j"},
+        {"file": "bayman_HIT_LV2_01.wav", "wave": 74, "cue": "down_03a"},
+        {"file": "bayman_HIT_LV2_02.wav", "wave": 77, "cue": "down_03d"},
+        {"file": "bayman_HIT_LV2_03.wav", "wave": 82, "cue": "down_03i"},
+        {"file": "bayman_HIT_LV3_01.wav", "wave": 80, "cue": "down_03g"},
+        {"file": "bayman_HIT_LV3_02.wav", "wave": 84, "cue": "down_03k"},
+        {"file": "bayman_KO_01.wav", "wave": 75, "cue": "down_03b"},
+        {"file": "bayman_KO_02.wav", "wave": 87, "cue": "down_03n"},
+        {"file": "bayman_KO_03.wav", "wave": 85, "cue": "down_03l"}
+      ]
+    },
+    "ein": {
+      "name": "Ein",
+      "clips": [
+        {"file": "ein_HIT_LV1_01.wav", "wave": 84, "cue": "down_03a"},
+        {"file": "ein_HIT_LV1_02.wav", "wave": 85, "cue": "down_03b"},
+        {"file": "ein_HIT_LV1_03.wav", "wave": 87, "cue": "down_03d"},
+        {"file": "ein_HIT_LV1_04.wav", "wave": 88, "cue": "down_03e"},
+        {"file": "ein_HIT_LV2_01.wav", "wave": 86, "cue": "down_03c"},
+        {"file": "ein_HIT_LV2_02.wav", "wave": 90, "cue": "down_03g"},
+        {"file": "ein_HIT_LV2_03.wav", "wave": 91, "cue": "down_03h"},
+        {"file": "ein_HIT_LV2_04.wav", "wave": 93, "cue": "down_03j"},
+        {"file": "ein_HIT_LV3_01.wav", "wave": 92, "cue": "down_03i"},
+        {"file": "ein_HIT_LV3_02.wav", "wave": 94, "cue": "down_03k"},
+        {"file": "ein_HIT_LV3_03.wav", "wave": 95, "cue": "down_03l"},
+        {"file": "ein_KO_01.wav", "wave": 96, "cue": "down_03m"},
+        {"file": "ein_KO_02.wav", "wave": 97, "cue": "down_03n"},
+        {"file": "ein_KO_03.wav", "wave": 98, "cue": "down_03o"}
+      ]
+    },
+    "gen": {
+      "name": "Gen Fu",
+      "clips": [
+        {"file": "gen_HIT_LV1_01.wav", "wave": 74, "cue": "down_03a"},
+        {"file": "gen_HIT_LV1_03.wav", "wave": 82, "cue": "down_03i"},
+        {"file": "gen_HIT_LV1_04.wav", "wave": 83, "cue": "down_03j"},
+        {"file": "gen_HIT_LV2_01.wav", "wave": 75, "cue": "down_03b"},
+        {"file": "gen_HIT_LV2_03.wav", "wave": 80, "cue": "down_03g"},
+        {"file": "gen_HIT_LV3_01.wav", "wave": 81, "cue": "down_03h"},
+        {"file": "gen_KO_01.wav", "wave": 76, "cue": "down_03c"},
+        {"file": "gen_KO_02.wav", "wave": 77, "cue": "down_03d"}
+      ]
+    },
+    "hel": {
+      "name": "Helena",
+      "clips": [
+        {"file": "helena_HIT_LV1_01.wav", "wave": 60, "cue": "down_03f"},
+        {"file": "helena_HIT_LV1_02.wav", "wave": 55, "cue": "down_03a"},
+        {"file": "helena_HIT_LV2_01.wav", "wave": 57, "cue": "down_03c"},
+        {"file": "helena_HIT_LV2_02.wav", "wave": 56, "cue": "down_03b"},
+        {"file": "helena_HIT_LV3_01.wav", "wave": 61, "cue": "down_03g"},
+        {"file": "helena_KO_01.wav", "wave": 58, "cue": "down_03d"},
+        {"file": "helena_KO_02.wav", "wave": 59, "cue": "down_03e"},
+        {"file": "helena_KO_03.wav", "wave": 62, "cue": "down_03h"}
+      ]
+    },
+    "jan": {
+      "name": "Jann Lee",
+      "clips": [
+        {"file": "jan_HIT_LV1_01.wav", "wave": 100, "cue": "down_03a"},
+        {"file": "jan_HIT_LV1_02.wav", "wave": 104, "cue": "down_03e"},
+        {"file": "jan_HIT_LV1_03.wav", "wave": 105, "cue": "down_03f"},
+        {"file": "jan_HIT_LV2_01.wav", "wave": 101, "cue": "down_03b"},
+        {"file": "jan_HIT_LV2_02.wav", "wave": 102, "cue": "down_03c"},
+        {"file": "jan_HIT_LV2_03.wav", "wave": 107, "cue": "down_03h"},
+        {"file": "jan_HIT_LV3_01.wav", "wave": 103, "cue": "down_03d"},
+        {"file": "jan_HIT_LV3_02.wav", "wave": 106, "cue": "down_03g"},
+        {"file": "jan_KO_01.wav", "wave": 108, "cue": "down_03i"},
+        {"file": "jan_KO_02.wav", "wave": 109, "cue": "down_03j"},
+        {"file": "jan_KO_03.wav", "wave": 110, "cue": "down_03k"}
+      ]
+    },
+    "kas": {
+      "name": "Kasumi",
+      "clips": [
+        {"file": "kas_HIT_LV1_01.wav", "wave": 58, "cue": "down_03a"},
+        {"file": "kas_HIT_LV1_02.wav", "wave": 60, "cue": "down_03c"},
+        {"file": "kas_HIT_LV1_04.wav", "wave": 65, "cue": "down_03h"},
+        {"file": "kas_HIT_LV2_01.wav", "wave": 59, "cue": "down_03b"},
+        {"file": "kas_HIT_LV2_04.wav", "wave": 61, "cue": "down_03d"},
+        {"file": "kas_HIT_LV3_01.wav", "wave": 64, "cue": "down_03g"},
+        {"file": "kas_HIT_LV3_02.wav", "wave": 62, "cue": "down_03e"},
+        {"file": "kas_KO_01.wav", "wave": 63, "cue": "down_03f"},
+        {"file": "kas_KO_02.wav", "wave": 66, "cue": "down_03i"},
+        {"file": "kas_KO_03.wav", "wave": 67, "cue": "down_03j"}
+      ]
+    },
+    "kor": {
+      "name": "Hitomi",
+      "clips": [
+        {"file": "hit_HIT_LV1_01.wav", "wave": 111, "cue": "down_03a"},
+        {"file": "hit_HIT_LV1_02.wav", "wave": 116, "cue": "down_03f"},
+        {"file": "hit_HIT_LV1_03.wav", "wave": 123, "cue": "down_03m"},
+        {"file": "hit_HIT_LV2_01.wav", "wave": 114, "cue": "down_03d"},
+        {"file": "hit_HIT_LV2_02.wav", "wave": 115, "cue": "down_03e"},
+        {"file": "hit_HIT_LV3_01.wav", "wave": 112, "cue": "down_03b"},
+        {"file": "hit_HIT_LV3_02.wav", "wave": 113, "cue": "down_03c"},
+        {"file": "hit_HIT_LV3_03.wav", "wave": 117, "cue": "down_03g"},
+        {"file": "hit_KO_01.wav", "wave": 118, "cue": "down_03h"},
+        {"file": "hit_KO_02.wav", "wave": 119, "cue": "down_03i"},
+        {"file": "hit_KO_03.wav", "wave": 120, "cue": "down_03j"},
+        {"file": "hit_KO_04.wav", "wave": 122, "cue": "down_03l"}
+      ]
+    },
+    "lei": {
+      "name": "Leifang",
+      "clips": [
+        {"file": "lei_HIT_LV1_01.wav", "wave": 38, "cue": "down_03a"},
+        {"file": "lei_HIT_LV1_02.wav", "wave": 39, "cue": "down_03b"},
+        {"file": "lei_HIT_LV1_03.wav", "wave": 40, "cue": "down_03c"},
+        {"file": "lei_HIT_LV2_01.wav", "wave": 41, "cue": "down_03d"},
+        {"file": "lei_HIT_LV2_02.wav", "wave": 42, "cue": "down_03e"},
+        {"file": "lei_HIT_LV2_03.wav", "wave": 47, "cue": "down_03j"},
+        {"file": "lei_HIT_LV3_01.wav", "wave": 43, "cue": "down_03f"},
+        {"file": "lei_KO_01.wav", "wave": 45, "cue": "down_03h"},
+        {"file": "lei_KO_02.wav", "wave": 46, "cue": "down_03i"}
+      ]
+    },
+    "leo": {
+      "name": "Leon",
+      "clips": [
+        {"file": "leo_HIT_LV1_01.wav", "wave": 66, "cue": "down_03f"},
+        {"file": "leo_HIT_LV1_02.wav", "wave": 69, "cue": "down_03i"},
+        {"file": "leo_HIT_LV1_03.wav", "wave": 70, "cue": "down_03j"},
+        {"file": "leo_HIT_LV1_04.wav", "wave": 72, "cue": "down_03l"},
+        {"file": "leo_HIT_LV2_01.wav", "wave": 61, "cue": "down_03a"},
+        {"file": "leo_HIT_LV2_03.wav", "wave": 67, "cue": "down_03g"},
+        {"file": "leo_HIT_LV2_04.wav", "wave": 71, "cue": "down_03k"},
+        {"file": "leo_HIT_LV3_01.wav", "wave": 62, "cue": "down_03b"},
+        {"file": "leo_HIT_LV3_02.wav", "wave": 68, "cue": "down_03h"},
+        {"file": "leo_KO_01.wav", "wave": 63, "cue": "down_03c"},
+        {"file": "leo_KO_02.wav", "wave": 64, "cue": "down_03d"},
+        {"file": "leon_HIT_LV3_01.wav", "wave": 65, "cue": "down_03e"}
+      ]
+    },
+    "ryu": {
+      "name": "Ryu Hayabusa",
+      "clips": [
+        {"file": "ryu_HIT_LV1_01.wav", "wave": 40, "cue": "down_03a"},
+        {"file": "ryu_HIT_LV1_02.wav", "wave": 46, "cue": "down_03g"},
+        {"file": "ryu_HIT_LV1_03.wav", "wave": 47, "cue": "down_03h"},
+        {"file": "ryu_HIT_LV2_01.wav", "wave": 44, "cue": "down_03e"},
+        {"file": "ryu_HIT_LV2_02.wav", "wave": 48, "cue": "down_03i"},
+        {"file": "ryu_HIT_LV3_01.wav", "wave": 41, "cue": "down_03b"},
+        {"file": "ryu_KO_01.wav", "wave": 42, "cue": "down_03c"},
+        {"file": "ryu_KO_02.wav", "wave": 45, "cue": "down_03f"}
+      ]
+    },
+    "tin": {
+      "name": "Tina",
+      "clips": [
+        {"file": "tin_HIT_LV1_01.wav", "wave": 63, "cue": "down_03f"},
+        {"file": "tin_HIT_LV1_02.wav", "wave": 65, "cue": "down_03h"},
+        {"file": "tin_HIT_LV1_03.wav", "wave": 67, "cue": "down_03j"},
+        {"file": "tin_HIT_LV2_01.wav", "wave": 58, "cue": "down_03a"},
+        {"file": "tin_HIT_LV2_02.wav", "wave": 60, "cue": "down_03c"},
+        {"file": "tin_HIT_LV2_03.wav", "wave": 61, "cue": "down_03d"},
+        {"file": "tin_HIT_LV2_04.wav", "wave": 64, "cue": "down_03g"},
+        {"file": "tin_HIT_LV3_01.wav", "wave": 59, "cue": "down_03b"},
+        {"file": "tin_HIT_LV3_02.wav", "wave": 62, "cue": "down_03e"},
+        {"file": "tin_HIT_LV3_03.wav", "wave": 66, "cue": "down_03i"},
+        {"file": "tin_KO_01.wav", "wave": 68, "cue": "down_03k"},
+        {"file": "tin_KO_02.wav", "wave": 69, "cue": "down_03l"}
+      ]
+    },
+    "tng": {
+      "name": "Tengu",
+      "clips": [
+        {"file": "tng_HIT_LV1_01.wav", "wave": 53, "cue": "down_03c"},
+        {"file": "tng_HIT_LV1_02.wav", "wave": 56, "cue": "down_03f"},
+        {"file": "tng_HIT_LV1_03.wav", "wave": 57, "cue": "down_03g"},
+        {"file": "tng_HIT_LV2_01.wav", "wave": 51, "cue": "down_03a"},
+        {"file": "tng_HIT_LV2_02.wav", "wave": 54, "cue": "down_03d"},
+        {"file": "tng_HIT_LV2_03.wav", "wave": 55, "cue": "down_03e"},
+        {"file": "tng_HIT_LV2_04.wav", "wave": 58, "cue": "down_03h"},
+        {"file": "tng_HIT_LV3_01.wav", "wave": 52, "cue": "down_03b"},
+        {"file": "tng_HIT_LV3_03.wav", "wave": 60, "cue": "down_04a"},
+        {"file": "tng_KO_01.wav", "wave": 59, "cue": "down_03i"}
+      ]
+    },
+    "zac": {
+      "name": "Zack",
+      "clips": [
+        {"file": "zac_HIT_LV1_01.wav", "wave": 79, "cue": "down_03a"},
+        {"file": "zac_HIT_LV1_02.wav", "wave": 81, "cue": "down_03c"},
+        {"file": "zac_HIT_LV2_01.wav", "wave": 80, "cue": "down_03b"},
+        {"file": "zac_HIT_LV2_02.wav", "wave": 82, "cue": "down_03d"},
+        {"file": "zac_HIT_LV2_03.wav", "wave": 89, "cue": "down_03k"},
+        {"file": "zac_HIT_LV3_01.wav", "wave": 83, "cue": "down_03e"},
+        {"file": "zac_HIT_LV3_02.wav", "wave": 84, "cue": "down_03f"},
+        {"file": "zac_HIT_LV3_04.wav", "wave": 90, "cue": "down_03l"},
+        {"file": "zac_KO_01.wav", "wave": 86, "cue": "down_03h"},
+        {"file": "zac_KO_02.wav", "wave": 85, "cue": "down_03g"},
+        {"file": "zac_KO_03.wav", "wave": 87, "cue": "down_03i"},
+        {"file": "zac_KO_04.wav", "wave": 88, "cue": "down_03j"}
+      ]
+    }
+  }
+}

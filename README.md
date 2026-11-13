@@ -89,8 +89,12 @@ keeps running.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
   of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
   decodes every voice clip of all 15 fighters into
-  `private\doa4-voice-all\<fighter>`. Put the ones you want in that
-  fighter's `selections` folder, named `..._HIT_LV1_01.wav`, `_HIT_LV2_`,
+  `private\doa4-voice-all\<fighter>` and fills each fighter's `selections`
+  folder from `tools\doa4_voice_selections.json`, a mapping of which DOA4
+  clip plays for what (it holds no audio), so every install gets the same
+  hit voices from its own disc. To pick your own, put clips in that
+  fighter's `selections` folder (the importer never overwrites one that has
+  clips), named `..._HIT_LV1_01.wav`, `_HIT_LV2_`,
   `_HIT_LV3_` (light, medium and heavy hits) and `..._KO_01.wav`, and the game
   plays them: grunts follow the damage taken (a heavy hit always, a combo
   once or twice), at least 0.7 seconds apart, and a KO always cries, in the
@@ -98,7 +102,9 @@ keeps running.
   silent. **VoiceEditor.exe** (built from `tools\voice_editor.cs` beside the
   launchers) does this for you: pick a fighter, add clips to its light,
   medium, heavy and KO lists from any WAV, play them, and tune how often
-  they play; a running game picks up changes within a second. Hits are
+  they play; a running game picks up changes within a second. Its **Save
+  mapping** button (or the importer's `--save-selections`) writes your picks
+  back into the mapping file to share them. Hits are
   graded by the move's base damage, before combo scaling. It needs an
   ffmpeg with XMA support. PC SETTINGS' **Hit Voices**
   row sets them Off, Quiet, Normal or Loud. Online they stay off, since a

@@ -8,6 +8,10 @@
 // _HIT_LV2_ (medium), _HIT_LV3_ (heavy) or <fighter>_KO_NN.wav. Removed clips
 // move to selections\removed. The settings go to selections\voice.ini. The
 // game picks up every change within a second, so it can run alongside.
+// Save mapping writes the picks to tools\doa4_voice_selections.json (through
+// tools\import_doa4_voices.py --save-selections, which needs Python, ffmpeg and
+// your DOA4 snd.afs), so other installs build the same selections from their
+// own disc. The mapping holds no audio.
 //
 // Built with the C# compiler every Windows ships (C# 5):
 //   csc /target:winexe /out:VoiceEditor.exe tools\voice_editor.cs
@@ -18,6 +22,8 @@ using System.Globalization;
 using System.IO;
 using System.Media;
 using System.Text;
+using System.Diagnostics;
+using System.Threading;
 using System.Windows.Forms;
 
 static class VoiceEditorProgram
@@ -99,6 +105,13 @@ class VoiceEditor : Form
         fighters.SelectedIndexChanged += delegate { LoadFighter(); };
         left.Controls.Add(fighters);
         left.Controls.Add(fightersLabel);
+        var save = Button("Save mapping...", delegate { SaveMapping(); });
+        save.AutoSize = false;
+        save.Dock = DockStyle.Bottom;
+        save.Height = 30;
+        new ToolTip().SetToolTip(save, "Write every fighter's picks and settings to tools\\doa4_voice_selections.json,\n" +
+            "so other installs build the same selections from their own DOA4 disc.");
+        left.Controls.Add(save);
 
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(4) };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -134,6 +147,91 @@ class VoiceEditor : Form
             if (dialog.ShowDialog() == DialogResult.OK) return dialog.SelectedPath;
         }
         return null;
+    }
+
+    // The repository: private\doa4-voice-all's grandparent.
+    string RepoRoot
+    {
+        get
+        {
+            if (root == null) return null;
+            var up = Directory.GetParent(root);
+            up = up == null ? null : up.Parent;
+            return up == null ? null : up.FullName;
+        }
+    }
+
+    void SaveMapping()
+    {
+        var repo = RepoRoot;
+        var script = repo == null ? null : Path.Combine(Path.Combine(repo, "tools"), "import_doa4_voices.py");
+        if (script == null || !File.Exists(script))
+        {
+            MessageBox.Show(this, "tools\\import_doa4_voices.py was not found beside the private folder.", Text);
+            return;
+        }
+        var remembered = Path.Combine(root, "snd-afs.txt");
+        string afs = File.Exists(remembered) ? File.ReadAllText(remembered).Trim() : null;
+        if (afs == null || !File.Exists(afs))
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Title = "Choose snd.afs from your extracted DOA4 disc";
+                dialog.Filter = "snd.afs|snd.afs|AFS archives (*.afs)|*.afs";
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                afs = dialog.FileName;
+                File.WriteAllText(remembered, afs);
+            }
+        }
+        Say("Saving the mapping: decoding DOA4's voice banks to match your clips (a minute or two)...");
+        UseWaitCursor = true;
+        Enabled = false;
+        var args = "\"" + script + "\" \"" + afs + "\" --save-selections --out \"" + root + "\"";
+        var worker = new Thread(delegate()
+        {
+            string output;
+            int code = -1;
+            try { output = RunPython(repo, args, out code); }
+            catch (Exception e) { output = e.Message; }
+            BeginInvoke((MethodInvoker)delegate
+            {
+                Enabled = true;
+                UseWaitCursor = false;
+                Say(code == 0 ? "Mapping saved to tools\\doa4_voice_selections.json." : "Saving the mapping failed.");
+                MessageBox.Show(this, output.Trim(), code == 0 ? "Mapping saved" : "Saving the mapping failed");
+            });
+        });
+        worker.IsBackground = true;
+        worker.Start();
+    }
+
+    // python, else the py launcher; stdout and stderr together.
+    static string RunPython(string directory, string args, out int code)
+    {
+        foreach (var exe in new[] { "python", "py" })
+        {
+            var info = new ProcessStartInfo(exe, (exe == "py" ? "-3 " : "") + args)
+            {
+                WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+            };
+            Process process;
+            try { process = Process.Start(info); }
+            catch (System.ComponentModel.Win32Exception) { continue; }
+            var errors = new StringBuilder();
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data != null && e.Data.IndexOf("Invalid data", StringComparison.Ordinal) < 0 &&
+                    e.Data.IndexOf("would have to skip", StringComparison.Ordinal) < 0) errors.AppendLine(e.Data);
+            };
+            process.BeginErrorReadLine();
+            var text = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            code = process.ExitCode;
+            return text + errors;
+        }
+        code = -1;
+        return "Python was not found. Install Python 3 and make sure it is on PATH.";
     }
 
     Fighter Current { get { return fighters.SelectedItem as Fighter; } }
