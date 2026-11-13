@@ -18,6 +18,8 @@ struct QualityRequest {
 static std::mutex quality_lock;
 static QualityRequest quality_request;
 
+namespace {
+
 /* The largest sample count up to requested that both the color and the
    depth format support, as createGraphics chooses it. */
 UINT supportedSamples(RecompD3dPresenter *presenter, UINT requested)
@@ -85,6 +87,8 @@ void blitPicture(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source
     context->Draw(3u, 0u);
     context->ClearState();
 }
+
+} // namespace
 
 /* Applies PC Settings' quality between frames, as the Vulkan renderer does.
    SMAA only switches its pass. A new scale or MSAA rebuilds the main target,

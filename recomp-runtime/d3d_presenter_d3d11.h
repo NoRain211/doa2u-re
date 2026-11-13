@@ -12,10 +12,12 @@
 #include <d3d11_1.h>
 #include <dxgi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <thread>
 #include <unordered_map>
 #include <vector>
