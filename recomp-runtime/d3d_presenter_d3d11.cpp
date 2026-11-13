@@ -258,6 +258,8 @@ struct RecompD3dPresenter {
     float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
     uint32_t msaa = 1u;         // RECOMP_D3D_MSAA: main target sample count
     unsigned quality_applied = 0u; // last PC Settings quality generation applied
+    unsigned quality_retry_generation = 0u; // failed rebuild waiting to retry
+    std::chrono::steady_clock::time_point quality_retry_at{};
     float target_scale_x = 1.0f, target_scale_y = 1.0f; // bound target / guest size
     uint32_t target_samples = 1u; // MSAA samples of the bound target
     // Occlusion queries: the open BEGIN, ended ones in submission order, reusable ones.
@@ -3741,6 +3743,8 @@ void applyQuality(RecompD3dPresenter *presenter)
         if (quality_request.generation == presenter->quality_applied) return;
         want = quality_request;
     }
+    const auto now = std::chrono::steady_clock::now();
+    if (want.generation == presenter->quality_retry_generation && now < presenter->quality_retry_at) return;
     const bool old_smaa = presenter->smaa;
     presenter->smaa = want.smaa;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
@@ -3798,6 +3802,8 @@ void applyQuality(RecompD3dPresenter *presenter)
         presenter->scale = old_scale;
         presenter->msaa = old_msaa;
         presenter->smaa = old_smaa;
+        presenter->quality_retry_generation = want.generation;
+        presenter->quality_retry_at = now + std::chrono::seconds(1);
     } else {
         blitPicture(presenter, presenter->vrr_source, main_render, width, height);
         context->ClearDepthStencilView(depth_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0u);
