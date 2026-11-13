@@ -74,6 +74,12 @@ void removeStaleSaves(const std::string &target)
     for (; !error && it != end; it.increment(error)) {
         const std::string name = it->path().filename().string();
         if (name.compare(0u, prefix.size(), prefix) != 0) continue;
+        const std::string suffix = name.substr(prefix.size());
+        const size_t dot = suffix.find('.');
+        if (dot == std::string::npos || dot == 0u || dot + 1u == suffix.size() ||
+            suffix.find_first_not_of("0123456789", 0u) != dot ||
+            suffix.find_first_not_of("0123456789", dot + 1u) != std::string::npos)
+            continue; // not one of ours
         std::error_code age;
         if (it->last_write_time(age) < cutoff && !age) std::filesystem::remove(it->path(), age);
     }
@@ -136,7 +142,7 @@ bool save(const char *variable, bool pad)
         if (!error) return true;
     }
     std::fprintf(stderr, "recomp rebind: cannot save %s\n", path);
-    if (file != nullptr) {
+    if (fd >= 0) {
         std::error_code ignored;
         std::filesystem::remove(temporary, ignored); // only the temp this save made
     }
