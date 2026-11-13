@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -116,20 +117,68 @@ Settings loadSettings(const std::string &path)
     return settings;
 }
 
+// The flat object's keys and raw values, in file order.
+std::vector<std::pair<std::string, std::string>> jsonEntries(const std::string &text)
+{
+    std::vector<std::pair<std::string, std::string>> entries;
+    size_t at = 0;
+    while ((at = text.find('"', at)) != std::string::npos) {
+        const size_t key_end = text.find('"', ++at);
+        if (key_end == std::string::npos) break;
+        const std::string key = text.substr(at, key_end - at);
+        const size_t colon = text.find(':', key_end);
+        if (colon == std::string::npos) break;
+        size_t start = text.find_first_not_of(" \t\r\n", colon + 1);
+        if (start == std::string::npos) break;
+        size_t end;
+        if (text[start] == '"') {
+            end = text.find('"', start + 1);
+            if (end == std::string::npos) break;
+            ++end;
+        } else {
+            end = text.find_first_of(",}", start);
+            if (end == std::string::npos) end = text.size();
+            while (end > start && std::string(" \t\r\n").find(text[end - 1]) != std::string::npos) --end;
+        }
+        entries.emplace_back(key, text.substr(start, end - start));
+        at = end;
+    }
+    return entries;
+}
+
 bool saveSettings(const std::string &path, const Settings &settings)
 {
+    // The file is shared: the Windows launcher, the in-game PC SETTINGS page
+    // and run_game.py read keys this launcher does not write (vulkan, vrr,
+    // game_source, window...), so keep every entry it does not own.
+    std::vector<std::pair<std::string, std::string>> entries;
+    {
+        std::ifstream existing(path);
+        entries = jsonEntries(
+            std::string{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()});
+    }
+    const auto put = [&entries](const char *key, const std::string &value) {
+        for (auto &entry : entries)
+            if (entry.first == key) { entry.second = value; return; }
+        entries.emplace_back(key, value);
+    };
+    put("height", std::to_string(settings.height));
+    put("msaa", std::to_string(settings.msaa));
+    put("smaa", settings.smaa ? "true" : "false");
+    put("widescreen", settings.screen != "4:3" ? "true" : "false");
+    put("screen", std::string("\"") + settings.screen + "\"");
+    put("skipIntro", settings.skip_intro ? "true" : "false");
+    put("checkUpdates", settings.check_updates ? "true" : "false");
+    put("unlockAll", settings.unlock_all ? "true" : "false");
+    put("surround", settings.surround ? "true" : "false");
+    put("freeCamera", settings.free_camera ? "true" : "false");
+    put("randomCpuCostumes", settings.random_cpu_costumes ? "true" : "false");
+    put("dedicationCard", settings.dedication ? "true" : "false");
     std::ofstream file(path, std::ios::trunc);
-    file << "{\n  \"height\": " << settings.height << ",\n  \"msaa\": " << settings.msaa
-         << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
-         << ",\n  \"widescreen\": " << (settings.screen != "4:3" ? "true" : "false")
-         << ",\n  \"screen\": \"" << settings.screen << '"'
-         << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
-         << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
-         << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
-         << ",\n  \"surround\": " << (settings.surround ? "true" : "false")
-         << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false")
-         << ",\n  \"randomCpuCostumes\": " << (settings.random_cpu_costumes ? "true" : "false")
-         << ",\n  \"dedicationCard\": " << (settings.dedication ? "true" : "false") << "\n}\n";
+    file << "{\n";
+    for (size_t i = 0; i < entries.size(); ++i)
+        file << (i == 0 ? "  \"" : ",\n  \"") << entries[i].first << "\": " << entries[i].second;
+    file << "\n}\n";
     return static_cast<bool>(file);
 }
 
