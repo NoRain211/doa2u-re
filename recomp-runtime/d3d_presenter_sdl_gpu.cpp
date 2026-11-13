@@ -2934,8 +2934,8 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
                 SDL_EndGPUCopyPass(pass);
                 SDL_GenerateMipmapsForGPUTexture(commands, presenter->present_texture);
                 source = presenter->present_texture;
-                source_width >>= mip;
-                source_height >>= mip;
+                source_width = (std::max)(source_width >> mip, 1u);
+                source_height = (std::max)(source_height >> mip, 1u);
             } else {
                 mip = 0u;
             }

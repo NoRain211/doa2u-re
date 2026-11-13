@@ -3676,19 +3676,18 @@ RecompD3dPresenterError submitPresent(
     const float shown = present.aspect > 0.0f ? present.aspect : window_aspect;
     const bool drawn = chain.BufferDesc.Width != mainWidth(presenter) ||
         chain.BufferDesc.Height != mainHeight(presenter) || std::fabs(shown - window_aspect) > 0.001f;
+    const D3D11_VIEWPORT viewport = drawn
+        ? fitViewport(shown, chain.BufferDesc.Width, chain.BufferDesc.Height)
+        : D3D11_VIEWPORT{};
     if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
-    if (drawn) presenter->context->GenerateMips(presenter->vrr_source);
     if (drawn) {
         auto *context = presenter->context;
-        D3D11_TEXTURE2D_DESC window{};
-        ID3D11Texture2D *back_buffer = nullptr;
-        presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer));
-        if (back_buffer == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        back_buffer->GetDesc(&window);
-        releaseCom(back_buffer);
-        const D3D11_VIEWPORT viewport = fitViewport(shown, window.Width, window.Height);
+        /* The implicit-LOD window sample only leaves mip 0 when the fitted
+           picture is smaller than the render target. */
+        if (viewport.Width < mainWidth(presenter) || viewport.Height < mainHeight(presenter))
+            context->GenerateMips(presenter->vrr_source);
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         context->ClearState();
         context->ClearRenderTargetView(presenter->present_target_view, black);
