@@ -4,6 +4,8 @@
 #include "input_host_win32.h"
 
 #include <atomic>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -60,6 +62,23 @@ void listen(int request)
     }
 }
 
+/* Temps a crashed save left behind; a live save finishes in milliseconds. */
+void removeStaleSaves(const std::string &target)
+{
+    const std::filesystem::path path(target), folder = path.parent_path();
+    const std::string prefix = path.filename().string() + ".tmp.";
+    const auto cutoff = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+    std::error_code error;
+    std::filesystem::directory_iterator it(
+        folder.empty() ? std::filesystem::path(".") : folder, error), end;
+    for (; !error && it != end; it.increment(error)) {
+        const std::string name = it->path().filename().string();
+        if (name.compare(0u, prefix.size(), prefix) != 0) continue;
+        std::error_code age;
+        if (it->last_write_time(age) < cutoff && !age) std::filesystem::remove(it->path(), age);
+    }
+}
+
 bool save(const char *variable, bool pad)
 {
     const char *path = std::getenv(variable);
@@ -68,23 +87,28 @@ bool save(const char *variable, bool pad)
         return true;
     }
     const std::string target(path);
-    // A per-save name keeps O_EXCL from colliding with a live writer, and a
-    // crashed save's orphan from blocking later saves.
+    removeStaleSaves(target);
+    // A per-save name keeps O_EXCL from colliding with a live writer; a name
+    // that already exists is tried again with the next one.
     static std::atomic<unsigned> attempt{0};
-    const std::string temporary = target + ".tmp." +
-#ifdef _WIN32
-        std::to_string(_getpid())
-#else
-        std::to_string(getpid())
-#endif
-        + "." + std::to_string(attempt.fetch_add(1u));
+    std::string temporary;
 #ifdef _WIN32
     int fd = -1;
-    const int error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-        _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    int error = 0;
+    for (unsigned tries = 0u; tries < 8u; ++tries) {
+        temporary = target + ".tmp." + std::to_string(_getpid()) + "." + std::to_string(attempt.fetch_add(1u));
+        error = _sopen_s(&fd, temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+            _SH_DENYNO, _S_IREAD | _S_IWRITE);
+        if (error != EEXIST) break;
+    }
     std::FILE *file = error == 0 ? _fdopen(fd, "wb") : nullptr;
 #else
-    int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    int fd = -1;
+    for (unsigned tries = 0u; tries < 8u; ++tries) {
+        temporary = target + ".tmp." + std::to_string(getpid()) + "." + std::to_string(attempt.fetch_add(1u));
+        fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
     std::FILE *file = fd >= 0 ? fdopen(fd, "wb") : nullptr;
 #endif
     bool written = file != nullptr;
@@ -112,8 +136,10 @@ bool save(const char *variable, bool pad)
         if (!error) return true;
     }
     std::fprintf(stderr, "recomp rebind: cannot save %s\n", path);
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
+    if (file != nullptr) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored); // only the temp this save made
+    }
     return false;
 }
 
