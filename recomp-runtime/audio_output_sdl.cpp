@@ -539,10 +539,12 @@ extern "C" void recomp_audio_output_submit(
         std::pow(10.0f, volume_hundredth_db / 2000.0f);
     /* A routed voice's gain rides in its ramped matrix; SDL's stream gain
        steps at once on audio already queued. */
-    if (!routed && gain != voice.gain) {
+    if (gain != voice.gain) {
         voice.gain = gain;
-        SDL_SetAudioStreamGain(voice.stream, gain);
-        if (voice.wet_stream) SDL_SetAudioStreamGain(voice.wet_stream, gain);
+        if (!routed) {
+            SDL_SetAudioStreamGain(voice.stream, gain);
+            if (voice.wet_stream) SDL_SetAudioStreamGain(voice.wet_stream, gain);
+        }
     }
 
     const uint32_t frames = bytes / block_align;
@@ -595,8 +597,11 @@ extern "C" void recomp_audio_output_submit(
         mixOutput(pcm, frames, channels, bits_per_sample, voice.dry_mix, dry, ramp, speakers, dry_frames);
         if (voice.wet_stream)
             mixOutput(pcm, frames, channels, bits_per_sample, voice.wet_mix, wet, ramp, 2u, wet_frames);
-        std::memcpy(voice.dry_mix, dry, sizeof dry);
-        std::memcpy(voice.wet_mix, wet, sizeof wet);
+        /* A chunk shorter than the ramp stops partway; the next one continues
+           from there rather than stepping to the target. */
+        const float reached = frames < ramp ? static_cast<float>(frames) / ramp : 1.0f;
+        for (uint32_t i = 0; i < channels * speakers; ++i) voice.dry_mix[i] += (dry[i] - voice.dry_mix[i]) * reached;
+        for (uint32_t i = 0; i < channels * 2u; ++i) voice.wet_mix[i] += (wet[i] - voice.wet_mix[i]) * reached;
         const uint32_t dry_bytes = frames * speakers * 4u;
         const uint32_t wet_bytes = frames * 2u * 4u;
         if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;

@@ -125,9 +125,13 @@ int main()
     std::vector<float> level(4800 * 2, 0.5f);  // 100 ms of DC
     const uint32_t level_bytes = static_cast<uint32_t>(level.size() * sizeof(float));
     recomp_audio_output_submit(4, reinterpret_cast<const uint8_t *>(level.data()), level_bytes, 48000, 2, 32, 0);
-    // Change the volume while the first chunk plays, as the game does.
+    // Change the volume while the first chunk plays, as the game does, in
+    // 2 ms chunks like game-thread pumps: each must continue the ramp.
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    recomp_audio_output_submit(4, reinterpret_cast<const uint8_t *>(level.data()), level_bytes, 48000, 2, 32, -600);
+    for (uint32_t done = 0; done < level_bytes; done += 96u * 2u * sizeof(float)) {
+        recomp_audio_output_submit(4, reinterpret_cast<const uint8_t *>(level.data()) + done,
+            96u * 2u * sizeof(float), 48000, 2, 32, -600);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     recomp_audio_output_shutdown();
     unsetenv("RECOMP_AUDIO_CAPTURE");
