@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings_store.h"
+#include "combo_hud.h"
 
 #include <cctype>
 #include <cstdio>
@@ -150,6 +151,15 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_CPU_COSTUMES] = boolean(entries, "randomCpuCostumes", false) ? 1u : 0u;
     choices[RECOMP_PC_FREE_CAMERA] = boolean(entries, "freeCamera", false) ? 1u : 0u;
     choices[RECOMP_PC_DEDICATION] = boolean(entries, "dedicationCard", true) ? 0u : 1u;
+    const std::string colour = text(entries, "lifeBarColour", RECOMP_LIFE_BAR_NAMES[0]);
+    choices[RECOMP_PC_LIFE_BAR] = RECOMP_LIFE_BAR_DEFAULT;
+    for (std::uint8_t i = 0u; i < RECOMP_LIFE_BAR_COLOURS; ++i)
+        if (colour == RECOMP_LIFE_BAR_NAMES[i]) choices[RECOMP_PC_LIFE_BAR] = i;
+    // hitVoices turns them off; hitVoiceVolume, added later, picks Quiet, Normal or Loud.
+    const std::string volume = text(entries, "hitVoiceVolume", "normal");
+    choices[RECOMP_PC_HIT_VOICES] = !boolean(entries, "hitVoices", true) ? 0u
+        : volume == "quiet" ? 1u : volume == "loud" ? 3u : 2u;
+    choices[RECOMP_PC_KO_REPLAY] = text(entries, "koReplay", "dynamic") == "original" ? 0u : 1u;
 }
 
 bool read_file(const std::string &path, std::string *out)
@@ -185,6 +195,23 @@ bool recomp_pc_settings_read(const std::string &path, const RecompPcSettingsStor
     return read;
 }
 
+std::uint32_t recomp_pc_settings_custom_life_bar(const std::string &path)
+{
+    Entries entries;
+    std::string content;
+    if (!read_file(path, &content) || !parse(content, &entries)) return 0xffffffu;
+    std::string hex = text(entries, "lifeBarCustom", "FFFFFF");
+    if (!hex.empty() && hex[0] == '#') hex.erase(0, 1);
+    if (hex.size() != 6u) return 0xffffffu;
+    std::uint32_t rgb = 0u;
+    for (const char c : hex) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return 0xffffffu;
+        rgb = rgb << 4 | static_cast<std::uint32_t>(std::isdigit(static_cast<unsigned char>(c)) ? c - '0'
+            : std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
+    }
+    return rgb;
+}
+
 bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsStore &store,
     const std::uint8_t choices[RECOMP_PC_SETTING_COUNT])
 {
@@ -212,6 +239,14 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     put(&entries, "randomCpuCostumes", flag(choices[RECOMP_PC_CPU_COSTUMES] == 1u));
     put(&entries, "freeCamera", flag(choices[RECOMP_PC_FREE_CAMERA] == 1u));
     put(&entries, "dedicationCard", flag(choices[RECOMP_PC_DEDICATION] == 0u));
+    put(&entries, "lifeBarColour", std::string("\"") +
+        RECOMP_LIFE_BAR_NAMES[choices[RECOMP_PC_LIFE_BAR] % RECOMP_LIFE_BAR_COLOURS] + "\"");
+    put(&entries, "hitVoices", flag(choices[RECOMP_PC_HIT_VOICES] != 0u));
+    // Off keeps the volume last chosen.
+    static const char *const VOLUMES[4] = {nullptr, "quiet", "normal", "loud"};
+    if (choices[RECOMP_PC_HIT_VOICES] != 0u && choices[RECOMP_PC_HIT_VOICES] < 4u)
+        put(&entries, "hitVoiceVolume", std::string("\"") + VOLUMES[choices[RECOMP_PC_HIT_VOICES]] + "\"");
+    put(&entries, "koReplay", choices[RECOMP_PC_KO_REPLAY] == 0u ? "\"original\"" : "\"dynamic\"");
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;

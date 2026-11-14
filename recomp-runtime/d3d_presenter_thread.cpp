@@ -33,6 +33,7 @@ struct PresenterThread {
     unsigned pending = 0; // Includes the packet executing outside the mutex.
     bool started = false;
     bool shutdown = false;
+    bool finished = false; // run() has released the backend
     RecompD3dPresenterError created = RECOMP_D3D_PRESENTER_OK;
     RecompD3dPresenterError status = RECOMP_D3D_PRESENTER_OK;
     RecompD3dPresenterError destroyed = RECOMP_D3D_PRESENTER_OK;
@@ -278,6 +279,11 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
     thread.destroyed = d3d_backend_destroy(&backend);
     std::fprintf(stderr, "recomp d3d presenter thread: draw declines=%u\n",
         thread.draw_declines);
+    {
+        std::lock_guard<std::mutex> lock(thread.mutex);
+        thread.finished = true;
+    }
+    thread.changed.notify_all();
 }
 
 double clock_ms()
@@ -506,6 +512,21 @@ RecompD3dPresenterError recomp_d3d_presenter_destroy(RecompD3dPresenter **presen
         thread.shutdown = true;
     }
     SetEvent(thread.wake);
+    {
+        /* Destroy runs at process exit. A driver that never returns from the
+           backend release must not keep the process alive: give the worker a
+           few seconds, then leave it (and its state) to the process exit. */
+        std::unique_lock<std::mutex> lock(thread.mutex);
+        if (!thread.changed.wait_for(lock, std::chrono::seconds(5), [&] { return thread.finished; })) {
+            lock.unlock();
+            std::fprintf(stderr, "recomp d3d presenter: render thread did not finish its release"
+                " in 5 s; leaving it to the process exit\n");
+            thread.worker.detach();
+            active_thread = nullptr;
+            *presenter = nullptr;
+            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+        }
+    }
     thread.worker.join();
     // A close already reached the owner through PRESENT; report other pending work errors.
     const auto pending = thread.status == RECOMP_D3D_PRESENTER_CLOSED

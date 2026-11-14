@@ -214,6 +214,10 @@ add_test(NAME recomp-runtime-pc-settings COMMAND recomp_pc_settings_test)
 add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runner_assets.c d3d_texture_model.c
     menu_quit_test.c)
 add_test(NAME recomp-runtime-menu-quit COMMAND recomp_menu_quit_test)
+add_executable(recomp_hit_voice_test hit_voice.c hit_voice_test.c)
+add_test(NAME recomp-runtime-hit-voice COMMAND recomp_hit_voice_test)
+add_executable(recomp_ko_replay_test ko_replay.c ko_replay_test.c)
+add_test(NAME recomp-runtime-ko-replay COMMAND recomp_ko_replay_test)
 add_executable(recomp_pc_settings_store_test pc_settings_store.cpp pc_settings_store_test.cpp)
 add_test(NAME recomp-runtime-pc-settings-store COMMAND recomp_pc_settings_store_test)
 
@@ -234,6 +238,7 @@ add_test(NAME recomp-runtime-d3d-vertex-declaration COMMAND recomp_d3d_vertex_de
 if(NOT MSVC)
     target_link_libraries(recomp_manual_test PRIVATE m)
     target_link_libraries(recomp_pc_settings_test PRIVATE m)
+    target_link_libraries(recomp_ko_replay_test PRIVATE m)
     target_link_libraries(recomp_menu_quit_test PRIVATE m)
     target_link_libraries(recomp_model_test PRIVATE m)
     target_link_libraries(recomp_d3d8_adapter_test PRIVATE m)
@@ -431,7 +436,13 @@ file(DOWNLOAD ${_xbrz_url}/xbrz.h "${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h"
     EXPECTED_HASH SHA256=f0c59293edf8268abe7e749f017fe84c9ae38303aef2afc3244b2fdba9aeb69c)
 include("${CMAKE_CURRENT_SOURCE_DIR}/xbrz_patch.cmake")
 recomp_patch_xbrz("${CMAKE_CURRENT_BINARY_DIR}/xbrz_upstream.h" "${_xbrz_dir}/xbrz.h")
-target_sources(${_sdl_gpu_presenter} PRIVATE texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp")
+# One copy serves both renderers (Windows links the Direct3D 11 and Vulkan ones together).
+add_library(recomp_texture_upscale STATIC texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp")
+target_include_directories(recomp_texture_upscale PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_texture_upscale)
+if(WIN32)
+    target_link_libraries(recomp_d3d_presenter PUBLIC recomp_texture_upscale)
+endif()
 set_source_files_properties(texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" PROPERTIES INCLUDE_DIRECTORIES "${_xbrz_dir}")
 add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" texture_upscale_test.cpp)
 target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
@@ -677,7 +688,7 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c unlock_profile.c pc_settings.c
+        netplay_menu_room.cpp netplay_menu_find.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c unlock_profile.c pc_settings.c
         pc_settings_store.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c

@@ -69,7 +69,7 @@ static inline uint32_t recomp_game_sprite_colour(const RecompGameSprite *sprite,
 typedef uint_least16_t recomp_utf16;
 
 /* Message numbers for 0x6a3e0, past every number the game uses. */
-enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_QUIT = 0x7100 };
+enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_QUIT = 0x7200 };
 /* A message's text per game language (Japanese, English, French, German,
    Italian, Spanish), copied into guest memory. */
 void recomp_runner_text_set(uint32_t number, const recomp_utf16 *const text[6]);

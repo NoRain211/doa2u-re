@@ -22,7 +22,7 @@ DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitigno
              "tools/doa2u/function_status.json", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
 # Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
-WINDOWS_ONLY = {"tools/launcher.cs", *(f"recomp-runtime/{name}" for name in (
+WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", *(f"recomp-runtime/{name}" for name in (
     "audio_output_xaudio2.cpp", "audio_output_xaudio2_test.cpp", "audio_output_xaudio2_host_test.cpp",
     "audio_xtalk_xapo.cpp", "audio_xtalk_xapo.h", "audio_capture_xapo.cpp", "audio_capture_xapo.h",
     "audio_capture_xapo_test.cpp", "xaudio2_reverb.h", "xaudio2_reverb_test.cpp",
@@ -59,22 +59,24 @@ PLATFORMS = {"windows": ("", "docs/test-release.md"),
              "linux": ("-Linux", "docs/test-release-linux.md")}
 
 
-# The C# compiler every Windows ships builds both launchers from tools/launcher.cs.
+# The C# compiler every Windows ships builds both launchers from tools/launcher.cs and VoiceEditor.exe.
 CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
-LAUNCHERS = {"Launcher.exe": [], "DOA2U.exe": ["/define:PLAY_ONLY"]}
+LAUNCHERS = {"Launcher.exe": ("launcher.cs", []), "DOA2U.exe": ("launcher.cs", ["/define:PLAY_ONLY"]),
+             "VoiceEditor.exe": ("voice_editor.cs", [])}
 # Optional private icon (fan art from issue #39 holds Tecmo's character and logo art, so it stays untracked).
 ICON = ROOT / "private" / "launcher-icon.ico"
 
 
 def build_launchers(out_dir):
-    """Launcher.exe (build, settings, play) and DOA2U.exe (play) into out_dir."""
+    """Launcher.exe (build, settings, play), DOA2U.exe (play) and VoiceEditor.exe into out_dir."""
     if not CSC.is_file():
         raise SystemExit(f"The launchers need Windows: {CSC} is missing")
     icon = [f"/win32icon:{ICON}"] if ICON.is_file() else []
-    for exe, flags in LAUNCHERS.items():
+    background = [f"/resource:{ROOT / 'tools' / 'launcher-background.jpg'},launcher-background.jpg"]
+    for exe, (source, flags) in LAUNCHERS.items():
         subprocess.run([str(CSC), "/nologo", "/warnaserror", "/target:winexe", "/r:System.Web.Extensions.dll",
-                        f"/resource:{ROOT / 'tools' / 'launcher-background.jpg'},launcher-background.jpg",
-                        *icon, *flags, f"/out:{out_dir / exe}", str(ROOT / "tools" / "launcher.cs")], check=True)
+                        *(background if source == "launcher.cs" else []), *icon, *flags,
+                        f"/out:{out_dir / exe}", str(ROOT / "tools" / source)], check=True)
 
 
 def git(*args, cwd=ROOT):
@@ -131,7 +133,7 @@ def main():
     parser.add_argument("version", nargs="?")
     parser.add_argument("--platform", choices=PLATFORMS, default="windows")
     parser.add_argument("--launchers", type=Path, metavar="DIR",
-                        help="only build Launcher.exe and DOA2U.exe into DIR (the repository root for a checkout)")
+                        help="only build Launcher.exe, DOA2U.exe and VoiceEditor.exe into DIR (the repository root for a checkout)")
     args = parser.parse_args()
     if args.launchers:
         build_launchers(args.launchers)
