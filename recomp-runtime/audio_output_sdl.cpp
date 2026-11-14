@@ -68,6 +68,7 @@ std::vector<float> dry_frames, wet_frames;
 std::mutex reverb_mutex;
 RecompAudioReverbState *reverb;
 RecompXtalk xtalk;
+std::vector<float> wet_pair;  // the reverb device's front pair on a 5.1 master
 
 unsigned long long submitted_buffers, submitted_bytes, nonzero_buffers;
 unsigned long long dropped_buffers, underruns, voice_resets;
@@ -101,18 +102,38 @@ void SDLCALL dumpPostmix(void *, const SDL_AudioSpec *spec, float *buffer, int b
 }
 
 /* The wet device's mix is the reverb input; the callback replaces it with
-   the reverb output, which SDL then adds to the dry device's mix. */
+   the reverb output, which SDL then adds to the dry device's mix. SDL hands
+   every logical device the physical device's spec, so a 5.1 master gives
+   this stereo device six channels: the wet pair sits in FL/FR (SDL's stereo
+   upmix) and the return goes back there, as XAudio2's reverb submix does. */
 void SDLCALL reverbPostmix(void *, const SDL_AudioSpec *spec, float *buffer, int buflen)
 {
-    const int frames = buflen / static_cast<int>(sizeof(float)) / spec->channels;
+    const int channels = spec->channels;
+    const int frames = buflen / static_cast<int>(sizeof(float)) / channels;
     std::lock_guard<std::mutex> lock(reverb_mutex);
-    if (reverb == nullptr || spec->channels != 2) {
+    if (reverb == nullptr || channels < 2) {
         std::memset(buffer, 0, static_cast<size_t>(buflen));
         return;
     }
-    recomp_audio_reverb_process(reverb, buffer, frames);
+    float *stereo = buffer;
+    if (channels != 2) {
+        wet_pair.resize(static_cast<size_t>(frames) * 2u);
+        stereo = wet_pair.data();
+        for (int i = 0; i < frames; ++i) {
+            stereo[i * 2] = buffer[i * channels];
+            stereo[i * 2 + 1] = buffer[i * channels + 1];
+        }
+    }
+    recomp_audio_reverb_process(reverb, stereo, frames);
     /* shortcut: the 11-sample delay and pole assume 48 kHz; resample for other device rates. */
-    recomp_xtalk_process_block(&xtalk, buffer, static_cast<uint32_t>(frames));
+    recomp_xtalk_process_block(&xtalk, stereo, static_cast<uint32_t>(frames));
+    if (channels != 2) {
+        std::memset(buffer, 0, static_cast<size_t>(buflen));
+        for (int i = 0; i < frames; ++i) {
+            buffer[i * channels] = stereo[i * 2];
+            buffer[i * channels + 1] = stereo[i * 2 + 1];
+        }
+    }
 }
 
 void dropBuffer(uint32_t slot, const char *reason)
@@ -356,6 +377,12 @@ extern "C" void recomp_audio_output_test_reset(void)
     attempted = false;
     summary_printed = false;
     owner_thread = std::thread::id{};
+}
+
+extern "C" void recomp_audio_output_test_reverb_postmix(int channels, int freq, float *buffer, int bytes)
+{
+    const SDL_AudioSpec spec{SDL_AUDIO_F32, channels, freq};
+    reverbPostmix(nullptr, &spec, buffer, bytes);
 }
 
 extern "C" void recomp_audio_output_reset_voice(uint32_t slot)
