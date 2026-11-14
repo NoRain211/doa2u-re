@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import ssl
 import sys
 import tempfile
 import time
@@ -36,12 +37,22 @@ def runs_upstream_linux_binary():
         return False
 
 
-def fetch_verified(url, expected_sha256, archive, name):
+def fetch_verified(url, expected_sha256, archive, name, manual=""):
+    try:
+        import truststore  # the Windows release bundles it; elsewhere Python's own CA store is used
+        truststore.inject_into_ssl()
+    except ImportError:
+        pass
     try:
         with urllib.request.urlopen(url, timeout=60) as response, archive.open("xb") as file:
             shutil.copyfileobj(response, file)
     except (OSError, urllib.error.URLError) as error:
-        raise ValueError(f"Could not download {name}: {error}. Retry when online.") from error
+        message = f"Could not download {name}: {error}. Retry when online."
+        if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
+            # Antivirus HTTPS scanning, a VPN or a proxy usually re-signs the connection with a root Python lacks.
+            message += (f" If antivirus HTTPS scanning, a VPN or a proxy is on, pause it and rerun, or download "
+                        f"{url} in your browser. {manual}").rstrip()
+        raise ValueError(message) from error
     if sha256(archive) != expected_sha256:
         raise ValueError(f"The {name} download failed its SHA-256 check. Rerun the build.")
 
@@ -55,7 +66,8 @@ def install_llvm_mingw(root):
     with tempfile.TemporaryDirectory(prefix="llvm-mingw-", dir=private) as folder:
         archive = Path(folder) / "llvm-mingw.zip"
         print("Downloading the llvm-mingw compiler (190 MB)...", flush=True)
-        fetch_verified(LLVM_MINGW_URL, LLVM_MINGW_SHA256, archive, "llvm-mingw")
+        fetch_verified(LLVM_MINGW_URL, LLVM_MINGW_SHA256, archive, "llvm-mingw",
+                       f"Extract the folder inside it into {target} so {target / 'bin/clang.exe'} exists.")
         print("Extracting llvm-mingw...", flush=True)
         staging = Path(folder) / "extract"
         with zipfile.ZipFile(archive) as contents:
@@ -74,8 +86,13 @@ def install_llvm_mingw(root):
 
 
 def llvm_mingw(root):
-    """Return clang.exe and put its folder, which also holds mingw32-make, first on PATH."""
+    """Return clang.exe (pinned copy, else a llvm-mingw on PATH) and put its folder, which also holds mingw32-make, first on PATH."""
     clang = root / LLVM_MINGW / "bin/clang.exe"
+    if not clang.is_file():
+        # shortcut: a PATH toolchain skips the pin and SHA-256 check; it must ship mingw32-make like llvm-mingw does.
+        found = shutil.which("clang.exe") if sys.platform == "win32" else None
+        if found and (Path(found).parent / "mingw32-make.exe").is_file():
+            clang = Path(found)
     if not clang.is_file():
         install_llvm_mingw(root)
         if not clang.is_file():

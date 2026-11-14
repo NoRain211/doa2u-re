@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -88,6 +89,38 @@ class UpdateTest(unittest.TestCase):
                 writer.writestr(info, "same")
             update.unpack(zipfile.ZipFile(data))
             chmod.assert_called_once_with(0o755)
+
+    def test_install_downloads_only_changed_entries(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as writer:
+            writer.writestr("DOA2U-2/big.bin", os.urandom(1 << 21))  # random, so it stays 2 MB compressed
+            writer.writestr("DOA2U-2/VERSION", "2")
+        zipped = data.getvalue()
+        asset = {"browser_download_url": "url", "size": len(zipped), "digest": "sha256:" + "0" * 64}
+        for status in (206, 200):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as folder, \
+                    mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                    mock.patch.object(update.Ranges, "BLOCK", 4096):
+                with zipfile.ZipFile(io.BytesIO(zipped)) as source:
+                    (update.ROOT / "big.bin").write_bytes(source.read("DOA2U-2/big.bin"))
+                served = []
+
+                def fetch(url, start=None, end=None):
+                    response = io.BytesIO(zipped[start:end] if start is not None and status == 206 else zipped)
+                    response.status = status if start is not None else 200
+                    served.append(len(response.getvalue()))
+                    return response
+
+                with mock.patch.object(update, "fetch", fetch):
+                    if status == 206:
+                        update.install(asset)
+                        self.assertEqual((update.ROOT / "VERSION").read_text(), "2")
+                        self.assertLess(sum(served), len(zipped) // 10)
+                    else:
+                        # No partial downloads: the whole ZIP comes down and must match GitHub's digest.
+                        with self.assertRaisesRegex(ValueError, "checksum"):
+                            update.install(asset)
+                        self.assertFalse((update.ROOT / "VERSION").exists())
 
     def test_unsafe_entry_stops_before_any_write(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):
