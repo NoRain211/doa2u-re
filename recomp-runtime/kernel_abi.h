@@ -3,6 +3,10 @@
 
 #include "runtime.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Shared calling-convention helpers for kernel import adapters.
  *
  * A kernel adapter is entered with the guest stack exactly as the CALL left
@@ -270,5 +274,9 @@ void recomp_kernel_drain_dpcs(void);
 void recomp_kernel_poll(void);
 /* Signal expired timers and queue their DPCs; returns the number queued. */
 unsigned recomp_kernel_expire_timers(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
