@@ -1,11 +1,10 @@
 #include "controller_settings.h"
+#include "settings_file.h"
 
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#ifdef _WIN32
-#include <windows.h>
-#endif
+#include <string>
 
 namespace fs = std::filesystem;
 
@@ -41,18 +40,6 @@ bool recomp_controller_settings_save(const char *root, const uint8_t modes[4])
     try {
         const auto path = settings_path(root);
         fs::create_directories(path.parent_path());
-        auto temporary = path;
-        temporary += ".tmp";
-        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-        file.write("DCP1", 4);
-        file.write(reinterpret_cast<const char *>(modes), 4);
-        file.close();
-        if (!file) return false;
-#ifdef _WIN32
-        return MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
-#else
-        fs::rename(temporary, path);
-        return true;
-#endif
+        return recomp_settings_write(path, std::string("DCP1", 4) + std::string(reinterpret_cast<const char *>(modes), 4));
     } catch (...) { return false; }
 }

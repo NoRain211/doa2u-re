@@ -13,6 +13,7 @@
 #include "cpu_costume.h"
 #include "unlock_profile.h"
 #include "pc_settings.h"
+#include "button_config.h"
 #include "runner_assets.h"
 #include "menu_quit.h"
 #include "pc_settings_store.h"
@@ -20,6 +21,7 @@
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "netplay_menu.h"
+#include "rebind.h"
 #include "netplay_session.h"
 #include "perf_overlay.h"
 #include "rollback.h"
@@ -94,12 +96,18 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
     }
 }
 
-// A host pad goes through the quit prompt, then the netplay menu. The open
-// prompt owns the pads, so the room cannot inject its A behind it.
+// A host pad goes through the quit prompt, then Rebind, then the netplay menu.
+// The open prompt owns the pads, so the room cannot inject its A behind it.
 static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
 {
     quitPrompt(port, sampled ? gamepad : nullptr);
-    if (sampled && !recomp_quit_prompt_open()) recomp_netplay_menu_filter(port, gamepad);
+    if (!sampled) {
+        recomp_rebind_release(port); // an unplugged pad cannot let go of a button
+        return;
+    }
+    if (recomp_quit_prompt_open()) return;
+    recomp_rebind_filter(port, gamepad);
+    recomp_netplay_menu_filter(port, gamepad);
 }
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
@@ -210,6 +218,9 @@ static void installPcSettings(bool online)
     recomp_ko_replay_set_enabled(choices[RECOMP_PC_KO_REPLAY] == 1u);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
+    const RecompButtonConfigHost rebind{recomp_rebind_name, recomp_rebind_listen, recomp_rebind_listening,
+        recomp_rebind_reset, recomp_rebind_save};
+    recomp_button_config_install(&rebind);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
     const bool quality = recomp_d3d_presenter_quality_live();
     for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA})
@@ -442,6 +453,7 @@ int main(int argc, char **argv)
     std::string xbePath, discRoot, expectStop, milestoneLog;
     std::string replayPath;
     RecompNetplayLaunch launch;
+    recomp_rebind_load(); // before the first pad sample
     recomp_input_pulse_source_init(&inputPulses, recomp_input_host_sample, 0u);
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];

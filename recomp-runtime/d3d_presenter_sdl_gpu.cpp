@@ -2471,7 +2471,7 @@ bool triangleCovers(const float (&clip)[3][4], RecompD3dCullMode cull, const flo
 uint32_t virtualKey(SDL_Scancode code)
 {
     if (code >= SDL_SCANCODE_A && code <= SDL_SCANCODE_Z) return 'A' + (code - SDL_SCANCODE_A);
-    // Keys private/keyboard.json can bind (tools/run_game.py).
+    // Keys private/keyboard.json can bind (input_host_win32.c).
     if (code >= SDL_SCANCODE_1 && code <= SDL_SCANCODE_9) return '1' + (code - SDL_SCANCODE_1);
     if (code == SDL_SCANCODE_0) return '0';
     if (code >= SDL_SCANCODE_F1 && code <= SDL_SCANCODE_F12) return 0x70u + (code - SDL_SCANCODE_F1);
