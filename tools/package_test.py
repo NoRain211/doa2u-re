@@ -200,10 +200,12 @@ def main():
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release
     partial.rename(out)
-    # Upload beside the ZIP: tools/update.py checks it against GitHub's digest, then each entry it fetches against it.
+    # Upload beside the ZIP: tools/update.py checks it against GitHub's digest, then trusts its digests and modes
+    # over the ranged ZIP's directory.
     manifest = out.with_name(out.name + ".sha256.json")
     with zipfile.ZipFile(out) as package:
-        manifest.write_text(json.dumps({info.filename: hashlib.sha256(package.read(info)).hexdigest()
+        manifest.write_text(json.dumps({info.filename: [hashlib.sha256(package.read(info)).hexdigest(),
+                                                        (info.external_attr >> 16) & 0o777]
                                         for info in package.infolist() if not info.is_dir()}, indent=0), encoding="utf-8")
     print(out)
     print(manifest)

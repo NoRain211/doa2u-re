@@ -97,7 +97,7 @@ def newer(current):
 
 
 def manifest_of(assets, asset):
-    """The release's <zip>.sha256.json beside asset: each entry's SHA-256, which package_test.py writes."""
+    """The release's <zip>.sha256.json beside asset: each entry's [SHA-256, mode], which package_test.py writes."""
     return next((other for other in assets if other["name"] == asset["name"] + ".sha256.json"), None)
 
 
@@ -124,7 +124,7 @@ def install(asset, manifest=None):
         hashes = json.loads(listed)
         try:
             with zipfile.ZipFile(Ranges(url, asset["size"])) as archive:
-                files = pending(archive)
+                files = pending(archive, hashes)
                 # Past half the ZIP (a new compiler, say), one whole download beats many ranges.
                 # Launchers read stdout as the result, so this prints nothing.
                 files = fetched(archive, files, hashes) if ranged_bytes(files) < asset["size"] // 2 else None
@@ -154,35 +154,43 @@ def unpack(archive):
     write(fetched(archive, pending(archive)))
 
 
-def pending(archive):
-    """The (entry, target, mode) of each entry that differs from the install, judged from the ZIP's directory alone."""
+def pending(archive, hashes=None):
+    """The (entry, target, mode) of each entry that differs from the install.
+
+    With hashes, the verified manifest ({name: [sha256, mode]}), its digests and modes decide, since a ranged
+    ZIP's directory is not authenticated; without, the directory's size, CRC-32 and mode do."""
+    entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+    if hashes is not None and sorted(entry.filename for entry in entries) != sorted(hashes):
+        raise ValueError("The update's files do not match its file list")
     files = []
-    for entry in archive.infolist():
-        if entry.is_dir():
-            continue
+    for entry in entries:
         target = (ROOT / entry.filename.partition("/")[2]).resolve()
         if ROOT not in target.parents:
             raise ValueError(f"Unsafe path in the update: {entry.filename}")
         # private/ holds the player's files; a release only adds ones they lack.
         if ROOT / "private" in target.parents and target.exists():
             continue
-        mode = (entry.external_attr >> 16) & 0o777
+        if hashes is None:
+            mode = (entry.external_attr >> 16) & 0o777
+            same = (target.is_file() and target.stat().st_size == entry.file_size
+                    and zlib.crc32(target.read_bytes()) == entry.CRC)
+        else:
+            digest, mode = hashes[entry.filename]
+            same = target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == digest
         # Unchanged files stay untouched, including those of the bundled Python running this.
         # Windows has no mode bits beyond read-only, so only other systems compare modes.
-        if (target.is_file() and target.stat().st_size == entry.file_size
-                and zlib.crc32(target.read_bytes()) == entry.CRC
-                and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode)):
+        if same and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode):
             continue
         files.append((entry, target, mode))
     return files
 
 
 def fetched(archive, files, hashes=None):
-    """(target, data, mode) for each pending entry, with VERSION last; hashes, when given, must list each entry's SHA-256."""
+    """(target, data, mode) for each pending entry, with VERSION last; with hashes, each must match its listed SHA-256."""
     result = []
     for entry, target, mode in files:
         data = archive.read(entry)
-        if hashes is not None and hashlib.sha256(data).hexdigest() != hashes.get(entry.filename):
+        if hashes is not None and hashlib.sha256(data).hexdigest() != hashes[entry.filename][0]:
             raise ValueError(f"{entry.filename} does not match the update's file list")
         result.append((target, data, mode))
     return sorted(result, key=lambda file: file[0] == ROOT / "VERSION")
