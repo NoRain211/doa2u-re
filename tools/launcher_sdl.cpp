@@ -185,9 +185,12 @@ bool saveSettings(const std::string &path, const Settings &settings)
     std::ifstream existing(path, std::ios::binary);
     if (existing.is_open()) {
         const std::string text{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
+        existing.close();
         // Never rewrite what this cannot read: the file is shared, and a save
-        // that drops the others' keys is worse than no save.
-        if (!jsonEntries(text, entries)) return false;
+        // that drops the others' keys is worse than no save. A blank file
+        // holds no keys to lose, so it is rewritten.
+        if (text.find_first_not_of(" \t\r\n") != std::string::npos && !jsonEntries(text, entries))
+            return false;
     } else {
         std::error_code error;
         if (std::filesystem::exists(path, error) || error) return false;
@@ -209,12 +212,25 @@ bool saveSettings(const std::string &path, const Settings &settings)
     put("freeCamera", settings.free_camera ? "true" : "false");
     put("randomCpuCostumes", settings.random_cpu_costumes ? "true" : "false");
     put("dedicationCard", settings.dedication ? "true" : "false");
-    std::ofstream file(path, std::ios::trunc);
-    file << "{\n";
-    for (size_t i = 0; i < entries.size(); ++i)
-        file << (i == 0 ? "  \"" : ",\n  \"") << entries[i].first << "\": " << entries[i].second;
-    file << "\n}\n";
-    return static_cast<bool>(file);
+    // Written beside the file and renamed over it, so a torn save keeps the
+    // old file instead of leaving one the next save refuses to read.
+    const std::string temp = path + ".tmp";
+    {
+        std::ofstream file(temp, std::ios::trunc);
+        file << "{\n";
+        for (size_t i = 0; i < entries.size(); ++i)
+            file << (i == 0 ? "  \"" : ",\n  \"") << entries[i].first << "\": " << entries[i].second;
+        file << "\n}\n";
+        file.close();
+        if (!file) {
+            std::remove(temp.c_str());
+            return false;
+        }
+    }
+    std::error_code error;
+    std::filesystem::rename(temp, path, error);
+    if (error) std::remove(temp.c_str());
+    return !error;
 }
 
 float tabWidth(int m) { return static_cast<float>(SDL_strlen(kPages[m].name) * 8); }
