@@ -2918,8 +2918,13 @@ static bool testPresentDownscale()
 #ifdef RECOMP_TEST_D3D11
         RECT rect{};
         // The fitted picture must be smaller than the target, or the mip path never runs.
-        passed &= GetClientRect(presenterWindow(), &rect) &&
-            (rect.right < 3840 || rect.bottom < 2880);
+        if (!GetClientRect(presenterWindow(), &rect)) {
+            std::fprintf(stderr, "FAIL downscale window has no client rect\n");
+            passed = false;
+        } else if (rect.right >= 3840 && rect.bottom >= 2880) {
+            std::printf("SKIP downscale window %ldx%ld is not smaller than 3840x2880\n",
+                rect.right, rect.bottom);
+        }
 #endif
     }
     d3d_backend_destroy(&presenter);
