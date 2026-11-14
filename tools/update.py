@@ -13,6 +13,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 LATEST = "https://api.github.com/repos/NoRain211/doa2u-re/releases/latest"
@@ -30,8 +31,53 @@ def installed():
     return version.read_text(encoding="utf-8").strip() if version.is_file() else None
 
 
-def fetch(url):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "DOA2U-launcher"}), timeout=30)
+def fetch(url, start=None, end=None):
+    """Open url, or only bytes start..end-1 of it."""
+    try:
+        import truststore  # the Windows release bundles it so Windows verifies certificates; elsewhere Python's CA store is used
+        truststore.inject_into_ssl()
+    except ImportError:
+        pass
+    headers = {"User-Agent": "DOA2U-launcher"}
+    if start is not None:
+        headers["Range"] = f"bytes={start}-{end - 1}"  # urllib keeps it across GitHub's redirect to its CDN
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30)
+
+
+class Ranges:
+    """A read-only, seekable view of a remote file that downloads only the byte ranges read from it.
+
+    zipfile reads the central directory and then just the entries asked for, so an update fetches only those."""
+    BLOCK = 1 << 20  # read ahead, so the many small reads of headers and neighbouring entries share requests
+
+    def __init__(self, url, size):
+        self.url, self.size, self.pos, self.cached = url, size, 0, (0, b"")
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.pos
+
+    def seek(self, offset, whence=0):
+        self.pos = (offset, self.pos + offset, self.size + offset)[whence]
+        return self.pos
+
+    def read(self, n=-1):
+        end = self.size if n is None or n < 0 else min(self.size, self.pos + n)
+        start, data = self.cached
+        if not start <= self.pos <= end <= start + len(data):
+            start, stop = self.pos, min(self.size, max(end, self.pos + self.BLOCK))
+            with fetch(self.url, start, stop) as response:
+                if response.status != 206:
+                    raise OSError("The server does not send partial downloads")
+                data = response.read()
+            if len(data) != stop - start:
+                raise OSError("A partial download came back short")
+            self.cached = (start, data)
+        result = data[self.pos - start:end - start]
+        self.pos = end
+        return result
 
 
 def pick_asset(assets):
@@ -50,10 +96,46 @@ def newer(current):
     return release if number(release["tag_name"]) > number(current) else None
 
 
-def install(asset):
+def manifest_of(assets, asset):
+    """The release's <zip>.sha256.json beside asset: each entry's [SHA-256, mode], which package_test.py writes."""
+    return next((other for other in assets if other["name"] == asset["name"] + ".sha256.json"), None)
+
+
+def ranged_bytes(files):
+    """Roughly what Ranges downloads for these entries: a read-ahead block for each one the previous block missed."""
+    total = covered = 0
+    for entry, _, _ in sorted(files, key=lambda file: file[0].header_offset):
+        end = entry.header_offset + 30 + len(entry.filename.encode()) + len(entry.extra) + entry.compress_size
+        if entry.header_offset >= covered or end > covered:
+            total += max(Ranges.BLOCK, end - entry.header_offset)
+            covered = max(end, entry.header_offset + Ranges.BLOCK)
+    return total
+
+
+def install(asset, manifest=None):
+    """Fetch only changed entries when the release lists their SHA-256s under GitHub's digest; else the whole ZIP."""
+    url = asset["browser_download_url"]
+    files = None
+    if manifest and manifest.get("digest"):
+        with fetch(manifest["browser_download_url"]) as response:
+            listed = response.read()
+        if manifest["digest"] != "sha256:" + hashlib.sha256(listed).hexdigest():
+            raise ValueError("The update's file list does not match GitHub's checksum")
+        hashes = json.loads(listed)
+        try:
+            with zipfile.ZipFile(Ranges(url, asset["size"])) as archive:
+                files = pending(archive, hashes)
+                # Past half the ZIP (a new compiler, say), one whole download beats many ranges.
+                # Launchers read stdout as the result, so this prints nothing.
+                files = fetched(archive, files, hashes) if ranged_bytes(files) < asset["size"] // 2 else None
+        except (OSError, zipfile.BadZipFile):
+            files = None  # no partial downloads or a bad range: fetch the whole ZIP and check GitHub's digest
+    if files is not None:
+        write(files)
+        return
     digest = hashlib.sha256()
     with tempfile.TemporaryFile() as download:
-        with fetch(asset["browser_download_url"]) as response:
+        with fetch(url) as response:
             while chunk := response.read(1 << 20):
                 download.write(chunk)
                 digest.update(chunk)
@@ -69,25 +151,52 @@ def unpack(archive):
 
     Every entry is checked and read before the first write, and VERSION goes last, so an install that
     fails part way still reports the old version and can be run again."""
+    write(fetched(archive, pending(archive)))
+
+
+def pending(archive, hashes=None):
+    """The (entry, target, mode) of each entry that differs from the install.
+
+    With hashes, the verified manifest ({name: [sha256, mode]}), its digests and modes decide, since a ranged
+    ZIP's directory is not authenticated; without, the directory's size, CRC-32 and mode do."""
+    entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+    if hashes is not None and sorted(entry.filename for entry in entries) != sorted(hashes):
+        raise ValueError("The update's files do not match its file list")
     files = []
-    for entry in archive.infolist():
-        if entry.is_dir():
-            continue
+    for entry in entries:
         target = (ROOT / entry.filename.partition("/")[2]).resolve()
         if ROOT not in target.parents:
             raise ValueError(f"Unsafe path in the update: {entry.filename}")
         # private/ holds the player's files; a release only adds ones they lack.
         if ROOT / "private" in target.parents and target.exists():
             continue
-        data = archive.read(entry)
-        mode = (entry.external_attr >> 16) & 0o777
+        if hashes is None:
+            mode = (entry.external_attr >> 16) & 0o777
+            same = (target.is_file() and target.stat().st_size == entry.file_size
+                    and zlib.crc32(target.read_bytes()) == entry.CRC)
+        else:
+            digest, mode = hashes[entry.filename]
+            same = target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == digest
         # Unchanged files stay untouched, including those of the bundled Python running this.
         # Windows has no mode bits beyond read-only, so only other systems compare modes.
-        if (target.is_file() and target.read_bytes() == data
-                and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode)):
+        if same and (not mode or sys.platform == "win32" or (target.stat().st_mode & 0o777) == mode):
             continue
-        files.append((target, data, mode))
-    files.sort(key=lambda file: file[0] == ROOT / "VERSION")
+        files.append((entry, target, mode))
+    return files
+
+
+def fetched(archive, files, hashes=None):
+    """(target, data, mode) for each pending entry, with VERSION last; with hashes, each must match its listed SHA-256."""
+    result = []
+    for entry, target, mode in files:
+        data = archive.read(entry)
+        if hashes is not None and hashlib.sha256(data).hexdigest() != hashes[entry.filename][0]:
+            raise ValueError(f"{entry.filename} does not match the update's file list")
+        result.append((target, data, mode))
+    return sorted(result, key=lambda file: file[0] == ROOT / "VERSION")
+
+
+def write(files):
     for target, data, mode in files:
         target.parent.mkdir(parents=True, exist_ok=True)
         # A running exe or loaded DLL can be renamed but not overwritten; main() removes the old one next time.
@@ -123,7 +232,7 @@ def main(argv):
         if release is not None:
             asset = pick_asset(release["assets"])
             if argv[0] == "install":
-                install(asset)
+                install(asset, manifest_of(release["assets"], asset))
             print(release["tag_name"].lstrip("v"))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         print(f"Update failed: {error}")

@@ -5,6 +5,7 @@ import hashlib
 import io
 import os
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest import mock
@@ -41,9 +42,24 @@ class PrerequisiteTests(unittest.TestCase):
         self.download.assert_called_once_with(prerequisites.LLVM_MINGW_URL, timeout=60)
         self.assertEqual(os.environ["PATH"], os.pathsep.join([str(clang.parent), "system-tools"]))
 
+    def test_path_toolchain_with_make_is_used_without_download(self):
+        bin_dir = self.root / "winget/bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "clang.exe").write_bytes(b"clang")
+        self.enterContext(mock.patch.object(prerequisites.sys, "platform", "win32"))
+        self.enterContext(mock.patch.object(prerequisites.shutil, "which", return_value=str(bin_dir / "clang.exe")))
+        # Plain LLVM without mingw32-make is not llvm-mingw, so it falls through to the pinned download.
+        self.download.side_effect = urllib.error.URLError("offline")
+        with self.assertRaisesRegex(ValueError, "Could not download"):
+            prerequisites.llvm_mingw(self.root)
+        (bin_dir / "mingw32-make.exe").write_bytes(b"make")
+        self.assertEqual(prerequisites.llvm_mingw(self.root), bin_dir / "clang.exe")
+        self.assertEqual(os.environ["PATH"].split(os.pathsep)[0], str(bin_dir))
+
     def test_failed_download_or_hash_installs_nothing(self):
         payload = self.llvm_mingw_zip()
         for failure, message in ((urllib.error.URLError("offline"), "Could not download"),
+                                 (urllib.error.URLError(ssl.SSLCertVerificationError()), "HTTPS scanning.*clang.exe"),
                                  (None, "SHA-256")):
             with self.subTest(message=message):
                 self.download.side_effect = failure or (lambda *args, **kwargs: io.BytesIO(payload))

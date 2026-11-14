@@ -2,7 +2,9 @@
 """Package a release ZIP (e.g. 0.1-Alpha): source, the pinned lifter and setup tools, no game data."""
 # Adapted from committed DOA3 tools/package_test.py at 5747204.
 import argparse
+import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +13,7 @@ import tempfile
 import time
 import zipfile
 
-from build_prerequisites import fetch_verified
+from build_prerequisites import LLVM_MINGW, LLVM_MINGW_SHA256, LLVM_MINGW_URL, fetch_verified
 from extract_iso import sha256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +43,7 @@ LIFTER_FILES = {"LICENSE", "NOTICE", "tools/__init__.py", "templates/runtime/rec
 # extract-xiso.exe and its LICENSE.TXT, copied from the DOA3 test package, and
 # dedication-photo.jpg, which run_game.py turns into the staff-roll card.
 ARTIFACTS = ROOT / "private" / "release-assets"
-# The Windows ZIP carries Python with the build's packages, and CMake, so players install nothing (#89).
+# The Windows ZIP carries Python with the build's packages, CMake and llvm-mingw, so players install nothing (#89).
 # Each is (URL, SHA-256, the archive folder that ships); the wheels are installed by unpacking them.
 PYTHON = ("https://www.nuget.org/api/v2/package/python/3.12.10",
           "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8", "tools/")
@@ -50,7 +52,11 @@ WHEELS = [("https://files.pythonhosted.org/packages/70/39/2138d890a8e827636b9de9
            "4ab8bcb7da8f221ff45926ca168ca33e76f7237d06fbf3c10780002faa2670e1", ""),
           ("https://files.pythonhosted.org/packages/5d/7b/25a221d2c761c6a8ae21bfa3874988ff2583e19cf8a27bf2fee358df7942/"
            "pillow-12.2.0-cp312-cp312-win_amd64.whl",
-           "7f84204dee22a783350679a0333981df803dac21a0190d706a50475e361c93f5", "")]
+           "7f84204dee22a783350679a0333981df803dac21a0190d706a50475e361c93f5", ""),
+          # truststore lets downloads verify through Windows, which fetches missing roots and trusts proxy roots.
+          ("https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/"
+           "truststore-0.10.5-py3-none-any.whl",
+           "9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c", "")]
 CMAKE = ("https://github.com/Kitware/CMake/releases/download/v4.4.5/cmake-4.4.5-windows-x86_64.zip",
          "326c826486d46a23cf9d5a1c9ee3a567d427bdd02c4a34071937a2a675cff004", "cmake-4.4.5-windows-x86_64/")
 # ZIP name suffix and README for each platform; macOS and Linux build extract-xiso themselves.
@@ -182,6 +188,10 @@ def main():
                 bundle(package, f"{name}/tools/python/Lib/site-packages/", *wheel)
             # The build never runs the GUI or reads the manuals; leaving them out saves 11 MB.
             bundle(package, f"{name}/tools/cmake/", *CMAKE, skip=("bin/cmake-gui.exe", "doc/cmake/html/", "man/"))
+            # The build targets x86-64 only and never runs LLDB; leaving out other sysroots and LLDB's Python saves 257 MB.
+            bundle(package, f"{name}/{LLVM_MINGW.as_posix()}/", LLVM_MINGW_URL, LLVM_MINGW_SHA256,
+                   LLVM_MINGW_URL.rsplit("/", 1)[1].removesuffix(".zip") + "/",
+                   skip=("aarch64-w64-mingw32/", "armv7-w64-mingw32/", "i686-w64-mingw32/", "python/"))
             with tempfile.TemporaryDirectory() as launchers:
                 build_launchers(Path(launchers))
                 for exe in LAUNCHERS:
@@ -190,7 +200,15 @@ def main():
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release
     partial.rename(out)
+    # Upload beside the ZIP: tools/update.py checks it against GitHub's digest, then trusts its digests and modes
+    # over the ranged ZIP's directory.
+    manifest = out.with_name(out.name + ".sha256.json")
+    with zipfile.ZipFile(out) as package:
+        manifest.write_text(json.dumps({info.filename: [hashlib.sha256(package.read(info)).hexdigest(),
+                                                        (info.external_attr >> 16) & 0o777]
+                                        for info in package.infolist() if not info.is_dir()}, indent=0), encoding="utf-8")
     print(out)
+    print(manifest)
 
 
 if __name__ == "__main__":

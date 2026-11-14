@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import hashlib
 import io
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -88,6 +91,71 @@ class UpdateTest(unittest.TestCase):
                 writer.writestr(info, "same")
             update.unpack(zipfile.ZipFile(data))
             chmod.assert_called_once_with(0o755)
+
+    def test_install_downloads_only_changed_entries(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as writer:
+            writer.writestr("DOA2U-2/big.bin", os.urandom(1 << 21))  # random, so it stays 2 MB compressed
+            writer.writestr("DOA2U-2/VERSION", "2")
+        zipped = data.getvalue()
+        with zipfile.ZipFile(io.BytesIO(zipped)) as source:
+            big = source.read("DOA2U-2/big.bin")
+            hashes = {info.filename: [hashlib.sha256(source.read(info)).hexdigest(), (info.external_attr >> 16) & 0o777]
+                      for info in source.infolist()}
+        asset = {"name": "DOA2U-2.zip", "browser_download_url": "zip", "size": len(zipped), "digest": "sha256:" + "0" * 64}
+
+        def manifest(listed):
+            body = json.dumps(listed).encode()
+            return body, {"name": "DOA2U-2.zip.sha256.json", "browser_download_url": "manifest",
+                          "digest": "sha256:" + hashlib.sha256(body).hexdigest()}
+
+        # (case, ranges served, manifest listing, expected error); the ZIP's own digest is wrong on purpose,
+        # so any whole-ZIP download fails its checksum and shows which path ran.
+        cases = (("changed only", True, hashes, None), ("no ranges", False, hashes, "GitHub's checksum"),
+                 ("no manifest", True, None, "GitHub's checksum"),
+                 ("tampered entry", True, {**hashes, "DOA2U-2/VERSION": ["0" * 64, 0]}, "file list"),
+                 # The ZIP's directory says big.bin matches the install, but the manifest lists newer bytes: the
+                 # manifest decides, so big.bin (most of the ZIP) is pending, the whole ZIP downloads and is refused.
+                 ("stale directory", True, {**hashes, "DOA2U-2/big.bin": ["0" * 64, 0]}, "GitHub's checksum"),
+                 ("entry missing from the list", True, {"DOA2U-2/VERSION": hashes["DOA2U-2/VERSION"]}, "files do not"))
+        self.assertEqual(update.manifest_of([manifest(hashes)[1], asset], asset), manifest(hashes)[1])
+        for case, ranges, listed, error in cases:
+            with self.subTest(case), tempfile.TemporaryDirectory() as folder, \
+                    mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                    mock.patch.object(update.Ranges, "BLOCK", 4096):
+                (update.ROOT / "big.bin").write_bytes(big)
+                body, listing = manifest(listed) if listed else (b"", None)
+                served = []
+
+                def fetch(url, start=None, end=None):
+                    if url == "manifest":
+                        response = io.BytesIO(body)
+                    else:
+                        response = io.BytesIO(zipped[start:end] if start is not None and ranges else zipped)
+                        served.append(len(response.getvalue()))
+                    response.status = 206 if start is not None and ranges else 200
+                    return response
+
+                with mock.patch.object(update, "fetch", fetch):
+                    if error is None:
+                        update.install(asset, listing)
+                        self.assertEqual((update.ROOT / "VERSION").read_text(), "2")
+                        self.assertLess(sum(served), len(zipped) // 10)
+                    else:
+                        with self.assertRaisesRegex(ValueError, error):
+                            update.install(asset, listing)
+                        self.assertFalse((update.ROOT / "VERSION").exists())
+
+    def test_size_estimate_counts_a_read_ahead_block_per_scattered_entry(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as writer:
+            writer.writestr("DOA2U-2/a", "a")
+            writer.writestr("DOA2U-2/mid.bin", os.urandom(1 << 16))
+            writer.writestr("DOA2U-2/b", "b")
+        with zipfile.ZipFile(data) as archive, mock.patch.object(update.Ranges, "BLOCK", 4096):
+            entries = archive.infolist()
+            self.assertEqual(update.ranged_bytes([(entries[0], None, 0), (entries[2], None, 0)]), 2 * 4096)
+            self.assertEqual(update.ranged_bytes([(entries[0], None, 0)]), 4096)
 
     def test_unsafe_entry_stops_before_any_write(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()):

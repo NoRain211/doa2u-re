@@ -176,11 +176,15 @@ On macOS and Linux, including the Steam Deck, follow
 [building on macOS and Linux](docs/building.md) instead.
 
 **Requirements:** Windows 10/11 x64, internet access for the first build, and
-your Disc 2 ISO with about 6 GB free. The ZIP carries Python (with Capstone and
-Pillow) and CMake, so there is nothing to install.
-The build downloads the pinned [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
-compiler (190 MB) into `tools\llvm-mingw` and checks its SHA-256; it needs no
-Visual Studio or administrator approval.
+your Disc 2 ISO with about 6 GB free. The ZIP carries Python (with Capstone,
+Pillow and truststore), CMake and the pinned
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) compiler in
+`tools\llvm-mingw`, so there is nothing to install. A source checkout downloads
+llvm-mingw (190 MB) there on first build and checks its SHA-256; neither needs
+Visual Studio or administrator approval. If `tools\llvm-mingw` is missing and a
+`clang.exe` with `mingw32-make.exe` beside it is on PATH (for example winget's
+llvm-mingw), the build uses that copy instead, without the version pin or
+SHA-256 check.
 
 1. Download the ZIP from the
    [latest release](https://github.com/NoRain211/doa2u-re/releases/latest) and
@@ -354,6 +358,9 @@ The Windows ZIP adds extract-xiso and its license
 with [test-release.md](docs/test-release.md) as `README.txt`; the macOS and
 Linux ZIPs use [test-release-macos.md](docs/test-release-macos.md) and
 [test-release-linux.md](docs/test-release-linux.md).
+Each ZIP gets a `<zip>.sha256.json` beside it listing every file's SHA-256;
+upload it with the ZIP. The updater checks it against GitHub's digest so it can
+fetch only changed files; without it, updates download the whole ZIP.
 
 ## Repository layout
 
