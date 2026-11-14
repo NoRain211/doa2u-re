@@ -2908,6 +2908,7 @@ static bool testPresentDownscale()
         RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8};
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create present downscale", d3d_backend_create(&downscale_config, &presenter));
+    bool skipped = false;
     if (passed) {
         auto clear = clearCommand();
         clear.data.clear.color = 0xff336699u;
@@ -2924,6 +2925,7 @@ static bool testPresentDownscale()
         } else if (rect.right >= 3840 && rect.bottom >= 2880) {
             std::printf("SKIP downscale window %ldx%ld is not smaller than 3840x2880\n",
                 rect.right, rect.bottom);
+            skipped = true;
         }
 #endif
     }
@@ -2939,7 +2941,7 @@ static bool testPresentDownscale()
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
     _putenv_s("RECOMP_D3D_SCALE", "");
     DeleteFileA(path);
-    if (passed) std::puts("PASS 4:3 high-resolution present downscales into a smaller window");
+    if (passed && !skipped) std::puts("PASS 4:3 high-resolution present downscales into a smaller window");
     return passed;
 }
 // A full-frame MSAA target sampled, redrawn and sampled again must show the redraw.
