@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "audio_matrix_ramp.h"
 #include "audio_output.h"
 
 #include <cmath>
@@ -139,24 +140,36 @@ int main()
     CHECK(wav != nullptr);
     std::fseek(wav, 44, SEEK_SET);
     // Past the resampler's ringing on the step up from silence, the level
-    // must glide from 0.5 to -6 dB (the unramped gain jumped there), and
-    // within one 10 ms quantum (480 frames) however the chunks split it.
-    const float quieter = 0.5f * std::pow(10.0f, -600.0f / 2000.0f);
+    // must glide from 0.5 to -6 dB; the unramped gain jumped there.
     float frame[2], previous = 0.0f, largest = 0.0f;
-    int sounding = 0, gliding = 0, glide_frames = -1;
+    int sounding = 0;
     while (std::fread(frame, sizeof frame, 1, wav) == 1) {
         sounding = frame[0] > 0.1f ? sounding + 1 : 0;
-        if (sounding > 64) {
-            largest = std::max(largest, std::fabs(frame[0] - previous));
-            if (frame[0] < 0.495f && glide_frames < 0) ++gliding;
-            if (gliding > 0 && frame[0] < quieter + 0.001f && glide_frames < 0) glide_frames = gliding;
-        }
+        if (sounding > 64) largest = std::max(largest, std::fabs(frame[0] - previous));
         previous = frame[0];
     }
     std::fclose(wav);
     unlink(capture);
     CHECK(largest > 0.0f && largest < 0.01f);
-    CHECK(glide_frames > 400 && glide_frames < 520);
+
+    // The ramp eases linearly over its quantum however the chunks split it,
+    // and a change mid-ramp restarts from the level it had reached.
+    RecompMatrixRamp ramp{};
+    float loud[RecompMatrixRamp::kEntries] = {1.0f}, quiet[RecompMatrixRamp::kEntries] = {0.5f};
+    ramp.retarget(loud, 480u);
+    CHECK(!ramp.easing(0u) && ramp.atFrame(0u, 0u) == 1.0f);  // the first target applies at once
+    ramp.retarget(quiet, 480u);
+    for (uint32_t chunk = 0; chunk < 5u; ++chunk, ramp.advance(96u)) {
+        for (uint32_t f = 0; f < 96u; ++f) {
+            const float expected = 1.0f - 0.5f * static_cast<float>(chunk * 96u + f + 1u) / 480.0f;
+            CHECK(std::fabs(ramp.atFrame(0u, f) - expected) < 1e-6f);
+        }
+    }
+    CHECK(!ramp.easing(0u) && ramp.atFrame(0u, 0u) == 0.5f);
+    ramp.retarget(loud, 480u);
+    ramp.advance(240u);  // halfway: 0.75
+    ramp.retarget(quiet, 480u);
+    CHECK(std::fabs(ramp.atFrame(0u, 0u) - (0.75f - 0.25f / 480.0f)) < 1e-6f);
 
     // Reset attempted flag for muted lifecycle test
     recomp_audio_output_test_reset();

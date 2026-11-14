@@ -10,6 +10,7 @@
    wet half goes to a stereo twin stream on a second logical device whose
    post-mix callback runs the reverb (audio_reverb.h) over the summed wet
    signal, as the submix does. */
+#include "audio_matrix_ramp.h"
 #include "audio_output.h"
 #include "audio_reverb.h"
 #include "dsound_hrtf.h"
@@ -50,12 +51,9 @@ struct SdlVoice {
     SDL_AudioStream *stream;
     SDL_AudioStream *wet_stream;  // routed voices with a wet send only
     uint32_t sample_rate, channels, bits_per_sample;
-    bool routed, mixed;
+    bool routed;
     float gain, ratio, level_ms;
-    /* Routing times gain: the ramp runs linearly from `from` to `to` over
-       one quantum, `elapsed` frames in, across however many chunks. */
-    float dry_from[3 * 6], wet_from[3 * 2], dry_to[3 * 6], wet_to[3 * 2];
-    uint32_t elapsed;
+    RecompMatrixRamp dry, wet;  // a routed voice's matrices times its gain
     uint64_t bytes_submitted;
 };
 
@@ -174,20 +172,19 @@ float sampleAt(const uint8_t *pcm, uint32_t bits, uint32_t index)
     return value;
 }
 
-/* Applies an output matrix ([source + destination * channels], as XAudio2)
-   to whole frames, giving interleaved float for the given speaker count. Like
-   XAudio2, a change eases in linearly from the previous matrix over `ramp`
-   frames, of which `elapsed` passed in earlier chunks; a step would click. */
+/* Applies an easing output matrix to whole frames, giving interleaved float
+   for the given speaker count. */
 void mixOutput(const uint8_t *pcm, uint32_t frames, uint32_t channels, uint32_t bits,
-    const float *from, const float *to, uint32_t elapsed, uint32_t ramp, uint32_t speakers,
-    std::vector<float> &out)
+    const RecompMatrixRamp &ramp, uint32_t speakers, std::vector<float> &out)
 {
     out.assign(static_cast<size_t>(frames) * speakers, 0.0f);
-    float matrix[3 * 6];
+    float eased[RecompMatrixRamp::kEntries];
     for (uint32_t frame = 0u; frame < frames; ++frame) {
-        const uint32_t done = elapsed + frame + 1u;
-        const float t = done < ramp ? static_cast<float>(done) / ramp : 1.0f;
-        for (uint32_t i = 0u; i < channels * speakers; ++i) matrix[i] = from[i] + (to[i] - from[i]) * t;
+        const float *matrix = ramp.to;
+        if (ramp.easing(frame)) {
+            for (uint32_t i = 0u; i < channels * speakers; ++i) eased[i] = ramp.atFrame(i, frame);
+            matrix = eased;
+        }
         float *mixed = out.data() + static_cast<size_t>(frame) * speakers;
         for (uint32_t source = 0u; source < channels; ++source) {
             const float sample = sampleAt(pcm, bits, frame * channels + source);
@@ -590,33 +587,16 @@ extern "C" void recomp_audio_output_submit(
         if (voice.wet_stream) SDL_SetAudioStreamFrequencyRatio(voice.wet_stream, ratio);
     }
     if (routed) {
-        float dry[3 * 6] = {}, wet[3 * 2] = {};
+        float dry[RecompMatrixRamp::kEntries] = {}, wet[RecompMatrixRamp::kEntries] = {};
         for (uint32_t i = 0; i < channels * speakers; ++i) dry[i] = route.dry[i] * gain;
         for (uint32_t i = 0; i < channels * 2u; ++i) wet[i] = route.wet[i] * gain;
-        const uint32_t ramp = sample_rate / 100u;  // one 10 ms XAudio2 quantum
-        if (!voice.mixed) {
-            std::memcpy(voice.dry_from, dry, sizeof dry);
-            std::memcpy(voice.wet_from, wet, sizeof wet);
-            std::memcpy(voice.dry_to, dry, sizeof dry);
-            std::memcpy(voice.wet_to, wet, sizeof wet);
-            voice.elapsed = ramp;
-            voice.mixed = true;
-        } else if (std::memcmp(voice.dry_to, dry, sizeof dry) != 0 ||
-                   std::memcmp(voice.wet_to, wet, sizeof wet) != 0) {
-            // A new target restarts the ramp from wherever the old one had got to.
-            const float t = static_cast<float>(voice.elapsed) / ramp;
-            for (uint32_t i = 0; i < 3u * 6u; ++i) voice.dry_from[i] += (voice.dry_to[i] - voice.dry_from[i]) * t;
-            for (uint32_t i = 0; i < 3u * 2u; ++i) voice.wet_from[i] += (voice.wet_to[i] - voice.wet_from[i]) * t;
-            std::memcpy(voice.dry_to, dry, sizeof dry);
-            std::memcpy(voice.wet_to, wet, sizeof wet);
-            voice.elapsed = 0u;
-        }
-        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry_from, voice.dry_to,
-            voice.elapsed, ramp, speakers, dry_frames);
-        if (voice.wet_stream)
-            mixOutput(pcm, frames, channels, bits_per_sample, voice.wet_from, voice.wet_to,
-                voice.elapsed, ramp, 2u, wet_frames);
-        voice.elapsed = frames < ramp - voice.elapsed ? voice.elapsed + frames : ramp;
+        const uint32_t quantum = sample_rate / 100u;  // XAudio2's 10 ms
+        voice.dry.retarget(dry, quantum);
+        voice.wet.retarget(wet, quantum);
+        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry, speakers, dry_frames);
+        if (voice.wet_stream) mixOutput(pcm, frames, channels, bits_per_sample, voice.wet, 2u, wet_frames);
+        voice.dry.advance(frames);
+        voice.wet.advance(frames);
         const uint32_t dry_bytes = frames * speakers * 4u;
         const uint32_t wet_bytes = frames * 2u * 4u;
         if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
