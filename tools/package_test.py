@@ -31,7 +31,7 @@ WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", *(f"recomp-runtime
     "d3d_presenter_d3d11.cpp", "d3d_presenter_thread.cpp", "overlay_d3d11.cpp", "overlay_d3d11.h"))}
 # The SDL_GPU presenter ships everywhere: Windows builds it as its Vulkan renderer.
 POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md", *(f"recomp-runtime/{name}" for name in (
-    "audio_output_sdl.cpp", "audio_output_sdl_test.cpp", "audio_reverb.cpp", "audio_reverb.h",
+    "audio_output_sdl.cpp", "audio_output_sdl_test.cpp", "audio_matrix_ramp.h", "audio_reverb.cpp", "audio_reverb.h",
     "win32_compat.c", "win32_compat_test.c", "fiber_switch_arm64.S", "fiber_switch_x86_64.S"))}
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},

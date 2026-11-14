@@ -10,6 +10,7 @@
    wet half goes to a stereo twin stream on a second logical device whose
    post-mix callback runs the reverb (audio_reverb.h) over the summed wet
    signal, as the submix does. */
+#include "audio_matrix_ramp.h"
 #include "audio_output.h"
 #include "audio_reverb.h"
 #include "dsound_hrtf.h"
@@ -52,6 +53,7 @@ struct SdlVoice {
     uint32_t sample_rate, channels, bits_per_sample;
     bool routed;
     float gain, ratio, level_ms;
+    RecompMatrixRamp dry, wet;  // a routed voice's matrices times its gain
     uint64_t bytes_submitted;
 };
 
@@ -170,13 +172,19 @@ float sampleAt(const uint8_t *pcm, uint32_t bits, uint32_t index)
     return value;
 }
 
-/* Applies one output matrix ([source + destination * channels], as XAudio2)
-   to whole frames, giving interleaved float for the given speaker count. */
+/* Applies an easing output matrix to whole frames, giving interleaved float
+   for the given speaker count. */
 void mixOutput(const uint8_t *pcm, uint32_t frames, uint32_t channels, uint32_t bits,
-    const float *matrix, uint32_t speakers, std::vector<float> &out)
+    const RecompMatrixRamp &ramp, uint32_t speakers, std::vector<float> &out)
 {
     out.assign(static_cast<size_t>(frames) * speakers, 0.0f);
+    float eased[RecompMatrixRamp::kEntries];
     for (uint32_t frame = 0u; frame < frames; ++frame) {
+        const float *matrix = ramp.to;
+        if (ramp.easing(frame)) {
+            for (uint32_t i = 0u; i < channels * speakers; ++i) eased[i] = ramp.atFrame(i, frame);
+            matrix = eased;
+        }
         float *mixed = out.data() + static_cast<size_t>(frame) * speakers;
         for (uint32_t source = 0u; source < channels; ++source) {
             const float sample = sampleAt(pcm, bits, frame * channels + source);
@@ -531,10 +539,14 @@ extern "C" void recomp_audio_output_submit(
     if (volume_hundredth_db > 0) volume_hundredth_db = 0;
     const float gain = volume_hundredth_db == -10000 ? 0.0f :
         std::pow(10.0f, volume_hundredth_db / 2000.0f);
+    /* A routed voice's gain rides in its ramped matrix; SDL's stream gain
+       steps at once on audio already queued. */
     if (gain != voice.gain) {
         voice.gain = gain;
-        SDL_SetAudioStreamGain(voice.stream, gain);
-        if (voice.wet_stream) SDL_SetAudioStreamGain(voice.wet_stream, gain);
+        if (!routed) {
+            SDL_SetAudioStreamGain(voice.stream, gain);
+            if (voice.wet_stream) SDL_SetAudioStreamGain(voice.wet_stream, gain);
+        }
     }
 
     const uint32_t frames = bytes / block_align;
@@ -575,9 +587,16 @@ extern "C" void recomp_audio_output_submit(
         if (voice.wet_stream) SDL_SetAudioStreamFrequencyRatio(voice.wet_stream, ratio);
     }
     if (routed) {
-        mixOutput(pcm, frames, channels, bits_per_sample, route.dry, speakers, dry_frames);
-        if (voice.wet_stream)
-            mixOutput(pcm, frames, channels, bits_per_sample, route.wet, 2u, wet_frames);
+        float dry[RecompMatrixRamp::kEntries] = {}, wet[RecompMatrixRamp::kEntries] = {};
+        for (uint32_t i = 0; i < channels * speakers; ++i) dry[i] = route.dry[i] * gain;
+        for (uint32_t i = 0; i < channels * 2u; ++i) wet[i] = route.wet[i] * gain;
+        const uint32_t quantum = sample_rate / 100u;  // XAudio2's 10 ms
+        voice.dry.retarget(dry, quantum);
+        voice.wet.retarget(wet, quantum);
+        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry, speakers, dry_frames);
+        if (voice.wet_stream) mixOutput(pcm, frames, channels, bits_per_sample, voice.wet, 2u, wet_frames);
+        voice.dry.advance(frames);
+        voice.wet.advance(frames);
         const uint32_t dry_bytes = frames * speakers * 4u;
         const uint32_t wet_bytes = frames * 2u * 4u;
         if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
