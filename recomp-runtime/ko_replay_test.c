@@ -168,6 +168,7 @@ int main(void)
     expect("back to the fight", get32(0x008a3968u) == 3u && get8(0x00878394u) == 1u &&
         get8(0x0087ae30u + 0x94u) == 0u && get8(0x0087d23au) == 2u && getf(0x0069338cu) == -0.5f &&
         getf(0x00693398u) == -0.1f && recomp_runtime.registers.ebx == 0x1234u);
+    expect("the KO's own move back", get16(0x0087d564u) == 999u);
 
     /* The round's end at its replay stage: no second replay, the task's end done. */
     put8(0x0087d23au, 1u);

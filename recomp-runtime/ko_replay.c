@@ -165,6 +165,7 @@ static void run_replay(void)
     const uint8_t stage = *recomp_memory(STAGE, 1u), old_winner = *recomp_memory(WINNER, 1u);
     uint8_t *human = recomp_memory(HUMAN + SIDE_STRIDE * winner, 1u);
     const uint8_t was_human = *human;
+    const uint16_t old_move = *recomp_memory_u16(KO_MOVE);
     const int move = recomp_ko_replay_listed_move(*recomp_memory(KO_CHARACTER, 1u));
     /* The newest frame is `cut` past the KO's. */
     const RecompKoReplayTiming *timing = &state.timing;
@@ -201,6 +202,7 @@ static void run_replay(void)
     memcpy(recomp_memory(START_TABLES, 12u), tables, 12u);
     memcpy(recomp_memory(START_TABLES_ZERO, 12u), tables + 3, 12u);
     *human = was_human;
+    *recomp_memory_u16(KO_MOVE) = old_move;
     *recomp_memory(WINNER, 1u) = old_winner;
     *recomp_memory_u32(ROUND_STAGE) = round_stage;
     *recomp_memory(STAGE, 1u) = stage;

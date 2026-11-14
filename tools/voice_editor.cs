@@ -374,6 +374,8 @@ class VoiceEditor : Form
         finally { loading = false; }
     }
 
+    const int MaxClips = 16; // hit_voice.c's CLIPS: the game ignores clips past this per list
+
     void Add(Pool pool)
     {
         if (Selections == null) return;
@@ -390,6 +392,11 @@ class VoiceEditor : Form
             var failed = new List<string>();
             foreach (var source in dialog.FileNames)
             {
+                if (pool.List.Items.Count + added >= MaxClips)
+                {
+                    failed.Add(Path.GetFileName(source) + ": the game plays at most " + MaxClips + " clips per list");
+                    continue;
+                }
                 try
                 {
                     var pcm = Wave.ReadMono48k(source);
@@ -456,6 +463,13 @@ class VoiceEditor : Form
     void MoveClips(Pool from, Pool to)
     {
         var chosen = Chosen(from);
+        int room = MaxClips - to.List.Items.Count;
+        if (chosen.Count > room)
+        {
+            MessageBox.Show(this, "The game plays at most " + MaxClips + " clips per list; " + to.Title.ToLowerInvariant() +
+                " has room for " + Math.Max(room, 0) + ".", Text);
+            return;
+        }
         if (chosen.Count == 0) return;
         player.Stop();
         foreach (var file in chosen) File.Move(file, NextName(to));

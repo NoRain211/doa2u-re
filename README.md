@@ -102,7 +102,7 @@ keeps running.
   once or twice), at least 0.7 seconds apart, and a KO always cries, in the
   KO replay too. Fighters without a `selections` folder stay
   silent. **VoiceEditor.exe** (built from `tools\voice_editor.cs` beside the
-  launchers) does this for you: pick a fighter, add clips to its light,
+  launchers) does this for you: pick a fighter, add up to 16 clips to each of its light,
   medium, heavy and KO lists from any WAV, play them, and tune how often
   they play; a running game picks up changes within a second. Its **Save
   mapping** button (or the importer's `--save-selections`) writes your picks

@@ -1952,9 +1952,10 @@ static bool testClose(bool idle)
     passed &= owner != 0 && owner != GetCurrentThreadId();
     if (passed) passed = PostMessageW(window, WM_CLOSE, 0, 0) != 0;
     if (passed && idle) {
+        /* WM_CLOSE hides the window; releasePresenter destroys it later. */
         const ULONGLONG deadline = GetTickCount64() + 2000;
-        while (IsWindow(window) && GetTickCount64() < deadline) Sleep(1);
-        passed = !IsWindow(window);
+        while (IsWindowVisible(window) && GetTickCount64() < deadline) Sleep(1);
+        passed = !IsWindowVisible(window);
     }
     RecompD3dPresenterError error = RECOMP_D3D_PRESENTER_OK;
     uint32_t ticks = 0;
