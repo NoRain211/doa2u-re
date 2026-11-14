@@ -194,7 +194,11 @@ and shared depth after capability fallback.
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
 both selectors retain the presenter's shared frame-buffer flag. Constant-alpha
-blend factors (`0x8003`/`0x8004`) retain their native blend semantics. Adapter
+blend factors (`0x8003`/`0x8004`) retain their native blend semantics.
+D3DBLENDOP_REVSUBTRACTSIGNED (`0xf005`) maps to reverse subtract. Great
+Opera's baked floor shadows (`0x1f3be3`) draw a dark map, about 0.1 grey, at
+ONE/ONE with it; read as ADD it washed the floor out, and a 0.5 bias would
+brighten it too. ADDSIGNED (`0xf006`) has no observed caller. Adapter
 and GPU pixel regressions cover the final-stage style frame blend that would
 otherwise cover the scene with blank guest memory.
 

@@ -431,10 +431,15 @@ bool recomp_d3d_blend_op_from_nv(uint32_t value, RecompD3dBlendOp *op)
         *op = RECOMP_D3D_BLEND_OP_SUBTRACT;
         return true;
     case 0x800bu:
+    /* D3DBLENDOP_REVSUBTRACTSIGNED. Great Opera's floor shadow layer
+       (0x1f3be3) draws a dark map, about 0.1 grey, at ONE/ONE with it; the
+       Xbox floor darkens there, so dst - src matches and a 0.5 bias would
+       brighten the floor instead. Signed intermediate range is not modelled. */
+    case 0xf005u:
         *op = RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT;
         return true;
     default:
-        /* The signed NV extensions (0xf005/0xf006) have no host equivalent. */
+        /* D3DBLENDOP_ADDSIGNED (0xf006) has no observed caller. */
         return false;
     }
 }
