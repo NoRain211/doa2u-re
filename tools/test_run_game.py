@@ -10,8 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from extract_iso import private_pattern, redact_private
 from package_test import build_launchers
-from run_game import (controller_map, keyboard_map, prepare_disc, run, runner_path, saved_settings,
-                      seed_hdd_cache)
+from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
 
 
 def runner(code, output=()):
@@ -115,34 +114,6 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), r"~\doa2u ~ D:\~\x")
 
-    def test_keyboard_json_becomes_the_runner_keymap(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            (root / "private").mkdir()
-            with patch("run_game.ROOT", root):
-                self.assertEqual(keyboard_map(), "")
-                (root / "private/keyboard.json").write_text(
-                    '{"a": "space", "start": "F5", "up": "W", "y": ""}')
-                self.assertEqual(keyboard_map(), "a=20,start=74,up=57,y=")
-                for bad in ('{"jump": "Z"}', '{"a": "Home"}', '{"a": "F10"}', '{"a": "F11"}', '[1]', '{"a":'):
-                    (root / "private/keyboard.json").write_text(bad)
-                    with self.assertRaises(ValueError):
-                        keyboard_map()
-
-    def test_controller_json_becomes_the_runner_padmap(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            (root / "private").mkdir()
-            with patch("run_game.ROOT", root):
-                self.assertEqual(controller_map(), "")
-                (root / "private/controller.json").write_text(
-                    '{"a": "lb", "white": "A", "start": "touchpad", "y": ""}')
-                self.assertEqual(controller_map(), "a=LB,white=A,start=Touchpad,y=")
-                for bad in ('{"jump": "A"}', '{"a": "Guide"}', '{"a": 1}', '[1]', '{"a":'):
-                    (root / "private/controller.json").write_text(bad)
-                    with self.assertRaises(ValueError):
-                        controller_map()
-
     def test_logs_show_the_home_folder_and_user_as_tilde(self):
         windows = private_pattern("E:\\Profiles\\Ann", "ann.b")
         for line, expected in ((r"open E:\Profiles\Ann\doa2u\.recomp-storage", r"open ~\doa2u\.recomp-storage"),
@@ -196,6 +167,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_VRR"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_LAUNCHER_SETTINGS"],
                                  str(root / "private/launcher.json"))
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_KEYBOARD_SETTINGS"],
+                                 str(root / "private/keyboard.json"))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_CONTROLLER_SETTINGS"],
                                  str(root / "private/controller.json"))
                 self.assertEqual(run(None, vulkan=True), 0)
@@ -213,19 +186,9 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(run(None), 0)
                 # A soft-reset relaunch starts one more runner in the same session log.
                 execute.reset_mock()
-                (root / "private/keyboard.json").write_text('{"a": "Space"}')
-                launches = []
-
-                def relaunch(*_args, **_kwargs):
-                    launches.append(1)
-                    (root / "private/keyboard.json").write_text('{"a": "Enter"}')
-                    return runner(4 if len(launches) == 1 else 0)
-
-                execute.side_effect = relaunch
+                execute.side_effect = [runner(4), runner(0)]
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_count, 2)
-                self.assertEqual([call.kwargs["env"]["RECOMP_KEYMAP"]
-                                  for call in execute.call_args_list], ["a=20", "a=d"])
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
             self.assertEqual(len(logs), 14)

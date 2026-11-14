@@ -27,10 +27,8 @@ void recomp_input_host_set_capture_hook(RecompInputCaptureHook hook);
 void recomp_input_host_keyboard_buttons(RecompInputGamepad *pressed_buttons);
 
 /* The pad buttons the keyboard and host pads press, in the Rebind screen's
-   order. RECOMP_KEYMAP="a=20,..." (hex virtual keys) and RECOMP_PADMAP="a=LB,..."
-   (host pad button names), built by run_game.py from private/keyboard.json and
-   private/controller.json, replace the defaults; a key or button given to one
-   leaves the one that had it by default. The stick clicks stay fixed. */
+   order. private/keyboard.json and private/controller.json replace the
+   defaults (rebind.h loads them). The stick clicks stay fixed. */
 typedef enum RecompInputBinding {
     RECOMP_INPUT_BIND_UP, RECOMP_INPUT_BIND_DOWN, RECOMP_INPUT_BIND_LEFT, RECOMP_INPUT_BIND_RIGHT,
     RECOMP_INPUT_BIND_START, RECOMP_INPUT_BIND_BACK, RECOMP_INPUT_BIND_A, RECOMP_INPUT_BIND_B,
@@ -48,6 +46,13 @@ int recomp_input_host_bound(unsigned binding, bool pad);
 void recomp_input_host_bind(unsigned binding, bool pad, int source);
 /* A source's name as the JSON files spell it; NULL when it cannot be bound. */
 const char *recomp_input_host_source_name(bool pad, int source);
+/* The source a name stands for, in any case; -1 when it names none that can be bound. */
+int recomp_input_host_source(bool pad, const char *name);
+/* A bindings file's entries: each given binding takes its source (-1 for
+   nothing), and a source given to one leaves the binding that had it by
+   default. Call before pads are sampled. */
+void recomp_input_host_load_bindings(bool pad, const int sources[RECOMP_INPUT_BIND_COUNT],
+    const bool given[RECOMP_INPUT_BIND_COUNT]);
 /* The first bindable key, or host pad button on any pad, pressed since the
    last call; -1 for none. Call where pads are sampled. */
 int recomp_input_host_take_press(bool pad);

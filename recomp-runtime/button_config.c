@@ -123,11 +123,12 @@ enum {
     MSG_PRESS = MSG_HELPS + 3, MSG_COUNT = MSG_PRESS + 2
 };
 enum { HELP_DEVICES, HELP_PLATES, HELP_LISTEN };
+_Static_assert(RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_COUNT <= RECOMP_RUNNER_TEXT_QUIT,
+    "Button Config text stays below the next module's");
 
 /* ---- State ----------------------------------------------------------- */
 
-static RecompPcSettingsHost host;
-static unsigned text_base;
+static RecompButtonConfigHost host;
 static uint32_t controller_layout; /* page 4's with Rebind: CONTROLLER_RECORDS, then 0 */
 static bool rebinding;             /* Button Config shows the bindings */
 static bool drawing_config;        /* ... and its draw is running */
@@ -150,16 +151,15 @@ static unsigned game_language(void) { return kernel_call_lifted(sub_000212E0, NU
 static uint32_t text_for(unsigned message)
 {
     uint32_t text = 0u;
-    recomp_runner_text_lookup(text_base + message, game_language(), &text);
+    recomp_runner_text_lookup(RECOMP_RUNNER_TEXT_BUTTON_CONFIG + message, game_language(), &text);
     return text;
 }
 
 /* ---- Install --------------------------------------------------------- */
 
-void recomp_button_config_install(const RecompPcSettingsHost *with, unsigned base)
+void recomp_button_config_install(const RecompButtonConfigHost *with)
 {
     host = *with;
-    text_base = base;
     rebinding = drawing_config = drawing_list = drawing_labels = false;
     controller_layout = recomp_runner_alloc(28u * CONTROLLER_RECORDS + 4u, 4u);
     plate_set = recomp_runner_alloc(2u, 4u);
@@ -191,7 +191,7 @@ void recomp_button_config_install(const RecompPcSettingsHost *with, unsigned bas
     for (unsigned m = 0u; m < MSG_COUNT; ++m) {
         const recomp_utf16 *text[6];
         for (unsigned l = 0u; l < 6u; ++l) text[l] = texts[l >= 2u ? l - 1u : 0u][m];
-        recomp_runner_text_set(text_base + m, text);
+        recomp_runner_text_set(RECOMP_RUNNER_TEXT_BUTTON_CONFIG + m, text);
     }
 }
 
@@ -248,13 +248,13 @@ unsigned recomp_button_config_help(uint16_t page, uint16_t row, uint32_t args[3]
         if (row == REBIND_ROW) {
             args[0] = 0u;
             args[1] = 0u;
-            return text_base + MSG_REBIND_HELP;
+            return RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_REBIND_HELP;
         }
         if (row > REBIND_ROW) args[1] = row - 1u;
     } else if (rebinding && (page == DEVICE_PAGE || page == PLATE_PAGE)) {
         args[0] = 0u;
         args[1] = 0u;
-        return text_base + MSG_HELPS +
+        return RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_HELPS +
             (page == DEVICE_PAGE ? HELP_DEVICES : host.listening() ? HELP_LISTEN : HELP_PLATES);
     }
     return 0u;
@@ -337,7 +337,7 @@ static void config_update(void)
 
 static void config_leave(void)
 {
-    if (rebinding) host.rebind_closed();
+    if (rebinding) host.closed();
     rebinding = false;
     sub_0011B260();
 }

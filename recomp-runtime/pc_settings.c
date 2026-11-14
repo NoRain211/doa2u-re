@@ -207,13 +207,12 @@ static const Language *language_text(unsigned language)
 }
 
 /* Message numbers from RECOMP_RUNNER_TEXT_PC: rows, then each row's values,
-   then the help lines, the Page row and its values.
-   Button Config's follow them (button_config.c). */
+   then the help lines, the Page row and its values. */
 enum {
     MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + PC_ROWS * MAX_CHOICES,
     MSG_PAGE = MSG_HELP + HELPS, MSG_VIEWS = MSG_PAGE + 1, MSG_COUNT = MSG_VIEWS + VIEWS
 };
-_Static_assert(RECOMP_RUNNER_TEXT_PC + MSG_COUNT <= RECOMP_RUNNER_TEXT_QUIT, "PC text stays below the next module's");
+_Static_assert(RECOMP_RUNNER_TEXT_PC + MSG_COUNT <= RECOMP_RUNNER_TEXT_BUTTON_CONFIG, "PC text stays below the next module's");
 
 static const recomp_utf16 *message_text(const Language *text, unsigned message)
 {
@@ -313,7 +312,6 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
         for (unsigned l = 0u; l < 6u; ++l) text[l] = message_text(language_text(l), m);
         recomp_runner_text_set(RECOMP_RUNNER_TEXT_PC + m, text);
     }
-    recomp_button_config_install(&host, RECOMP_RUNNER_TEXT_PC + MSG_COUNT);
 
     /* Two P8 sprites (white label, glow), each palette one colour at every alpha. */
     for (unsigned i = 0u; i < 2u; ++i) {

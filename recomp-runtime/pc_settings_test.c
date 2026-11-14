@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pc_settings.h"
+#include "button_config.h"
 #include "input_host_win32.h"
 #include "runner_assets.h"
 #include "xbox_memory_layout.h"
@@ -284,10 +285,11 @@ int main(void)
     recomp_runtime.registers.esp = STACK;
     make_layout();
     const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1};
-    const RecompPcSettingsHost host = {host_changed, host_closed, host_bound, host_listen, host_listening,
-        host_reset, host_rebind_closed, NULL};
+    const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
+    const RecompButtonConfigHost rebind = {host_bound, host_listen, host_listening, host_reset, host_rebind_closed};
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
+    recomp_button_config_install(&rebind);
     /* The layout: 6 row records (Page and a view's five), 6 value records, then the end word. */
     uint32_t page = 19u;
     const uint32_t layout = hook(0x00090ad0u, &page, 1u);

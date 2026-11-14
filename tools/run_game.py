@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import string
 import subprocess
 import sys
 import threading
@@ -18,55 +17,6 @@ from extract_iso import redact_private, sha256
 RELAUNCH = 4  # runner exit code for XLaunchNewImage of the game's own XBE
 # The archives check_hdd_install (0xf6cc0) expects on Z:, copied there by hdd_install_thread.
 HDD_ARCHIVES = ("voice.afs", "datahdd.afs", "datahdd2.afs")
-# Pad buttons and keys that private/keyboard.json may bind; the codes are Windows virtual keys.
-# F10 is left out because Windows treats it as a system key, and F11 because the presenter
-# keeps it, with Alt+Enter, for fullscreen.
-KEY_ACTIONS = ("up", "down", "left", "right", "start", "back", "a", "b", "x", "y", "white", "black", "ltrig", "rtrig")
-KEY_CODES = {**{c: ord(c) for c in string.ascii_uppercase + string.digits},
-             **{f"F{n}": 0x6f + n for n in range(1, 13) if n not in (10, 11)},
-             "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0d, "SHIFT": 0x10, "CTRL": 0x11, "ESC": 0x1b,
-             "SPACE": 0x20, "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28}
-# Host pad buttons that private/controller.json may bind, as input_host_win32.c names them;
-# A, B, X and Y are by position, so Cross is A on a PlayStation pad.
-PAD_NAMES = ("A", "B", "X", "Y", "Back", "Start", "LB", "RB", "LT", "RT", "LS", "RS",
-             "Up", "Down", "Left", "Right", "Misc", "P1", "P2", "P3", "P4", "Touchpad")
-
-
-def bindings_file(name, example):
-    """The object in private/<name>, which the game's Rebind screen also writes; {} if absent."""
-    try:
-        bindings = json.loads((ROOT / "private" / name).read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, ValueError) as error:
-        raise ValueError(f"private/{name} is not valid JSON: {error}")
-    if not isinstance(bindings, dict):
-        raise ValueError(f"private/{name} must be an object such as {example}")
-    return bindings
-
-
-def keyboard_map():
-    """RECOMP_KEYMAP text for private/keyboard.json, e.g. {"a": "Space", "y": ""}; "" if absent."""
-    bindings = bindings_file("keyboard.json", '{"a": "Space"}')
-    for action, key in bindings.items():
-        if action not in KEY_ACTIONS or not isinstance(key, str) or (key and key.upper() not in KEY_CODES):
-            raise ValueError(f"private/keyboard.json: cannot bind {action!r} to {key!r}; buttons are "
-                             f"{', '.join(KEY_ACTIONS)}; keys are A-Z, 0-9, F1-F9, F12, Up, Down, Left, Right, "
-                             "Enter, Backspace, Space, Tab, Shift, Ctrl and Esc, or \"\" to unbind")
-    return ",".join(f"{action}={KEY_CODES[key.upper()]:x}" if key else f"{action}="
-                    for action, key in bindings.items())
-
-
-def controller_map():
-    """RECOMP_PADMAP text for private/controller.json, e.g. {"a": "LB", "y": ""}; "" if absent."""
-    names = {name.upper(): name for name in PAD_NAMES}
-    bindings = bindings_file("controller.json", '{"a": "LB"}')
-    for action, button in bindings.items():
-        if action not in KEY_ACTIONS or not isinstance(button, str) or (button and button.upper() not in names):
-            raise ValueError(f"private/controller.json: cannot bind {action!r} to {button!r}; buttons are "
-                             f"{', '.join(KEY_ACTIONS)}; controller buttons are {', '.join(PAD_NAMES)}, "
-                             'or "" to unbind')
-    return ",".join(f"{action}={names.get(button.upper(), '')}" for action, button in bindings.items())
 
 
 def prepare_disc(source, disc):
@@ -274,15 +224,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
             code = RELAUNCH
             # The game's soft reset relaunches its own XBE; a fresh runner is that cold boot.
             while code == RELAUNCH:
-                launch_env = env.copy()
-                keymap = keyboard_map()
-                if keymap:
-                    launch_env.setdefault("RECOMP_KEYMAP", keymap)
-                padmap = controller_map()
-                if padmap:
-                    launch_env.setdefault("RECOMP_PADMAP", padmap)
                 with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      env=launch_env, encoding="utf-8", errors="surrogateescape") as child:
+                                      env=env, encoding="utf-8", errors="surrogateescape") as child:
                     copy = threading.Thread(target=lambda: log.writelines(map(redact_private, child.stdout)))
                     copy.start()
                     try:

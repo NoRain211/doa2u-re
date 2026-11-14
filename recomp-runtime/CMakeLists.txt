@@ -218,7 +218,7 @@ add_executable(recomp_hit_voice_test hit_voice.c hit_voice_test.c)
 add_test(NAME recomp-runtime-hit-voice COMMAND recomp_hit_voice_test)
 add_executable(recomp_ko_replay_test ko_replay.c ko_replay_test.c)
 add_test(NAME recomp-runtime-ko-replay COMMAND recomp_ko_replay_test)
-add_executable(recomp_pc_settings_store_test pc_settings_store.cpp pc_settings_store_test.cpp)
+add_executable(recomp_pc_settings_store_test pc_settings_store.cpp settings_file.cpp pc_settings_store_test.cpp)
 add_test(NAME recomp-runtime-pc-settings-store COMMAND recomp_pc_settings_store_test)
 
 add_executable(recomp_d3d8_state_test d3d8_state_adapter.c d3d8_state_adapter_test.c
@@ -290,7 +290,7 @@ endif()
 add_executable(recomp_save_transaction_test save_transaction.cpp save_transaction_test.cpp)
 add_test(NAME recomp-runtime-save-transaction COMMAND recomp_save_transaction_test)
 
-add_executable(recomp_controller_settings_test controller_settings.cpp controller_settings_test.cpp)
+add_executable(recomp_controller_settings_test controller_settings.cpp settings_file.cpp controller_settings_test.cpp)
 add_test(NAME recomp-runtime-controller-settings COMMAND recomp_controller_settings_test)
 
 add_executable(recomp_input_adapter_test input_adapter.c input_model.c input_adapter_test.c
@@ -302,7 +302,7 @@ target_compile_definitions(recomp_input_pulse_source_test PRIVATE RECOMP_INPUT_P
 add_test(NAME recomp-runtime-input-pulses COMMAND recomp_input_pulse_source_test)
 
 add_library(recomp_keyboard STATIC input_keyboard_win32.c)
-add_executable(recomp_input_host_test input_host_win32.c input_host_win32_test.c)
+add_executable(recomp_input_host_test input_host_win32.c rebind.cpp settings_file.cpp input_host_win32_test.c)
 target_compile_definitions(recomp_input_host_test PRIVATE RECOMP_INPUT_TEST_FOCUSED)
 target_link_libraries(recomp_input_host_test PRIVATE recomp_keyboard)
 recomp_use_sdl3(recomp_input_host_test)
@@ -315,7 +315,7 @@ endif()
 if(TEST recomp-runtime-input-host-sdl)
     add_test(NAME recomp-runtime-input-host-keymap COMMAND recomp_input_host_test keymap)
     set_tests_properties(recomp-runtime-input-host-keymap PROPERTIES
-        ENVIRONMENT "RECOMP_KEYMAP=a=20,bogus,start=74,x=53,up=79,down=7a;RECOMP_PADMAP=b=RT,start=Nope;RECOMP_TEST_FOCUSED=1")
+        ENVIRONMENT "RECOMP_TEST_FOCUSED=1")
 endif()
 if(WIN32)
     add_library(recomp_audio STATIC audio_output_xaudio2.cpp audio_xtalk_xapo.cpp
@@ -690,7 +690,7 @@ if(RECOMP_PROGRAM_DIR)
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c
         unlock_profile.c pc_settings.c button_config.c
-        pc_settings_store.cpp runner_assets.c menu_quit.c quit_icon.c
+        pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp)

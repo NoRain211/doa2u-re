@@ -1,6 +1,7 @@
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
 #include "input_keyboard_win32.h"
+#include "rebind.h"
 
 #include <SDL3/SDL.h>
 
@@ -39,29 +40,36 @@ static SDL_Joystick *attach(uintptr_t index, SDL_JoystickID *id)
     return *id != 0 ? SDL_OpenJoystick(*id) : NULL;
 }
 
-/* CMake runs this with RECOMP_KEYMAP=a=20,bogus,start=74,x=53,up=79,down=7a and
-   RECOMP_TEST_FOCUSED=1 (the test adds y= to the pad map):
-   Space is A, F5 is Start and S is X. The keys those had press nothing, and Y, which had S,
-   has no key. "bogus" has no key and is skipped without losing the entries after it; F10 and
-   F11 cannot be bound.
-   RECOMP_PADMAP=b=RT,start=Nope gives B the right trigger, which leaves R Trigger with
-   none; Start keeps its own button, as Nope names none. y= leaves Y with no button and
-   keeps its default from coming back. */
-static void unbind_pad_y(void)
+/* The settings files rebind.cpp loads, as Rebind or a player writes them.
+   Space (in any case) is A, F5 is Start and S is X. The keys those had press
+   nothing, and Y, which had S, has no key. "bogus" names no button and F10 and
+   F11 cannot be bound, so they are skipped without losing the entries after them.
+   The pad file gives B the right trigger, which leaves R Trigger with none;
+   Start keeps its own button, as Nope names none. "" leaves Y with no button
+   and keeps its default from coming back. */
+static void load_settings_file(const char *variable, const char *path, const char *text)
 {
-    const char *map = getenv("RECOMP_PADMAP");
-    char value[512];
-    snprintf(value, sizeof value, "%s%sy=", map != NULL ? map : "", map != NULL && *map != '\0' ? "," : "");
+    FILE *file = fopen(path, "wb");
+    if (file != NULL) {
+        fputs(text, file);
+        fclose(file);
+    }
 #ifdef _WIN32
-    _putenv_s("RECOMP_PADMAP", value);
+    _putenv_s(variable, path);
 #else
-    setenv("RECOMP_PADMAP", value, 1);
+    setenv(variable, path, 1);
 #endif
 }
 static int keymap(void)
 {
     RecompInputGamepad pad, keys;
-    unbind_pad_y();
+    load_settings_file("RECOMP_KEYBOARD_SETTINGS", "input-host-test-keyboard.json",
+        "{\"a\": \"space\", \"bogus\": \"Q\", \"start\": \"F5\", \"x\": \"S\", \"up\": \"F10\", \"down\": \"F11\"}");
+    load_settings_file("RECOMP_CONTROLLER_SETTINGS", "input-host-test-controller.json",
+        "{\"b\": \"RT\", \"start\": \"Nope\", \"y\": \"\"}");
+    recomp_rebind_load();
+    remove("input-host-test-keyboard.json");
+    remove("input-host-test-controller.json");
     CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_A, false) == 0x20 &&
           recomp_input_host_bound(RECOMP_INPUT_BIND_Y, false) == -1);
     CHECK(recomp_input_host_bound(RECOMP_INPUT_BIND_B, true) == pad_source("RT") &&

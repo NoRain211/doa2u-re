@@ -8,6 +8,7 @@
 #endif
 #include <SDL3/SDL.h>
 
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,7 +91,7 @@ static bool trace_enabled(void)
 }
 
 /* Host pad buttons a binding can take, named as private/controller.json
-   spells them (run_game.py's PAD_NAMES). SDL names face buttons by position,
+   spells them, in any case. SDL names face buttons by position,
    so Cross/Circle/Square/Triangle are A/B/X/Y. */
 enum {
     PAD_A, PAD_B, PAD_X, PAD_Y, PAD_BACK, PAD_START, PAD_LB, PAD_RB, PAD_LT, PAD_RT, PAD_LS, PAD_RS,
@@ -110,8 +111,8 @@ static const struct { const char *name; int button, axis; } pad_sources[PAD_SOUR
     [PAD_P4] = {"P4", SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, -1}, [PAD_TOUCHPAD] = {"Touchpad", SDL_GAMEPAD_BUTTON_TOUCHPAD, -1},
 };
 
-/* Keys a binding can take, named as private/keyboard.json spells them
-   (run_game.py's KEY_CODES). F10 is a Windows system key and F11 toggles
+/* Keys a binding can take, named as private/keyboard.json spells them, in
+   any case. F10 is a Windows system key and F11 toggles
    fullscreen, so neither is here. */
 static const struct { uint8_t key; const char *name; } named_keys[] = {
     {0x08, "Backspace"}, {0x09, "Tab"}, {0x0d, "Enter"}, {0x10, "Shift"}, {0x11, "Ctrl"}, {0x1b, "Esc"},
@@ -151,44 +152,17 @@ const char *recomp_input_host_source_name(bool pad, int source)
     return NULL;
 }
 
-/* A RECOMP_KEYMAP (hex keys) or RECOMP_PADMAP (pad button names) value. */
-static int parse_source(bool pad, const char *value, size_t length)
+int recomp_input_host_source(bool pad, const char *name)
 {
-    if (!pad) {
-        const unsigned long key = strtoul(value, NULL, 16);
-        return key > 0ul && key < RECOMP_INPUT_KEY_COUNT &&
-            recomp_input_host_source_name(false, (int)key) != NULL ? (int)key : -1;
+    const int count = pad ? PAD_SOURCES : RECOMP_INPUT_KEY_COUNT;
+    for (int source = 0; name != NULL && source < count; ++source) {
+        const char *known = recomp_input_host_source_name(pad, source);
+        size_t i = 0;
+        while (known != NULL && known[i] != '\0' &&
+               tolower((unsigned char)known[i]) == tolower((unsigned char)name[i])) ++i;
+        if (known != NULL && known[i] == '\0' && name[i] == '\0') return source;
     }
-    for (int i = 0; i < PAD_SOURCES; ++i)
-        if (strlen(pad_sources[i].name) == length && strncmp(value, pad_sources[i].name, length) == 0) return i;
     return -1;
-}
-
-static void load_map(bool pad, const char *at)
-{
-    bool bound[RECOMP_INPUT_BIND_COUNT] = {false};
-    while (at != NULL && *at != '\0') {
-        const char *next = strchr(at, ',');
-        const char *equals = strchr(at, '=');
-        if (equals != NULL && (next == NULL || equals < next)) { /* an entry without = is skipped */
-            const char *value = equals + 1;
-            const size_t length = next != NULL ? (size_t)(next - value) : strlen(value);
-            /* An empty value means no button, not the default one. */
-            const int source = length == 0 ? -1 : parse_source(pad, value, length);
-            for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
-                if (strlen(bindings[i].name) == (size_t)(equals - at) &&
-                    strncmp(at, bindings[i].name, equals - at) == 0 && (length == 0 || source >= 0)) {
-                    bindings[i].source[pad] = source;
-                    bound[i] = true;
-                }
-            }
-        }
-        at = next != NULL ? next + 1 : NULL;
-    }
-    /* A source given to one button leaves the button that had it by default. */
-    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
-        for (size_t j = 0; j < RECOMP_INPUT_BIND_COUNT; ++j)
-            if (!bound[i] && bound[j] && bindings[i].source[pad] == bindings[j].source[pad]) bindings[i].source[pad] = -1;
 }
 
 static void load_bindings(void)
@@ -201,8 +175,29 @@ static void load_bindings(void)
     }
     loaded = true;
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) memcpy(bindings[i].source, bindings[i].defaults, sizeof bindings[i].source);
-    load_map(false, getenv("RECOMP_KEYMAP"));
-    load_map(true, getenv("RECOMP_PADMAP"));
+    unlock_bindings();
+}
+
+/* Each binding's key (pad false) or host pad button, read once per sample. */
+static void snapshot_sources(bool pad, int sources[RECOMP_INPUT_BIND_COUNT])
+{
+    load_bindings();
+    lock_bindings();
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) sources[i] = bindings[i].source[pad];
+    unlock_bindings();
+}
+
+void recomp_input_host_load_bindings(bool pad, const int sources[RECOMP_INPUT_BIND_COUNT],
+    const bool given[RECOMP_INPUT_BIND_COUNT])
+{
+    load_bindings();
+    lock_bindings();
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
+        if (given[i]) bindings[i].source[pad] = sources[i];
+    /* A source given to one button leaves the button that had it by default. */
+    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i)
+        for (size_t j = 0; j < RECOMP_INPUT_BIND_COUNT; ++j)
+            if (!given[i] && given[j] && bindings[i].source[pad] == bindings[j].source[pad]) bindings[i].source[pad] = -1;
     unlock_bindings();
 }
 
@@ -402,10 +397,7 @@ static int16_t up_axis(SDL_Gamepad *gamepad, SDL_GamepadAxis axis)
 static void read_pad(SDL_Gamepad *host, RecompInputGamepad *gamepad)
 {
     int sources[RECOMP_INPUT_BIND_COUNT];
-    load_bindings();
-    lock_bindings();
-    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) sources[i] = bindings[i].source[1];
-    unlock_bindings();
+    snapshot_sources(true, sources);
     if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_LEFT_STICK)) gamepad->buttons |= XBOX_LEFT_THUMB;
     if (SDL_GetGamepadButton(host, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) gamepad->buttons |= XBOX_RIGHT_THUMB;
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
@@ -467,10 +459,7 @@ static bool sample(uint32_t port, RecompInputGamepad *gamepad)
 
     recomp_input_keyboard_sample(keyboard);
     int sources[RECOMP_INPUT_BIND_COUNT];
-    load_bindings();
-    lock_bindings();
-    for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) sources[i] = bindings[i].source[0];
-    unlock_bindings();
+    snapshot_sources(false, sources);
     for (size_t i = 0; i < RECOMP_INPUT_BIND_COUNT; ++i) {
         if (sources[i] < 0 || !pressed(sources[i])) continue;
         if (bindings[i].button != 0u) keyboard_buttons.buttons |= bindings[i].button;

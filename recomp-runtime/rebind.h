@@ -24,9 +24,12 @@ bool recomp_rebind_listening(void);
 void recomp_rebind_reset(bool pad);
 /* The name of what presses a binding, as the JSON files spell it; NULL for nothing. */
 const char *recomp_rebind_name(unsigned binding, bool pad);
-/* Saves the keys to the file RECOMP_KEYBOARD_SETTINGS names and the pad
-   buttons to RECOMP_CONTROLLER_SETTINGS's, in the shape run_game.py reads,
-   if anything changed. */
+/* The files RECOMP_KEYBOARD_SETTINGS and RECOMP_CONTROLLER_SETTINGS name
+   hold each button's key or pad button, such as {"a": "Space", "y": ""}
+   ("" for nothing); a button left out keeps its default. Load reads them
+   before pads are sampled, reporting what it cannot use; save writes them
+   back if anything changed. */
+void recomp_rebind_load(void);
 void recomp_rebind_save(void);
 /* Sees each sampled pad first: while it listens, and after a change until
    every button is up, the game gets an idle pad. */

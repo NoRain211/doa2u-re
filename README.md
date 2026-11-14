@@ -231,7 +231,8 @@ Y (by position, so Cross is A), Back, Start, LB, RB, LT, RT, LS, RS, Up, Down,
 Left, Right, Misc, P1-P4 and Touchpad. Buttons you leave out keep their keys,
 except that a key you give to one button leaves the button that had it. F10
 is a Windows system key, and F11 and Alt+Enter are reserved for fullscreen, so
-none of them can be bound. F3 keeps its
+none of them can be bound. The game reads both files when it starts; an
+entry it cannot use is named in the session log and skipped. F3 keeps its
 readout and, with the free camera turned on, F1, F12 and P keep their jobs,
 so a button bound to one of those does both. The free camera's own keys stay
 fixed, and while it flies the keyboard is the camera's.

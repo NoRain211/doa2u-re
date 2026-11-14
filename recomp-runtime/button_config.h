@@ -2,7 +2,10 @@
 #ifndef DOA2U_RECOMP_BUTTON_CONFIG_H
 #define DOA2U_RECOMP_BUTTON_CONFIG_H
 
-#include "pc_settings.h"
+#include "kernel_abi.h"
+
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,7 +14,20 @@ extern "C" {
 /* Button Config: the Controller page's Rebind row, and the game's Button
    Config screen (scene 0x19) while it rebinds. pc_settings.c owns PC SETTINGS
    and calls these from the Options menu hooks both pages share. */
-void recomp_button_config_install(const RecompPcSettingsHost *host, unsigned text_base);
+
+/* What the screen changes (rebind.h): what presses a binding (NULL for
+   nothing), listening for a new key (pad false) or pad button, giving them
+   all their defaults, and the screen closing, when the host saves. */
+typedef struct RecompButtonConfigHost {
+    const char *(*bound)(unsigned binding, bool pad);
+    void (*listen)(unsigned binding, bool pad);
+    bool (*listening)(void);
+    void (*reset)(bool pad);
+    void (*closed)(void);
+} RecompButtonConfigHost;
+
+/* Without it the Rebind row does nothing. */
+void recomp_button_config_install(const RecompButtonConfigHost *host);
 RecompFunction recomp_button_config_lookup_manual(uint32_t guest_address);
 
 /* True when it handled the call, so the caller leaves it to the game. */
