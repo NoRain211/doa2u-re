@@ -287,7 +287,6 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *main_depth = nullptr;
     bool main_resolved = true;
     SDL_GPUTexture *present_texture = nullptr;  // main picture with mips, for a smaller window
-    uint32_t present_width = 0u, present_height = 0u;
     SDL_GPUTexture *back_buffer_copy = nullptr;   // GetBackBuffer(0) snapshots
     SDL_GPUTexture *previous_frame = nullptr;     // GetBackBuffer(-1)
     bool copy_mips = false;
@@ -460,7 +459,8 @@ SDL_GPUTexture *createTexture(RecompD3dPresenter *presenter, SDL_GPUTextureType 
 }
 
 /* The mip whose texels cover the window's pixels, so the blit averages what it
-   drops instead of taking one bilinear tap from level 0. */
+   drops instead of taking one bilinear tap from level 0. Below 2x a bilinear tap
+   already reads every pixel; D3D11's trilinear sample blends two levels instead. */
 uint32_t presentMipLevel(uint32_t width, uint32_t height,
     uint32_t destination_width, uint32_t destination_height)
 {
@@ -472,31 +472,43 @@ uint32_t presentMipLevel(uint32_t width, uint32_t height,
     return (std::min)(static_cast<uint32_t>(std::floor(std::log2(ratio))), last);
 }
 
-bool ensurePresentTexture(RecompD3dPresenter *presenter)
+/* The window blit's source: level 0 of the picture, or for a window at least 2x
+   smaller, a mip of a main-sized copy (released by applyQuality like gamma_target). */
+SDL_GPUBlitRegion presentSource(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
+    SDL_GPUTexture *shown, uint32_t window_width, uint32_t window_height)
 {
-    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
-    if (presenter->present_texture != nullptr && presenter->present_width == width &&
-        presenter->present_height == height) return true;
-    if (presenter->present_texture != nullptr) {
-        SDL_ReleaseGPUTexture(presenter->device, presenter->present_texture);
-        presenter->present_texture = nullptr;
+    SDL_GPUBlitRegion source{};
+    source.texture = shown;
+    source.w = mainWidth(presenter);
+    source.h = mainHeight(presenter);
+    const uint32_t mip = presentMipLevel(source.w, source.h, window_width, window_height);
+    if (mip == 0u) return source;
+    if (presenter->present_texture == nullptr) {
+        presenter->present_texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+            SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+            SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+            source.w, source.h, 1u, mipLevels(source.w, source.h));
     }
-    presenter->present_width = presenter->present_height = 0u;
-    presenter->present_texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
-        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
-        width, height, 1u, mipLevels(width, height));
     if (presenter->present_texture == nullptr) {
         static bool reported;
         if (!reported) {
             reported = true;
             std::fprintf(stderr, "recomp d3d presenter: present mips unavailable: %s\n", SDL_GetError());
         }
-        return false;
+        return source;
     }
-    presenter->present_width = width;
-    presenter->present_height = height;
-    return true;
+    SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands);
+    if (pass == nullptr) return source;
+    const SDL_GPUTextureLocation copy_source{shown, 0u, 0u, 0u, 0u, 0u};
+    const SDL_GPUTextureLocation copy_destination{presenter->present_texture, 0u, 0u, 0u, 0u, 0u};
+    SDL_CopyGPUTextureToTexture(pass, &copy_source, &copy_destination, source.w, source.h, 1u, false);
+    SDL_EndGPUCopyPass(pass);
+    SDL_GenerateMipmapsForGPUTexture(commands, presenter->present_texture);
+    source.texture = presenter->present_texture;
+    source.mip_level = mip;
+    source.w = (std::max)(source.w >> mip, 1u);
+    source.h = (std::max)(source.h >> mip, 1u);
+    return source;
 }
 
 /* Resolves a multisampled color target into its single-sample twin with an
@@ -2920,33 +2932,9 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
             height = static_cast<int>(swap_width / source_aspect + 0.5f);
             y = (static_cast<int>(swap_height) - height) / 2;
         }
-        SDL_GPUTexture *source = shown;
-        uint32_t source_width = mainWidth(presenter), source_height = mainHeight(presenter);
-        uint32_t mip = presentMipLevel(source_width, source_height,
-            static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-        if (mip != 0u && ensurePresentTexture(presenter)) {
-            if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
-                const SDL_GPUTextureLocation copy_source{shown, 0u, 0u, 0u, 0u, 0u};
-                const SDL_GPUTextureLocation copy_destination{presenter->present_texture,
-                    0u, 0u, 0u, 0u, 0u};
-                SDL_CopyGPUTextureToTexture(pass, &copy_source, &copy_destination,
-                    source_width, source_height, 1u, false);
-                SDL_EndGPUCopyPass(pass);
-                SDL_GenerateMipmapsForGPUTexture(commands, presenter->present_texture);
-                source = presenter->present_texture;
-                source_width = (std::max)(source_width >> mip, 1u);
-                source_height = (std::max)(source_height >> mip, 1u);
-            } else {
-                mip = 0u;
-            }
-        } else {
-            mip = 0u;
-        }
         SDL_GPUBlitInfo blit{};
-        blit.source.texture = source;
-        blit.source.mip_level = mip;
-        blit.source.w = source_width;
-        blit.source.h = source_height;
+        blit.source = presentSource(presenter, commands, shown,
+            static_cast<uint32_t>(width), static_cast<uint32_t>(height));
         blit.destination.texture = swapchain;
         blit.destination.x = static_cast<Uint32>(x);
         blit.destination.y = static_cast<Uint32>(y);
@@ -3332,7 +3320,6 @@ void applyQuality(RecompD3dPresenter *presenter)
         if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
         *texture = nullptr;
     }
-    presenter->present_width = presenter->present_height = 0u;
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     presenter->gamma_pipeline = nullptr;
     if (presenter->gamma_enabled && !ensureGammaPass(presenter)) presenter->gamma_enabled = false;

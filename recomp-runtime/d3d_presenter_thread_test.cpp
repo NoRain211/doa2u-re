@@ -2960,6 +2960,8 @@ static bool testPresentDownscale()
     const RecompD3dPresenterConfig downscale_config = {
         720u, 480u, RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM,
         RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8};
+    // A 4:3 target at scale 6 is 3840x2880, whatever the window.
+    const uint32_t target_height = downscale_config.height * 6u, target_width = target_height * 4u / 3u;
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create present downscale", d3d_backend_create(&downscale_config, &presenter));
     bool skipped = false;
@@ -2976,9 +2978,10 @@ static bool testPresentDownscale()
         if (!GetClientRect(presenterWindow(), &rect)) {
             std::fprintf(stderr, "FAIL downscale window has no client rect\n");
             passed = false;
-        } else if (rect.right >= 3840 && rect.bottom >= 2880) {
-            std::printf("SKIP downscale window %ldx%ld is not smaller than 3840x2880\n",
-                rect.right, rect.bottom);
+        } else if (static_cast<uint32_t>(rect.right) >= target_width &&
+                static_cast<uint32_t>(rect.bottom) >= target_height) {
+            std::printf("SKIP downscale window %ldx%ld is not smaller than %ux%u\n",
+                rect.right, rect.bottom, target_width, target_height);
             skipped = true;
         }
 #endif
@@ -2989,7 +2992,7 @@ static bool testPresentDownscale()
         std::fseek(file, 18, SEEK_SET);
         passed &= std::fread(&width, 4, 1, file) == 1 && std::fread(&height, 4, 1, file) == 1;
         std::fclose(file);
-        passed &= width == 3840u && height == 2880u;
+        passed &= width == target_width && height == target_height;
     } else passed = false;
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
