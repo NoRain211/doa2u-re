@@ -330,6 +330,16 @@ static int check_frame_state(void)
     recomp_d3d_blend_state(recomp_d3d8_state_model(), &blend);
     CHECK(blend.blend_enable && blend.src_factor == RECOMP_D3D_BLEND_SRC_ALPHA &&
         blend.dst_factor == RECOMP_D3D_BLEND_INV_SRC_ALPHA);
+    /* Great Opera's floor shadow layer: ONE/ONE with REVSUBTRACTSIGNED darkens. */
+    CHECK(recomp_d3d8_state_set_simple(0x40344u, 1u));
+    CHECK(recomp_d3d8_state_set_simple(0x40348u, 1u));
+    CHECK(recomp_d3d8_state_set_simple(0x40350u, 0xf005u));
+    recomp_d3d_blend_state(recomp_d3d8_state_model(), &blend);
+    CHECK(blend.src_factor == RECOMP_D3D_BLEND_ONE && blend.dst_factor == RECOMP_D3D_BLEND_ONE &&
+        blend.op == RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT);
+    CHECK(recomp_d3d8_state_set_simple(0x40350u, 0x8006u));
+    CHECK(recomp_d3d8_state_set_simple(0x40344u, 0x302u));
+    CHECK(recomp_d3d8_state_set_simple(0x40348u, 0x303u));
     RecompD3dDepthState depth;
     recomp_d3d_depth_state(recomp_d3d8_state_model(), &depth);
     CHECK(depth.depth_write_enable && depth.depth_test_enable && depth.stencil_enable);
