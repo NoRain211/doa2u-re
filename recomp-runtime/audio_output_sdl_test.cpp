@@ -5,9 +5,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 
 extern "C" void recomp_audio_output_test_reset(void);
+extern "C" void recomp_audio_output_test_reverb_postmix(int channels, int freq, float *buffer, int bytes);
 
 static void check_fail(const char *expr, const char *file, int line)
 {
@@ -76,6 +78,32 @@ int main()
     // Shutdown
     recomp_audio_output_shutdown();
     CHECK(recomp_audio_output_enabled() == 0);
+
+    // A 5.1 master hands the stereo reverb device six channels; its return
+    // must still reach FL/FR (issue #145 regression: it was silenced).
+    recomp_audio_output_test_reset();
+    setenv("RECOMP_AUDIO_GAIN", "1", 1);
+    setenv("RECOMP_AUDIO_SURROUND", "1", 1);
+    recomp_audio_output_initialize();
+    CHECK(recomp_audio_output_enabled() != 0);
+    const RecompAudioReverb hall = {-1000, -100, 0.0f, 1.49f, 0.83f, -2602, 0.007f,
+        200, 0.011f, 100.0f, 100.0f, 5000.0f};
+    CHECK(recomp_audio_output_set_reverb(&hall));
+    std::vector<float> mix(480 * 6, 0.0f);
+    mix[0] = mix[1] = 1.0f;  // an impulse in FL/FR, where SDL upmixes the wet pair
+    bool front = false, other = false;
+    for (int block = 0; block < 20; ++block) {
+        recomp_audio_output_test_reverb_postmix(6, 48000, mix.data(),
+            static_cast<int>(mix.size() * sizeof(float)));
+        for (size_t i = 0; i < mix.size(); ++i) {
+            (i % 6 < 2 ? front : other) |= mix[i] != 0.0f;
+        }
+        std::fill(mix.begin(), mix.end(), 0.0f);
+    }
+    CHECK(front);
+    CHECK(!other);
+    recomp_audio_output_shutdown();
+    unsetenv("RECOMP_AUDIO_SURROUND");
 
     // Reset attempted flag for muted lifecycle test
     recomp_audio_output_test_reset();
