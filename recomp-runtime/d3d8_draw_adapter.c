@@ -501,8 +501,9 @@ static void distortion(uint32_t device, uint32_t stride, RecompD3dPresenterDrawC
    The water shader (built by FUN_0026bd20, bound by the unanalyzed draw at
    0x26c980) has t0 PROJECT2D, t1 and t3 BUMPENVMAP of t0 and no t2 (0x300c1).
    Its seven combiners give s = max(0, dot(expand v0, expand t3))^8, then
-   r0 = v1 t1.a, r0 = (s - 0.5) + (r0 - 0.5), r0 += t3.a t1 and r0.a =
-   t3.a v0.a, with the same final combiner. Returns 1 (effect), 2 (water) or 0. */
+   r0 = v1 t1.a, r0 = (s - 0.5) + (r0 - 0.5), r0 = max(0, r0) + t3.a t1
+   (unsigned r0 input) and r0.a = t3.a v0.a, with the same final combiner.
+   Returns 1 (effect), 2 (water) or 0. */
 static uint32_t bump_shader(uint32_t device)
 {
     static const uint32_t effect[][2] = {

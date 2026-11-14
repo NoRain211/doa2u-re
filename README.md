@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, ultrawide or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -66,23 +66,67 @@ keeps running.
 - **Free camera.** Take the game's camera in fights and cutscenes and fly it
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
-- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the renderer, VRR, an
-  optional intro-movie skip, 5.1 surround, the unlock setting, random CPU costumes and the free camera, and remembers them. `DOA2U.exe` plays
-  with the same choices. On release ZIPs after 0.1.10, the settings launcher on
-  each platform can check GitHub for a newer release and install it from its
-  **UPDATE** page; **Check At Start** turns the start-up check off.
+- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the
+  renderer, VRR, an optional intro-movie skip, 5.1 surround, the unlock
+  setting, random CPU costumes, the free camera and the staff-roll dedication
+  card, and remembers them. `DOA2U.exe` plays with the same choices. On release
+  ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
+  for a newer release and install it from its **UPDATE** page; **Check At
+  Start** turns the start-up check off.
 - **PC Settings in the game.** The game's own **Options** menu has a
   **PC SETTINGS** row after **Video**, drawn and translated like the game's
-  rows, with the launcher's settings. **Unlocks**, **CPU Costumes** and
-  **Free Camera** change at once, and with the Vulkan renderer so do
-  **Resolution**, **MSAA** and **SMAA**; the others say they apply the next
+  rows, with the launcher's settings over three pages: the top **Page** row
+  (left, right or confirm) turns between the display, audio and gameplay
+  settings. **Unlocks**, **CPU Costumes**, **Free Camera** and
+  **Dedication** change at once, and so do **Resolution**, **MSAA** and
+  **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
+- **Combo damage and critical stun.** Outside Sparring, the combo's damage
+  shows under the game's own hit counter, and while a fighter is in a
+  critical stun their life bar darkens the damage left before the stun
+  breaks, as Sparring's bar does. Online both stay off.
+- **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
+  colour from 16, at once, or **Custom**: any colour, set as
+  `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
+- **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
+  of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
+  decodes every voice clip of all 15 fighters into
+  `private\doa4-voice-all\<fighter>` and fills each fighter's `selections`
+  folder from `tools\doa4_voice_selections.json`, a mapping of which DOA4
+  clip plays for what (it holds no audio), so every install gets the same
+  hit voices from its own disc. To pick your own, put clips in that
+  fighter's `selections` folder (the importer never overwrites one that has
+  clips), named `..._HIT_LV1_01.wav`, `_HIT_LV2_`,
+  `_HIT_LV3_` (light, medium and heavy hits) and `..._KO_01.wav`, and the game
+  plays them: grunts follow the damage taken (a heavy hit always, a combo
+  once or twice), at least 0.7 seconds apart, and a KO always cries, in the
+  KO replay too. Fighters without a `selections` folder stay
+  silent. **VoiceEditor.exe** (built from `tools\voice_editor.cs` beside the
+  launchers) does this for you: pick a fighter, add up to 16 clips to each of its light,
+  medium, heavy and KO lists from any WAV, play them, and tune how often
+  they play; a running game picks up changes within a second. Its **Save
+  mapping** button (or the importer's `--save-selections`) writes your picks
+  back into the mapping file to share them. Hits are
+  graded by the move's base damage, before combo scaling. It needs an
+  ffmpeg with XMA support. PC SETTINGS' **Hit Voices**
+  row sets them Off, Quiet, Normal or Loud. Online they stay off, since a
+  rollback would replay them.
+- **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**
+  (the default), a few frames after the KO hit the fight stands still and
+  the game's own multi-angle replay, which DOA2U otherwise keeps for a human
+  winner's few special moves, shows the hit three times from three cameras,
+  the last at 85% speed, as Tekken Tag Tournament does; then the fall plays
+  out live and the round moves on. KOs by the stage (hazards, fences,
+  falls into another area) get no replay at all. **Original** keeps DOA2U's
+  own replays.
+  Offline only.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
-- **Sharper menus.** The Vulkan renderer redraws the game's 2D art (menus,
+- **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
-  shown, so it stays smooth at high resolutions. `RECOMP_UI_UPSCALE=0` turns
-  it off.
+  shown, so it stays smooth at high resolutions; the Vulkan renderer also
+  redraws 8-bit alpha art, which Direct3D 11 samples differently and leaves
+  as-is. `RECOMP_UI_UPSCALE=0` turns it off.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
   character and costume is offered unless you choose **Earn** on the
   launcher's **GAMEPLAY** page. Your profile only ever saves what you have
@@ -109,7 +153,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
-| Native 16:9 widescreen, 16:10, ultrawide and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
+| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
@@ -132,11 +176,15 @@ On macOS and Linux, including the Steam Deck, follow
 [building on macOS and Linux](docs/building.md) instead.
 
 **Requirements:** Windows 10/11 x64, internet access for the first build, and
-your Disc 2 ISO with about 6 GB free. The ZIP carries Python (with Capstone and
-Pillow) and CMake, so there is nothing to install.
-The build downloads the pinned [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
-compiler (190 MB) into `tools\llvm-mingw` and checks its SHA-256; it needs no
-Visual Studio or administrator approval.
+your Disc 2 ISO with about 6 GB free. The ZIP carries Python (with Capstone,
+Pillow and truststore), CMake and the pinned
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) compiler in
+`tools\llvm-mingw`, so there is nothing to install. A source checkout downloads
+llvm-mingw (190 MB) there on first build and checks its SHA-256; neither needs
+Visual Studio or administrator approval. If `tools\llvm-mingw` is missing and a
+`clang.exe` with `mingw32-make.exe` beside it is on PATH (for example winget's
+llvm-mingw), the build uses that copy instead, without the version pin or
+SHA-256 check.
 
 1. Download the ZIP from the
    [latest release](https://github.com/NoRain211/doa2u-re/releases/latest) and
@@ -276,7 +324,8 @@ setting, and the presenter shows that image at 16:9.
 widescreen mode in another shape: the runner widens the game's projection to
 it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
-launcher's **16:10**, **Ultrawide** (the primary monitor's own shape) and
+launcher's **16:10**, **21:9** (the primary monitor's own shape on a 21:9
+display, else 64:27) and
 **32:9** choices set it. Online sessions and replays use the host's 4:3 or
 16:9 mode, fitted with black bars, as both sides must compute the same
 frames. Above 480p the Direct3D 11 window fills the screen borderless in
@@ -290,6 +339,8 @@ window. The build fetches pinned, hash-verified copies of SDL3,
 
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.
+Choose **Dedication: Hide** on the launcher's **GAMEPLAY** page or the game's
+**PC SETTINGS** page, or pass `--no-dedication-card` to `run_game.py`, to skip it.
 `--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
 off the automatic character and costume unlock, so unlocks come from play.
 With the unlock on, saves and the game's awards still keep to what each
@@ -319,6 +370,9 @@ The Windows ZIP adds extract-xiso and its license
 with [test-release.md](docs/test-release.md) as `README.txt`; the macOS and
 Linux ZIPs use [test-release-macos.md](docs/test-release-macos.md) and
 [test-release-linux.md](docs/test-release-linux.md).
+Each ZIP gets a `<zip>.sha256.json` beside it listing every file's SHA-256;
+upload it with the ZIP. The updater checks it against GitHub's digest so it can
+fetch only changed files; without it, updates download the whole ZIP.
 
 ## Repository layout
 

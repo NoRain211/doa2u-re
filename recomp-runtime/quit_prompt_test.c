@@ -51,6 +51,10 @@ int main(void)
     pad.thumb_lx = 20000;
     recomp_quit_prompt_filter(0u, &pad, 6110u);
     expect("a pushed stick stays hidden too", pad.thumb_lx == 0);
+    memset(&pad, 0, sizeof pad);
+    pad.thumb_ly = -12000;
+    recomp_quit_prompt_filter(0u, &pad, 6112u);
+    expect("a drifting stick lets the latch go", pad.thumb_ly == -12000);
     step(0u, 0u, 0, 0, 6115u, &pad);
     expect("input returns after release", step(0u, 0u, 1, 0, 6120u, &pad) == RECOMP_QUIT_NONE &&
         pad.analog_buttons[0] == 0xffu);

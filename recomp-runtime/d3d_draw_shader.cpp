@@ -525,7 +525,7 @@ bool recomp_d3d_draw_shader_source(
             "        float s = saturate(dot(v0.rgb * 2.0f - 1.0f, t3.rgb * 2.0f - 1.0f));\n"
             "        s *= s; s *= s; s *= s;\n"
             "        float3 r0 = clamp(s + v1.rgb * t1.a - 1.0f, -1.0f, 1.0f);\n"
-            "        r0 = clamp(r0 + t3.a * t1.rgb, -1.0f, 1.0f);\n"
+            "        r0 = clamp(max(r0, 0.0f) + t3.a * t1.rgb, -1.0f, 1.0f);\n"
             "        float f = bump_fog.z > 0.5f ? saturate(bump_fog.x + bump_fog.y * input.program_fog) : 1.0f;\n"
             "        shaded = float4(lerp(fog_color.rgb, saturate(r0), f), t3.a * v0.a);\n"
             "    } else if (bump_fog.w > 0.5f) {\n"

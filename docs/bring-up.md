@@ -96,7 +96,9 @@ the held time from the guest clock. A new press of any pad button or mapped
 key fades the card out early; a button still held from the fight must be
 released first. In Kasumi's Story the track is first read
 after the final KO's white flash, so the card plays just before the ending,
-which carries the staff credits over it.
+which carries the staff credits over it. **Dedication: Hide** on the launchers'
+**GAMEPLAY** page or the game's **PC SETTINGS** page, or `--no-dedication-card`,
+skips it.
 
 `--story-finale` (runner and `run_game.py`) holds every live Story CPU at 1
 life and sets the stage to 5 at the first CPU KO, so the game's own advance
@@ -195,6 +197,14 @@ both selectors retain the presenter's shared frame-buffer flag. Constant-alpha
 blend factors (`0x8003`/`0x8004`) retain their native blend semantics. Adapter
 and GPU pixel regressions cover the final-stage style frame blend that would
 otherwise cover the scene with blank guest memory.
+
+D3DBLENDOP_REVSUBTRACTSIGNED (`0xf005`) maps to reverse subtract (dst - src);
+the signed intermediate range is not modelled. Great Opera's baked floor
+shadows (`0x1f3be3`) draw a dark map, about 0.1 grey, at ONE/ONE with it. Read
+as ADD it washed the floor out, and a 0.5 bias would brighten it too. ADDSIGNED
+(`0xf006`) has no observed caller. An NV2A compare, stencil or blend value with
+no mapping leaves the field at its Xbox D3D8 default and is logged once as
+`recomp d3d: unmapped NV2A value`.
 
 Polygon offset now survives the simple-state model, captured draw and native
 rasterizer. The 5849 `ZBias(1)` receiver state is slope `-0.25`, D24 units
@@ -506,8 +516,9 @@ Water draws in an unanalyzed function at 0x26c980 with program 0x7add80
 pixel shader that FUN_0026bd20 builds: t0 PROJECT2D, t1 and t3 BUMPENVMAP of
 t0, no t2 (texture modes 0x300c1). Its seven combiners compute s =
 max(0, dot(expand v0, expand t3))^8, r0 = v1 * t1.a, r0 = (s - 0.5) +
-(r0 - 0.5), r0 += t3.a * t1 and r0.a = t3.a * v0.a, with the stage effect's
-final combiner. The draw binds one of the 17 V8U8 maps on stage 0, the water
+(r0 - 0.5), r0 = max(0, r0) + t3.a * t1 (combiner 5 reads r0 unsigned, so a
+negative sum clamps to 0 rather than darkening the reflection) and r0.a =
+t3.a * v0.a, with the stage effect's final combiner. The draw binds one of the 17 V8U8 maps on stage 0, the water
 reflection target (FUN_0026d610) on stage 1 and a filtered environment map
 (0xe5b0a8) on stage 3, with matrices on stages 1 and 3, fog off and
 SPECULARENABLE on. The adapter matches those words and reuses the bump path
@@ -831,8 +842,9 @@ brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
 own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
-`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks and
-CPU Costumes apply at once, offline only, and the others at the next launch.
+`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks, CPU
+Costumes, Free Camera and Dedication apply at once (the first three offline
+only), and the others at the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and

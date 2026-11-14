@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
-// the intro skip, remember them in private/launcher.json, then exit 0 so
+// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
+// the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
 // between letterbox bars, the page tabs and the chosen page's settings in the
@@ -14,7 +14,7 @@ let settingsURL = root.appendingPathComponent("private/launcher.json")
 
 let heights = [480, 720, 1080, 1440, 2160]
 let samples = [1, 2, 4, 8]
-let screens = ["4:3", "16:9", "16:10", "Ultrawide", "32:9"]
+let screens = ["4:3", "16:9", "16:10", "21:9", "32:9"]
 
 var settings: [String: Any] = [:]
 if let data = try? Data(contentsOf: settingsURL),
@@ -27,17 +27,18 @@ func intSetting(_ key: String, _ fallback: Int) -> Int {
 func boolSetting(_ key: String, _ fallback: Bool) -> Bool {
     (settings[key] as? NSNumber)?.boolValue ?? fallback
 }
-// "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"; settings saved before 16:10
+// "4:3", "16:9", "16:10", "32:9" or a 21:9 "W:H"; settings saved before 16:10
 // hold only a widescreen flag.
 func screenSetting() -> String {
     settings["screen"] as? String ?? (boolSetting("widescreen", true) ? "16:9" : "4:3")
 }
-// The main screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+// The main screen's own shape when it is a 21:9 display (wider than 16:9, narrower than
+// 3:1, so not 32:9), else 21:9 as 2560x1080 (64:27).
 func ultrawideShape() -> String {
     guard let screen = NSScreen.screens.first else { return "64:27" }
     let w = Int(screen.frame.width * screen.backingScaleFactor)
     let h = Int(screen.frame.height * screen.backingScaleFactor)
-    return w * 9 > h * 16 ? "\(w):\(h)" : "64:27"
+    return w * 9 > h * 16 && w < h * 3 ? "\(w):\(h)" : "64:27"
 }
 let screenHeight: Int = {
     guard let screen = NSScreen.screens.first ?? NSScreen.main else { return 1080 }
@@ -117,12 +118,14 @@ final class LauncherView: NSView {
                          boolSetting("freeCamera", false) ? 1 : 0)
     let cpuCostumes = Row("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", ["Default", "Random"],
                           boolSetting("randomCpuCostumes", false) ? 1 : 0)
+    let dedication = Row("Dedication", "Shows a memorial card before the staff roll", ["Show", "Hide"],
+                         boolSetting("dedicationCard", true) ? 0 : 1)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
-        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes and whether the free camera is allowed",
-             rows: [unlock, cpuCostumes, freeCamera]),
+        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
+             rows: [unlock, cpuCostumes, freeCamera, dedication]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
@@ -173,6 +176,7 @@ final class LauncherView: NSView {
             "unlockAll": unlock.index == 0,
             "freeCamera": freeCamera.index == 1,
             "randomCpuCostumes": cpuCostumes.index == 1,
+            "dedicationCard": dedication.index == 0,
         ]
     }
 
@@ -436,7 +440,7 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Settings hold after a plain quit too, so the game plays with them later.
     func keepSettings() {
         guard !launched else { return }
-        // A quit keeps an untouched 16x/32x MSAA or ultrawide shape; play saves what the rows show.
+        // A quit keeps an untouched 16x/32x MSAA or 21:9 shape; play saves what the rows show.
         var kept = view.chosen
         if view.msaa.index == samples.lastIndex(where: { $0 <= intSetting("msaa", 8) }) ?? 0 { kept["msaa"] = settings["msaa"] }
         if view.screen.index == screens.firstIndex(of: screenSetting()) ?? 3 { kept["screen"] = settings["screen"] }

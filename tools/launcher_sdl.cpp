@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Linux launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
-// the intro skip, remember them in private/launcher.json, then exit 0 so
+// Linux launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
+// the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
 // run_game.py starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
 // between letterbox bars, the page tabs and the chosen page's settings in the
@@ -12,9 +12,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -28,9 +30,9 @@ constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY 
 
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
-const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE", "32:9"};
+const char *const kScreens[] = {"4:3", "16:9", "16:10", "21:9", "32:9"};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, UPDATE, CHECK_UPDATES, ITEM_COUNT };
+enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, UPDATE, CHECK_UPDATES, ITEM_COUNT };
 // One row per Item, in Item order: its label and how many values it cycles through.
 struct Row { const char *label; int count; };
 const Row kRows[] = {
@@ -43,6 +45,7 @@ const Row kRows[] = {
     {"UNLOCKS", 2},
     {"CPU COSTUMES", 2},
     {"FREE CAMERA", 2},
+    {"DEDICATION", 2},
     {"UPDATE", 2},
     {"CHECK AT START", 2},
 };
@@ -53,7 +56,7 @@ const Page kPages[] = {
     {"VIDEO SETTINGS", "Sets resolution, anti-aliasing and screen shape", {RESOLUTION, MSAA, SMAA, WIDESCREEN}},
     {"AUDIO SETTINGS", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"MOVIES", "Plays or skips the logo and opening movies at boot", {SKIP_INTRO}},
-    {"GAMEPLAY", "Chooses the unlocks, CPU costumes and whether the free camera is allowed", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA}},
+    {"GAMEPLAY", "Chooses the unlocks, CPU costumes, free camera and dedication card", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION}},
     {"START GAME", "Saves these settings and starts the game", {}},
     {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
     {"EXIT", "Closes the launcher", {}},
@@ -65,13 +68,14 @@ struct Settings {
     int height = 0;
     int msaa = 8;
     bool smaa = true;
-    std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or an ultrawide "W:H"
+    std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or a 21:9 "W:H"
     bool surround = false;
     bool skip_intro = false;
     bool check_updates = true;
     bool unlock_all = true;
     bool random_cpu_costumes = false;
     bool free_camera = false;
+    bool dedication = true;
 };
 
 struct Color { Uint8 r, g, b; };
@@ -110,23 +114,123 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "unlockAll", value)) settings.unlock_all = value == "true";
     if (jsonValue(text, "freeCamera", value)) settings.free_camera = value == "true";
     if (jsonValue(text, "randomCpuCostumes", value)) settings.random_cpu_costumes = value == "true";
+    if (jsonValue(text, "dedicationCard", value)) settings.dedication = value == "true";
     return settings;
+}
+
+// One past a string token at at (a quote), or false when it never ends.
+bool jsonString(const std::string &text, size_t &at)
+{
+    if (at >= text.size() || text[at] != '"') return false;
+    for (++at; at < text.size(); ++at) {
+        if (text[at] == '\\') { ++at; continue; }
+        if (text[at] == '"') { ++at; return true; }
+    }
+    return false;
+}
+
+// The object's top-level keys and raw values, in file order. Values are copied
+// verbatim, so nested objects and arrays survive; false means malformed.
+bool jsonEntries(const std::string &text, std::vector<std::pair<std::string, std::string>> &entries)
+{
+    size_t at = text.find_first_not_of(" \t\r\n");
+    if (at == std::string::npos || text[at] != '{') return false;
+    ++at;
+    for (;;) {
+        at = text.find_first_not_of(" \t\r\n", at);
+        if (at == std::string::npos) return false;
+        if (text[at] == '}') return true;
+        const size_t key_start = at;
+        if (!jsonString(text, at)) return false;
+        const std::string key = text.substr(key_start + 1, at - key_start - 2);
+        at = text.find_first_not_of(" \t\r\n", at);
+        if (at == std::string::npos || text[at] != ':') return false;
+        at = text.find_first_not_of(" \t\r\n", ++at);
+        if (at == std::string::npos) return false;
+        const size_t value_start = at;
+        int depth = 0;
+        bool quoted = false;
+        for (; at < text.size(); ++at) {
+            const char c = text[at];
+            if (quoted) {
+                if (c == '\\') ++at;
+                else if (c == '"') quoted = false;
+            } else if (c == '"') {
+                quoted = true;
+            } else if (c == '{' || c == '[') {
+                ++depth;
+            } else if (c == '}' || c == ']') {
+                if (depth == 0) break; // the object's own brace
+                --depth;
+            } else if (c == ',' && depth == 0) {
+                break;
+            }
+        }
+        if (at >= text.size()) return false;
+        size_t value_end = at;
+        while (value_end > value_start && std::string(" \t\r\n").find(text[value_end - 1]) != std::string::npos)
+            --value_end;
+        entries.emplace_back(key, text.substr(value_start, value_end - value_start));
+        if (text[at] == '}') return true;
+        ++at; // the comma
+    }
 }
 
 bool saveSettings(const std::string &path, const Settings &settings)
 {
-    std::ofstream file(path, std::ios::trunc);
-    file << "{\n  \"height\": " << settings.height << ",\n  \"msaa\": " << settings.msaa
-         << ",\n  \"smaa\": " << (settings.smaa ? "true" : "false")
-         << ",\n  \"widescreen\": " << (settings.screen != "4:3" ? "true" : "false")
-         << ",\n  \"screen\": \"" << settings.screen << '"'
-         << ",\n  \"skipIntro\": " << (settings.skip_intro ? "true" : "false")
-         << ",\n  \"checkUpdates\": " << (settings.check_updates ? "true" : "false")
-         << ",\n  \"unlockAll\": " << (settings.unlock_all ? "true" : "false")
-         << ",\n  \"surround\": " << (settings.surround ? "true" : "false")
-         << ",\n  \"freeCamera\": " << (settings.free_camera ? "true" : "false")
-         << ",\n  \"randomCpuCostumes\": " << (settings.random_cpu_costumes ? "true" : "false") << "\n}\n";
-    return static_cast<bool>(file);
+    // The file is shared: the Windows launcher, the in-game PC SETTINGS page
+    // and run_game.py read keys this launcher does not write (vulkan, vrr,
+    // game_source, window...), so keep every entry it does not own.
+    std::vector<std::pair<std::string, std::string>> entries;
+    std::ifstream existing(path, std::ios::binary);
+    if (existing.is_open()) {
+        const std::string text{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
+        existing.close();
+        // Never rewrite what this cannot read: the file is shared, and a save
+        // that drops the others' keys is worse than no save. A blank file
+        // holds no keys to lose, so it is rewritten.
+        if (text.find_first_not_of(" \t\r\n") != std::string::npos && !jsonEntries(text, entries))
+            return false;
+    } else {
+        std::error_code error;
+        if (std::filesystem::exists(path, error) || error) return false;
+    }
+    const auto put = [&entries](const char *key, const std::string &value) {
+        for (auto &entry : entries)
+            if (entry.first == key) { entry.second = value; return; }
+        entries.emplace_back(key, value);
+    };
+    put("height", std::to_string(settings.height));
+    put("msaa", std::to_string(settings.msaa));
+    put("smaa", settings.smaa ? "true" : "false");
+    put("widescreen", settings.screen != "4:3" ? "true" : "false");
+    put("screen", std::string("\"") + settings.screen + "\"");
+    put("skipIntro", settings.skip_intro ? "true" : "false");
+    put("checkUpdates", settings.check_updates ? "true" : "false");
+    put("unlockAll", settings.unlock_all ? "true" : "false");
+    put("surround", settings.surround ? "true" : "false");
+    put("freeCamera", settings.free_camera ? "true" : "false");
+    put("randomCpuCostumes", settings.random_cpu_costumes ? "true" : "false");
+    put("dedicationCard", settings.dedication ? "true" : "false");
+    // Written beside the file and renamed over it, so a torn save keeps the
+    // old file instead of leaving one the next save refuses to read.
+    const std::string temp = path + ".tmp";
+    {
+        std::ofstream file(temp, std::ios::trunc);
+        file << "{\n";
+        for (size_t i = 0; i < entries.size(); ++i)
+            file << (i == 0 ? "  \"" : ",\n  \"") << entries[i].first << "\": " << entries[i].second;
+        file << "\n}\n";
+        file.close();
+        if (!file) {
+            std::remove(temp.c_str());
+            return false;
+        }
+    }
+    std::error_code error;
+    std::filesystem::rename(temp, path, error);
+    if (error) std::remove(temp.c_str());
+    return !error;
 }
 
 float tabWidth(int m) { return static_cast<float>(SDL_strlen(kPages[m].name) * 8); }
@@ -179,6 +283,7 @@ struct Launcher {
         case UPDATE: return update != nullptr ? "WORKING" : pending.empty() ? "CHECK" : "INSTALL";
         case UNLOCKS: return choice[item] ? "EARN" : "EVERYTHING";
         case CPU_COSTUMES: return choice[item] ? "RANDOM" : "DEFAULT";
+        case DEDICATION: return choice[item] ? "HIDE" : "SHOW";
         default: return choice[item] ? "ON" : "OFF";
         }
     }
@@ -340,7 +445,7 @@ struct Launcher {
             const std::string value = valueText(item);
             const Color arrow = selected ? kSand : Color{180, 150, 112};
             text(left + 8, kValueY + 4, "<", arrow);
-            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // ULTRAWIDE fits only small
+            const float scale = 32 + value.size() * 16 <= column ? 2 : 1; // the longest value fits only small
             text(left + 20, kValueY + (scale == 2 ? 0 : 4), value, selected ? kWhite : Color{232, 222, 212}, scale);
             text(left + 24 + value.size() * 8 * scale, kValueY + 4, ">", arrow);
         }
@@ -424,7 +529,7 @@ int main(int argc, char **argv)
     launcher.choice[MSAA] = static_cast<int>(std::upper_bound(std::begin(kSamples), std::end(kSamples),
         std::max(settings.msaa, 1)) - std::begin(kSamples)) - 1;
     launcher.choice[SMAA] = settings.smaa ? 1 : 0;
-    launcher.choice[WIDESCREEN] = 3; // a saved ultrawide "W:H"
+    launcher.choice[WIDESCREEN] = 3; // a saved 21:9 "W:H"
     for (int i = 0; i < static_cast<int>(std::size(kScreens)); ++i) {
         if (settings.screen == kScreens[i]) launcher.choice[WIDESCREEN] = i;
     }
@@ -435,7 +540,8 @@ int main(int argc, char **argv)
     launcher.choice[UNLOCKS] = settings.unlock_all ? 0 : 1;
     launcher.choice[CPU_COSTUMES] = settings.random_cpu_costumes ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
-    // A plain exit keeps an untouched 16x/32x MSAA or ultrawide shape; play saves what the rows show.
+    launcher.choice[DEDICATION] = settings.dedication ? 0 : 1;
+    // A plain exit keeps an untouched 16x/32x MSAA or 21:9 shape; play saves what the rows show.
     const Settings loaded = settings;
     const int shown_msaa = launcher.choice[MSAA], shown_screen = launcher.choice[WIDESCREEN];
 
@@ -542,9 +648,10 @@ int main(int argc, char **argv)
         settings.smaa = launcher.choice[SMAA] != 0;
         settings.screen = kScreens[launcher.choice[WIDESCREEN]];
         if (launcher.choice[WIDESCREEN] == 3) {
-            // The primary screen's own shape when it is wider than 16:9, else 21:9 (2560x1080).
+            // The primary screen's own shape when it is a 21:9 display (wider than 16:9,
+            // narrower than 3:1, so not 32:9), else 21:9 as 2560x1080 (64:27).
             const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
-            settings.screen = mode != nullptr && mode->w * 9 > mode->h * 16
+            settings.screen = mode != nullptr && mode->w * 9 > mode->h * 16 && mode->w < mode->h * 3
                 ? std::to_string(mode->w) + ":" + std::to_string(mode->h) : "64:27";
         }
         settings.surround = launcher.choice[SURROUND] != 0;
@@ -553,6 +660,7 @@ int main(int argc, char **argv)
         settings.unlock_all = launcher.choice[UNLOCKS] == 0;
         settings.random_cpu_costumes = launcher.choice[CPU_COSTUMES] != 0;
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
+        settings.dedication = launcher.choice[DEDICATION] == 0;
         if (result != 0) {
             if (launcher.choice[MSAA] == shown_msaa) settings.msaa = loaded.msaa;
             if (launcher.choice[WIDESCREEN] == shown_screen) settings.screen = loaded.screen;

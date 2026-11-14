@@ -18,8 +18,11 @@ namespace {
 
 constexpr uint32_t kVoiceCount = RECOMP_AUDIO_OUTPUT_SLOTS;
 /* The ring bounds memory; the time budget bounds latency, so voices that
-   submit millisecond pieces are not dropped after a few milliseconds. */
-constexpr uint32_t kQueueSize = 128;
+   submit millisecond pieces are not dropped after a few milliseconds. It
+   holds XAudio2's own limit (XAUDIO2_MAX_QUEUED_BUFFERS, 64) at most: a 65th
+   SubmitSourceBuffer fails with XAUDIO2_E_INVALID_CALL, which disables the
+   output, where a full ring only drops the piece. */
+constexpr uint32_t kQueueSize = 64;
 constexpr float kMaxQueueMs = 250.0f;
 constexpr uint32_t kMaxBufferBytes = 160000;
 /* Silence queued ahead of a new or starved voice, so producer jitter (15.6 ms
@@ -437,7 +440,13 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
     if (muted) return 1;
     if (!recomp_audio_output_enabled() || (wet_send && !reverb_voice)) return 0;
     OutputVoice &voice = voices[slot];
-    if (voice.source && voice.channels != channels) return 0;
+    /* A suppressed replay can reuse this slot before its next audio arrives;
+       keep the route and let the submit replace the old voice. */
+    if (voice.source && voice.channels != channels) {
+        routing[slot] = route;
+        ++routing_updates;
+        return 1;
+    }
     if (std::memcmp(&routing[slot], &route, sizeof route) == 0) return 1;
     if (voice.source && !applyRouting(voice, route)) return 0;
     routing[slot] = route;

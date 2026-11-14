@@ -70,3 +70,4 @@ Thumbs.db
 # Windows launchers, built by tools/package_test.py --launchers .
 /Launcher.exe
 /DOA2U.exe
+/VoiceEditor.exe

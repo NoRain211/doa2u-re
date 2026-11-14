@@ -22,5 +22,8 @@ bool recomp_pc_settings_read(const std::string &path, const RecompPcSettingsStor
     std::uint8_t choices[RECOMP_PC_SETTING_COUNT]);
 bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsStore &store,
     const std::uint8_t choices[RECOMP_PC_SETTING_COUNT]);
+/* launcher.json's lifeBarCustom, an RRGGBB hex colour ("#" optional), as
+   0xRRGGBB; white when missing or not a colour. Only the file sets it. */
+std::uint32_t recomp_pc_settings_custom_life_bar(const std::string &path);
 
 #endif

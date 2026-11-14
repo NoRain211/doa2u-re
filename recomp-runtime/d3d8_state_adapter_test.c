@@ -93,6 +93,29 @@ static RecompD3dLightRecord record(uint32_t index)
 
 static int check_frame_state(void);
 
+static int check_blend_op_decode(void)
+{
+    static const struct { uint32_t value; RecompD3dBlendOp op; } mapped[] = {
+        {0x8006u, RECOMP_D3D_BLEND_OP_ADD},
+        {0x8007u, RECOMP_D3D_BLEND_OP_MIN},
+        {0x8008u, RECOMP_D3D_BLEND_OP_MAX},
+        {0x800au, RECOMP_D3D_BLEND_OP_SUBTRACT},
+        {0x800bu, RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT},
+        /* REVSUBTRACTSIGNED: Great Opera's floor shadow layer must darken. */
+        {0xf005u, RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT},
+    };
+    for (size_t i = 0u; i < sizeof mapped / sizeof mapped[0]; ++i) {
+        /* Start from a different op so a missed write fails. */
+        RecompD3dBlendOp op = mapped[i].op == RECOMP_D3D_BLEND_OP_ADD
+            ? RECOMP_D3D_BLEND_OP_MIN : RECOMP_D3D_BLEND_OP_ADD;
+        CHECK(recomp_d3d_blend_op_from_nv(mapped[i].value, &op) && op == mapped[i].op);
+    }
+    /* ADDSIGNED is unmapped and leaves the caller's op unchanged. */
+    RecompD3dBlendOp op = RECOMP_D3D_BLEND_OP_ADD;
+    CHECK(!recomp_d3d_blend_op_from_nv(0xf006u, &op) && op == RECOMP_D3D_BLEND_OP_ADD);
+    return 0;
+}
+
 int main(void)
 {
     int passed = 1;
@@ -256,6 +279,7 @@ int main(void)
     CHECK(invoke(0x346c30u, 2u, 0xff336699u) == 0u && recomp_runtime.registers.esp == STACK + 12u);
     CHECK(*recomp_memory_u32(0x355060u + (64u + 29u) * 4u) == 0xff336699u);
     passed &= check_frame_state() == 0;
+    passed &= check_blend_op_decode() == 0;
     if (passed) puts("PASS D3D8 gamma, transform, fog, light, shader and frame-state ABI/shadow state");
     return passed ? 0 : 1;
 }
