@@ -138,7 +138,7 @@ keeps running.
 ## Status
 
 > [!WARNING]
-> **0.3.2 Alpha is bring-up software.** Story, Watch and the attract demo play
+> **0.4.0 Alpha is bring-up software.** Story, Watch and the attract demo play
 > in development runs on every stage, but many modes and characters have not
 > been tried. A draw the port cannot render yet stops the game with a message
 > in the log.
@@ -357,9 +357,9 @@ picks, such as a costume about to unlock, stay. It stays off online.
 To package a release ZIP from a clean checkout:
 
 ```powershell
-python tools/package_test.py 0.3.2-Alpha
-python tools/package_test.py 0.3.2-Alpha --platform macos
-python tools/package_test.py 0.3.2-Alpha --platform linux
+python tools/package_test.py 0.4.0-Alpha
+python tools/package_test.py 0.4.0-Alpha --platform macos
+python tools/package_test.py 0.4.0-Alpha --platform linux
 ```
 
 It zips the files of committed HEAD that building and playing on that platform
