@@ -20,8 +20,8 @@
    row count.
 
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
-   no table uses. Its settings are split over two views of seven, under a
-   Page row (1 / 2, 2 / 2) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
+   no table uses. Its settings are split over three views of five, under a
+   Page row (1 / 3 to 3 / 3) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
    own art (group 3), with the same blue glow, as two runner sprites; its
    text is runner text (runner_assets.c). */
 enum {
@@ -29,8 +29,8 @@ enum {
     TOP_ROWS = 8,
     PC_PAGE = 19,
     PC_ROWS = RECOMP_PC_SETTING_COUNT,
-    PER_VIEW = 7,
-    VIEWS = 2,
+    PER_VIEW = 5,
+    VIEWS = 3,
     SHOWN = PER_VIEW + 1,          /* the Page row, then a view's settings */
     VALUE_KIND = 0x7e00,           /* 0x910a0 keys for each row's values, outside its 1-28 */
 
@@ -104,10 +104,10 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 2u};
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
-    [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
+    [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
 };
 static bool live[PC_ROWS];
 enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELPS = 4 };
@@ -120,7 +120,7 @@ typedef struct Language {
     const recomp_utf16 *help[HELPS];
     const recomp_utf16 *page;   /* the Page row */
 } Language;
-static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 2", u"2 / 2"};
+static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 3", u"2 / 3", u"3 / 3"};
 
 /* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
@@ -132,68 +132,68 @@ static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 2", u"2 / 2"};
 static const Language LANGUAGES[5] = {
     {u"PC SETTINGS",
      {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Audio Output",
-      u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera",
+      u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera", u"Dedication",
       u"Life Bar", u"Hit Voices", u"KO Replay"},
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
-      {u"Default", u"Random"}, {u"Off", u"On"},
+      {u"Default", u"Random"}, {u"Off", u"On"}, {u"Show", u"Hide"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
        u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
      {u"Graphics, audio and gameplay settings for this PC.", u"Takes effect immediately.",
       u"Takes effect the next time the game starts.",
-      u"Left or right shows the other page of settings."},
+      u"Left or right shows another page of settings."},
      u"Page"},
     {u"PARAM\u00c8TRES PC",
      {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Sortie audio",
-      u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre",
+      u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre", u"D\u00e9dicace",
       u"Barre de vie", u"Voix des coups", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
-      {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"},
+      {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"}, {u"Afficher", u"Masquer"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
        u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
      {u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
       u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu.",
-      u"Gauche ou droite affiche l'autre page de param\u00e8tres."},
+      u"Gauche ou droite affiche une autre page de param\u00e8tres."},
      u"Page"},
     {u"PC-EINSTELLUNGEN",
      {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Audioausgabe",
-      u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera",
+      u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera", u"Widmung",
       u"Lebensleiste", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
-      {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"},
+      {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"}, {u"Anzeigen", u"Ausblenden"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
        u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
      {u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
       u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart.",
-      u"Links oder rechts zeigt die andere Einstellungsseite."},
+      u"Links oder rechts zeigt eine andere Einstellungsseite."},
      u"Seite"},
     {u"IMPOSTAZIONI PC",
      {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Uscita audio",
-      u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera",
+      u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera", u"Dedica",
       u"Barra vita", u"Voci dei colpi", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
-      {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"},
+      {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"}, {u"Mostra", u"Nascondi"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
        u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
      {u"Impostazioni grafiche, audio e di gioco di questo PC.", u"Effettivo immediatamente.",
       u"Effettivo al prossimo avvio del gioco.",
-      u"Sinistra o destra mostra l'altra pagina di impostazioni."},
+      u"Sinistra o destra mostra un'altra pagina di impostazioni."},
      u"Pagina"},
     {u"CONFIG. PC",
      {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Salida de audio",
-      u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre",
+      u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre", u"Dedicatoria",
       u"Barra de vida", u"Voces de golpes", u"Repetici\u00f3n K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
-      {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"},
+      {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"}, {u"Mostrar", u"Ocultar"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
        u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
      {u"Opciones de gr\u00e1ficos, audio y juego de este PC.", u"Se aplica de inmediato.",
       u"Se aplica la pr\u00f3xima vez que inicies el juego.",
-      u"Izquierda o derecha muestra la otra p\u00e1gina de opciones."},
+      u"Izquierda o derecha muestra otra p\u00e1gina de opciones."},
      u"P\u00e1gina"},
 };
 
@@ -230,7 +230,7 @@ static const uint32_t GLOW_BASE[6] = {0x30006u, 0x30006u, 0x30014u, 0x30022u, 0x
 static RecompPcSettingsHost host;
 static uint32_t values;          /* guest u16 per setting: the choices */
 static uint32_t shown;           /* guest u16 per shown row: the view, then its settings' choices */
-static unsigned view;            /* which seven settings page 19 shows */
+static unsigned view;            /* which five settings page 19 shows */
 static uint32_t layout;          /* guest page layout: LAYOUT_RECORDS of 28 bytes, then 0 */
 static bool drawing_top;
 static bool drawing_pc;          /* page 19's own draw is running */
@@ -561,7 +561,7 @@ static void pc_input(void)
     if (row >= SHOWN) return;
     const int setting = setting_at(row);
     if (setting < 0) {
-        /* The Page row: left, right or confirm turns to the other view. */
+        /* The Page row: left, right or confirm turns to the next view. */
         refresh_shown();
         const uint32_t step[4] = {shown, VIEWS, 1u, 0u};
         kernel_call_lifted(sub_0011B9F0, step, 4u);

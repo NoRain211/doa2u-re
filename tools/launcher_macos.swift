@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera and
-// the intro skip, remember them in private/launcher.json, then exit 0 so
+// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
+// the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs without the build page
 // (./build_game.sh builds) and with MSAA up to SDL_GPU's 8x: the backdrop
 // between letterbox bars, the page tabs and the chosen page's settings in the
@@ -118,12 +118,14 @@ final class LauncherView: NSView {
                          boolSetting("freeCamera", false) ? 1 : 0)
     let cpuCostumes = Row("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", ["Default", "Random"],
                           boolSetting("randomCpuCostumes", false) ? 1 : 0)
+    let dedication = Row("Dedication", "Shows a memorial card before the staff roll", ["Show", "Hide"],
+                         boolSetting("dedicationCard", true) ? 0 : 1)
     lazy var pages = [
         Page(name: "VIDEO SETTINGS", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
         Page(name: "AUDIO SETTINGS", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
-        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes and whether the free camera is allowed",
-             rows: [unlock, cpuCostumes, freeCamera]),
+        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
+             rows: [unlock, cpuCostumes, freeCamera, dedication]),
         Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
         Page(name: "EXIT", info: "Closes the launcher", rows: []),
@@ -174,6 +176,7 @@ final class LauncherView: NSView {
             "unlockAll": unlock.index == 0,
             "freeCamera": freeCamera.index == 1,
             "randomCpuCostumes": cpuCostumes.index == 1,
+            "dedicationCard": dedication.index == 0,
         ]
     }
 
