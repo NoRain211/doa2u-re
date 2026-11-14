@@ -1,6 +1,7 @@
 #include "d3d_render_state_model.h"
 #include <stddef.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
@@ -279,6 +280,24 @@ static bool simple_or_absent(
     return recomp_d3d_get_simple_render_state(model, method, value);
 }
 
+/* An unmapped value leaves the field at its Xbox D3D8 default, so log each
+   method/value pair once instead of letting it pass silently (0xf005 once drew
+   as the default ADD). Per-thread tables keep this race-free. */
+static void report_unmapped(uint32_t method, uint32_t value, bool mapped)
+{
+    static _Thread_local struct { uint32_t method, value; } seen[32];
+    static _Thread_local size_t count;
+    if (mapped) return;
+    for (size_t i = 0u; i < count; ++i)
+        if (seen[i].method == method && seen[i].value == value) return;
+    if (count == sizeof seen / sizeof seen[0]) return;
+    seen[count].method = method;
+    seen[count].value = value;
+    ++count;
+    fprintf(stderr, "recomp d3d: unmapped NV2A value method=%05x value=%08x\n",
+        (unsigned)method, (unsigned)value);
+}
+
 void recomp_d3d_depth_state(
     const RecompD3dRenderStateModel *model,
     RecompD3dDepthState *state)
@@ -319,19 +338,22 @@ void recomp_d3d_depth_state(
         state->depth_write_enable = value != 0u;
     }
     if (simple_or_absent(model, D3D_METHOD_DEPTH_FUNC, &value)) {
-        recomp_d3d_compare_func_from_nv(value, &state->depth_func);
+        report_unmapped(D3D_METHOD_DEPTH_FUNC, value,
+            recomp_d3d_compare_func_from_nv(value, &state->depth_func));
     }
     if (simple_or_absent(model, D3D_METHOD_ALPHA_TEST_ENABLE, &value)) {
         state->alpha_test_enable = value != 0u;
     }
     if (simple_or_absent(model, D3D_METHOD_ALPHA_FUNC, &value)) {
-        recomp_d3d_compare_func_from_nv(value, &state->alpha_func);
+        report_unmapped(D3D_METHOD_ALPHA_FUNC, value,
+            recomp_d3d_compare_func_from_nv(value, &state->alpha_func));
     }
     if (simple_or_absent(model, D3D_METHOD_ALPHA_REF, &value)) {
         state->alpha_ref = value & 0xffu;
     }
     if (simple_or_absent(model, D3D_METHOD_STENCIL_FUNC, &value)) {
-        recomp_d3d_compare_func_from_nv(value, &state->stencil_func);
+        report_unmapped(D3D_METHOD_STENCIL_FUNC, value,
+            recomp_d3d_compare_func_from_nv(value, &state->stencil_func));
     }
     if (simple_or_absent(model, D3D_METHOD_STENCIL_REF, &value)) {
         state->stencil_ref = value & 0xffu;
@@ -343,13 +365,16 @@ void recomp_d3d_depth_state(
         state->stencil_write_mask = value & 0xffu;
     }
     if (simple_or_absent(model, D3D_METHOD_STENCIL_FAIL, &value)) {
-        recomp_d3d_stencil_op_from_nv(value, &state->stencil_fail);
+        report_unmapped(D3D_METHOD_STENCIL_FAIL, value,
+            recomp_d3d_stencil_op_from_nv(value, &state->stencil_fail));
     }
     if (simple_or_absent(model, D3D_METHOD_STENCIL_ZFAIL, &value)) {
-        recomp_d3d_stencil_op_from_nv(value, &state->stencil_zfail);
+        report_unmapped(D3D_METHOD_STENCIL_ZFAIL, value,
+            recomp_d3d_stencil_op_from_nv(value, &state->stencil_zfail));
     }
     if (simple_or_absent(model, D3D_METHOD_STENCIL_PASS, &value)) {
-        recomp_d3d_stencil_op_from_nv(value, &state->stencil_pass);
+        report_unmapped(D3D_METHOD_STENCIL_PASS, value,
+            recomp_d3d_stencil_op_from_nv(value, &state->stencil_pass));
     }
 }
 
@@ -431,15 +456,15 @@ bool recomp_d3d_blend_op_from_nv(uint32_t value, RecompD3dBlendOp *op)
         *op = RECOMP_D3D_BLEND_OP_SUBTRACT;
         return true;
     case 0x800bu:
-    /* D3DBLENDOP_REVSUBTRACTSIGNED. Great Opera's floor shadow layer
-       (0x1f3be3) draws a dark map, about 0.1 grey, at ONE/ONE with it; the
-       Xbox floor darkens there, so dst - src matches and a 0.5 bias would
-       brighten the floor instead. Signed intermediate range is not modelled. */
+        *op = RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT;
+        return true;
     case 0xf005u:
+        /* REVSUBTRACTSIGNED as dst - src; the signed range is not modelled
+           (docs/bring-up.md). */
         *op = RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT;
         return true;
     default:
-        /* D3DBLENDOP_ADDSIGNED (0xf006) has no observed caller. */
+        /* ADDSIGNED (0xf006) has no observed caller. */
         return false;
     }
 }
@@ -477,16 +502,19 @@ void recomp_d3d_blend_state(
             ((value & 0x01000000u) != 0u ? 8u : 0u));
     }
     if (simple_or_absent(model, D3D_METHOD_BLEND_SRC, &value)) {
-        recomp_d3d_blend_factor_from_nv(value, &state->src_factor);
+        report_unmapped(D3D_METHOD_BLEND_SRC, value,
+            recomp_d3d_blend_factor_from_nv(value, &state->src_factor));
     }
     if (simple_or_absent(model, D3D_METHOD_BLEND_DST, &value)) {
-        recomp_d3d_blend_factor_from_nv(value, &state->dst_factor);
+        report_unmapped(D3D_METHOD_BLEND_DST, value,
+            recomp_d3d_blend_factor_from_nv(value, &state->dst_factor));
     }
     if (simple_or_absent(model, D3D_METHOD_BLEND_COLOR, &value)) {
         state->constant_color = value;
     }
     if (simple_or_absent(model, D3D_METHOD_BLEND_EQUATION, &value)) {
-        recomp_d3d_blend_op_from_nv(value, &state->op);
+        report_unmapped(D3D_METHOD_BLEND_EQUATION, value,
+            recomp_d3d_blend_op_from_nv(value, &state->op));
     }
 }
 
