@@ -945,10 +945,14 @@ HRESULT createGraphics(RecompD3dPresenter *presenter)
         D3D11_TEXTURE2D_DESC desc{};
         desc.Width = mainWidth(presenter);
         desc.Height = mainHeight(presenter);
-        desc.MipLevels = desc.ArraySize = 1u;
+        /* The window blit picks a mip by its own scale, so a CRT mode below
+           the render resolution averages the pixels it drops. */
+        desc.MipLevels = 0u;
+        desc.ArraySize = 1u;
         desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         desc.SampleDesc.Count = 1u;
         desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
         ID3D11Texture2D *output = nullptr;
         result = presenter->device->CreateTexture2D(&desc, nullptr, &output);
         if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(
@@ -963,7 +967,7 @@ HRESULT createGraphics(RecompD3dPresenter *presenter)
             " uv = float2((id << 1) & 2, id & 2);\n"
             " return float4(uv * float2(2,-2) + float2(-1,1), 0, 1); }\n"
             "float4 ps(float4 p : SV_Position, float2 uv : TEXCOORD0) : SV_Target {\n"
-            " return pixels.SampleLevel(bilinear, uv, 0); }\n";
+            " return pixels.Sample(bilinear, uv); }\n";
         ID3DBlob *vertex = nullptr, *pixel = nullptr;
         if (SUCCEEDED(result)) result = D3DCompile(shader, sizeof shader - 1u, nullptr,
             nullptr, nullptr, "vs", "vs_4_0", 0u, 0u, &vertex, nullptr);
@@ -3672,18 +3676,18 @@ RecompD3dPresenterError submitPresent(
     const float shown = present.aspect > 0.0f ? present.aspect : window_aspect;
     const bool drawn = chain.BufferDesc.Width != mainWidth(presenter) ||
         chain.BufferDesc.Height != mainHeight(presenter) || std::fabs(shown - window_aspect) > 0.001f;
+    const D3D11_VIEWPORT viewport = drawn
+        ? fitViewport(shown, chain.BufferDesc.Width, chain.BufferDesc.Height)
+        : D3D11_VIEWPORT{};
     if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     if (drawn) {
         auto *context = presenter->context;
-        D3D11_TEXTURE2D_DESC window{};
-        ID3D11Texture2D *back_buffer = nullptr;
-        presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer));
-        if (back_buffer == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        back_buffer->GetDesc(&window);
-        releaseCom(back_buffer);
-        const D3D11_VIEWPORT viewport = fitViewport(shown, window.Width, window.Height);
+        /* The implicit-LOD window sample only leaves mip 0 when the fitted
+           picture is smaller than the render target. */
+        if (viewport.Width < mainWidth(presenter) || viewport.Height < mainHeight(presenter))
+            context->GenerateMips(presenter->vrr_source);
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         context->ClearState();
         context->ClearRenderTargetView(presenter->present_target_view, black);
