@@ -66,17 +66,20 @@ keeps running.
 - **Free camera.** Take the game's camera in fights and cutscenes and fly it
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
-- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the renderer, VRR, an
-  optional intro-movie skip, 5.1 surround, the unlock setting, random CPU costumes and the free camera, and remembers them. `DOA2U.exe` plays
-  with the same choices. On release ZIPs after 0.1.10, the settings launcher on
-  each platform can check GitHub for a newer release and install it from its
-  **UPDATE** page; **Check At Start** turns the start-up check off.
+- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the
+  renderer, VRR, an optional intro-movie skip, 5.1 surround, the unlock
+  setting, random CPU costumes, the free camera and the staff-roll dedication
+  card, and remembers them. `DOA2U.exe` plays with the same choices. On release
+  ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
+  for a newer release and install it from its **UPDATE** page; **Check At
+  Start** turns the start-up check off.
 - **PC Settings in the game.** The game's own **Options** menu has a
   **PC SETTINGS** row after **Video**, drawn and translated like the game's
-  rows, with the launcher's settings. **Unlocks**, **CPU Costumes** and
-  **Free Camera** change at once, and with the Vulkan renderer so do
-  **Resolution**, **MSAA** and **SMAA**; the others say they apply the next
-  time the game starts. Leaving the page saves them for the launcher too.
+  rows, with the launcher's settings. **Unlocks**, **CPU Costumes**,
+  **Free Camera** and **Dedication** change at once, and with the Vulkan
+  renderer so do **Resolution**, **MSAA** and **SMAA**; the others say they
+  apply the next time the game starts. Leaving the page saves them for the
+  launcher too.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
 - **Sharper menus.** The Vulkan renderer redraws the game's 2D art (menus,
@@ -278,6 +281,8 @@ window. The build fetches pinned, hash-verified copies of SDL3,
 
 At first launch `run_game.py` builds an image from
 `private/dedication-photo.jpg` (shipped in the release ZIP) with Pillow.
+Choose **Dedication: Hide** on the launcher's **GAMEPLAY** page or the game's
+**PC SETTINGS** page, or pass `--no-dedication-card` to `run_game.py`, to skip it.
 `--no-unlock-all`, or **Unlocks: Earn** on the launcher's **GAMEPLAY** page, turns
 off the automatic character and costume unlock, so unlocks come from play.
 With the unlock on, saves and the game's awards still keep to what each
