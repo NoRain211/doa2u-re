@@ -96,19 +96,40 @@ def newer(current):
     return release if number(release["tag_name"]) > number(current) else None
 
 
-def install(asset):
+def manifest_of(assets, asset):
+    """The release's <zip>.sha256.json beside asset: each entry's SHA-256, which package_test.py writes."""
+    return next((other for other in assets if other["name"] == asset["name"] + ".sha256.json"), None)
+
+
+def ranged_bytes(files):
+    """Roughly what Ranges downloads for these entries: a read-ahead block for each one the previous block missed."""
+    total = covered = 0
+    for entry, _, _ in sorted(files, key=lambda file: file[0].header_offset):
+        end = entry.header_offset + 30 + len(entry.filename.encode()) + len(entry.extra) + entry.compress_size
+        if entry.header_offset >= covered or end > covered:
+            total += max(Ranges.BLOCK, end - entry.header_offset)
+            covered = max(end, entry.header_offset + Ranges.BLOCK)
+    return total
+
+
+def install(asset, manifest=None):
+    """Fetch only changed entries when the release lists their SHA-256s under GitHub's digest; else the whole ZIP."""
     url = asset["browser_download_url"]
-    try:
-        with zipfile.ZipFile(Ranges(url, asset["size"])) as archive:
-            files = pending(archive)
-            # Past half the ZIP (a new compiler, say), one whole download beats many ranges.
-            # Launchers read stdout as the result, so this prints nothing.
-            if sum(entry.compress_size for entry, _, _ in files) < asset["size"] // 2:
-                files = fetched(archive, files)  # zipfile checks each entry's CRC-32 as it reads
-            else:
-                files = None
-    except (OSError, zipfile.BadZipFile):
-        files = None  # no partial downloads or a bad range: fetch the whole ZIP and check GitHub's digest
+    files = None
+    if manifest and manifest.get("digest"):
+        with fetch(manifest["browser_download_url"]) as response:
+            listed = response.read()
+        if manifest["digest"] != "sha256:" + hashlib.sha256(listed).hexdigest():
+            raise ValueError("The update's file list does not match GitHub's checksum")
+        hashes = json.loads(listed)
+        try:
+            with zipfile.ZipFile(Ranges(url, asset["size"])) as archive:
+                files = pending(archive)
+                # Past half the ZIP (a new compiler, say), one whole download beats many ranges.
+                # Launchers read stdout as the result, so this prints nothing.
+                files = fetched(archive, files, hashes) if ranged_bytes(files) < asset["size"] // 2 else None
+        except (OSError, zipfile.BadZipFile):
+            files = None  # no partial downloads or a bad range: fetch the whole ZIP and check GitHub's digest
     if files is not None:
         write(files)
         return
@@ -156,10 +177,15 @@ def pending(archive):
     return files
 
 
-def fetched(archive, files):
-    """(target, data, mode) for each pending entry, with VERSION last."""
-    files = [(target, archive.read(entry), mode) for entry, target, mode in files]
-    return sorted(files, key=lambda file: file[0] == ROOT / "VERSION")
+def fetched(archive, files, hashes=None):
+    """(target, data, mode) for each pending entry, with VERSION last; hashes, when given, must list each entry's SHA-256."""
+    result = []
+    for entry, target, mode in files:
+        data = archive.read(entry)
+        if hashes is not None and hashlib.sha256(data).hexdigest() != hashes.get(entry.filename):
+            raise ValueError(f"{entry.filename} does not match the update's file list")
+        result.append((target, data, mode))
+    return sorted(result, key=lambda file: file[0] == ROOT / "VERSION")
 
 
 def write(files):
@@ -198,7 +224,7 @@ def main(argv):
         if release is not None:
             asset = pick_asset(release["assets"])
             if argv[0] == "install":
-                install(asset)
+                install(asset, manifest_of(release["assets"], asset))
             print(release["tag_name"].lstrip("v"))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         print(f"Update failed: {error}")

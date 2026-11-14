@@ -2,7 +2,9 @@
 """Package a release ZIP (e.g. 0.1-Alpha): source, the pinned lifter and setup tools, no game data."""
 # Adapted from committed DOA3 tools/package_test.py at 5747204.
 import argparse
+import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -198,7 +200,13 @@ def main():
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release
     partial.rename(out)
+    # Upload beside the ZIP: tools/update.py checks it against GitHub's digest, then each entry it fetches against it.
+    manifest = out.with_name(out.name + ".sha256.json")
+    with zipfile.ZipFile(out) as package:
+        manifest.write_text(json.dumps({info.filename: hashlib.sha256(package.read(info)).hexdigest()
+                                        for info in package.infolist() if not info.is_dir()}, indent=0), encoding="utf-8")
     print(out)
+    print(manifest)
 
 
 if __name__ == "__main__":
