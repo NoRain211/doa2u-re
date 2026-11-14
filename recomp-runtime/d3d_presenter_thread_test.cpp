@@ -2148,6 +2148,52 @@ static bool testVolume(bool camera_position = false)
     return passed;
 }
 
+// PC Settings' quality applies after a present: the main target is rebuilt at
+// the new scale and keeps the picture drawn before it. The request is global,
+// so this runs last and leaves 1x without MSAA behind.
+static bool testLiveQuality()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "qty", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", "3");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create live quality", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xffff0000u;
+        RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        present.data.present = {5,1};
+        passed &= expect("red frame", d3d_backend_submit(presenter, &clear));
+        passed &= expect("first present", d3d_backend_submit(presenter, &present));
+        d3d_backend_set_quality(2.0f, 1u, false);
+        passed &= expect("present then rebuild", d3d_backend_submit(presenter, &present));
+        passed &= expect("carried present", d3d_backend_submit(presenter, &present));
+    }
+    d3d_backend_destroy(&presenter);
+    d3d_backend_set_quality(1.0f, 1u, false);
+    if (passed) {
+        FILE *file = std::fopen(path, "rb");
+        int32_t size[2]{};
+        unsigned char bgr[3]{};
+        if (file) {
+            std::fseek(file, 18, SEEK_SET);
+            passed &= std::fread(size, sizeof size[0], 2, file) == 2;
+            std::fseek(file, 54 + 240 * 640 * 3 + 320 * 3, SEEK_SET);
+            passed &= std::fread(bgr, 1, 3, file) == 3;
+            std::fclose(file);
+        } else passed = false;
+        passed &= size[0] == 640 && size[1] == 480 && bgr[2] > 250 && bgr[1] < 4 && bgr[0] < 4;
+        if (!passed) std::fprintf(stderr, "FAIL live quality %dx%d BGR=%u,%u,%u\n",
+            size[0], size[1], bgr[0], bgr[1], bgr[2]);
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS live quality rebuilds the main target at 2x and keeps its picture");
+    return passed;
+}
+
 static bool testFrameBufferBlend()
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -3056,7 +3102,8 @@ int main()
         !testStageBump() ||
         !testStageWater(false) || !testStageWater(true) ||
         !testVisibility() ||
-        !testClose(false) || !testClose(true) || !testPresentDownscale()) return 1;
+        !testClose(false) || !testClose(true) || !testPresentDownscale() ||
+        !testLiveQuality()) return 1;
     std::puts("PASS presenter render thread");
     return 0;
 }
