@@ -882,6 +882,144 @@ IDXGIAdapter1 *highPerformanceAdapter()
     return adapter;
 }
 
+/* The largest sample count up to requested that both the color and the
+   depth format support. */
+UINT supportedSamples(RecompD3dPresenter *presenter, UINT requested)
+{
+    static bool reported;
+    UINT samples = 1u;
+    for (UINT count = 2u; count <= 32u; count *= 2u) {
+        UINT quality = 0u, depth_quality = 0u;
+        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, count, &quality);
+        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, count, &depth_quality);
+        if (!reported) {
+            std::fprintf(stderr, "recomp d3d presenter: msaa %ux quality color=%u depth=%u\n",
+                count, quality, depth_quality);
+        }
+        if (count <= requested && quality != 0u && depth_quality != 0u) samples = count;
+    }
+    reported = true;
+    return samples;
+}
+
+/* A color target of width x height with samples, its render view and a
+   single-sample view to sample (the same texture when samples is 1). A
+   single-sample target can carry a mip chain to generate; the render view
+   writes mip 0. */
+HRESULT createColorTarget(RecompD3dPresenter *presenter, UINT width, UINT height, UINT samples,
+    ID3D11RenderTargetView *&render, ID3D11ShaderResourceView *&sample, bool mips = false)
+{
+    render = nullptr;
+    sample = nullptr;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = mips && samples == 1u ? 0u : 1u;
+    desc.ArraySize = 1u;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = samples;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET | (samples == 1u ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u);
+    desc.MiscFlags = desc.MipLevels == 0u ? static_cast<UINT>(D3D11_RESOURCE_MISC_GENERATE_MIPS) : 0u;
+    ID3D11Texture2D *texture = nullptr;
+    HRESULT result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
+    if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(texture, nullptr, &render);
+    if (SUCCEEDED(result) && samples > 1u) {
+        releaseCom(texture);
+        desc.SampleDesc.Count = 1u;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
+    }
+    if (SUCCEEDED(result)) result = presenter->device->CreateShaderResourceView(texture, nullptr, &sample);
+    releaseCom(texture);
+    if (FAILED(result)) {
+        releaseCom(render);
+        releaseCom(sample);
+    }
+    return result;
+}
+
+/* The main target at the current scale and MSAA, its single-sample output and
+   its depth. They replace the presenter's only once all of them exist. The
+   window blit picks the output's mip by its own scale, so a CRT mode below the
+   render resolution averages the pixels it drops. */
+HRESULT createMainTargets(RecompD3dPresenter *presenter)
+{
+    const UINT width = mainWidth(presenter), height = mainHeight(presenter);
+    ID3D11RenderTargetView *main = nullptr, *output = nullptr;
+    ID3D11ShaderResourceView *main_sample = nullptr, *output_sample = nullptr;
+    ID3D11Texture2D *depth_texture = nullptr;
+    ID3D11DepthStencilView *depth_view = nullptr;
+    HRESULT result = createColorTarget(presenter, width, height, presenter->msaa, main, main_sample);
+    releaseCom(main_sample); // the main target is sampled through its copies
+    if (SUCCEEDED(result)) result = createColorTarget(presenter, width, height, 1u, output, output_sample, true);
+    if (SUCCEEDED(result)) {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = desc.ArraySize = 1u;
+        desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        desc.SampleDesc.Count = presenter->msaa;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        result = presenter->device->CreateTexture2D(&desc, nullptr, &depth_texture);
+        if (SUCCEEDED(result)) result = presenter->device->CreateDepthStencilView(depth_texture, nullptr, &depth_view);
+    }
+    if (FAILED(result)) {
+        releaseCom(main);
+        releaseCom(output);
+        releaseCom(output_sample);
+        releaseCom(depth_view);
+        releaseCom(depth_texture);
+        return result;
+    }
+    releaseCom(presenter->render_target_view);
+    releaseCom(presenter->vrr_target_view);
+    releaseCom(presenter->vrr_source);
+    releaseCom(presenter->depth_view);
+    releaseCom(presenter->depth_texture);
+    presenter->render_target_view = main;
+    presenter->vrr_target_view = output;
+    presenter->vrr_source = output_sample;
+    presenter->depth_texture = depth_texture;
+    presenter->depth_view = depth_view;
+    return S_OK;
+}
+
+D3D11_VIEWPORT fullViewport(UINT width, UINT height)
+{
+    return {0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f};
+}
+
+/* Binds the main target and its depth over all of it. */
+void bindMainTarget(RecompD3dPresenter *presenter)
+{
+    const D3D11_VIEWPORT viewport = fullViewport(mainWidth(presenter), mainHeight(presenter));
+    presenter->context->OMSetRenderTargets(1u, &presenter->render_target_view, presenter->depth_view);
+    presenter->context->RSSetViewports(1u, &viewport);
+    presenter->target_scale_x = viewport.Width / presenter->config.width;
+    presenter->target_scale_y = viewport.Height / presenter->config.height;
+    presenter->target_samples = presenter->msaa;
+}
+
+/* Draws source, filtered, over viewport of target with the output's
+   full-screen shader. */
+void blitPicture(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source,
+    ID3D11RenderTargetView *target, const D3D11_VIEWPORT &viewport)
+{
+    auto *context = presenter->context;
+    context->ClearState();
+    context->RSSetViewports(1u, &viewport);
+    context->OMSetRenderTargets(1u, &target, nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(presenter->vrr_vs, nullptr, 0u);
+    context->PSSetShader(presenter->vrr_ps, nullptr, 0u);
+    context->PSSetSamplers(0u, 1u, &presenter->vrr_sampler);
+    context->PSSetShaderResources(0u, 1u, &source);
+    context->Draw(3u, 0u);
+    context->ClearState();
+}
+
 HRESULT createGraphics(RecompD3dPresenter *presenter)
 {
     IDXGIAdapter1 *adapter = highPerformanceAdapter();
@@ -922,65 +1060,19 @@ HRESULT createGraphics(RecompD3dPresenter *presenter)
         0u,
         __uuidof(ID3D11Texture2D),
         reinterpret_cast<void **>(&back_buffer));
-    const UINT requested_msaa = presenter->msaa;
-    presenter->msaa = 1u;
-    for (UINT count = 2u; count <= 32u; count *= 2u) {
-        UINT quality = 0u;
-        presenter->device->CheckMultisampleQualityLevels(
-            DXGI_FORMAT_B8G8R8A8_UNORM, count, &quality);
-        UINT depth_quality = 0u;
-        presenter->device->CheckMultisampleQualityLevels(
-            DXGI_FORMAT_D24_UNORM_S8_UINT, count, &depth_quality);
-        std::fprintf(stderr, "recomp d3d presenter: msaa %ux quality color=%u depth=%u\n",
-            count, quality, depth_quality);
-        if (count <= requested_msaa && quality != 0u && depth_quality != 0u) {
-            presenter->msaa = count;
-        }
-    }
+    presenter->msaa = supportedSamples(presenter, presenter->msaa);
     std::fprintf(stderr, "recomp d3d presenter: target=%ux%u msaa=%u\n",
         mainWidth(presenter), mainHeight(presenter), presenter->msaa);
     if (SUCCEEDED(result)) {
         result = presenter->device->CreateRenderTargetView(
             back_buffer, nullptr, &presenter->present_target_view);
     }
+    releaseCom(back_buffer);
     /* Keep guest pixels uncorrected: gamma is display state and must not feed
-       back into later draws or compound when a frame is presented twice. */
+       back into later draws or compound when a frame is presented twice. The
+       output is also the source of a picture whose aspect differs from the window's. */
+    if (SUCCEEDED(result)) result = createMainTargets(presenter);
     if (SUCCEEDED(result)) {
-        D3D11_TEXTURE2D_DESC desc{};
-        back_buffer->GetDesc(&desc);
-        desc.Width = mainWidth(presenter);
-        desc.Height = mainHeight(presenter);
-        desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-        desc.MiscFlags = 0u;
-        desc.SampleDesc.Count = presenter->msaa;
-        ID3D11Texture2D *guest_buffer = nullptr;
-        result = presenter->device->CreateTexture2D(&desc, nullptr, &guest_buffer);
-        if (SUCCEEDED(result)) {
-            result = presenter->device->CreateRenderTargetView(
-                guest_buffer, nullptr, &presenter->render_target_view);
-        }
-        releaseCom(guest_buffer);
-    }
-    // Also the source of a picture whose aspect differs from the window's.
-    if (SUCCEEDED(result)) {
-        D3D11_TEXTURE2D_DESC desc{};
-        desc.Width = mainWidth(presenter);
-        desc.Height = mainHeight(presenter);
-        /* The window blit picks a mip by its own scale, so a CRT mode below
-           the render resolution averages the pixels it drops. */
-        desc.MipLevels = 0u;
-        desc.ArraySize = 1u;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1u;
-        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
-        ID3D11Texture2D *output = nullptr;
-        result = presenter->device->CreateTexture2D(&desc, nullptr, &output);
-        if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(
-            output, nullptr, &presenter->vrr_target_view);
-        if (SUCCEEDED(result)) result = presenter->device->CreateShaderResourceView(
-            output, nullptr, &presenter->vrr_source);
-        releaseCom(output);
         static const char shader[] =
             "Texture2D pixels : register(t0);\n"
             "SamplerState bilinear : register(s0);\n"
@@ -1007,45 +1099,10 @@ HRESULT createGraphics(RecompD3dPresenter *presenter)
         if (SUCCEEDED(result)) result = presenter->device->CreateSamplerState(
             &sampler, &presenter->vrr_sampler);
     }
-    releaseCom(back_buffer);
     if (FAILED(result)) {
         return result;
     }
-
-    D3D11_TEXTURE2D_DESC depth_desc{};
-    depth_desc.Width = mainWidth(presenter);
-    depth_desc.Height = mainHeight(presenter);
-    depth_desc.MipLevels = 1u;
-    depth_desc.ArraySize = 1u;
-    depth_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depth_desc.SampleDesc.Count = presenter->msaa;
-    depth_desc.Usage = D3D11_USAGE_DEFAULT;
-    depth_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    result = presenter->device->CreateTexture2D(
-        &depth_desc, nullptr, &presenter->depth_texture);
-    if (FAILED(result)) {
-        return result;
-    }
-    result = presenter->device->CreateDepthStencilView(
-        presenter->depth_texture, nullptr, &presenter->depth_view);
-    if (FAILED(result)) {
-        return result;
-    }
-
-    presenter->context->OMSetRenderTargets(
-        1u, &presenter->render_target_view, presenter->depth_view);
-    const D3D11_VIEWPORT viewport = {
-        0.0f,
-        0.0f,
-        static_cast<float>(mainWidth(presenter)),
-        static_cast<float>(mainHeight(presenter)),
-        0.0f,
-        1.0f,
-    };
-    presenter->context->RSSetViewports(1u, &viewport);
-    presenter->target_scale_x = viewport.Width / presenter->config.width;
-    presenter->target_scale_y = viewport.Height / presenter->config.height;
-    presenter->target_samples = presenter->msaa;
+    bindMainTarget(presenter);
     return S_OK;
 }
 
@@ -1214,40 +1271,10 @@ RecompD3dPresenterError bindTarget(
                 std::fprintf(stderr, "recomp d3d presenter: target memory budget exhausted\n");
                 return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
             }
-            D3D11_TEXTURE2D_DESC texture_desc{};
-            texture_desc.Width = host_width;
-            texture_desc.Height = host_height;
-            texture_desc.MipLevels = 1u;
-            texture_desc.ArraySize = 1u;
-            texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            texture_desc.SampleDesc.Count = samples;
-            texture_desc.Usage = D3D11_USAGE_DEFAULT;
-            texture_desc.BindFlags =
-                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-
-            ID3D11Texture2D *texture = nullptr;
             RenderTargetEntry created{};
-            HRESULT result = presenter->device->CreateTexture2D(
-                &texture_desc, nullptr, &texture);
-            if (SUCCEEDED(result)) {
-                result = presenter->device->CreateRenderTargetView(
-                    texture, nullptr, &created.render_view);
-            }
-            if (SUCCEEDED(result) && samples > 1u) {
-                releaseCom(texture);
-                texture_desc.SampleDesc.Count = 1u;
-                texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                result = presenter->device->CreateTexture2D(
-                    &texture_desc, nullptr, &texture);
-            }
-            if (SUCCEEDED(result)) {
-                result = presenter->device->CreateShaderResourceView(
-                    texture, nullptr, &created.sample_view);
-            }
-            releaseCom(texture);
+            const HRESULT result = createColorTarget(presenter, host_width, host_height, samples,
+                created.render_view, created.sample_view);
             if (FAILED(result)) {
-                releaseCom(created.sample_view);
-                releaseCom(created.render_view);
                 std::fprintf(stderr,
                     "recomp d3d presenter: render target create failed "
                     "data=0x%08X fmt=0x%02X size=%ux%u hr=0x%08lX\n",
@@ -3667,74 +3694,6 @@ void saveScreenshot(RecompD3dPresenter *presenter, ID3D11Texture2D *source)
     releaseCom(back_buffer);
 }
 
-/* The largest sample count up to requested that both the color and the
-   depth format support, as createGraphics chooses it. */
-UINT supportedSamples(RecompD3dPresenter *presenter, UINT requested)
-{
-    UINT samples = 1u;
-    for (UINT count = 2u; count <= 32u && count <= requested; count *= 2u) {
-        UINT quality = 0u, depth_quality = 0u;
-        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, count, &quality);
-        presenter->device->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, count, &depth_quality);
-        if (quality != 0u && depth_quality != 0u) samples = count;
-    }
-    return samples;
-}
-
-/* A color target of width x height with samples, its render view and a
-   single-sample view to sample (the same texture when samples is 1). */
-bool createColorTarget(RecompD3dPresenter *presenter, UINT width, UINT height, UINT samples,
-    ID3D11RenderTargetView *&render, ID3D11ShaderResourceView *&sample)
-{
-    render = nullptr;
-    sample = nullptr;
-    D3D11_TEXTURE2D_DESC desc{};
-    desc.Width = width;
-    desc.Height = height;
-    desc.MipLevels = desc.ArraySize = 1u;
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    desc.SampleDesc.Count = samples;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_RENDER_TARGET | (samples == 1u ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u);
-    ID3D11Texture2D *texture = nullptr;
-    HRESULT result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
-    if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(texture, nullptr, &render);
-    if (SUCCEEDED(result) && samples > 1u) {
-        releaseCom(texture);
-        desc.SampleDesc.Count = 1u;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        result = presenter->device->CreateTexture2D(&desc, nullptr, &texture);
-    }
-    if (SUCCEEDED(result)) result = presenter->device->CreateShaderResourceView(texture, nullptr, &sample);
-    releaseCom(texture);
-    if (FAILED(result)) {
-        releaseCom(render);
-        releaseCom(sample);
-        return false;
-    }
-    return true;
-}
-
-/* Draws source over all of target (width x height), filtered, with the VRR
-   output's full-screen shader. */
-void blitPicture(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source,
-    ID3D11RenderTargetView *target, UINT width, UINT height)
-{
-    auto *context = presenter->context;
-    const D3D11_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height),
-        0.0f, 1.0f};
-    context->ClearState();
-    context->RSSetViewports(1u, &viewport);
-    context->OMSetRenderTargets(1u, &target, nullptr);
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(presenter->vrr_vs, nullptr, 0u);
-    context->PSSetShader(presenter->vrr_ps, nullptr, 0u);
-    context->PSSetSamplers(0u, 1u, &presenter->vrr_sampler);
-    context->PSSetShaderResources(0u, 1u, &source);
-    context->Draw(3u, 0u);
-    context->ClearState();
-}
-
 /* Applies PC Settings' quality between frames, as the Vulkan renderer does.
    SMAA only switches its pass. A new scale or MSAA rebuilds the main target,
    its depth and output, and every offscreen target sized by them, carrying
@@ -3764,67 +3723,34 @@ void applyQuality(RecompD3dPresenter *presenter)
 
     auto *context = presenter->context;
     context->ClearState();
-    // The current picture, single-sampled, in the old output texture.
+    // The current picture, single-sampled, in the old output texture, kept until drawn into the new target.
+    ID3D11ShaderResourceView *picture = presenter->vrr_source;
+    picture->AddRef();
     {
-        ID3D11Resource *picture = nullptr, *output = nullptr;
-        presenter->render_target_view->GetResource(&picture);
-        presenter->vrr_source->GetResource(&output);
-        if (presenter->msaa > 1u) context->ResolveSubresource(output, 0u, picture, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
-        else context->CopyResource(output, picture);
+        ID3D11Resource *rendered = nullptr, *output = nullptr;
+        presenter->render_target_view->GetResource(&rendered);
+        picture->GetResource(&output);
+        if (presenter->msaa > 1u) context->ResolveSubresource(output, 0u, rendered, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
+        else context->CopySubresourceRegion(output, 0u, 0u, 0u, 0u, rendered, 0u, nullptr);
         releaseCom(output);
-        releaseCom(picture);
+        releaseCom(rendered);
     }
+    context->GenerateMips(picture); // a smaller new target samples the averaged levels
     const float old_scale = presenter->scale;
     const UINT old_msaa = presenter->msaa;
     presenter->scale = scale;
     presenter->msaa = msaa;
     const UINT width = mainWidth(presenter), height = mainHeight(presenter);
-
-    // The main target, its output and depth.
-    ID3D11RenderTargetView *main_render = nullptr, *output_render = nullptr;
-    ID3D11ShaderResourceView *main_sample = nullptr, *output_sample = nullptr;
-    ID3D11Texture2D *depth_texture = nullptr;
-    ID3D11DepthStencilView *depth_view = nullptr;
-    bool created = createColorTarget(presenter, width, height, msaa, main_render, main_sample) &&
-        createColorTarget(presenter, width, height, 1u, output_render, output_sample);
-    if (created) {
-        D3D11_TEXTURE2D_DESC depth_desc{};
-        depth_desc.Width = width;
-        depth_desc.Height = height;
-        depth_desc.MipLevels = depth_desc.ArraySize = 1u;
-        depth_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        depth_desc.SampleDesc.Count = msaa;
-        depth_desc.Usage = D3D11_USAGE_DEFAULT;
-        depth_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        created = SUCCEEDED(presenter->device->CreateTexture2D(&depth_desc, nullptr, &depth_texture)) &&
-            SUCCEEDED(presenter->device->CreateDepthStencilView(depth_texture, nullptr, &depth_view));
-    }
-    releaseCom(main_sample); // the main target is sampled through its copies
-    if (!created) {
+    if (FAILED(createMainTargets(presenter))) {
         std::fprintf(stderr, "recomp d3d presenter: quality %ux%u msaa=%u unavailable\n", width, height, msaa);
-        releaseCom(main_render);
-        releaseCom(output_render);
-        releaseCom(output_sample);
-        releaseCom(depth_view);
-        releaseCom(depth_texture);
         presenter->scale = old_scale;
         presenter->msaa = old_msaa;
         presenter->smaa = old_smaa;
         presenter->quality_retry_generation = want.generation;
         presenter->quality_retry_at = now + std::chrono::seconds(1);
     } else {
-        blitPicture(presenter, presenter->vrr_source, main_render, width, height);
-        context->ClearDepthStencilView(depth_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0u);
-        releaseCom(presenter->render_target_view);
-        releaseCom(presenter->vrr_target_view);
-        releaseCom(presenter->vrr_source);
-        releaseCom(presenter->depth_view);
-        releaseCom(presenter->depth_texture);
-        presenter->render_target_view = main_render;
-        presenter->vrr_target_view = output_render;
-        presenter->vrr_source = output_sample;
-        presenter->depth_texture = depth_texture;
-        presenter->depth_view = depth_view;
+        blitPicture(presenter, picture, presenter->render_target_view, fullViewport(width, height));
+        context->ClearDepthStencilView(presenter->depth_view, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0u);
 
         // Main-sized and scaled offscreen targets, as bindTarget sizes them.
         for (RenderTargetEntry &entry : presenter->render_targets) {
@@ -3844,9 +3770,9 @@ void applyQuality(RecompD3dPresenter *presenter)
             const UINT samples = host_main ? msaa : 1u;
             ID3D11RenderTargetView *render = nullptr;
             ID3D11ShaderResourceView *sample = nullptr;
-            if (!createColorTarget(presenter, host_width, host_height, samples, render, sample))
+            if (FAILED(createColorTarget(presenter, host_width, host_height, samples, render, sample)))
                 continue; // keeps its old size
-            blitPicture(presenter, entry.sample_view, render, host_width, host_height);
+            blitPicture(presenter, entry.sample_view, render, fullViewport(host_width, host_height));
             releaseCom(entry.render_view);
             releaseCom(entry.sample_view);
             entry.render_view = render;
@@ -3856,16 +3782,12 @@ void applyQuality(RecompD3dPresenter *presenter)
             entry.host_width = host_width;
             entry.host_height = host_height;
         }
-        // Depths sized by the scale or samples are made again when bound.
-        for (auto it = presenter->depth_targets.begin(); it != presenter->depth_targets.end();) {
-            if (it->host_main || it->host_width != it->desc.width) {
-                releaseCom(it->view);
-                presenter->target_bytes -= it->bytes;
-                it = presenter->depth_targets.erase(it);
-            } else {
-                ++it;
-            }
+        // Every custom depth pairs with a main-sized or scaled target; each is made again when bound.
+        for (DepthTargetEntry &entry : presenter->depth_targets) {
+            releaseCom(entry.view);
+            presenter->target_bytes -= entry.bytes;
         }
+        presenter->depth_targets.clear();
         releaseCom(presenter->back_buffer_sample);
         releaseCom(presenter->back_buffer_copy);
         const bool had_previous = presenter->previous_frame != nullptr;
@@ -3885,14 +3807,9 @@ void applyQuality(RecompD3dPresenter *presenter)
             toggleFullscreen(presenter);
         presenter->quality_applied = want.generation;
     }
+    releaseCom(picture);
     context->ClearState();
-    context->OMSetRenderTargets(1u, &presenter->render_target_view, presenter->depth_view);
-    const D3D11_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(mainWidth(presenter)),
-        static_cast<float>(mainHeight(presenter)), 0.0f, 1.0f};
-    context->RSSetViewports(1u, &viewport);
-    presenter->target_scale_x = viewport.Width / presenter->config.width;
-    presenter->target_scale_y = viewport.Height / presenter->config.height;
-    presenter->target_samples = presenter->msaa;
+    bindMainTarget(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
         mainWidth(presenter), mainHeight(presenter), presenter->msaa, presenter->smaa ? 1 : 0);
 }
@@ -3965,23 +3882,14 @@ RecompD3dPresenterError submitPresent(
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     if (drawn) {
-        auto *context = presenter->context;
         /* The implicit-LOD window sample only leaves mip 0 when the fitted
            picture is smaller than the render target. */
         if (viewport.Width < mainWidth(presenter) || viewport.Height < mainHeight(presenter))
-            context->GenerateMips(presenter->vrr_source);
+            presenter->context->GenerateMips(presenter->vrr_source);
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        context->ClearState();
-        context->ClearRenderTargetView(presenter->present_target_view, black);
-        context->RSSetViewports(1u, &viewport);
-        context->OMSetRenderTargets(1u, &presenter->present_target_view, nullptr);
-        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context->VSSetShader(presenter->vrr_vs, nullptr, 0u);
-        context->PSSetShader(presenter->vrr_ps, nullptr, 0u);
-        context->PSSetSamplers(0u, 1u, &presenter->vrr_sampler);
-        context->PSSetShaderResources(0u, 1u, &presenter->vrr_source);
-        context->Draw(3u, 0u);
-        context->ClearState();
+        presenter->context->ClearState();
+        presenter->context->ClearRenderTargetView(presenter->present_target_view, black);
+        blitPicture(presenter, presenter->vrr_source, presenter->present_target_view, viewport);
     }
     // Capture the rendered buffer before flip presentation releases it, at the
     // main target's size: a frame drawn into the window is dumped before fitting.
