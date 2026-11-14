@@ -139,17 +139,24 @@ int main()
     CHECK(wav != nullptr);
     std::fseek(wav, 44, SEEK_SET);
     // Past the resampler's ringing on the step up from silence, the level
-    // must glide from 0.5 to 0.25; the unramped gain jumped by 0.25.
+    // must glide from 0.5 to -6 dB (the unramped gain jumped there), and
+    // within one 10 ms quantum (480 frames) however the chunks split it.
+    const float quieter = 0.5f * std::pow(10.0f, -600.0f / 2000.0f);
     float frame[2], previous = 0.0f, largest = 0.0f;
-    int sounding = 0;
+    int sounding = 0, gliding = 0, glide_frames = -1;
     while (std::fread(frame, sizeof frame, 1, wav) == 1) {
         sounding = frame[0] > 0.1f ? sounding + 1 : 0;
-        if (sounding > 64) largest = std::max(largest, std::fabs(frame[0] - previous));
+        if (sounding > 64) {
+            largest = std::max(largest, std::fabs(frame[0] - previous));
+            if (frame[0] < 0.495f && glide_frames < 0) ++gliding;
+            if (gliding > 0 && frame[0] < quieter + 0.001f && glide_frames < 0) glide_frames = gliding;
+        }
         previous = frame[0];
     }
     std::fclose(wav);
     unlink(capture);
     CHECK(largest > 0.0f && largest < 0.01f);
+    CHECK(glide_frames > 400 && glide_frames < 520);
 
     // Reset attempted flag for muted lifecycle test
     recomp_audio_output_test_reset();

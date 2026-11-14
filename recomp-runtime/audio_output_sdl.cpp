@@ -52,7 +52,10 @@ struct SdlVoice {
     uint32_t sample_rate, channels, bits_per_sample;
     bool routed, mixed;
     float gain, ratio, level_ms;
-    float dry_mix[3 * 6], wet_mix[3 * 2];  // routing times gain, as last submitted
+    /* Routing times gain: the ramp runs linearly from `from` to `to` over
+       one quantum, `elapsed` frames in, across however many chunks. */
+    float dry_from[3 * 6], wet_from[3 * 2], dry_to[3 * 6], wet_to[3 * 2];
+    uint32_t elapsed;
     uint64_t bytes_submitted;
 };
 
@@ -173,15 +176,17 @@ float sampleAt(const uint8_t *pcm, uint32_t bits, uint32_t index)
 
 /* Applies an output matrix ([source + destination * channels], as XAudio2)
    to whole frames, giving interleaved float for the given speaker count. Like
-   XAudio2, a change eases in from the previous matrix over the first `ramp`
-   frames; a step would click. */
+   XAudio2, a change eases in linearly from the previous matrix over `ramp`
+   frames, of which `elapsed` passed in earlier chunks; a step would click. */
 void mixOutput(const uint8_t *pcm, uint32_t frames, uint32_t channels, uint32_t bits,
-    const float *from, const float *to, uint32_t ramp, uint32_t speakers, std::vector<float> &out)
+    const float *from, const float *to, uint32_t elapsed, uint32_t ramp, uint32_t speakers,
+    std::vector<float> &out)
 {
     out.assign(static_cast<size_t>(frames) * speakers, 0.0f);
     float matrix[3 * 6];
     for (uint32_t frame = 0u; frame < frames; ++frame) {
-        const float t = frame < ramp ? static_cast<float>(frame + 1u) / ramp : 1.0f;
+        const uint32_t done = elapsed + frame + 1u;
+        const float t = done < ramp ? static_cast<float>(done) / ramp : 1.0f;
         for (uint32_t i = 0u; i < channels * speakers; ++i) matrix[i] = from[i] + (to[i] - from[i]) * t;
         float *mixed = out.data() + static_cast<size_t>(frame) * speakers;
         for (uint32_t source = 0u; source < channels; ++source) {
@@ -588,20 +593,30 @@ extern "C" void recomp_audio_output_submit(
         float dry[3 * 6] = {}, wet[3 * 2] = {};
         for (uint32_t i = 0; i < channels * speakers; ++i) dry[i] = route.dry[i] * gain;
         for (uint32_t i = 0; i < channels * 2u; ++i) wet[i] = route.wet[i] * gain;
-        if (!voice.mixed) {
-            std::memcpy(voice.dry_mix, dry, sizeof dry);
-            std::memcpy(voice.wet_mix, wet, sizeof wet);
-            voice.mixed = true;
-        }
         const uint32_t ramp = sample_rate / 100u;  // one 10 ms XAudio2 quantum
-        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry_mix, dry, ramp, speakers, dry_frames);
+        if (!voice.mixed) {
+            std::memcpy(voice.dry_from, dry, sizeof dry);
+            std::memcpy(voice.wet_from, wet, sizeof wet);
+            std::memcpy(voice.dry_to, dry, sizeof dry);
+            std::memcpy(voice.wet_to, wet, sizeof wet);
+            voice.elapsed = ramp;
+            voice.mixed = true;
+        } else if (std::memcmp(voice.dry_to, dry, sizeof dry) != 0 ||
+                   std::memcmp(voice.wet_to, wet, sizeof wet) != 0) {
+            // A new target restarts the ramp from wherever the old one had got to.
+            const float t = static_cast<float>(voice.elapsed) / ramp;
+            for (uint32_t i = 0; i < 3u * 6u; ++i) voice.dry_from[i] += (voice.dry_to[i] - voice.dry_from[i]) * t;
+            for (uint32_t i = 0; i < 3u * 2u; ++i) voice.wet_from[i] += (voice.wet_to[i] - voice.wet_from[i]) * t;
+            std::memcpy(voice.dry_to, dry, sizeof dry);
+            std::memcpy(voice.wet_to, wet, sizeof wet);
+            voice.elapsed = 0u;
+        }
+        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry_from, voice.dry_to,
+            voice.elapsed, ramp, speakers, dry_frames);
         if (voice.wet_stream)
-            mixOutput(pcm, frames, channels, bits_per_sample, voice.wet_mix, wet, ramp, 2u, wet_frames);
-        /* A chunk shorter than the ramp stops partway; the next one continues
-           from there rather than stepping to the target. */
-        const float reached = frames < ramp ? static_cast<float>(frames) / ramp : 1.0f;
-        for (uint32_t i = 0; i < channels * speakers; ++i) voice.dry_mix[i] += (dry[i] - voice.dry_mix[i]) * reached;
-        for (uint32_t i = 0; i < channels * 2u; ++i) voice.wet_mix[i] += (wet[i] - voice.wet_mix[i]) * reached;
+            mixOutput(pcm, frames, channels, bits_per_sample, voice.wet_from, voice.wet_to,
+                voice.elapsed, ramp, 2u, wet_frames);
+        voice.elapsed = frames < ramp - voice.elapsed ? voice.elapsed + frames : ramp;
         const uint32_t dry_bytes = frames * speakers * 4u;
         const uint32_t wet_bytes = frames * 2u * 4u;
         if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
