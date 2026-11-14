@@ -2915,6 +2915,12 @@ static bool testPresentDownscale()
         RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
         present.data.present = {5u, 1u};
         passed &= expect("downscale present", d3d_backend_submit(presenter, &present));
+#ifdef RECOMP_TEST_D3D11
+        RECT rect{};
+        // The fitted picture must be smaller than the target, or the mip path never runs.
+        passed &= GetClientRect(presenterWindow(), &rect) &&
+            (rect.right < 3840 || rect.bottom < 2880);
+#endif
     }
     d3d_backend_destroy(&presenter);
     if (FILE *file = std::fopen(path, "rb")) {
