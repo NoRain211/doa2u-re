@@ -280,12 +280,13 @@ static bool simple_or_absent(
     return recomp_d3d_get_simple_render_state(model, method, value);
 }
 
-/* An unmapped value keeps the field's earlier value, so log each method/value
-   pair once instead of letting it pass silently (0xf005 once drew as ADD). */
+/* An unmapped value leaves the field at its Xbox D3D8 default, so log each
+   method/value pair once instead of letting it pass silently (0xf005 once drew
+   as the default ADD). Per-thread tables keep this race-free. */
 static void report_unmapped(uint32_t method, uint32_t value, bool mapped)
 {
-    static struct { uint32_t method, value; } seen[32];
-    static size_t count;
+    static _Thread_local struct { uint32_t method, value; } seen[32];
+    static _Thread_local size_t count;
     if (mapped) return;
     for (size_t i = 0u; i < count; ++i)
         if (seen[i].method == method && seen[i].value == value) return;

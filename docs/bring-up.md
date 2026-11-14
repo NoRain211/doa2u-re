@@ -203,7 +203,7 @@ the signed intermediate range is not modelled. Great Opera's baked floor
 shadows (`0x1f3be3`) draw a dark map, about 0.1 grey, at ONE/ONE with it. Read
 as ADD it washed the floor out, and a 0.5 bias would brighten it too. ADDSIGNED
 (`0xf006`) has no observed caller. An NV2A compare, stencil or blend value with
-no mapping keeps the field's earlier value and is logged once as
+no mapping leaves the field at its Xbox D3D8 default and is logged once as
 `recomp d3d: unmapped NV2A value`.
 
 Polygon offset now survives the simple-state model, captured draw and native
