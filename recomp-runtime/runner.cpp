@@ -654,7 +654,7 @@ static void bootGuest()
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
     recomp_kernel_file_set_synchronous_reads(false);
-    recomp_dsound_buffer_set_game_thread_pump(false);
+    recomp_dsound_buffer_set_frame_clock(false);
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
         if (clock == nullptr || std::strcmp(clock, "0") != 0)

@@ -39,7 +39,7 @@ int main(void)
     recomp_rollback_init(&a, 0u);
     recomp_rollback_init(&b, 0u);
     for (uint16_t i = 0u; i < 5u; ++i) {
-        const RecompInputGamepad value = pad(i, (int16_t)(-1000 * i));
+        const RecompInputGamepad value = pad(i, (int16_t)(-0x2000 - 1000 * i));
         recomp_rollback_add_local(&a, &value);
     }
     size_t size = recomp_netplay_encode(&net_a, &a, -3, packet);
@@ -50,7 +50,7 @@ int main(void)
     packet[0] ^= 1u;
     check("decode", recomp_netplay_decode(&net_b, &b, packet, size));
     check("pads arrive", b.remote_count == 5u && b.remote[4].buttons == 4u &&
-        b.remote[4].thumb_ly == -4000 && b.remote[4].analog_buttons[3] == 0xffu);
+        b.remote[4].thumb_ly == -0x2000 - 4000 && b.remote[4].analog_buttons[3] == 0xffu);
     check("advantage arrives", net_b.peer_advantage == -3 && net_b.peer_seen);
     check("duplicate ignored", recomp_netplay_decode(&net_b, &b, packet, size) && b.remote_count == 5u);
 

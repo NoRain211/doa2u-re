@@ -251,6 +251,12 @@ void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
     }
 }
 
+bool recomp_d3d8_draw_skippable(bool offscreen)
+{
+    /* submit drops the draw; only the back-buffer flags it clears reach the saved state. */
+    return gpu_work_suppressed && (offscreen || (!back_buffer_displayed && !back_buffer_saved));
+}
+
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
 {
     /* A hidden frame submits no draws, so drop this one without a GPU wait. */

@@ -18,6 +18,9 @@ uint32_t recomp_d3d8_require_device(void);
 void recomp_d3d8_target(RecompD3dPresenterTarget *target);
 void recomp_d3d8_submit(const RecompD3dPresenterCommand *command);
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
+/* A repeated run-ahead frame's draw to this target leaves the saved state as
+   it is, so it need not be built. */
+bool recomp_d3d8_draw_skippable(bool offscreen);
 /* Width over height the game draws its frames for: 4:3, or the widescreen shape. */
 float recomp_d3d8_content_aspect(void);
 /* Fits an on-screen pretransformed draw of the game's 16:9 2D layer to

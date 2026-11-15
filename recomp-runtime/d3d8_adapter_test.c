@@ -952,6 +952,24 @@ int main(void)
             dispatched == 0x276b50u && dispatched_context == 0x33u);
         free(callback_state);
     }
+    /* After a Swap the first on-screen draw clears the displayed flag the saved
+       state carries, so a repeated run-ahead frame builds it; later ones skip. */
+    void *skip_state = malloc(recomp_d3d8_state_size());
+    passed &= expect("skip snapshot allocated", skip_state != NULL);
+    if (skip_state != NULL) {
+        recomp_d3d8_state_save(skip_state);
+        recomp_d3d8_set_gpu_work_suppressed(true);
+        const bool skip_after_swap = recomp_d3d8_draw_skippable(false);
+        const bool skip_offscreen = recomp_d3d8_draw_skippable(true);
+        RecompD3dPresenterCommand screen_draw = {.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        recomp_d3d8_submit(&screen_draw);
+        const bool skip_after_draw = recomp_d3d8_draw_skippable(false);
+        recomp_d3d8_set_gpu_work_suppressed(false);
+        passed &= expect("a run-ahead draw skips only once the saved state cannot change",
+            !skip_after_swap && skip_offscreen && skip_after_draw && !recomp_d3d8_draw_skippable(true));
+        recomp_d3d8_state_restore(skip_state);
+        free(skip_state);
+    }
     arguments[0] = 2u;
     passed &= call(0x349e10u, arguments, 3u, "d3d8:insert-callback:2");
     arguments[0] = 0x11u; arguments[1] = OUTPUT; arguments[2] = 0u;

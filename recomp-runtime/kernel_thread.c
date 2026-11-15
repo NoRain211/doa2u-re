@@ -1048,7 +1048,9 @@ size_t recomp_kernel_thread_fiber_state_size(void)
 void recomp_kernel_thread_fiber_state_save(void *state)
 {
     KernelThreadFiberState *out = state;
-    memset(out, 0, sizeof *out);
+    /* Each slot's 64 KB stack copy is written only up to its used bytes. */
+    for (unsigned i = 0u; i < MAX_THREADS; ++i)
+        memset(&out->threads[i], 0, offsetof(KernelThreadFiber, native.stack));
     for (unsigned i = 0u; i < MAX_THREADS; ++i) {
         if (threads[i].native_fiber == NULL || i == current_thread) continue;
         /* A converted thread keeps the runner's own stack; its guest state

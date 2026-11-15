@@ -20,7 +20,7 @@ static uint32_t memory[RECOMP_XBOX_RAM_SIZE / 4u];
 static uint32_t cursor, owners = 1u, device = DEVICE, allocated, freed;
 static int fail_after = -1;
 static struct Allocation { uint32_t base, size; int live; } allocations[1024];
-static uint64_t now;
+static uint64_t now, wall;
 static int ready = 1, muted;
 static uint32_t output_calls, resets;
 static float listener[6], route_dry[18], route_wet[6];
@@ -57,6 +57,7 @@ uint8_t *recomp_memory(uint32_t address, size_t size)
 }
 uint32_t *recomp_memory_u32_checked(uint32_t address) { return (uint32_t *)(void *)recomp_memory(address, 4); }
 uint64_t recomp_test_dsound_now_ms(void) { return now; }
+uint64_t recomp_test_dsound_wall_ms(void) { return wall; }
 uint32_t recomp_dsound_current_device(void) { return device; }
 void recomp_dsound_require_device(uint32_t handle) { CHECK(handle == device && device && ready); }
 void recomp_dsound_device_add_owner(void) { ++owners; }
@@ -142,7 +143,7 @@ static void fixture(uint16_t tag, uint16_t channels, uint32_t bytes)
     CHECK(allocated == freed);
     memset(allocations, 0, sizeof allocations);
     allocated = freed = 0; cursor = 0x10000u; owners = 1u; device = DEVICE;
-    fail_after = -1; now = 0; ready = 1; muted = 0; output_calls = resets = 0;
+    fail_after = -1; now = wall = 0; ready = 1; muted = 0; output_calls = resets = 0;
     memset(&output, 0, sizeof output);
     write32(DEVICE, DEVICE_SETTINGS);
     memset(recomp_memory(DESC, 24), 0, 24);
@@ -289,6 +290,23 @@ static void test_hidden_frames(void)
     recomp_dsound_buffer_set_output_suppressed(false);
     CHECK(CALL(0x364802, handle, 0, 0, 0) == 0 && resets == before + 1);
     CHECK(CALL(0x363641, handle) == 0);
+
+    /* A create run again after a rewind saves the same bytes, as SyncTest compares them. */
+    fixture(1, 1, 0);
+    const size_t size = recomp_dsound_buffer_state_size();
+    uint8_t *start = malloc(size), *first = malloc(size), *again = malloc(size);
+    CHECK(start && first && again);
+    const uint32_t mark = cursor, marked = allocated;
+    recomp_dsound_buffer_state_save(start);
+    (void)create();
+    recomp_dsound_buffer_state_save(first);
+    recomp_dsound_buffer_state_restore(start);
+    cursor = mark; allocated = marked; owners = 1u; /* rewind the stubbed guest heap too */
+    handle = create();
+    recomp_dsound_buffer_state_save(again);
+    CHECK(memcmp(first, again, size) == 0);
+    CHECK(CALL(0x363641, handle) == 0);
+    free(start); free(first); free(again);
 }
 static void test_adpcm(void)
 {
@@ -439,11 +457,64 @@ static void test_3d(void)
     stop_armed = 0;
 }
 
+static int16_t first_sample(void) { return ((int16_t *)(void *)output.pcm)[0]; }
+
+/* On the frame-locked clock, output plays real time from its own place while
+   the guest's cursor follows guest time. */
+static void test_real_clock_output(void)
+{
+    fixture(1, 1, 0);
+    recomp_dsound_buffer_set_frame_clock(true);
+    uint32_t handle = create();
+    for (uint16_t i = 0; i < 1000; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 2000) == 0 && CALL(0x364802, handle, 0, 0, 0) == 0);
+    recomp_dsound_buffers_pump();
+    /* Slow frames: a one-shot plays 20 ms while guest time moves 10. */
+    now = 10; wall = 20; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 0);
+    CHECK(CALL(0x36489e, handle, OUTPUT, 0) == 0 && read32(OUTPUT) == 20);
+    /* Under 10 ms of real time waits for more. */
+    uint32_t calls = output_calls;
+    wall = 25; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    /* Guest time jumps: output plays on behind it, then skips once 100 ms late. */
+    now = 100; wall = 30; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 20 && first_sample() == 20);
+    now = 250; wall = 40; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 20 && first_sample() == 250);
+    /* A re-simulated frame neither plays nor moves output. */
+    recomp_dsound_buffer_set_output_suppressed(true);
+    calls = output_calls;
+    now = 260; wall = 50; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    recomp_dsound_buffer_set_output_suppressed(false);
+    now = 270; wall = 60; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 260);
+    CHECK(CALL(0x363641, handle) == 0);
+
+    /* A ring plays ahead only into its last Lock, and 50 ms at most. */
+    fixture(1, 1, 0);
+    handle = create();
+    for (uint16_t i = 0; i < 500; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 1000) == 0 && CALL(0x364802, handle, 0, 0, 1) == 0);
+    recomp_dsound_buffers_pump();
+    CHECK(CALL(0x3648da, handle, 0, 60, OUTPUT, OUTPUT + 4, OUTPUT + 8, OUTPUT + 12, 1) == 0);
+    CHECK(CALL(0x36363c, handle, DATA, 60, 0, 0) == 0);
+    now = 10; wall = 40; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 60 && first_sample() == 0);
+    calls = output_calls;
+    now = 20; wall = 60; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    CHECK(CALL(0x3648da, handle, 0, 200, OUTPUT, OUTPUT + 4, OUTPUT + 8, OUTPUT + 12, 1) == 0);
+    CHECK(CALL(0x36363c, handle, DATA + 40, 200, 0, 0) == 0);
+    now = 30; wall = 80; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 30);
+    CHECK(CALL(0x363641, handle) == 0);
+    recomp_dsound_buffer_set_frame_clock(false);
+}
+
 int main(void)
 {
     test_pcm_and_headroom(); test_ownership_and_lock(); test_clock_and_loop();
     test_adpcm(); test_validation_and_guards(); test_capacity_and_owner(); test_3d();
-    test_hidden_frames();
+    test_hidden_frames(); test_real_clock_output();
     recomp_dsound_buffers_reset(); CHECK(allocated == freed);
     puts("PASS 5849 buffer RAM layout, PCM/ADPCM output, headroom, clocks, locks, aliases, ownership, 3D voices and guards");
     return 0;
