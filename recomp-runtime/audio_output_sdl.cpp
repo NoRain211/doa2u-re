@@ -17,14 +17,12 @@
 
 #include <SDL3/SDL.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -79,11 +77,9 @@ unsigned long long dropped_buffers, underruns, voice_resets;
 unsigned long long reverb_updates, routing_updates;
 
 /* RECOMP_AUDIO_CAPTURE=<file.wav> (or the older RECOMP_AUDIO_DUMP) records the
-   dry device mix for diagnosis, and a capture the reverb return beside it in
-   <file>.wet.wav, padded to start in step. A capture never overwrites a file. */
-FILE *dump_file, *wet_file;
-std::atomic<uint64_t> dump_bytes;  // read by the reverb callback to pad the wet file
-uint64_t wet_bytes;
+   dry device mix for diagnosis. A capture never overwrites an existing file. */
+FILE *dump_file;
+uint64_t dump_bytes;
 int dump_channels, dump_rate;
 
 void writeWavHeader(FILE *file, uint32_t data_bytes, int channels, int rate)
@@ -133,21 +129,6 @@ void SDLCALL reverbPostmix(void *, const SDL_AudioSpec *spec, float *buffer, int
     recomp_audio_reverb_process(reverb, stereo, frames);
     /* shortcut: the 11-sample delay and pole assume 48 kHz; resample for other device rates. */
     recomp_xtalk_process_block(&xtalk, stereo, static_cast<uint32_t>(frames));
-    if (wet_file && spec->freq == dump_rate) {
-        if (wet_bytes == 0 && dump_channels > 0) {
-            static const float silence[1024] = {};
-            uint64_t lead = dump_bytes.load(std::memory_order_relaxed) /
-                static_cast<uint64_t>(dump_channels) * 2u / sizeof(float);
-            while (lead > 0) {
-                const size_t chunk = static_cast<size_t>(std::min<uint64_t>(lead, 1024u));
-                std::fwrite(silence, sizeof(float), chunk, wet_file);
-                wet_bytes += chunk * sizeof(float);
-                lead -= chunk;
-            }
-        }
-        std::fwrite(stereo, sizeof(float) * 2u, static_cast<size_t>(frames), wet_file);
-        wet_bytes += static_cast<uint64_t>(frames) * 2u * sizeof(float);
-    }
     if (channels != 2) {
         std::memset(buffer, 0, static_cast<size_t>(buflen));
         for (int i = 0; i < frames; ++i) {
@@ -347,13 +328,6 @@ extern "C" void recomp_audio_output_initialize(void)
             writeWavHeader(dump_file, 0, dump_channels, dump_rate);
             SDL_SetAudioPostmixCallback(audio_device, dumpPostmix, nullptr);
         }
-        if (dump_file && capture_path) {
-            const std::string wet_path = std::string(capture_path) + ".wet.wav";
-            wet_file = std::fopen(wet_path.c_str(), "wbx");
-            wet_bytes = 0;
-            if (wet_file) writeWavHeader(wet_file, 0, 2, dump_rate);
-            else std::fprintf(stderr, "[audio-output] reverb capture not written (exists or unwritable): %s\n", wet_path.c_str());
-        }
     }
     SDL_ResumeAudioDevice(audio_device);
     std::fprintf(stderr,
@@ -393,11 +367,6 @@ extern "C" void recomp_audio_output_shutdown(void)
         writeWavHeader(dump_file, static_cast<uint32_t>(dump_bytes), dump_channels, dump_rate);
         std::fclose(dump_file);
         dump_file = nullptr;
-    }
-    if (wet_file) {
-        writeWavHeader(wet_file, static_cast<uint32_t>(wet_bytes), 2, dump_rate);
-        std::fclose(wet_file);
-        wet_file = nullptr;
     }
     attempted = true;
     muted = false;
