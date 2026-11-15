@@ -1015,6 +1015,11 @@ the existing worker modules run; they do not force middleware load status.
 Swap waits for the host to finish earlier frames as a guest wait, so those
 vblank threads keep their 60 Hz refills of CRI's audio rings when the GPU
 falls behind; a host-blocked Swap let the rings replay as echoes (issue #69).
+The Xbox preempts the game at each vblank to run those threads, but here they
+run only when the game yields. A game frame that used the whole refresh
+halved their wakes and speech crackled with stale ring audio (issue #145), so
+a late vblank waiter is handed the refreshes it missed, up to four. The frame
+clock keeps the plain wait for netplay determinism.
 
 Movies no longer run CRI's Sofdec player. Its MPEG decoder ran on CRI's file
 server thread, and one decode burst held every other guest thread, the audio
