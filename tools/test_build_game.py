@@ -196,7 +196,18 @@ class BuildTests(unittest.TestCase):
                 (play / "b.xbe").write_bytes(b"game")
                 drop_owned_extraction()
                 self.assertTrue((imported / "disc/sub/data.afs").is_file())
+                # Nor is one from another import with the same names but other bytes.
+                (play / "sub/data.afs").write_bytes(b"old!")
+                drop_owned_extraction()
+                self.assertTrue((imported / "disc/sub/data.afs").is_file())
                 shutil.rmtree(play)
+                # A copied play folder with the same bytes counts as whole.
+                shutil.copytree(imported / "disc", play)
+                # A held file keeps the extraction and does not fail the build.
+                with patch("build_game.Path.rename", side_effect=PermissionError("held")):
+                    drop_owned_extraction()
+                self.assertTrue((imported / "disc/b.xbe").is_file())
+                self.assertFalse((imported / "disc.old").exists())
 
                 drop_owned_extraction()
                 self.assertFalse((imported / "disc").exists())

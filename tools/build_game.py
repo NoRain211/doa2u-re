@@ -195,15 +195,27 @@ def drop_owned_extraction():
     disc = imported / "disc"
     if not disc.is_dir() or (disc / ".recomp-storage").exists():
         return
-    prepare_disc(disc, play)
-    # An older play folder must hold every file before it becomes the only copy.
-    if not all((play / path.relative_to(disc)).is_file() for path in disc.rglob("*") if path.is_file()):
+
+    def same_file(path):
+        # A play folder from an earlier import, or another dump, has the same names.
+        copy = play / path.relative_to(disc)
+        return copy.is_file() and (os.path.samefile(path, copy) or (
+            copy.stat().st_size == path.stat().st_size and sha256(copy) == sha256(path)))
+
+    # The build already succeeded, so a failure here only keeps the extraction.
+    try:
+        prepare_disc(disc, play)
+        if not all(same_file(path) for path in disc.rglob("*") if path.is_file()):
+            print(f"Kept {disc}: {play} holds a different disc", flush=True)
+            return
+        select_xbe(play)
+        # Renamed first, so a file a scan holds open never leaves a partial disc behind.
+        aside = imported / "disc.old"
+        shutil.rmtree(aside, ignore_errors=True)
+        disc.rename(aside)
+    except (OSError, ValueError) as error:
+        print(f"Kept {disc}: {error}", flush=True)
         return
-    select_xbe(play)
-    # Renamed first, so a file a scan holds open never leaves a partial disc behind.
-    aside = imported / "disc.old"
-    shutil.rmtree(aside, ignore_errors=True)
-    disc.rename(aside)
     shutil.rmtree(aside, ignore_errors=True)
 
 
@@ -362,7 +374,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     if windows:
         receipt["vulkan_runner_sha256"] = sha256(runner_path(vulkan=True))
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    if iso is not None:
+    if iso is not None and not build_only:
         drop_owned_extraction()
 
 
