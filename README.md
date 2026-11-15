@@ -272,6 +272,8 @@ The importer extracts the disc once into `private/imported-disc` with XboxDev
 in the release ZIP), selects the game executable by its SHA-256 and leaves
 the ISO unchanged. Only that hash is published, in `tools/build_game.py`.
 A different ISO is staged first and replaces that extraction and receipt only if it verifies; a wrong disc keeps the previous import.
+After a successful build the disc moves to `private/play-disc` and the
+extraction keeps only its receipt, so the install holds one copy of the disc.
 After a runtime change, `python tools/build_game.py --build-only` reuses the
 authenticated lift; `--lift-only` generates without building. Generated C,
 receipts and logs stay in `private/`.

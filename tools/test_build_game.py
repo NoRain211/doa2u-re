@@ -3,13 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_game import (STEPS, build, build_fraction, failure_excerpt, import_disc, lifter_revision,
-                        merge_functions, program_manifest, selected_xbe, use_windows_newlines,
-                        write_functions)
+from build_game import (STEPS, build, build_fraction, drop_owned_extraction, failure_excerpt, import_disc,
+                        lifter_revision, merge_functions, program_manifest, selected_xbe,
+                        use_windows_newlines, write_functions)
 from extract_iso import sha256
 
 
@@ -167,6 +168,52 @@ class BuildTests(unittest.TestCase):
             with patch("build_game.ROOT", root), patch("build_game.XBE_SHA256", "0" * 64):
                 with self.assertRaises(ValueError):
                     import_disc(iso)
+
+    def test_built_extraction_is_dropped_and_reused_from_the_play_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            imported, play = root / "private/imported-disc", root / "private/play-disc"
+            iso = root / "synthetic.iso"
+            iso.write_bytes(b"synthetic image")
+
+            def fresh(iso, output, extractor):
+                (output / "disc/sub").mkdir(parents=True)
+                (output / "receipt.json").write_text(json.dumps(dict(iso_sha256=sha256(iso))))
+                (output / "disc/b.xbe").write_bytes(b"game")
+                (output / "disc/sub/data.afs").write_bytes(b"data")
+
+            with patch("build_game.ROOT", root), patch("build_game.XBE_SHA256", hashlib.sha256(b"game").hexdigest()):
+                with patch("build_game.extract", side_effect=fresh):
+                    import_disc(iso)
+                # Saves in the extraction keep it whole.
+                (imported / "disc/.recomp-storage").mkdir()
+                drop_owned_extraction()
+                self.assertTrue((imported / "disc/b.xbe").is_file())
+                self.assertFalse(play.exists())
+                (imported / "disc/.recomp-storage").rmdir()
+                # A play folder missing a file is never left as the only copy.
+                (play / "sub").mkdir(parents=True)
+                (play / "b.xbe").write_bytes(b"game")
+                drop_owned_extraction()
+                self.assertTrue((imported / "disc/sub/data.afs").is_file())
+                shutil.rmtree(play)
+
+                drop_owned_extraction()
+                self.assertFalse((imported / "disc").exists())
+                self.assertFalse((imported / "disc.old").exists())
+                self.assertTrue((imported / "receipt.json").is_file())
+                self.assertEqual((play / "sub/data.afs").read_bytes(), b"data")
+                self.assertEqual(selected_xbe(), (play / "b.xbe").resolve())
+                with patch("build_game.extract") as extract:
+                    import_disc(iso)
+                extract.assert_not_called()
+                self.assertEqual(selected_xbe(), (play / "b.xbe").resolve())
+                # Without the play folder the ISO is extracted again.
+                shutil.rmtree(play)
+                with patch("build_game.extract", side_effect=fresh) as extract:
+                    import_disc(iso)
+                extract.assert_called_once()
+                self.assertEqual(selected_xbe(), (imported / "disc/b.xbe").resolve())
 
     def test_packaged_lifter_uses_the_export_pin(self):
         with tempfile.TemporaryDirectory() as folder:
