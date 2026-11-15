@@ -5,7 +5,7 @@
    device's real consumption rate.
 
    XAudio2 sends each voice through an output matrix to the master and, when
-   wet, to an I3DL2 reverb submix. Here a routed voice is converted to float
+   wet, to an I3DL2 reverb submix. Here every voice is converted to float
    for the device's speaker count with its dry matrix on the way in, and its
    wet half goes to a stereo twin stream on a second logical device whose
    post-mix callback runs the reverb (audio_reverb.h) over the summed wet
@@ -50,10 +50,9 @@ struct VoiceRouting {
 struct SdlVoice {
     SDL_AudioStream *stream;
     SDL_AudioStream *wet_stream;  // routed voices with a wet send only
-    uint32_t sample_rate, channels, bits_per_sample;
-    bool routed;
-    float gain, ratio, level_ms;
-    RecompMatrixRamp dry, wet;  // a routed voice's matrices times its gain
+    uint32_t sample_rate, channels;
+    float ratio, level_ms;
+    RecompMatrixRamp dry, wet;  // the voice's matrices times its gain
     uint64_t bytes_submitted;
 };
 
@@ -136,6 +135,20 @@ void SDLCALL reverbPostmix(void *, const SDL_AudioSpec *spec, float *buffer, int
             buffer[i * channels + 1] = stereo[i * 2 + 1];
         }
     }
+}
+
+/* An unrouted voice (hit sounds, movie audio) gets the matrix SDL's own channel
+   conversion would apply, so its volume changes ramp like a routed voice's. */
+VoiceRouting defaultRouting(uint32_t channels, uint32_t speakers)
+{
+    VoiceRouting route{};
+    route.channels = channels;
+    const float front = channels == 3 && speakers == 2 ? 0.8f : 1.0f;
+    for (uint32_t speaker = 0; speaker < 2; ++speaker)
+        route.dry[(channels == 1 ? 0 : speaker) + speaker * channels] = front;
+    if (channels == 3 && speakers == 2) route.dry[2] = route.dry[2 + channels] = 0.2f;
+    if (channels == 3 && speakers == 6) route.dry[2 + 3 * channels] = 1.0f;
+    return route;
 }
 
 void dropBuffer(uint32_t slot, const char *reason)
@@ -463,8 +476,6 @@ extern "C" int recomp_audio_output_set_voice_routing(uint32_t slot, uint32_t cha
         return 1;
     }
     if (std::memcmp(&routing[slot], &route, sizeof route) == 0) return 1;
-    // A voice switching between direct and routed output restarts its stream.
-    if (voice.stream && !voice.routed) destroyVoice(voice);
     routing[slot] = route;
     ++routing_updates;
     return 1;
@@ -492,28 +503,24 @@ extern "C" void recomp_audio_output_submit(
 
     std::lock_guard<std::mutex> lock(audio_mutex);
     SdlVoice &voice = voices[slot];
-    const VoiceRouting &route = routing[slot];
-    if (route.channels && route.channels != channels) {
+    const uint32_t speakers = recomp_audio_output_speakers();
+    if (routing[slot].channels && routing[slot].channels != channels) {
         dropBuffer(slot, "routing-channel-mismatch");
         return;
     }
-    const bool routed = route.channels != 0u;
-    const uint32_t speakers = recomp_audio_output_speakers();
+    const VoiceRouting route = routing[slot].channels ? routing[slot] : defaultRouting(channels, speakers);
     bool wet_send = false;
-    for (uint32_t i = 0; routed && i < channels * 2u; ++i) wet_send |= route.wet[i] != 0.0f;
+    for (uint32_t i = 0; i < channels * 2u; ++i) wet_send |= route.wet[i] != 0.0f;
     if (voice.stream && (voice.sample_rate != sample_rate || voice.channels != channels ||
-        voice.bits_per_sample != bits_per_sample || voice.routed != routed ||
         (voice.wet_stream != nullptr) != (wet_send && reverb_device != 0))) {
         destroyVoice(voice);
     }
     if (!voice.stream) {
-        /* 32-bit voices are IEEE float, 1.0 full scale (the HRTF mix). A
-           routed voice arrives as the float its dry matrix produces; the wet
-           stream stays stereo because the reverb device is. */
-        const SDL_AudioFormat format = routed ? SDL_AUDIO_F32
-            : bits_per_sample == 8 ? SDL_AUDIO_U8 : bits_per_sample == 16 ? SDL_AUDIO_S16LE : SDL_AUDIO_F32LE;
-        const uint32_t stream_channels = routed ? speakers : channels;
-        voice.stream = openStream(audio_device, format, stream_channels, sample_rate);
+        /* A voice arrives as the float its dry matrix produces (32-bit input
+           is IEEE float, 1.0 full scale: the HRTF mix); the wet stream stays
+           stereo because the reverb device is. */
+        const SDL_AudioFormat format = SDL_AUDIO_F32;
+        voice.stream = openStream(audio_device, format, speakers, sample_rate);
         if (!voice.stream) {
             dropBuffer(slot, "create-stream");
             return;
@@ -528,9 +535,6 @@ extern "C" void recomp_audio_output_submit(
         }
         voice.sample_rate = sample_rate;
         voice.channels = channels;
-        voice.bits_per_sample = bits_per_sample;
-        voice.routed = routed;
-        voice.gain = 1.0f;
         voice.ratio = 1.0f;
         voice.level_ms = kPrerollMs;
     }
@@ -539,18 +543,9 @@ extern "C" void recomp_audio_output_submit(
     if (volume_hundredth_db > 0) volume_hundredth_db = 0;
     const float gain = volume_hundredth_db == -10000 ? 0.0f :
         std::pow(10.0f, volume_hundredth_db / 2000.0f);
-    /* A routed voice's gain rides in its ramped matrix; SDL's stream gain
-       steps at once on audio already queued. */
-    if (gain != voice.gain) {
-        voice.gain = gain;
-        if (!routed) {
-            SDL_SetAudioStreamGain(voice.stream, gain);
-            if (voice.wet_stream) SDL_SetAudioStreamGain(voice.wet_stream, gain);
-        }
-    }
 
     const uint32_t frames = bytes / block_align;
-    const uint32_t stream_align = routed ? speakers * 4u : block_align;
+    const uint32_t stream_align = speakers * 4u;
     const uint32_t wet_align = 2u * 4u;
     const int queued = SDL_GetAudioStreamQueued(voice.stream);
     if (queued > 0 && static_cast<uint32_t>(queued) >= kMaxBufferBytes * stream_align / block_align) {
@@ -559,13 +554,12 @@ extern "C" void recomp_audio_output_submit(
     }
     const bool starved = queued <= 0;
     if (starved && voice.bytes_submitted > 0) ++underruns;
-    const uint8_t silence = bits_per_sample == 8 && !routed ? 0x80 : 0;
     float queued_ms = queued > 0 ?
         static_cast<float>(queued / stream_align) * 1000.0f / sample_rate : 0.0f;
     if (starved) {
         const uint32_t preroll = sample_rate * kPrerollMs / 1000 * stream_align;
         if (silence_buffer.size() < preroll) silence_buffer.resize(preroll);
-        std::memset(silence_buffer.data(), silence, preroll);
+        std::memset(silence_buffer.data(), 0, preroll);
         const uint32_t wet_preroll = sample_rate * kPrerollMs / 1000 * wet_align;
         const uint8_t *wet_silence = nullptr;
         if (voice.wet_stream) {
@@ -586,23 +580,19 @@ extern "C" void recomp_audio_output_submit(
         SDL_SetAudioStreamFrequencyRatio(voice.stream, ratio);
         if (voice.wet_stream) SDL_SetAudioStreamFrequencyRatio(voice.wet_stream, ratio);
     }
-    if (routed) {
-        float dry[RecompMatrixRamp::kEntries] = {}, wet[RecompMatrixRamp::kEntries] = {};
-        for (uint32_t i = 0; i < channels * speakers; ++i) dry[i] = route.dry[i] * gain;
-        for (uint32_t i = 0; i < channels * 2u; ++i) wet[i] = route.wet[i] * gain;
-        const uint32_t quantum = sample_rate / 100u;  // XAudio2's 10 ms
-        voice.dry.retarget(dry, quantum);
-        voice.wet.retarget(wet, quantum);
-        mixOutput(pcm, frames, channels, bits_per_sample, voice.dry, speakers, dry_frames);
-        if (voice.wet_stream) mixOutput(pcm, frames, channels, bits_per_sample, voice.wet, 2u, wet_frames);
-        voice.dry.advance(frames);
-        voice.wet.advance(frames);
-        const uint32_t dry_bytes = frames * speakers * 4u;
-        const uint32_t wet_bytes = frames * 2u * 4u;
-        if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
-    } else if (!putData(voice, slot, pcm, bytes, nullptr, 0u)) {
-        return;
-    }
+    float dry[RecompMatrixRamp::kEntries] = {}, wet[RecompMatrixRamp::kEntries] = {};
+    for (uint32_t i = 0; i < channels * speakers; ++i) dry[i] = route.dry[i] * gain;
+    for (uint32_t i = 0; i < channels * 2u; ++i) wet[i] = route.wet[i] * gain;
+    const uint32_t quantum = sample_rate / 100u;  // XAudio2's 10 ms
+    voice.dry.retarget(dry, quantum);
+    voice.wet.retarget(wet, quantum);
+    mixOutput(pcm, frames, channels, bits_per_sample, voice.dry, speakers, dry_frames);
+    if (voice.wet_stream) mixOutput(pcm, frames, channels, bits_per_sample, voice.wet, 2u, wet_frames);
+    voice.dry.advance(frames);
+    voice.wet.advance(frames);
+    const uint32_t dry_bytes = frames * speakers * 4u;
+    const uint32_t wet_bytes = frames * 2u * 4u;
+    if (!putData(voice, slot, dry_frames.data(), dry_bytes, wet_frames.data(), wet_bytes)) return;
 
     ++submitted_buffers;
     submitted_bytes += bytes;

@@ -109,48 +109,51 @@ int main()
     recomp_audio_output_shutdown();
     unsetenv("RECOMP_AUDIO_SURROUND");
 
-    // A routed voice's volume change eases in like XAudio2's instead of
-    // stepping, which clicked on macOS and Linux (issue #145).
-    recomp_audio_output_test_reset();
-    char capture[] = "/tmp/recomp_gain_ramp_XXXXXX";
-    const int capture_fd = mkstemp(capture);
-    CHECK(capture_fd >= 0);
-    close(capture_fd);
-    unlink(capture);  // the capture never overwrites a file
-    setenv("RECOMP_AUDIO_CAPTURE", capture, 1);
-    recomp_audio_output_initialize();
-    CHECK(recomp_audio_output_enabled() != 0);
-    const float front_dry[] = {1.0f, 0.0f, 0.0f, 1.0f};
-    const float no_wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    CHECK(recomp_audio_output_set_voice_routing(4, 2, front_dry, no_wet));
-    std::vector<float> level(4800 * 2, 0.5f);  // 100 ms of DC
-    const uint32_t level_bytes = static_cast<uint32_t>(level.size() * sizeof(float));
-    recomp_audio_output_submit(4, reinterpret_cast<const uint8_t *>(level.data()), level_bytes, 48000, 2, 32, 0);
-    // Change the volume while the first chunk plays, as the game does, in
-    // 2 ms chunks like game-thread pumps: each must continue the ramp.
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    for (uint32_t done = 0; done < level_bytes; done += 96u * 2u * sizeof(float)) {
-        recomp_audio_output_submit(4, reinterpret_cast<const uint8_t *>(level.data()) + done,
-            96u * 2u * sizeof(float), 48000, 2, 32, -600);
+    // A voice's volume change eases in like XAudio2's instead of stepping,
+    // which clicked on macOS and Linux (issue #145). Slot 4 is routed; slot
+    // 257, like the hit voices, takes the default matrix (issue #212).
+    for (const uint32_t slot : {4u, 257u}) {
+        recomp_audio_output_test_reset();
+        char capture[] = "/tmp/recomp_gain_ramp_XXXXXX";
+        const int capture_fd = mkstemp(capture);
+        CHECK(capture_fd >= 0);
+        close(capture_fd);
+        unlink(capture);  // the capture never overwrites a file
+        setenv("RECOMP_AUDIO_CAPTURE", capture, 1);
+        recomp_audio_output_initialize();
+        CHECK(recomp_audio_output_enabled() != 0);
+        const float front_dry[] = {1.0f, 0.0f, 0.0f, 1.0f};
+        const float no_wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (slot == 4u) CHECK(recomp_audio_output_set_voice_routing(slot, 2, front_dry, no_wet));
+        std::vector<float> level(4800 * 2, 0.5f);  // 100 ms of DC
+        const uint32_t level_bytes = static_cast<uint32_t>(level.size() * sizeof(float));
+        recomp_audio_output_submit(slot, reinterpret_cast<const uint8_t *>(level.data()), level_bytes, 48000, 2, 32, 0);
+        // Change the volume while the first chunk plays, as the game does, in
+        // 2 ms chunks like game-thread pumps: each must continue the ramp.
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+        for (uint32_t done = 0; done < level_bytes; done += 96u * 2u * sizeof(float)) {
+            recomp_audio_output_submit(slot, reinterpret_cast<const uint8_t *>(level.data()) + done,
+                96u * 2u * sizeof(float), 48000, 2, 32, -600);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        recomp_audio_output_shutdown();
+        unsetenv("RECOMP_AUDIO_CAPTURE");
+        FILE *wav = std::fopen(capture, "rb");
+        CHECK(wav != nullptr);
+        std::fseek(wav, 44, SEEK_SET);
+        // Past the resampler's ringing on the step up from silence, the level
+        // must glide from 0.5 to -6 dB; the unramped gain jumped there.
+        float frame[2], previous = 0.0f, largest = 0.0f;
+        int sounding = 0;
+        while (std::fread(frame, sizeof frame, 1, wav) == 1) {
+            sounding = frame[0] > 0.1f ? sounding + 1 : 0;
+            if (sounding > 64) largest = std::max(largest, std::fabs(frame[0] - previous));
+            previous = frame[0];
+        }
+        std::fclose(wav);
+        unlink(capture);
+        CHECK(largest > 0.0f && largest < 0.01f);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    recomp_audio_output_shutdown();
-    unsetenv("RECOMP_AUDIO_CAPTURE");
-    FILE *wav = std::fopen(capture, "rb");
-    CHECK(wav != nullptr);
-    std::fseek(wav, 44, SEEK_SET);
-    // Past the resampler's ringing on the step up from silence, the level
-    // must glide from 0.5 to -6 dB; the unramped gain jumped there.
-    float frame[2], previous = 0.0f, largest = 0.0f;
-    int sounding = 0;
-    while (std::fread(frame, sizeof frame, 1, wav) == 1) {
-        sounding = frame[0] > 0.1f ? sounding + 1 : 0;
-        if (sounding > 64) largest = std::max(largest, std::fabs(frame[0] - previous));
-        previous = frame[0];
-    }
-    std::fclose(wav);
-    unlink(capture);
-    CHECK(largest > 0.0f && largest < 0.01f);
 
     // The ramp eases linearly over its quantum however the chunks split it,
     // and a change mid-ramp restarts from the level it had reached.
