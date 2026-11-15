@@ -105,13 +105,44 @@ These steps set up one like it.
 6. From home, `python tools/matchmaker.py --probe <VM address>:47700`
    should answer, which proves both firewalls let the port through.
 7. In Cloudflare DNS, add an A record such as `mm` with the VM's public
-   address and proxy status DNS only. Cloudflare's proxy carries HTTP, so a
+   address and proxy status DNS only. For IPv6 (see below), add an AAAA
+   record with the same name. Cloudflare's proxy carries HTTP, so a
    proxied name would not reach a UDP server. Probe the name too.
 8. Set MATCHMAKER in NETPLAY SETTINGS to the name from step 7 and port
    47700 on two machines on different home networks; DEFAULT would test
    the default server instead. HOST ONLINE should say LISTED ON FIND
    MATCH and the other should quick-match it, which is also the first
    test of punching through real routers.
+
+## IPv6
+
+Many players behind carrier NAT have a public IPv6 address with no NAT, so
+two of them can reach each other directly where IPv4 punching fails. IPv4
+stays the primary path; IPv6 is an extra one between two players who both
+have it, so nobody who matched before matches worse.
+
+A client's second socket binds IPv6 only. With each HOST, JOIN and LIST it
+also sends ADDR6 to the server's AAAA address from that socket, and the
+server keeps the endpoint it came from, proven by a cookie like any other,
+under the client's nonce for 20 s. When both players of a JOIN have one,
+each PEER ends with the other's IPv6 endpoint; otherwise PEER is as before.
+Room packets then go to the IPv4 endpoints and the IPv6 one together. When
+one answers over IPv6 the peer is sent to there, and a relayed packet from
+the other side no longer starts the relay.
+
+The server listens on `::` too (`--address6`, empty for IPv4 only) and
+answers an IPv6 sender only LIST and ADDR6, so a room is always an IPv4
+endpoint. To enable it on the Oracle VM:
+
+1. Enable IPv6 on the VCN (Networking, the VCN, IPv6 CIDR blocks) and its
+   subnet, add a route rule `::/0` to the internet gateway, and assign the
+   VM an IPv6 address from its VNIC.
+2. Add a security list ingress rule: source `::/0`, UDP, port 47700.
+3. On the VM: `sudo ip6tables -I INPUT 1 -p udp --dport 47700 -j ACCEPT`
+   and `sudo netfilter-persistent save`.
+4. Add the AAAA record, copy `matchmaker.py` and restart the service.
+5. `python tools/matchmaker.py --probe mm.example.com:47700 --ipv6` from a
+   machine with IPv6 should answer.
 
 ## Packets
 
@@ -131,6 +162,10 @@ endian. An endpoint is an IPv4 address and port in 6 bytes. Names are up to
 | 8 LEAVE | host | none | none |
 | 9 RELAY | either player of a pair | up to 1,200 bytes | the same body to the other player, up to 250 a second for a pair and 500 for an address |
 | 10 COOKIE | server | cookie | the client stores it and sends its last HOST, JOIN or LEAVE again with it |
+| 11 ADDR6 | client, over IPv6, with each HOST, JOIN and LIST | none, with the cookie the server gave that IPv6 endpoint | stores the endpoint under the nonce for 20 s; 10 COOKIE if the cookie is missing or old |
+
+An IPv6 endpoint is 18 bytes. PEER carries one after the name only when
+both players sent ADDR6; a client takes either length of PEER.
 
 UDP source addresses can be forged, so neither side takes one on trust.
 The server answers a HOST, JOIN, LEAVE or RELAY without a valid cookie
@@ -256,7 +291,10 @@ the ping estimate from both round trips.
 - The default server is one small VM. While it is down, FIND MATCH says
   THE MATCHMAKER CANNOT BE FOUND and hosts are not listed; JOIN ONLINE by
   address still works.
-- Punching has only been tested on one machine, not through real routers.
+- Punching has only been tested on one machine, not through real routers,
+  and IPv6 only over loopback.
+- A client reaches the server over IPv4 only, so a player on IPv6 alone
+  (NAT64) cannot match; the server's IPv6 address is only for ADDR6.
 - The server does not check names; each player's runner checks the names
   it shows with the same check as profile names.
 - The estimate goes through the server, so two players near each other
