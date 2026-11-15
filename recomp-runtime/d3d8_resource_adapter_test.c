@@ -194,6 +194,9 @@ int main(void)
     const size_t state_size = recomp_d3d8_resource_state_size();
     uint8_t *saved = malloc(state_size * 2u), *after = saved + state_size;
     CHECK(saved != NULL);
+    /* Different stale bytes in each buffer: padding must not reach the compare. */
+    memset(saved, 0xa5, state_size);
+    memset(after, 0x5a, state_size);
     vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
     recomp_d3d8_resource_state_save(saved);
     uint32_t frees = free_count;

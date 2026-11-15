@@ -89,7 +89,10 @@ bool recomp_snapshots_init(RecompGuestSnapshots *s, uint8_t *ram, size_t size,
     const size_t page_count = size / PAGE;
     s->ram = ram;
     s->size = size;
+#ifdef _WIN32
     s->write_watch = write_watch;
+#endif
+    write_watch = s->write_watch; /* only Windows fills watch_addresses */
     s->slot_count = slot_count;
     s->newest = slot_count - 1u;
     s->shadow = malloc(size);
@@ -237,7 +240,8 @@ static void rehash_all(RecompGuestSnapshots *s)
 static void rehash_stale(RecompGuestSnapshots *s)
 {
     for (size_t byte = 0u; byte < (s->size / PAGE + 7u) / 8u; ++byte) {
-        for (unsigned bit = 0u; s->hash_stale[byte] != 0u && bit < 8u; ++bit) {
+        /* The last byte's high bits are past the last page after a 0xff fill. */
+        for (unsigned bit = 0u; s->hash_stale[byte] != 0u && bit < 8u && byte * 8u + bit < s->size / PAGE; ++bit) {
             if ((s->hash_stale[byte] & (1u << bit)) != 0u) rehash_page(s, byte * 8u + bit);
         }
         s->hash_stale[byte] = 0u;

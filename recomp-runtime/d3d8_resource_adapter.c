@@ -51,9 +51,9 @@ size_t recomp_d3d8_resource_state_size(void) { return sizeof(ResourceState); }
 void recomp_d3d8_resource_state_save(void *state)
 {
     ResourceState *out = state;
+    /* Padding and the texture while unused stay zero, so stale bytes never reach SyncTest's compare. */
+    memset(out, 0, sizeof *out);
     memcpy(out->owned, owned, sizeof owned);
-    /* Only while in use, so the pair's stale bytes never reach SyncTest's compare. */
-    memset(&out->inline_texture, 0, sizeof out->inline_texture);
     if (inline_texture_active) out->inline_texture = inline_texture;
     out->inline_texture_active = inline_texture_active;
 }

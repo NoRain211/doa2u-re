@@ -196,6 +196,22 @@ int main(void)
     if (plain == NULL) return fail("allocate", "plain RAM");
     result = run(plain, false, "page compare");
     free(plain);
+    /* Nine pages: the stale bitmap's last byte has bits past the last page. */
+    static uint8_t odd[9 * PAGE];
+    RecompGuestSnapshots o = {0}, t = {0};
+    uint64_t hash = 0u, fresh = 1u;
+    if (result == 0 && (!recomp_snapshots_init(&o, odd, sizeof odd, false, 2u) ||
+        !recomp_snapshots_hash(&o, NULL, 0u, &hash))) result = fail("nine pages", "init");
+    if (result == 0) {
+        fill(odd, 8u, 7u);
+        if (!recomp_snapshots_save(&o) || !recomp_snapshots_hash(&o, NULL, 0u, &hash) ||
+            !recomp_snapshots_init(&t, odd, sizeof odd, false, 1u) ||
+            !recomp_snapshots_hash(&t, NULL, 0u, &fresh) || hash != fresh) {
+            result = fail("nine pages", "hash after a save of the last page");
+        }
+        recomp_snapshots_free(&t);
+    }
+    recomp_snapshots_free(&o);
     if (result == 0) printf("guest snapshot: write watch=%d ok\n", write_watch ? 1 : 0);
     return result;
 }
