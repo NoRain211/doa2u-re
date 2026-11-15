@@ -374,12 +374,21 @@ static uint32_t heard_span(Buffer *buffer, uint64_t now, bool background, uint32
         h->hrtf = (RecompHrtfVoice){.filter = buffer->hrtf.filter, .rendered = buffer->hrtf.filter};
         return 0u;
     }
-    if (!guest->playing) h->model.playing = 0u;
+    /* A one-shot the guest finished plays on to its own end; a stop starts a new generation. */
+    if (!guest->playing && (guest->play_flags & RECOMP_DSOUND_PLAY_LOOPING)) h->model.playing = 0u;
     if (!h->model.playing || wall < h->model.last_ms + 10u) return 0u;
     h->model.sample_rate = guest->sample_rate; /* a pitch change plays on from here */
     const bool looping = (guest->play_flags & RECOMP_DSOUND_PLAY_LOOPING) != 0u;
     /* An untimed loop holds the same data on every lap. */
     if (looping && !buffer->filled_until_ms) return recomp_dsound_buffer_consume(&h->model, wall, offset);
+    /* After a mute or stall a ring resumes at the guest's cursor, at real time;
+       its own place would have run on into data not yet written. */
+    if (looping && wall > h->model.last_ms + HEARD_BEHIND_MS) {
+        h->model.cursor_bytes = guest->cursor_bytes;
+        h->model.frame_remainder = guest->frame_remainder;
+        h->model.last_ms = wall;
+        return 0u;
+    }
     const uint32_t start = recomp_dsound_buffer_cursor(&h->model, h->model.last_ms);
     uint64_t ahead = 0u, behind = bytes_for_ms(guest, HEARD_BEHIND_MS), span = 0u;
     int64_t place = (int64_t)start - guest->cursor_bytes;
@@ -426,7 +435,8 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
     }
     /* Every game-thread call counts, so a loop started by Play is not capped behind its start. */
     if (!background) game_pump_ms = now;
-    if (!buffer->model.playing || !buffer->pcm) return;
+    const uint32_t slot = (uint32_t)(buffer - buffers);
+    if (!buffer->pcm || !(buffer->model.playing || (frame_clock && heard[slot].model.playing))) return;
     uint32_t offset = 0u, bytes;
     if (frame_clock) bytes = heard_span(buffer, now, background, &offset);
     else {
@@ -468,7 +478,6 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
         offset += count;
         if (offset == end) offset = buffer->model.loop_start_bytes;
     }
-    const uint32_t slot = (uint32_t)(buffer - buffers);
     if (failure) {
         if (!background) recomp_stop(2, "%s", failure);
         if (frame_clock) heard[slot].model.playing = 0u;

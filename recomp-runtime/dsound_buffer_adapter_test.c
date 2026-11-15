@@ -507,6 +507,39 @@ static void test_real_clock_output(void)
     now = 30; wall = 80; recomp_dsound_buffers_pump();
     CHECK(output.bytes == 40 && first_sample() == 30);
     CHECK(CALL(0x363641, handle) == 0);
+
+    /* A one-shot the guest finished first still plays its last span. */
+    fixture(1, 1, 0);
+    handle = create();
+    for (uint16_t i = 0; i < 100; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 200) == 0 && CALL(0x364802, handle, 0, 0, 0) == 0);
+    recomp_dsound_buffers_pump();
+    now = 10; wall = 10; recomp_dsound_buffers_pump();
+    now = 100; wall = 20; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 20 && first_sample() == 10);
+    CHECK(CALL(0x364882, handle, OUTPUT) == 0 && read32(OUTPUT) == 0);
+    wall = 110; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 160 && first_sample() == 20);
+    calls = output_calls;
+    wall = 130; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    CHECK(CALL(0x363641, handle) == 0);
+
+    /* After a mute over 100 ms a ring resumes at the guest's cursor. */
+    fixture(1, 1, 0);
+    handle = create();
+    for (uint16_t i = 0; i < 500; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 1000) == 0 && CALL(0x364802, handle, 0, 0, 1) == 0);
+    recomp_dsound_buffers_pump();
+    CHECK(CALL(0x3648da, handle, 0, 600, OUTPUT, OUTPUT + 4, OUTPUT + 8, OUTPUT + 12, 1) == 0);
+    CHECK(CALL(0x36363c, handle, DATA, 600, 0, 0) == 0);
+    recomp_dsound_buffer_set_output_suppressed(true);
+    now = 100; wall = 100; recomp_dsound_buffers_pump();
+    recomp_dsound_buffer_set_output_suppressed(false);
+    calls = output_calls;
+    now = 150; wall = 200; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    now = 160; wall = 210; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 20 && first_sample() == 150);
+    CHECK(CALL(0x363641, handle) == 0);
     recomp_dsound_buffer_set_frame_clock(false);
 }
 
