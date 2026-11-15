@@ -150,6 +150,12 @@ class MatchmakerTest(unittest.TestCase):
         self.send(listing(), JOINER_AT, mm.ADDR6_SECONDS + 5.0)
         self.assertEqual(self.server.v6, {})
 
+    def test_a_full_ipv6_table_still_refreshes_what_it_holds(self):
+        self.send(saying_v6(), HOST_AT6, 0.0)
+        self.server.v6.update((bytes(2) + i.to_bytes(6, "big"), (JOINER_AT6, 0.0)) for i in range(2 * mm.MAX_ROOMS))
+        self.send(saying_v6(), HOST_AT6, 15.0)
+        self.assertEqual(self.server.v6[nonce(HOST_AT)][1], 15.0)
+
     def test_ipv6_senders_may_only_list_and_say_their_address(self):
         self.assertEqual(self.send(hosting(), HOST_AT6, 0.0), [])
         self.assertEqual(self.server.rooms, {})

@@ -569,8 +569,14 @@ int netplay_receive_from(RecompNetplay *net, uint8_t *packet, size_t capacity,
             }
             /* The peer, at the IPv6 endpoint the server proved; it keeps its IPv4 identity above this. */
             if (m->candidate6_port == 0u || from6.sin6_port != m->candidate6_port ||
-                memcmp(&from6.sin6_addr, m->candidate6, 16u) != 0 || net->peer_port == 0u)
+                memcmp(&from6.sin6_addr, m->candidate6, 16u) != 0)
                 continue;
+            /* A host that dropped its quiet peer takes it back as relay_on does, or an IPv6-only pair never meets again. */
+            if (net->peer_port == 0u) {
+                if (!m->direct6 || m->candidate_port[0] == 0u) continue;
+                net->peer_address = m->candidate_address[0];
+                net->peer_port = m->candidate_port[0];
+            }
             if (!m->direct6) fprintf(stderr, "recomp netplay: the other player answers over IPv6\n");
             m->direct6 = true;
             m->relay = false;
@@ -633,7 +639,10 @@ bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t 
     if (port == 0u) return false;
     /* The server's IPv6 name is optional: without one, or without IPv6 here, matches stay on IPv4. */
     m->server6_port = m->has_socket6 && resolve6(host, m->server6) ? htons(port) : 0u;
-    if (!resolve(host, &m->server_address)) return m->server6_port != 0u;
+    if (!resolve(host, &m->server_address)) {
+        m->server6_port = 0u; /* ADDR6 alone cannot match: every other ask goes over IPv4 */
+        return false;
+    }
     m->server_port = htons(port);
     return true;
 }

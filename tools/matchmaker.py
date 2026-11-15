@@ -144,7 +144,8 @@ class Matchmaker:
             return refresh
         if kind == ADDR6:
             # shortcut: counted per address, so one /64 can fill the table; cap by prefix if that matters.
-            if len(self.v6) < 2 * MAX_ROOMS and not over(self.addr6_counts, sender[0], ADDR6_PER_SECOND):
+            # A full table still refreshes what it holds, so a flood of new nonces cannot expire everyone's.
+            if not over(self.addr6_counts, sender[0], ADDR6_PER_SECOND) and (nonce in self.v6 or len(self.v6) < 2 * MAX_ROOMS):
                 self.v6[nonce] = (sender, now)
             return refresh
         return self.relay(body, sender, now) + refresh

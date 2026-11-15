@@ -212,8 +212,7 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
     room->salt = 0u;
     room->held_until_ms = 0u;
     net->match.busy = false;
-    net->match.direct = false;
-    net->match.direct6 = false;
+    net->match.direct = false; /* direct6 stays, as relay does for a joiner: IPv6 may be the only path */
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;
         net->match.relay = false;

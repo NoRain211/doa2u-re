@@ -198,6 +198,15 @@ static bool matchRooms(std::uint16_t toHost, std::uint16_t toJoiner, int millise
     relayed = host.match.relay && joiner.match.relay;
     bool met = hostRoom.pinged && joinerRoom.pinged && std::strcmp(hostRoom.name, "JOINER") == 0 &&
         std::strcmp(joinerRoom.name, "HOST") == 0 && !host.match.punching && !joiner.match.punching;
+    if (met && v6ToHost != 0u) { // a host that drops its quiet IPv6-only peer seats it again
+        recomp_netplay_room_drop(&host, &hostRoom);
+        for (int i = 0; i < 30 && !hostRoom.joined; ++i) {
+            recomp_netplay_room_tick(&host, &hostRoom, digest, "HOST", false, false);
+            recomp_netplay_room_tick(&joiner, &joinerRoom, digest, "JOINER", false, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        met = hostRoom.joined && host.match.direct6 && joiner.match.direct6;
+    }
     // A late pairing for another player leaves the host's talking peer alone.
     const std::uint16_t peer = host.peer_port;
     const bool hostRelay = host.match.relay;
