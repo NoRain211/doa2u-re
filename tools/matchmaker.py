@@ -19,7 +19,7 @@ import time
 
 MAGIC = b"D2MM"
 VERSION = 2
-HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY, COOKIE = range(1, 11)
+HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY, COOKIE, ADDR6 = range(1, 12)
 TOKEN = 8  # a client's nonce and the server's cookie
 ASKED = 6 + 2 * TOKEN  # where a HOST, JOIN, LEAVE or RELAY body starts, after the nonce and cookie
 COOKIE_SECONDS = 60  # a cookie lasts this epoch and the next
@@ -37,6 +37,8 @@ RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while 
 RELAY_PER_ADDRESS = 2 * RELAY_PER_SECOND  # a second, so one address cannot relay through every pair it makes
 PAIRS_PER_ADDRESS = 16  # each lasts PAIR_SECONDS; without a cap one address adds 10 a second
 MAX_RELAY = 1200
+ADDR6_SECONDS = 20.0  # a client says ADDR6 with each HOST, JOIN and LIST
+ADDR6_PER_SECOND = 10  # per address
 
 HOST_BODY = struct.Struct(">64sBBB32s6sH")  # digest, delay, open, name length, name, LAN endpoint, round trip
 JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, LAN endpoint
@@ -48,9 +50,15 @@ def header(kind):
     return MAGIC + bytes((VERSION, kind))
 
 
+def is_v6(address):
+    return ":" in address[0]
+
+
 def endpoint(address):
-    """An IPv4 address and port as 6 bytes, in network order."""
-    return socket.inet_aton(address[0]) + struct.pack(">H", address[1])
+    """An IPv4 address and port as 6 bytes, or an IPv6 one as 18, in network order."""
+    host = address[0].partition("%")[0]
+    packed = socket.inet_pton(socket.AF_INET6, host) if is_v6(address) else socket.inet_aton(host)
+    return packed + struct.pack(">H", address[1])
 
 
 def lan_endpoint(lan):
@@ -63,8 +71,10 @@ def lan_endpoint(lan):
     return lan
 
 
-def peer(nonce, public, lan, name):
-    return header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0")
+def peer(nonce, public, lan, name, v6=None):
+    """v6, the other player's proven IPv6 endpoint, is appended only when both players have one."""
+    return (header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0") +
+            (endpoint(v6) if v6 else b""))
 
 
 def over(counts, address, cap):
@@ -93,6 +103,8 @@ class Matchmaker:
         self.claims = {}  # the room each joining address holds; one each, so one address cannot hide the list
         self.join_counts = {}  # JOINs per address since the last sweep
         self.relay_counts = {}  # RELAYs per address since the last sweep
+        self.addr6_counts = {}  # ADDR6s per address since the last sweep
+        self.v6 = {}  # a client's IPv6 endpoint by its nonce, proven by a cookie, and when it last said it
         self.room_counts, self.minute = {}, None  # rooms each address opened this minute
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
@@ -109,8 +121,10 @@ class Matchmaker:
         kind, nonce, cookie, body = data[5], data[6:6 + TOKEN], data[6 + TOKEN:ASKED], data[ASKED:]
         if kind == LIST and len(data) == LIST_BYTES:
             return self.list(data[6 + TOKEN:6 + TOKEN + DIGEST], sender, nonce, now)
+        if is_v6(sender) and kind not in (LIST, ADDR6):
+            return []  # everything else is answered over IPv4, so a room's endpoint stays one
         sizes = {HOST: len(body) == HOST_BODY.size, JOIN: len(body) == JOIN_BODY.size, LEAVE: not body,
-                 RELAY: len(body) <= MAX_RELAY}
+                 RELAY: len(body) <= MAX_RELAY, ADDR6: not body and is_v6(sender)}
         if len(data) < ASKED or not sizes.get(kind):
             return []
         # A forged sender address never sees its cookie, so nothing it asks for is stored.
@@ -127,6 +141,11 @@ class Matchmaker:
             return self.join(body, sender, nonce, now) + refresh
         if kind == LEAVE:
             self.remove(self.rooms.get(sender))
+            return refresh
+        if kind == ADDR6:
+            # shortcut: counted per address, so one /64 can fill the table; cap by prefix if that matters.
+            if len(self.v6) < 2 * MAX_ROOMS and not over(self.addr6_counts, sender[0], ADDR6_PER_SECOND):
+                self.v6[nonce] = (sender, now)
             return refresh
         return self.relay(body, sender, now) + refresh
 
@@ -192,8 +211,17 @@ class Matchmaker:
         # LAN endpoints only help two players behind one router; anyone else would learn a private address.
         # shortcut: carrier NAT can put two households on one public address; add a LAN probe if that matters.
         same_router = sender[0] == room.host[0]
-        return [(peer(room.nonce, sender, lan_endpoint(lan) if same_router else bytes(6), name[:length]), room.host),
-                (peer(nonce, room.host, room.lan if same_router else bytes(6), room.name), sender)]
+        # Both players need an IPv6 endpoint, or the one with it would send to a peer that never answers there.
+        theirs, mine = self.v6_of(nonce), self.v6_of(room.nonce)
+        both = theirs and mine
+        return [(peer(room.nonce, sender, lan_endpoint(lan) if same_router else bytes(6), name[:length],
+                      theirs if both else None), room.host),
+                (peer(nonce, room.host, room.lan if same_router else bytes(6), room.name, mine if both else None),
+                 sender)]
+
+    def v6_of(self, nonce):
+        known = self.v6.get(nonce)
+        return known[0] if known else None
 
     def relay(self, body, sender, now):
         pair = self.pairs.get(sender)
@@ -221,6 +249,9 @@ class Matchmaker:
         self.swept = now
         self.join_counts.clear()
         self.relay_counts.clear()
+        self.addr6_counts.clear()
+        for nonce in [nonce for nonce, (_, seen) in self.v6.items() if now - seen > ADDR6_SECONDS]:
+            del self.v6[nonce]
         if int(now // 60) != self.minute:
             self.minute = int(now // 60)
             self.room_counts.clear()
@@ -251,14 +282,25 @@ class Server(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, sender):
         for packet, target in self.matchmaker.handle(data, sender[:2], self.loop.time()):
-            self.transport.sendto(packet, target)
+            # An IPv6 answer goes to the sender's full 4-tuple; Windows' event loop rejects the short form.
+            self.transport.sendto(packet, sender if target == sender[:2] else target)
 
 
-async def serve(address, port, relay_only, status_seconds):
+async def serve(address, port, relay_only, status_seconds, address6="::"):
     loop = asyncio.get_running_loop()
     matchmaker = Matchmaker(relay_only=relay_only)
     await loop.create_datagram_endpoint(lambda: Server(matchmaker), local_addr=(address, port))
     print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}", flush=True)
+    if address6:
+        # Its own socket, v6 only, so the IPv4 socket keeps its endpoints and a v4-only host still starts.
+        try:
+            six = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            six.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            six.bind((address6, port))
+            await loop.create_datagram_endpoint(lambda: Server(matchmaker), sock=six)
+            print(f"matchmaker: UDP [{address6}]:{port}", flush=True)
+        except OSError as error:
+            print(f"matchmaker: no IPv6 ({error})", flush=True)
     if status_seconds <= 0:
         await asyncio.Event().wait()
     while True:
@@ -266,9 +308,9 @@ async def serve(address, port, relay_only, status_seconds):
         print(matchmaker.status(loop.time()), flush=True)
 
 
-def probe(host, port, timeout=3.0):
+def probe(host, port, timeout=3.0, family=socket.AF_INET):
     """Asks a matchmaker for its list; returns the answer's round trip in ms, or None without one."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ask:
+    with socket.socket(family, socket.SOCK_DGRAM) as ask:
         ask.settimeout(timeout)
         nonce = os.urandom(TOKEN)
         started = time.monotonic()
@@ -288,14 +330,16 @@ def main():
     parser.add_argument("--port", type=int, default=47700)
     parser.add_argument("--relay-only", action="store_true", help="relay every pair, so no player learns another's address")
     parser.add_argument("--status", type=float, default=60.0, help="seconds between status lines, 0 for none")
+    parser.add_argument("--address6", default="::", help="IPv6 address to bind, empty for IPv4 only")
     parser.add_argument("--probe", metavar="HOST:PORT", help="check that a running matchmaker answers, then exit")
+    parser.add_argument("--ipv6", action="store_true", help="probe over IPv6; HOST may be an address, so use the last colon for the port")
     arguments = parser.parse_args()
     if arguments.probe:
-        host, _, port = arguments.probe.partition(":")
-        took = probe(host, int(port or 47700))
+        host, _, port = arguments.probe.rpartition(":") if arguments.ipv6 else arguments.probe.partition(":")
+        took = probe(host.strip("[]"), int(port or 47700), family=socket.AF_INET6 if arguments.ipv6 else socket.AF_INET)
         print(f"{arguments.probe}: " + (f"answered in {took:.0f} ms" if took is not None else "no answer"))
         sys.exit(0 if took is not None else 1)
-    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status))
+    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status, arguments.address6))
 
 
 if __name__ == "__main__":

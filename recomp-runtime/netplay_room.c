@@ -188,6 +188,7 @@ void recomp_netplay_room_tick(RecompNetplay *net, RecompNetplayRoom *room, const
     /* Sending first opens this side's router for the other's answer. */
     for (unsigned i = 0u; i < 2u; ++i)
         if (m->candidate_port[i] != 0u) netplay_send_raw(net, m->candidate_address[i], m->candidate_port[i], packet, ROOM_BYTES);
+    netplay_punch6(net, packet, ROOM_BYTES);
 }
 
 void recomp_netplay_room_say(RecompNetplayRoom *room, const char *text)
@@ -212,6 +213,7 @@ void recomp_netplay_room_drop(RecompNetplay *net, RecompNetplayRoom *room)
     room->held_until_ms = 0u;
     net->match.busy = false;
     net->match.direct = false;
+    net->match.direct6 = false;
     if (room->hosting) { /* let another player in */
         net->peer_port = 0u;
         net->match.relay = false;
