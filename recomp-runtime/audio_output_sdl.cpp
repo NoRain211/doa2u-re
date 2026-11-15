@@ -143,6 +143,8 @@ VoiceRouting defaultRouting(uint32_t channels, uint32_t speakers)
 {
     VoiceRouting route{};
     route.channels = channels;
+    /* Only mono and stereo voices go unrouted today; the 2.1 rows keep SDL's
+       mapping should submit ever take one, as it accepts up to 3 channels. */
     const float front = channels == 3 && speakers == 2 ? 0.8f : 1.0f;
     for (uint32_t speaker = 0; speaker < 2; ++speaker)
         route.dry[(channels == 1 ? 0 : speaker) + speaker * channels] = front;
@@ -519,14 +521,13 @@ extern "C" void recomp_audio_output_submit(
         /* A voice arrives as the float its dry matrix produces (32-bit input
            is IEEE float, 1.0 full scale: the HRTF mix); the wet stream stays
            stereo because the reverb device is. */
-        const SDL_AudioFormat format = SDL_AUDIO_F32;
-        voice.stream = openStream(audio_device, format, speakers, sample_rate);
+        voice.stream = openStream(audio_device, SDL_AUDIO_F32, speakers, sample_rate);
         if (!voice.stream) {
             dropBuffer(slot, "create-stream");
             return;
         }
         if (wet_send && reverb_device != 0) {
-            voice.wet_stream = openStream(reverb_device, format, 2u, sample_rate);
+            voice.wet_stream = openStream(reverb_device, SDL_AUDIO_F32, 2u, sample_rate);
             if (!voice.wet_stream) {
                 dropBuffer(slot, "create-wet-stream");
                 destroyVoice(voice);

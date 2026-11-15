@@ -155,6 +155,44 @@ int main()
         CHECK(largest > 0.0f && largest < 0.01f);
     }
 
+    // An unrouted mono voice (the hit voices) reaches front left and right
+    // alike, as SDL's own mono conversion did, and no other speaker (#212, #217).
+    recomp_audio_output_test_reset();
+    char mono_capture[] = "/tmp/recomp_mono_route_XXXXXX";
+    const int mono_fd = mkstemp(mono_capture);
+    CHECK(mono_fd >= 0);
+    close(mono_fd);
+    unlink(mono_capture);  // the capture never overwrites a file
+    setenv("RECOMP_AUDIO_CAPTURE", mono_capture, 1);
+    setenv("RECOMP_AUDIO_SURROUND", "1", 1);
+    recomp_audio_output_initialize();
+    CHECK(recomp_audio_output_enabled() != 0);
+    std::vector<float> mono(4800, 0.5f);  // 100 ms of DC
+    recomp_audio_output_submit(257, reinterpret_cast<const uint8_t *>(mono.data()),
+        static_cast<uint32_t>(mono.size() * sizeof(float)), 48000, 1, 32, 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    recomp_audio_output_shutdown();
+    unsetenv("RECOMP_AUDIO_SURROUND");
+    unsetenv("RECOMP_AUDIO_CAPTURE");
+    FILE *mono_wav = std::fopen(mono_capture, "rb");
+    CHECK(mono_wav != nullptr);
+    uint16_t capture_channels = 0;
+    std::fseek(mono_wav, 22, SEEK_SET);
+    CHECK(std::fread(&capture_channels, sizeof capture_channels, 1, mono_wav) == 1);
+    CHECK(capture_channels >= 2 && capture_channels <= 8);
+    std::fseek(mono_wav, 44, SEEK_SET);
+    float speaker[8];
+    int fronts = 0;
+    bool elsewhere = false;
+    while (std::fread(speaker, sizeof(float), capture_channels, mono_wav) == capture_channels) {
+        if (speaker[0] > 0.1f && std::fabs(speaker[0] - speaker[1]) < 1e-6f) ++fronts;
+        for (uint16_t c = 2; c < capture_channels; ++c) elsewhere |= speaker[c] != 0.0f;
+    }
+    std::fclose(mono_wav);
+    unlink(mono_capture);
+    CHECK(fronts > 1000);
+    CHECK(!elsewhere);
+
     // The ramp eases linearly over its quantum however the chunks split it,
     // and a change mid-ramp restarts from the level it had reached.
     RecompMatrixRamp ramp{};
