@@ -289,11 +289,11 @@ decompiler output, generated C and retail bytes stay under `private/`.
 <!-- function-status-grid:start -->
 | Area | Named | Decompiled | Bound / tested | Total | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Game | 157 | 46 | 3 | 206 | 24% |
-| CRI middleware | 15 | 0 | 15 | 30 | 50% |
-| SDK / CRT | 138 | 131 | 4 | 273 | 49% |
-| Untagged | 521 | 131 | 1 | 653 | 20% |
-| **Total** | **831** | **308** | **23** | **1,162** | **28%** |
+| Game | 157 | 67 | 31 | 255 | 38% |
+| CRI middleware | 15 | 1 | 17 | 33 | 55% |
+| SDK / CRT | 138 | 131 | 5 | 274 | 50% |
+| Untagged | 521 | 132 | 1 | 654 | 20% |
+| **Total** | **831** | **331** | **54** | **1,216** | **32%** |
 <!-- function-status-grid:end -->
 
 Statuses are exclusive; progress counts decompiled, bound and tested. The

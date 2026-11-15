@@ -199,6 +199,8 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
+add_executable(recomp_game_decomp_test game_decomp.c game_decomp_test.c)
+add_test(NAME recomp-runtime-game-decomp COMMAND recomp_game_decomp_test)
 add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
 add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
 
@@ -680,6 +682,8 @@ if(RECOMP_PROGRAM_DIR)
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
     add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c netplay_guest.c
+        game_decomp.c game_render_xform.c game_render_mesh.c game_render_state.c game_fighter_mesh.c game_fighter_pose.c game_math.c
+        game_render_draw.c game_library_hot.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c

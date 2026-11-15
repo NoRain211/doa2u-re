@@ -11,6 +11,7 @@
 #include "dsound_api_adapter.h"
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
+#include "game_decomp.h"
 #include "input_adapter.h"
 #include "kernel_abi.h"
 #include "mwply_adapter.h"
@@ -215,6 +216,8 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
 {
     RecompFunction stage = recomp_stage_select_lookup_manual(guest_address);
     if (stage != NULL) return stage;
+    RecompFunction decomp = recomp_game_decomp_lookup_manual(guest_address);
+    if (decomp != NULL) return decomp;
     if (guest_address == 0x000d92c0u) return skip_startup_legal;
     if (recomp_skip_intro && guest_address == 0x000d9300u) return skip_startup_logo;
     if (recomp_skip_intro && guest_address == 0x00069180u) return movie_scene_tick;
