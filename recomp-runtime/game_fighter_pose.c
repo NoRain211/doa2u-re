@@ -50,14 +50,14 @@ static void vec3_cross(const float *a, const float *b, float *out)
 /* 0x282ef0: the CRT's fast sqrtf, rsqrtss plus one correction step. Call the
    guest body so the approximation is the one every peer produces; it takes one
    float argument on the stack and returns the result in st(0). */
-static float guest_sqrtf(float value)
+static float guest_sqrtf(uint32_t return_address, float value)
 {
     uint32_t argument;
     unsigned top;
     float result;
 
     memcpy(&argument, &value, sizeof argument);
-    kernel_call_guest(0x00282ef0u, &argument, 1u);
+    kernel_call_guest_at(return_address, 0x00282ef0u, &argument, 1u);
     top = recomp_runtime.fpu_top;
     result = (float)recomp_runtime.fpu_stack[top];
     recomp_runtime.fpu_top = (top + 1u) & 7u;
@@ -91,10 +91,16 @@ static uint32_t mt_next_u32_body(void)
     uint32_t value;
 
     mt->left = left;
+    /* 0x1fef0: PUSH ESI, which stays below ESP after the return. */
+    *recomp_memory_u32(recomp_runtime.registers.esp - 4u) = recomp_runtime.registers.esi;
     if (left == 0u) {
         /* The reload rewrites the array, the counter and the cursor. */
+        const uint32_t entry = recomp_runtime.registers.esp;
+
         recomp_runtime.registers.ecx = object;
-        kernel_call_guest(0x0001fe30u, NULL, 0u);
+        recomp_runtime.registers.esp = entry - 4u;
+        kernel_call_guest_at(0x0001ff00u, 0x0001fe30u, NULL, 0u);
+        recomp_runtime.registers.esp = entry;
         mt = (Mt19937State *)recomp_memory(object, sizeof *mt);
     }
     cursor = mt->cursor;
@@ -111,9 +117,11 @@ static uint32_t mt_next_u32_body(void)
    One handler of the pose constraint list at 0x64c79c. The axis index says
    which component the circle is perpendicular to; that component is clamped to
    [low, high] first, then the two plane offsets and the clamped one are pushed
-   out to the radius. Only the position is written: the guest keeps the clamped
-   axis offset in its own argument slot, so no caller-owned memory changes.
-   Returns 1 when it moved the point. cdecl, (float *position, params *), ret 0. */
+   out to the radius. Besides the position it leaves a stack image later code
+   can read: the axis offset over its second argument slot, its saved
+   registers, the two plane offsets, the distance, and the sqrt call's argument
+   and return address. Returns 1 when it moved the point. cdecl,
+   (float *position, params *), ret 0. */
 typedef struct PoseCircleConstraint {
     float axis;    /* +0x00: 0, 1 or 2, read through cvttss2si */
     float centre1; /* +0x04: plane offset of the "across1" component */
@@ -146,10 +154,28 @@ static uint32_t pose_circle_constraint_body(void)
         offset_normal = position[normal] - circle->low;
     }
 
-    /* The guest parks this offset in its own argument slot, which is stack: no
-       caller-owned memory is written here. */
-    length2 = offset_normal * offset_normal + offset2 * offset2 + offset1 * offset1;
-    distance = guest_sqrtf(length2);
+    /* 0x4c4d0: SUB ESP,0xc then PUSH EBX, EBP, ESI, EDI; the plane offsets
+       go to the frame, the axis offset over the params argument. */
+    {
+        const uint32_t entry = recomp_runtime.registers.esp;
+        uint32_t *const frame = (uint32_t *)(void *)recomp_memory(entry - 0x1cu, 0x1cu);
+        uint32_t bits;
+
+        frame[3] = recomp_runtime.registers.ebx;
+        frame[2] = recomp_runtime.registers.ebp;
+        frame[1] = recomp_runtime.registers.esi;
+        frame[0] = recomp_runtime.registers.edi;
+        memcpy(&frame[5], &offset1, sizeof offset1);
+        memcpy(&frame[6], &offset2, sizeof offset2);
+        memcpy(&bits, &offset_normal, sizeof bits);
+        *recomp_memory_u32(entry + 8u) = bits;
+
+        length2 = offset_normal * offset_normal + offset2 * offset2 + offset1 * offset1;
+        recomp_runtime.registers.esp = entry - 0x1cu;
+        distance = guest_sqrtf(0x0004c585u, length2);
+        recomp_runtime.registers.esp = entry;
+        memcpy(&frame[4], &distance, sizeof distance); /* FSTP [ESP+0x14] */
+    }
     if (!(circle->radius > distance)) return 0u;
     scale = 1.0f;
     if (distance != 0.0f) scale = (circle->radius - distance) / distance;
@@ -251,7 +277,7 @@ static uint32_t fighter_pose_constraints_apply_body(void)
             pose_transform_point(world, local);
             changed = 0u;
         }
-        kernel_call_guest(handler, handler_args, 2u);
+        kernel_call_guest_at(0x0004c094u, handler, handler_args, 2u);
         changed |= recomp_runtime.registers.eax;
 
         command += 0x1cu;
@@ -328,6 +354,9 @@ static uint32_t fighter_segment_triangle_score_body(void)
        below our frame, where the original kept its own; nothing reads them
        after the call. Layout: crossing point (4 floats), direction, start, then
        the two triangle edges the callee re-derives its normal from. */
+    /* shortcut: the original builds these in its 0x98-byte frame and calls
+       0x2e040 from entry-0xc0, so the callee's spills land elsewhere here;
+       reproduce that frame if a mixed-build check ever diverges below it. */
     scratch = esp_in - 0x50u;
     work = (float *)recomp_memory(scratch, 16u * sizeof(float));
     for (unsigned i = 0u; i < 3u; ++i) {
@@ -344,7 +373,7 @@ static uint32_t fighter_segment_triangle_score_body(void)
     crossing_args[5] = v4_address;
     saved_esp = recomp_runtime.registers.esp;
     recomp_runtime.registers.esp = scratch;
-    kernel_call_guest(0x0002e040u, crossing_args, 6u);
+    kernel_call_guest_at(0x0002e370u, 0x0002e040u, crossing_args, 6u);
     recomp_runtime.registers.esp = saved_esp;
     crossings = recomp_runtime.registers.eax;
     if (crossings == 0u) return 0u;

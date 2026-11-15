@@ -1154,12 +1154,17 @@ Exactness covers more than the result:
 - SSE math is single precision in the original order; x87 math is double,
   rounded where the original stores.
 
+`game_library_hot.c` is a temporary exception to replacing library code
+wholesale: it holds exact copies of the CRI ADX decoder (`0x30bf90`,
+`0x30c280`) and the SDK matrix multiply (`0x2bffba`) until native
+replacements exist, because both are hot in rollback re-runs.
+
 These functions stay lifted:
 
 - `world_matrix_orthonormalize` (`0x63630`) and `node_list_transform`
   (`0x63780`): the leftover-stack lane above reaches `g_matrix_current`.
 - `bone_segment_distance` (`0x144940`) and `sweep_triangle_callback`
-  (`0x14a6c0`): not yet exact.
+  (`0x14a6c0`): not yet exact; no replacement is kept.
 - `fighter_cloth_strand_update` (`0x51f20`) and `fighter_strand_update`
   (`0x591a0`): not yet decompiled.
 

@@ -233,9 +233,11 @@ static void load_vec4(uint32_t address, float value[4])
 /* Calls a guest routine with the guest stack pointer at the depth the
    original's pushes put it, then restores the caller's pointer. The callee
    spills below that pointer and game code reads such leftover bytes, so the
-   depth is part of the behaviour. */
-static uint32_t call_guest_from(uint32_t stack, uint32_t address, uint32_t ecx,
-    uint32_t edx, const uint32_t *arguments, unsigned count)
+   depth, and the original CALL's return address it pushes, are part of the
+   behaviour. */
+static uint32_t call_guest_from(uint32_t return_address, uint32_t stack,
+    uint32_t address, uint32_t ecx, uint32_t edx, const uint32_t *arguments,
+    unsigned count)
 {
     const uint32_t saved = recomp_runtime.registers.esp;
     uint32_t result;
@@ -243,7 +245,7 @@ static uint32_t call_guest_from(uint32_t stack, uint32_t address, uint32_t ecx,
     recomp_runtime.registers.esp = stack;
     recomp_runtime.registers.ecx = ecx;
     recomp_runtime.registers.edx = edx;
-    kernel_call_guest(address, arguments, count);
+    kernel_call_guest_at(return_address, address, arguments, count);
     result = recomp_runtime.registers.eax;
     recomp_runtime.registers.esp = saved;
     return result;
@@ -362,7 +364,7 @@ static void fighter_vertex_chain_constrain(void)
 
         frame_set_u32(frame, CHAIN_VERTEX_BUFFER, arguments[0]);
         frame_set_u32(frame, CHAIN_INDEX_LIST, guest_u32(chain + 4u));
-        vertex_buffer = call_guest_from(frame_address - 0x0cu, 0x00346190u,
+        vertex_buffer = call_guest_from(0x0004fdd2u, frame_address - 0x0cu, 0x00346190u,
             0u, 0u, arguments, 2u);
     }
     /* The original reuses its own argument slot for that pointer. */
@@ -478,9 +480,9 @@ static void fighter_vertex_chain_constrain(void)
                 arguments[0] = frame_address + CHAIN_DELTA;
                 arguments[1] = frame_address + CHAIN_DELTA + 0x10u;
                 arguments[2] = frame_address + CHAIN_CROSS;
-                (void)call_guest_from(frame_address - 0x0cu, 0x00283ac0u,
+                (void)call_guest_from(0x0004ff44u, frame_address - 0x0cu, 0x00283ac0u,
                     0u, 0u, arguments, 3u);
-                (void)call_guest_from(frame_address - 0x0cu, 0x00283840u,
+                (void)call_guest_from(0x0004ff50u, frame_address - 0x0cu, 0x00283840u,
                     frame_address + CHAIN_CROSS, 0u, NULL, 0u);
                 for (uint32_t slot = 0; slot < 3u; ++slot) {
                     float *target = (float *)(void *)recomp_memory(
@@ -513,7 +515,7 @@ static void fighter_vertex_chain_constrain(void)
             frame_u32(frame, CHAIN_VERTEX_BUFFER), 0x20u
         };
 
-        vertex_buffer = call_guest_from(frame_address - 0x0cu, 0x00346190u,
+        vertex_buffer = call_guest_from(0x0005000du, frame_address - 0x0cu, 0x00346190u,
             0u, 0u, arguments, 2u);
     }
     *recomp_memory_u32(object_slot) = vertex_buffer;
@@ -527,7 +529,7 @@ static void fighter_vertex_chain_constrain(void)
 
             groups += 4u;
             if (repeats != 0u) {
-                (void)call_guest_from(frame_address - 0x0cu, 0x00283840u,
+                (void)call_guest_from(0x00050036u, frame_address - 0x0cu, 0x00283840u,
                     slot_address, 0u, NULL, 0u);
                 for (int32_t repeat = 0; repeat < (int32_t)repeats; ++repeat) {
                     store_vec3(vertex_buffer + guest_u32(groups),
@@ -620,12 +622,12 @@ static void fighter_strand_skin_chain(void)
 
         *recomp_memory_u32(frame_address - 0x0cu) = recomp_runtime.registers.ebp;
         *recomp_memory_u32(frame_address - 0x10u) = recomp_runtime.registers.edi;
-        (void)call_guest_from(stack, 0x00283ea0u, strand_axis_matrix(strand),
+        (void)call_guest_from(0x00050575u, stack, 0x00283ea0u, strand_axis_matrix(strand),
             0u, NULL, 0u);
         source = guest_u32(strand + 0x48u) + 0x10u;
         target = frame_address + STRAND_ROTATED_AXES;
         for (int32_t segment = segments; segment > 0; --segment) {
-            (void)call_guest_from(stack, 0x00284370u, source, target, NULL, 0u);
+            (void)call_guest_from(0x00050599u, stack, 0x00284370u, source, target, NULL, 0u);
             target += 0x10u;
             source += 0x40u;
         }
@@ -650,7 +652,7 @@ static void fighter_strand_skin_chain(void)
 
             frame_set_u32(frame, STRAND_AXES,
                 frame_address + STRAND_ROTATED_AXES);
-            vertex_buffer = call_guest_from(stack, 0x00346190u, 0u, 0u,
+            vertex_buffer = call_guest_from(0x00050603u, stack, 0x00346190u, 0u, 0u,
                 arguments, 2u);
         }
         frame_set_u32(frame, STRAND_COUNT, (uint32_t)segments);
@@ -700,7 +702,7 @@ static void fighter_strand_skin_chain(void)
                    chain. */
                 arguments[0] = frame_address + STRAND_DIRECTION;
                 arguments[1] = 0xbf800000u;
-                (void)call_guest_from(stack, 0x00283b80u, 0u, 0u, arguments,
+                (void)call_guest_from(0x000506b8u, stack, 0x00283b80u, 0u, 0u, arguments,
                     2u);
 
                 /* The side vector of the segment is (0, -z, y) of the
@@ -716,7 +718,7 @@ static void fighter_strand_skin_chain(void)
                 frame_set_f32(frame, STRAND_SIDE + 8u,
                     frame_f32(frame, STRAND_DIRECTION + 4u) -
                         frame_f32(frame, STRAND_DIRECTION) * 0.0f);
-                (void)call_guest_from(stack, 0x00283840u,
+                (void)call_guest_from(0x0005070cu, stack, 0x00283840u,
                     frame_address + STRAND_SIDE, 0u, NULL, 0u);
                 frame_set_f32(frame, STRAND_SIDE + 0x0cu, 0.0f);
                 {
@@ -764,7 +766,7 @@ static void fighter_strand_skin_chain(void)
 
                         indices += 4u;
                         if (index != 0xffffffffu) {
-                            (void)call_guest_from(stack, 0x002842c0u,
+                            (void)call_guest_from(0x0005084au, stack, 0x002842c0u,
                                 positions, frame_address + STRAND_POINT,
                                 NULL, 0u);
                             if ((index & 1u) != 0u) {
@@ -798,7 +800,7 @@ static void fighter_strand_skin_chain(void)
         if (chain != 0u) {
             const uint32_t arguments[2] = { object, chain };
 
-            (void)call_guest_from(frame_address - 0x08u, 0x0004fd00u, 0u, 0u,
+            (void)call_guest_from(0x000508d8u, frame_address - 0x08u, 0x0004fd00u, 0u, 0u,
                 arguments, 2u);
         }
     }
@@ -806,11 +808,11 @@ static void fighter_strand_skin_chain(void)
     /* A leading id of -1 publishes the root matrix, moves it by the root
        position and lets the object update itself. */
     if (guest_u16(guest_u32(strand + 0x50u)) == 0xffffu) {
-        (void)call_guest_from(frame_address - 0x08u, 0x00283ea0u,
+        (void)call_guest_from(0x0005091bu, frame_address - 0x08u, 0x00283ea0u,
             strand_bone_matrix(strand), 0u, NULL, 0u);
-        (void)call_guest_from(frame_address - 0x08u, 0x00284070u,
+        (void)call_guest_from(0x00050923u, frame_address - 0x08u, 0x00284070u,
             strand + 0x14u, 0u, NULL, 0u);
-        (void)call_guest_from(frame_address - 0x08u, 0x00288aa0u, object, 0u,
+        (void)call_guest_from(0x0005092au, frame_address - 0x08u, 0x00288aa0u, object, 0u,
             NULL, 0u);
     }
     kernel_return_caller_cleanup(0u);

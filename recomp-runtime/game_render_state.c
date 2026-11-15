@@ -211,24 +211,6 @@ static double fp_precision(double value)
         ? value : (double)(float)value;
 }
 
-/* kernel_call_guest with the original CALL's return address in the pushed
-   slot instead of 0. The word stays below ESP after the call, and later game
-   code copies such leftover stack words into guest RAM that peers compare. */
-static void call_guest(uint32_t return_address, uint32_t guest_address,
-    const uint32_t *arguments, unsigned count)
-{
-    const uint32_t saved_esp = recomp_runtime.registers.esp;
-
-    for (unsigned i = count; i > 0u; --i) {
-        recomp_runtime.registers.esp -= 4u;
-        *recomp_memory_u32(recomp_runtime.registers.esp) = arguments[i - 1u];
-    }
-    recomp_runtime.registers.esp -= 4u;
-    *recomp_memory_u32(recomp_runtime.registers.esp) = return_address;
-    recomp_dispatch_indirect_site(guest_address, saved_esp, __FILE__, __LINE__);
-    recomp_runtime.registers.esp = saved_esp;
-}
-
 /* bind_material and bind_material_stages open with PUSH EBX, EBP, ESI, EDI
    and make every call below those four words; the words and the callees'
    return addresses stay below ESP, where later game code copies such leftover
@@ -261,7 +243,7 @@ static uint32_t round_to_integer(double value)
 
     recomp_runtime.fpu_stack[top] = value;
     recomp_runtime.fpu_top = top;
-    call_guest(0x00286e38u, CRT_FTOL, NULL, 0u);
+    kernel_call_guest_at(0x00286e38u, CRT_FTOL, NULL, 0u);
     return recomp_runtime.registers.eax;
 }
 
@@ -279,14 +261,14 @@ static void set_texture(uint32_t return_address, uint32_t stage, uint32_t textur
 {
     const uint32_t arguments[2] = {stage, texture};
 
-    call_guest(return_address, SDK_SET_TEXTURE, arguments, 2u);
+    kernel_call_guest_at(return_address, SDK_SET_TEXTURE, arguments, 2u);
 }
 
 static void set_texcoord_index(uint32_t return_address, uint32_t stage, uint32_t value)
 {
     const uint32_t arguments[2] = {stage, value};
 
-    call_guest(return_address, SDK_SET_TEXCOORD_INDEX, arguments, 2u);
+    kernel_call_guest_at(return_address, SDK_SET_TEXCOORD_INDEX, arguments, 2u);
 }
 
 /* Guest 0x00286790(ECX = bounding sphere {x, y, z, radius}): 1 when the sphere
@@ -438,7 +420,7 @@ static void bind_material_stages(void)
             if (arg1 == D3DTA_TFACTOR) {
                 const uint32_t arguments[1] = {packed_texture_factor()};
 
-                call_guest(0x00286e46u, SDK_SET_TEXTURE_FACTOR, arguments, 1u);
+                kernel_call_guest_at(0x00286e46u, SDK_SET_TEXTURE_FACTOR, arguments, 1u);
                 cache->alpha_op = 0xffu;
             }
         }
@@ -538,14 +520,14 @@ static void bind_material(void)
 
             recomp_runtime.registers.ecx = RENDER_STATE_NORMALIZE_NORMALS;
             recomp_runtime.registers.edx = value;
-            call_guest(0x00286c54u, SDK_SET_RENDER_STATE_SIMPLE, NULL, 0u);
+            kernel_call_guest_at(0x00286c54u, SDK_SET_RENDER_STATE_SIMPLE, NULL, 0u);
             *recomp_memory_u32(DEFERRED_NORMALIZE_NORMALS) = value;
         }
         if ((changed & 0x80000003u) != 0u) {
             const uint32_t arguments[1] = {
                 *recomp_memory_u32(MATERIAL_CULL_TABLE + (flags & 3u) * 4u)};
 
-            call_guest(0x00286c74u, SDK_SET_CULL_MODE, arguments, 1u);
+            kernel_call_guest_at(0x00286c74u, SDK_SET_CULL_MODE, arguments, 1u);
         }
         *recomp_memory_u32(MATERIAL_FLAGS_BOUND) = flags;
     }
@@ -570,13 +552,13 @@ static void bind_material(void)
         const float opacity = load_f32(MATERIAL_OPACITY);
 
         if (opacity == load_f32(MATERIAL_OPAQUE)) {
-            call_guest(0x00286d25u, SDK_SET_MATERIAL, arguments, 1u);
+            kernel_call_guest_at(0x00286d25u, SDK_SET_MATERIAL, arguments, 1u);
         } else {
             const float saved = load_f32(material + MATERIAL_SPECULAR_POWER);
 
             store_f32(entry + 4u, saved); /* the original keeps it over its argument */
             store_f32(material + MATERIAL_SPECULAR_POWER, saved * opacity);
-            call_guest(0x00286d0au, SDK_SET_MATERIAL, arguments, 1u);
+            kernel_call_guest_at(0x00286d0au, SDK_SET_MATERIAL, arguments, 1u);
             store_f32(material + MATERIAL_SPECULAR_POWER, saved);
         }
     }
@@ -620,17 +602,17 @@ static void draw_mesh_chunk(void)
 
         arguments[0] = *recomp_memory_u32(MESH_ID_SHADER + binding * 8u) ^
             *recomp_memory_u32(MESH_SHADER_HANDLE + shader * 8u);
-        call_guest(0x00287045u, SDK_SET_VERTEX_SHADER, arguments, 1u);
+        kernel_call_guest_at(0x00287045u, SDK_SET_VERTEX_SHADER, arguments, 1u);
 
         arguments[0] = 0u;
         arguments[1] = *recomp_memory_u32(stream + MESH_STREAM_DATA);
         arguments[2] = *recomp_memory_u32(MESH_ID_OFFSET + binding * 8u) +
             *recomp_memory_u32(MESH_SHADER_OFFSET + shader * 8u);
-        call_guest(0x0028705du, SDK_SET_STREAM_SOURCE, arguments, 3u);
+        kernel_call_guest_at(0x0028705du, SDK_SET_STREAM_SOURCE, arguments, 3u);
 
         arguments[0] = *recomp_memory_u32(stream + MESH_STREAM_INDICES);
         arguments[1] = 0u;
-        call_guest(0x00287068u, SDK_SET_INDICES, arguments, 2u);
+        kernel_call_guest_at(0x00287068u, SDK_SET_INDICES, arguments, 2u);
         *recomp_memory_u32(MESH_BOUND_ID) = binding;
     }
 
@@ -645,7 +627,7 @@ static void draw_mesh_chunk(void)
         /* The original has dropped the rebinding registers by now, so the draw
            leaves its arguments two words higher. */
         recomp_runtime.registers.esp = entry - 8u;
-        call_guest(0x0028708bu, SDK_DRAW_INDEXED, arguments, 3u);
+        kernel_call_guest_at(0x0028708bu, SDK_DRAW_INDEXED, arguments, 3u);
     }
 
     recomp_runtime.registers.esp = entry;

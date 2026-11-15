@@ -182,6 +182,12 @@ static void matrix_4x4_multiply(void)
     kernel_return(3u, output_address);
 }
 
+/* Temporary seam: CRI ADX and the SDK's matrix multiply are library code,
+   which AGENTS.md replaces wholesale rather than decompiles. No native ADX
+   or D3DX replacement exists yet, and both are hot in rollback re-runs, so
+   these exact copies stand in until one does; that replacement must keep
+   their guest RAM writes. sub_0030BC30 is the lifted mono decoder the
+   dispatcher reaches by a tail jump, so it binds to the lifter's name. */
 RecompFunction recomp_library_hot_lookup_manual(uint32_t address)
 {
     switch (address) {

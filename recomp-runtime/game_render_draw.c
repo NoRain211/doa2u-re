@@ -171,9 +171,11 @@ static RecompFunction render_callee(unsigned callee)
 }
 
 /* Enters a callee the way its CALL site left the stack - arguments above the
-   return address - and puts ESP back afterwards, so a callee that cleans its
-   own arguments and one that leaves them both work. */
-static uint32_t render_invoke(unsigned callee, const uint32_t *arguments, unsigned count)
+   original CALL's return address - and puts ESP back afterwards, so a callee
+   that cleans its own arguments and one that leaves them both work. The
+   return address stays below ESP, where later game code reads leftover stack. */
+static uint32_t render_invoke(uint32_t return_address, unsigned callee,
+    const uint32_t *arguments, unsigned count)
 {
     const RecompFunction target = render_callee(callee);
     const uint32_t saved_esp = recomp_runtime.registers.esp;
@@ -184,77 +186,77 @@ static uint32_t render_invoke(unsigned callee, const uint32_t *arguments, unsign
         *recomp_memory_u32(recomp_runtime.registers.esp) = arguments[i - 1u];
     }
     recomp_runtime.registers.esp -= 4u;
-    *recomp_memory_u32(recomp_runtime.registers.esp) = 0u; /* return address */
+    *recomp_memory_u32(recomp_runtime.registers.esp) = return_address;
     target();
     recomp_runtime.registers.esp = saved_esp;
     return recomp_runtime.registers.eax;
 }
 
 /* 0x00286790 (fastcall): is the sphere at ECX inside the view cone. */
-static uint32_t render_sphere_visible(uint32_t sphere)
+static uint32_t render_sphere_visible(uint32_t ret, uint32_t sphere)
 {
     recomp_runtime.registers.ecx = sphere;
-    return render_invoke(CALLEE_SPHERE_VISIBLE, NULL, 0u);
+    return render_invoke(ret, CALLEE_SPHERE_VISIBLE, NULL, 0u);
 }
 
 /* 0x00286c00: bind the block's material and the render states it changes. */
-static void render_apply_material(uint32_t block)
+static void render_apply_material(uint32_t ret, uint32_t block)
 {
-    render_invoke(CALLEE_APPLY_MATERIAL, &block, 1u);
+    render_invoke(ret, CALLEE_APPLY_MATERIAL, &block, 1u);
 }
 
 /* 0x00286d30: bind `count` material stages, the stages being at EAX - this
    routine takes its array through a register, so its caller loads one. */
-static void render_bind_stages(uint32_t stages, uint32_t count)
+static void render_bind_stages(uint32_t ret, uint32_t stages, uint32_t count)
 {
     recomp_runtime.registers.eax = stages;
-    render_invoke(CALLEE_BIND_STAGES, &count, 1u);
+    render_invoke(ret, CALLEE_BIND_STAGES, &count, 1u);
 }
 
 /* 0x00287000: bind the vertex stream and indices the record names, then draw. */
-static void render_draw_record(uint32_t record)
+static void render_draw_record(uint32_t ret, uint32_t record)
 {
-    render_invoke(CALLEE_DRAW_RECORD, &record, 1u);
+    render_invoke(ret, CALLEE_DRAW_RECORD, &record, 1u);
 }
 
 /* 0x002871c0: append the block to the depth-sorted list at `list`. It takes
    the block through EBX, like its caller here, and returns the next block. */
-static uint32_t render_queue_block(uint32_t block, uint32_t flags, uint32_t list)
+static uint32_t render_queue_block(uint32_t ret, uint32_t block, uint32_t flags, uint32_t list)
 {
     const uint32_t arguments[2] = {flags, list};
 
     recomp_runtime.registers.ebx = block;
-    return render_invoke(CALLEE_QUEUE_BLOCK, arguments, 2u);
+    return render_invoke(ret, CALLEE_QUEUE_BLOCK, arguments, 2u);
 }
 
 /* 0x00287440: append the block in EBX to the deferred list, no stack arguments. */
-static uint32_t render_queue_deferred(uint32_t block)
+static uint32_t render_queue_deferred(uint32_t ret, uint32_t block)
 {
     recomp_runtime.registers.ebx = block;
-    return render_invoke(CALLEE_QUEUE_DEFERRED, NULL, 0u);
+    return render_invoke(ret, CALLEE_QUEUE_DEFERRED, NULL, 0u);
 }
 
-static void render_sort_list(uint32_t list)
+static void render_sort_list(uint32_t ret, uint32_t list)
 {
-    render_invoke(CALLEE_SORT_LIST, &list, 1u);
+    render_invoke(ret, CALLEE_SORT_LIST, &list, 1u);
 }
 
-static void render_promote_near_blocks(void)
+static void render_promote_near_blocks(uint32_t ret)
 {
-    render_invoke(CALLEE_PROMOTE_NEAR, NULL, 0u);
+    render_invoke(ret, CALLEE_PROMOTE_NEAR, NULL, 0u);
 }
 
 /* 0x00288900: apply each queued entry's draw state and draw its block. */
-static void render_submit_list(uint32_t list)
+static void render_submit_list(uint32_t ret, uint32_t list)
 {
-    render_invoke(CALLEE_SUBMIT_LIST, &list, 1u);
+    render_invoke(ret, CALLEE_SUBMIT_LIST, &list, 1u);
 }
 
 /* Same call with the list argument already pushed, as the original keeps it
    on the stack while the frame hooks between the submissions run. */
-static void render_submit_pushed_list(void)
+static void render_submit_pushed_list(uint32_t ret)
 {
-    render_invoke(CALLEE_SUBMIT_LIST, NULL, 0u);
+    render_invoke(ret, CALLEE_SUBMIT_LIST, NULL, 0u);
 }
 
 /* The originals keep their saved registers and pending arguments on the stack;
@@ -266,60 +268,60 @@ static void render_push(uint32_t value)
     *recomp_memory_u32(recomp_runtime.registers.esp) = value;
 }
 
-static void render_set_transform(uint32_t state, uint32_t matrix)
+static void render_set_transform(uint32_t ret, uint32_t state, uint32_t matrix)
 {
     const uint32_t arguments[2] = {state, matrix};
 
-    render_invoke(CALLEE_SET_TRANSFORM, arguments, 2u);
+    render_invoke(ret, CALLEE_SET_TRANSFORM, arguments, 2u);
 }
 
-static void render_kick(void)
+static void render_kick(uint32_t ret)
 {
-    render_invoke(CALLEE_KICK, NULL, 0u);
+    render_invoke(ret, CALLEE_KICK, NULL, 0u);
 }
 
-static void render_set_texture(uint32_t stage, uint32_t texture)
+static void render_set_texture(uint32_t ret, uint32_t stage, uint32_t texture)
 {
     const uint32_t arguments[2] = {stage, texture};
 
-    render_invoke(CALLEE_SET_TEXTURE, arguments, 2u);
+    render_invoke(ret, CALLEE_SET_TEXTURE, arguments, 2u);
 }
 
-static void render_set_indices(uint32_t buffer, uint32_t base)
+static void render_set_indices(uint32_t ret, uint32_t buffer, uint32_t base)
 {
     const uint32_t arguments[2] = {buffer, base};
 
-    render_invoke(CALLEE_SET_INDICES, arguments, 2u);
+    render_invoke(ret, CALLEE_SET_INDICES, arguments, 2u);
 }
 
-static void render_set_stream_source(uint32_t stream, uint32_t buffer, uint32_t stride)
+static void render_set_stream_source(uint32_t ret, uint32_t stream, uint32_t buffer, uint32_t stride)
 {
     const uint32_t arguments[3] = {stream, buffer, stride};
 
-    render_invoke(CALLEE_SET_STREAM_SOURCE, arguments, 3u);
+    render_invoke(ret, CALLEE_SET_STREAM_SOURCE, arguments, 3u);
 }
 
 /* A D3D8 push-buffer render state: method in ECX, value in EDX, no arguments. */
-static void render_set_state(uint32_t method, uint32_t value)
+static void render_set_state(uint32_t ret, uint32_t method, uint32_t value)
 {
     recomp_runtime.registers.ecx = method;
     recomp_runtime.registers.edx = value;
-    render_invoke(CALLEE_SET_STATE, NULL, 0u);
+    render_invoke(ret, CALLEE_SET_STATE, NULL, 0u);
 }
 
-static void render_normalize_normals(uint32_t enable)
+static void render_normalize_normals(uint32_t ret, uint32_t enable)
 {
-    render_invoke(CALLEE_NORMALIZE_NORMALS, &enable, 1u);
+    render_invoke(ret, CALLEE_NORMALIZE_NORMALS, &enable, 1u);
 }
 
-static void render_vertex_blend(uint32_t mode)
+static void render_vertex_blend(uint32_t ret, uint32_t mode)
 {
-    render_invoke(CALLEE_VERTEX_BLEND, &mode, 1u);
+    render_invoke(ret, CALLEE_VERTEX_BLEND, &mode, 1u);
 }
 
 /* A frame hook the game installs at 0xea6674; addressed at call time because
    the game swaps them, and cached by recomp_program_lookup. */
-static void render_hook(unsigned index)
+static void render_hook(uint32_t return_address, unsigned index)
 {
     const uint32_t address = *recomp_memory_u32(RENDER_HOOKS + 4u * index);
     const RecompFunction target = recomp_program_lookup(address);
@@ -327,7 +329,7 @@ static void render_hook(unsigned index)
 
     if (target == NULL) return;
     recomp_runtime.registers.esp -= 4u;
-    *recomp_memory_u32(recomp_runtime.registers.esp) = 0u; /* return address */
+    *recomp_memory_u32(recomp_runtime.registers.esp) = return_address;
     target();
     recomp_runtime.registers.esp = saved_esp;
 }
@@ -349,18 +351,22 @@ static void set_guest_float(uint32_t address, float value)
     *recomp_memory_u32(address) = bits;
 }
 
+/* Return addresses of the immediate-draw CALLs in 0x288aa0 and 0x288e40. */
+static const uint32_t model_draw_returns[3] = {0x00288bb8u, 0x00288bc6u, 0x00288bd1u};
+static const uint32_t faded_draw_returns[3] = {0x00289028u, 0x00289036u, 0x00289041u};
+
 /* Draws a block now: material, then its stages, then its draw record; returns
    the next block. None of the three callees reads a register beyond its stack
    arguments, except 0x286d30's stage array, which arrives in EAX. */
-static uint32_t render_draw_block(uint32_t block)
+static uint32_t render_draw_block(uint32_t block, const uint32_t ret[3])
 {
-    render_apply_material(block);
+    render_apply_material(ret[0], block);
 
     const uint32_t stages = *recomp_memory_u32(block + BLOCK_STAGE_COUNT);
     const uint32_t record = block + BLOCK_STAGES + stages * BLOCK_STAGE_BYTES;
 
-    render_bind_stages(block + BLOCK_STAGES, stages);
-    render_draw_record(record);
+    render_bind_stages(ret[1], block + BLOCK_STAGES, stages);
+    render_draw_record(ret[2], record);
     return record + BLOCK_DRAW_RECORD_BYTES;
 }
 
@@ -373,28 +379,28 @@ static void render_draw_flush_lists(void)
     const uint32_t saved_esi = recomp_runtime.registers.esi;
     const uint32_t saved_esp = recomp_runtime.registers.esp;
 
-    render_sort_list(RENDER_LIST1);
-    if (*recomp_memory_u32(RENDER_PROMOTE_PENDING) != 0u) render_promote_near_blocks();
+    render_sort_list(0x00288a0au, RENDER_LIST1);
+    if (*recomp_memory_u32(RENDER_PROMOTE_PENDING) != 0u) render_promote_near_blocks(0x00288a1bu);
 
     render_push(saved_esi);            /* 0x288a1b: PUSH ESI */
-    render_hook(0u);
-    render_submit_list(RENDER_LIST0);
-    render_bind_stages(0u, 0u);
-    render_hook(1u);
+    render_hook(0x00288a22u, 0u);
+    render_submit_list(0x00288a2cu, RENDER_LIST0);
+    render_bind_stages(0x00288a38u, 0u, 0u);
+    render_hook(0x00288a3eu, 1u);
     render_push(RENDER_LIST1);         /* 0x288a3e: the hooks below run with it */
-    render_submit_pushed_list();
-    render_hook(2u);
-    render_hook(3u);
-    render_hook(4u);
+    render_submit_pushed_list(0x00288a48u);
+    render_hook(0x00288a4eu, 2u);
+    render_hook(0x00288a54u, 3u);
+    render_hook(0x00288a5au, 4u);
     render_push(RENDER_LIST2);
-    render_submit_pushed_list();
+    render_submit_pushed_list(0x00288a64u);
     recomp_runtime.registers.esp += 8u; /* 0x288a64: ADD ESP,8 */
-    render_hook(5u);
+    render_hook(0x00288a6du, 5u);
 
-    render_kick();
-    render_set_stream_source(0u, 0u, 0u);
-    render_set_indices(0u, 0u);
-    for (uint32_t stage = 0u; stage < 4u; ++stage) render_set_texture(stage, 0u);
+    render_kick(0x00288a72u);
+    render_set_stream_source(0x00288a7du, 0u, 0u, 0u);
+    render_set_indices(0x00288a86u, 0u, 0u);
+    for (uint32_t stage = 0u; stage < 4u; ++stage) render_set_texture(0x00288a90u, stage, 0u);
 
     recomp_runtime.registers.esp = saved_esp; /* 0x288a96: POP ESI */
     recomp_runtime.registers.esi = saved_esi;
@@ -412,7 +418,7 @@ static void render_draw_model(void)
     uint32_t block;
 
     render_push(saved_esi);            /* 0x288aa0: PUSH ESI */
-    if (render_sphere_visible(model + BLOCK_BOUNDS) == 0u) {
+    if (render_sphere_visible(0x00288aabu, model + BLOCK_BOUNDS) == 0u) {
         recomp_runtime.registers.esp = saved_esp;
         recomp_runtime.registers.ebx = saved_ebx;
         recomp_runtime.registers.esi = saved_esi;
@@ -429,7 +435,7 @@ static void render_draw_model(void)
     *recomp_memory_u32(RENDER_CLASS_TABLE) = RENDER_CLASS_TABLE_PASS0;
     *recomp_memory_u32(RENDER_MATRIX_SOURCE) = GUEST_MATRIX_CURRENT;
     *recomp_memory_u32(RENDER_MATRIX_COUNT) = 1u;
-    render_set_transform(D3D_TRANSFORM_WORLD, GUEST_MATRIX_CURRENT);
+    render_set_transform(0x00288b09u, D3D_TRANSFORM_WORLD, GUEST_MATRIX_CURRENT);
 
     block = *recomp_memory_u32(RENDER_BLOCK_BASE) +
         (*recomp_memory_u32(model + 8u) << 5);
@@ -441,17 +447,17 @@ static void render_draw_model(void)
          flags = *recomp_memory_u32(block + BLOCK_FLAGS)) {
         recomp_runtime.registers.ebx = block;
         if ((flags & BLOCK_ALWAYS_DRAW) == 0u &&
-            render_sphere_visible(block + BLOCK_BOUNDS) == 0u) {
+            render_sphere_visible(0x00288b56u, block + BLOCK_BOUNDS) == 0u) {
             block += *recomp_memory_u32(block + BLOCK_NEXT_OFFSET);
             continue;
         }
         /* Types 1, 3, 4 and 5 queue to a list; 0, 2, 6 and 7 draw now. */
         switch (flags & 7u) {
-        case 1u: block = render_queue_block(block, flags, RENDER_LIST0); break;
-        case 3u: block = render_queue_block(block, flags, RENDER_LIST1); break;
-        case 4u: block = render_queue_block(block, flags, RENDER_LIST2); break;
-        case 5u: block = render_queue_deferred(block); break;
-        default: block = render_draw_block(block); break;
+        case 1u: block = render_queue_block(0x00288b7eu, block, flags, RENDER_LIST0); break;
+        case 3u: block = render_queue_block(0x00288b90u, block, flags, RENDER_LIST1); break;
+        case 4u: block = render_queue_block(0x00288ba2u, block, flags, RENDER_LIST2); break;
+        case 5u: block = render_queue_deferred(0x00288baeu, block); break;
+        default: block = render_draw_block(block, model_draw_returns); break;
         }
     }
 
@@ -487,7 +493,7 @@ static void render_draw_model_faded(void)
     /* COMISS 0.0, fade: draws while 0.0 is below it, and for a NaN fade. */
     if (0.0f >= fade) goto done;
     render_push(saved_edi);                /* 0x288e5f: PUSH EDI */
-    if (blend == 0u && render_sphere_visible(model + BLOCK_BOUNDS) == 0u) goto done;
+    if (blend == 0u && render_sphere_visible(0x00288e73u, model + BLOCK_BOUNDS) == 0u) goto done;
     render_push(saved_esi);                /* 0x288e86: PUSH ESI */
 
     *recomp_memory_u32(RENDER_OBJECT) = model;
@@ -507,17 +513,17 @@ static void render_draw_model_faded(void)
             uint32_t matrix = RENDER_BLEND_MATRICES + matrices * RENDER_MATRIX_BYTES;
 
             for (int32_t index = (int32_t)matrices; index >= 0; --index) {
-                render_set_transform(
+                render_set_transform(0x00288ef2u,
                     *recomp_memory_u32(RENDER_BLEND_TRANSFORMS + 4u * (uint32_t)index),
                     matrix);
                 matrix -= RENDER_MATRIX_BYTES;
             }
         }
-        render_vertex_blend(*recomp_memory_u32(RENDER_VERTEX_BLEND_STATES + 4u * matrices));
+        render_vertex_blend(0x00288f0au, *recomp_memory_u32(RENDER_VERTEX_BLEND_STATES + 4u * matrices));
     } else {
         *recomp_memory_u32(RENDER_MATRIX_SOURCE) = GUEST_MATRIX_CURRENT;
         *recomp_memory_u32(RENDER_MATRIX_COUNT) = 1u;
-        render_set_transform(D3D_TRANSFORM_WORLD, GUEST_MATRIX_CURRENT);
+        render_set_transform(0x00288f2cu, D3D_TRANSFORM_WORLD, GUEST_MATRIX_CURRENT);
     }
 
     if ((flags & 2u) != 0u) {
@@ -527,10 +533,10 @@ static void render_draw_model_faded(void)
         *recomp_memory_u32(D3D_STAGE_SHADOW + D3D_STAGE_SHADOW_ALPHA) = 4u;
         *recomp_memory_u32(D3D_STAGE_SHADOW + D3D_STAGE_SHADOW_BYTES +
                            D3D_STAGE_SHADOW_ALPHA) = 4u;
-        render_set_state(D3D_METHOD_ALPHA_REF, alpha_ref);
+        render_set_state(0x00288f67u, D3D_METHOD_ALPHA_REF, alpha_ref);
         *recomp_memory_u32(D3D_ALPHA_REF_SHADOW) = alpha_ref;
     }
-    if ((flags & 4u) != 0u) render_normalize_normals(1u);
+    if ((flags & 4u) != 0u) render_normalize_normals(0x00288f7eu, 1u);
 
     block = *recomp_memory_u32(RENDER_BLOCK_BASE) +
         (*recomp_memory_u32(model + 8u) << 5);
@@ -542,13 +548,13 @@ static void render_draw_model_faded(void)
          type = *recomp_memory_u32(block + BLOCK_FLAGS)) {
         recomp_runtime.registers.ebx = type;
         if (blend == 0u && (type & BLOCK_ALWAYS_DRAW) == 0u &&
-            render_sphere_visible(block + BLOCK_BOUNDS) == 0u) {
+            render_sphere_visible(0x00288fc8u, block + BLOCK_BOUNDS) == 0u) {
             block += *recomp_memory_u32(block + BLOCK_NEXT_OFFSET);
             continue;
         }
         /* A faded block, or one that is not the plain type, blends. */
         if (!blending && ((1.0f > fade) || (type & 7u) != 0u)) {
-            render_set_state(D3D_METHOD_BLEND_ENABLE, 1u);
+            render_set_state(0x00288fffu, D3D_METHOD_BLEND_ENABLE, 1u);
             *recomp_memory_u32(D3D_BLEND_SHADOW) = 1u;
             blending = true;
         }
@@ -556,17 +562,17 @@ static void render_draw_model_faded(void)
             *recomp_memory_u32(RENDER_CLASS_TABLE) + 4u * (type & 7u));
 
         if (class == 1u) {
-            block = render_queue_block(block, type, RENDER_LIST0);
+            block = render_queue_block(0x00289063u, block, type, RENDER_LIST0);
         } else if (class == 3u) {
-            block = render_queue_block(block, type, RENDER_LIST1);
+            block = render_queue_block(0x00289063u, block, type, RENDER_LIST1);
         } else if (class == 4u) {
-            block = render_queue_block(block, type, RENDER_LIST2);
+            block = render_queue_block(0x00289063u, block, type, RENDER_LIST2);
         } else {
-            block = render_draw_block(block);
+            block = render_draw_block(block, faded_draw_returns);
         }
     }
 
-    if (blend != 0u) render_vertex_blend(0u);
+    if (blend != 0u) render_vertex_blend(0x0028907fu, 0u);
     if ((flags & 2u) != 0u) {
         uint32_t dirty = *recomp_memory_u32(D3D_DIRTY);
 
@@ -574,12 +580,12 @@ static void render_draw_model_faded(void)
         *recomp_memory_u32(D3D_DIRTY) = dirty | 3u;
         *recomp_memory_u32(D3D_STAGE_SHADOW + D3D_STAGE_SHADOW_BYTES +
                            D3D_STAGE_SHADOW_ALPHA) = 0u;
-        render_set_state(D3D_METHOD_ALPHA_REF, 1u);
+        render_set_state(0x002890adu, D3D_METHOD_ALPHA_REF, 1u);
         *recomp_memory_u32(D3D_ALPHA_REF_SHADOW) = 1u;
     }
-    if ((flags & 4u) != 0u) render_normalize_normals(0u);
+    if ((flags & 4u) != 0u) render_normalize_normals(0x002890c3u, 0u);
     if (blending) {
-        render_set_state(D3D_METHOD_BLEND_ENABLE, 0u);
+        render_set_state(0x002890d5u, D3D_METHOD_BLEND_ENABLE, 0u);
         *recomp_memory_u32(D3D_BLEND_SHADOW) = 0u;
     }
 
