@@ -1032,6 +1032,21 @@ int main(void)
             passed &= expect("restored visibility result is cached",
                 recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 606u &&
                 visibility_queried == 0u);
+            /* A netplay session's save leaves a pending result to the polls. */
+            passed &= call(0x3457c0u, arguments, 0u, NULL);
+            passed &= call(0x345860u, arguments, 1u, NULL);
+            visibility_complete = false;
+            const unsigned waits = flush_count;
+            recomp_d3d8_set_save_waits_for_visibility(false);
+            recomp_d3d8_state_save(visibility_state);
+            recomp_d3d8_set_save_waits_for_visibility(true);
+            passed &= expect("a session save does not wait for the GPU", flush_count == waits);
+            visibility_complete = true;
+            visibility_pixels = 305u;
+            *recomp_memory_u32(OUTPUT) = EAX_SENTINEL;
+            passed &= call(0x344450u, arguments, 3u, NULL);
+            passed &= expect("the next poll takes the result",
+                recomp_runtime.registers.eax == 0u && *recomp_memory_u32(OUTPUT) == 610u);
             free(visibility_state);
         }
         flush_count = saved_flush_count;

@@ -189,6 +189,28 @@ int main(void)
     CHECK(invoke(0x346140u, 96u, 0u, 0u, 0u, 0u) == 0u);
     fail_allocation = false;
 
+    /* A rewind restores the table with guest RAM: a release it undoes runs
+       again, and a creation run again is listed once. */
+    const size_t state_size = recomp_d3d8_resource_state_size();
+    uint8_t *saved = malloc(state_size * 2u), *after = saved + state_size;
+    CHECK(saved != NULL);
+    vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
+    recomp_d3d8_resource_state_save(saved);
+    uint32_t frees = free_count;
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u && free_count == frees + 2u);
+    recomp_d3d8_resource_state_restore(saved);
+    put(vertex, 0x1000001u);
+    if (setjmp(stopped) != 0) { fprintf(stderr, "FAIL resource rewind: %s\n", reason); return 1; }
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u && free_count == frees + 4u);
+    recomp_d3d8_resource_state_save(saved);
+    CHECK(invoke(0x346140u, 96u, 0u, 0u, 0u, 0u) != 0u);
+    recomp_d3d8_resource_state_restore(saved);
+    vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u);
+    recomp_d3d8_resource_state_save(after);
+    CHECK(memcmp(saved, after, state_size) == 0);
+    free(saved);
+
     texture(TEXTURE + 32u, 0x10001u, 0u, 0u);
     invoke(0x345700u, TEXTURE + 32u, 7u, 0u, 0u, 0u);
     CHECK(word(DEVICE + 0x7a0u) == TEXTURE + 32u && word(DEVICE + 0x1cu) == 7u);

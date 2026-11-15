@@ -76,10 +76,13 @@ SyncTest.
 
 - Guest RAM snapshots: on Windows the runner allocates guest RAM with
   `MEM_WRITE_WATCH`, and `guest_snapshot.c` keeps a ring of save points
-  that each store only the pages written since the previous save. Write
+  that each store only the pages changed since the previous save. Write
   watch also reports `ReadFile` writes, which host read workers make
-  straight into guest RAM. Other hosts compare every page with a shadow
-  copy. Saves and loads must run while no host thread writes guest RAM, so
+  straight into guest RAM. A save reads the list of written pages without
+  clearing it and compares each with a shadow copy. After a clear the
+  first write to every page faults, about 0.7 us each or 0.17 ms for a
+  fight frame's 260 pages, so the list is cleared only once it holds more
+  than twice the changed pages plus 64. Other hosts compare every page. Saves and loads must run while no host thread writes guest RAM, so
   netplay makes file reads synchronous as SyncTest does.
 - Each XAPI fiber keeps its C continuation on a native host stack. On
   Windows, parked fibers are saved with their captured context and live
@@ -88,8 +91,9 @@ SyncTest.
   the same way, since their switch keeps the registers on the stack. The
   fiber test rewinds a parked task on x86-64 Linux; a whole session's
   rollback on Linux and macOS is unverified.
-- The other host modules (heap, allocations, threads, files, input, D3D8,
-  DirectSound) save and restore their own state.
+- The other host modules (heap, allocations, threads, files, input, D3D8
+  with its table of owned resources, DirectSound) save and restore their
+  own state.
 - `frame_time_update` (`0xfefc0`) feeds QueryPerformanceCounter time into
   `g_frame_time_6000ths` and `g_frame_fps`. `0x2506f0` spawns into a pool
   only when the frame time is below 101, so a slow frame changes guest RAM.
@@ -164,7 +168,10 @@ is the reference.
 From swap 3000 of the scripted Story fight, lag 4 over 600 frames rolled
 back 594 times (2,376 frames run again) and lag 8 over 900 frames 890 times
 (7,120 frames). Both dumps matched lag 0 byte for byte, and two lag 0 runs
-match each other, so separate processes simulate the same frames. A hidden
+match each other, so separate processes simulate the same frames. Only
+a session hides file times: a loopback run reads the save folder's host
+write time into guest RAM (8 bytes at `0x49c304`), so two dumps compare
+only while that folder is unchanged between their runs. A hidden
 frame costs about 3.7 ms on the development machine (26.4 s more than the
 paced lag 0 run for 7,120 frames), so about three frames of rollback fit in
 a 60 Hz frame; longer delays need input delay as well.
@@ -228,7 +235,30 @@ headers, as a restore reads just the used stack bytes, so a save takes about
 0.4 ms. A rewind writes each page once, from the oldest save it undoes, instead
 of once per save: on the joiner, whose rewinds undid about four saves, it fell
 from 1.0 to 0.64 ms; on the host, about 1.6 saves, from 0.71 to 0.64 ms.
-Repeated runs of this test vary by about a fifth, more than this changes. Both
+Repeated runs of this test vary by about a fifth, more than this changes.
+Three later changes were measured with three runs of each build, taken in
+turn. Packed SSE loads and stores of guest RAM compile inline like the
+scalar ones (`recomp_types.h`); the calls were about a tenth of a hidden
+frame. Saves leave write-watch tracking running (see Host state). Page
+hashes are brought up to date at a check, not at every save and rewind. A
+frame run again fell from 3.9 to 2.8 ms on the host (4.5, 3.6 and 3.6 ms
+against 2.8 three times) and from 4.1 to 2.8 ms on the joiner, a host save
+from 0.35 to 0.26 ms and a rewind's load from 0.39 to 0.29 ms. The host's
+seconds with a slow frame went from 27, 3 and 0 to 1, 0 and 1, the
+joiner's from 37, 28 and 28 to 8, 6 and 9. The host then keeps its pace, so
+its rewinds reach further back (3.9 frames each, from 3.1) and hidden
+frames still take a fifth of the run. In loopback, lag 4 over 600 frames
+ran its 2,376 hidden frames in 7.0 s instead of 9.1 s over four runs of
+each build. A session's saves also no longer wait for a pending visibility
+test: the wait held 15 of 5,620 host saves for 2 to 3 ms each on this
+stage, which has a lens flare. Loopback and SyncTest saves still wait,
+since their compares include the counts. A hidden frame now drops a draw
+before resolving its render target once the back buffer flags are clear,
+and the audio pump reserves its 80 KB output buffer only when it plays. In
+a loopback profile the host's draw work fell from 6.4% to 2.0% of a hidden
+frame, which took 2.46 ms instead of 2.62 ms; over eight runs of each build
+the frames run again took 3% less, less than the netsim varies between
+runs. Generated game code is then 82% of a hidden frame. Both
 renderers log each draw shader they build with how long it took: D3D11 only
 outside its boot precompile, SDL_GPU at boot too.
 Freezing the joiner's process for 6 s in the menus held the host on the
@@ -336,7 +366,9 @@ dumps still compare them.
 Two scripted runners on one machine at input delay 0 played six live rounds
 in 15,600 frames, about 10,400 of them with the rollback window open, and
 every check matched. After the first, a check took 0.01 to 0.06 ms, and
-saves spent about 0.06 ms a frame hashing the pages they copy. The first
+saves spent about 0.06 ms a frame hashing the pages they copy. Saves and
+rewinds now only mark those pages and the check hashes the marked ones,
+0.1 to 0.6 ms every 30 frames. The first
 check hashes all 64 MB, 4 to 6 ms at frame 30, while the walk to Versus is
 hidden. A thread or fiber stack that comes or goes moves the ranges, and the
 pages it uncovers are hashed again; a page wholly inside the ranges counts

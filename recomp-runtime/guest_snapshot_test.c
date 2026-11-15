@@ -9,7 +9,7 @@
 #include <windows.h>
 #endif
 
-enum { PAGE = RECOMP_SNAPSHOT_PAGE_SIZE, PAGES = 64, RAM_SIZE = PAGES * PAGE };
+enum { PAGE = RECOMP_SNAPSHOT_PAGE_SIZE, PAGES = 256, RAM_SIZE = PAGES * PAGE };
 
 static uint8_t initial[RAM_SIZE];
 static uint8_t first[RAM_SIZE];
@@ -123,6 +123,29 @@ static int run(uint8_t *ram, bool write_watch, const char *mode)
         return fail(mode, "load through a page saved twice");
     }
 
+    /* A page written with the bytes it held is no change. */
+    ram[12 * PAGE] = first[12 * PAGE];
+    if (!recomp_snapshots_save(&s) || s.records[s.newest].count != 0u) {
+        return fail(mode, "an unchanged page was saved");
+    }
+    /* Tracking starts again once most of its pages have stopped changing, and
+       still sees every later write. */
+    for (size_t page = 100u; page < 250u; ++page) fill(ram, page, 0x44);
+    if (!recomp_snapshots_save(&s)) return fail(mode, "wide save");
+    memcpy(first, ram, RAM_SIZE);
+    ram[100 * PAGE] ^= 1u;
+    if (!recomp_snapshots_save(&s)) return fail(mode, "narrow save");
+    memcpy(second, ram, RAM_SIZE);
+    ram[101 * PAGE] ^= 1u;
+    ram[200 * PAGE] ^= 1u;
+    if (!recomp_snapshots_load(&s, 0u) || memcmp(ram, second, RAM_SIZE) != 0) {
+        return fail(mode, "a write after tracking started again");
+    }
+    ram[102 * PAGE] ^= 1u;
+    if (!recomp_snapshots_load(&s, 1u) || memcmp(ram, first, RAM_SIZE) != 0) {
+        return fail(mode, "load after tracking started again");
+    }
+
     /* The hash follows saves, loads and moved ranges as a fresh pass would. */
     const RecompRamRange ignored[] = {{3 * PAGE + 4, 3 * PAGE + 8}, {40 * PAGE, 42 * PAGE}};
     uint64_t hash = 0u, again = 0u;
@@ -144,6 +167,17 @@ static int run(uint8_t *ram, bool write_watch, const char *mode)
     }
     if (!recomp_snapshots_hash(&s, NULL, 0u, &again) || again == hash || again != fresh_hash(ram, NULL, 0u)) {
         return fail(mode, "hash after the ranges moved");
+    }
+    /* Pages changed by several saves and a load are hashed at the next call. */
+    ram[50 * PAGE] ^= 1u;
+    if (!recomp_snapshots_save(&s)) return fail(mode, "hash save 1");
+    ram[50 * PAGE] ^= 2u;
+    ram[51 * PAGE] ^= 1u;
+    if (!recomp_snapshots_save(&s) || !recomp_snapshots_load(&s, 1u)) return fail(mode, "hash save 2 and load");
+    ram[52 * PAGE] ^= 1u;
+    if (!recomp_snapshots_save(&s) || !recomp_snapshots_hash(&s, NULL, 0u, &hash) ||
+        hash == again || hash != fresh_hash(ram, NULL, 0u)) {
+        return fail(mode, "hash after saves and a load without one between");
     }
     recomp_snapshots_free(&s);
     return 0;

@@ -35,7 +35,8 @@ static char stop_reason[128];
 static RecompD3dTextureDesc texture;
 static bool inline_texture_active;
 static RecompD3dPresenterTarget target;
-void recomp_d3d8_target(RecompD3dPresenterTarget *out) { *out = target; }
+static uint32_t target_reads;
+void recomp_d3d8_target(RecompD3dPresenterTarget *out) { ++target_reads; *out = target; }
 
 void recomp_stop(int code, const char *format, ...)
 {
@@ -74,8 +75,9 @@ void recomp_kernel_free_pool(uint32_t address) { freed = address; }
 uint32_t recomp_d3d8_require_device(void) { return DEVICE; }
 static bool overlay_hidden;
 bool recomp_scene_freeze_overlay_hidden(void) { return overlay_hidden; }
-static bool skippable;
-bool recomp_d3d8_draw_skippable(bool offscreen) { (void)offscreen; return skippable; }
+/* skippable: a hidden frame; back_buffer_kept: its back buffer flags are still set. */
+static bool skippable, back_buffer_kept;
+bool recomp_d3d8_draw_skippable(bool offscreen) { return skippable && (offscreen || !back_buffer_kept); }
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void) { return &state; }
 bool recomp_d3d8_state_set_simple(uint32_t method, uint32_t value)
 {
@@ -366,9 +368,19 @@ static int draw_tests(void)
     CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 1u);
     /* A skippable run-ahead draw is counted but not built or submitted. */
     skippable = true;
+    const uint32_t reads = target_reads;
     invoke(0x348240u, 2u, 2u, VERTICES, 20u);
-    skippable = false;
     CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 2u);
+    /* With the back buffer flags clear it drops the draw before reading the target. */
+    CHECK(target_reads == reads);
+    /* Until then an offscreen draw is dropped once its target is known. */
+    back_buffer_kept = true;
+    target.offscreen = true;
+    invoke(0x348240u, 2u, 2u, VERTICES, 20u);
+    target.offscreen = false;
+    back_buffer_kept = false;
+    skippable = false;
+    CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 3u && target_reads == reads + 1u);
     /* Width 2 widens an x-major line by one pixel above and below. */
     const float line[10] = {10.0f, 20.0f, 0.0f, 1.0f, 0.0f, 50.0f, 24.0f, 0.0f, 1.0f, 0.0f};
     const float wide = 2.0f;

@@ -915,11 +915,13 @@ routing. A pump gap over 100 ms still drops its span while the cursor advances.
 Netplay, replays and SyncTest run play cursors on the frame-locked guest
 clock, which falls behind real time when frames run slow and jumps when the
 game waits. Host output there keeps its own place per buffer on the real
-clock, outside the rollback state: a one-shot plays on to its end, a ring
+clock, outside the rollback state: a one-shot plays on to its end, also
+after the guest's cursor has reached it, a ring
 runs up to 50 ms ahead into its last Lock, and output falls up to 100 ms
 behind the guest's cursor before it skips to it. Re-simulated frames neither
-play nor move that place, and the pump thread feeds only it. Rings still
-gap when slow frames outrun the game's refills.
+play nor move that place, and the pump thread feeds only it. A timed ring that
+was muted or frozen for more than 100 ms starts again at the guest's cursor.
+Rings still gap when slow frames outrun the game's refills.
 Native endpoint consumption has an opt-in host test;
 synthetic API and backend tests remain suitable for public CI.
 
@@ -1074,7 +1076,8 @@ the first differing bytes.
 The state is a table of modules (`synctest_modules.c`): CPU and FPU, clock
 and vblank marks, XAPI fibers, guest threads, file positions and the handle
 table, kernel allocations, the guest heap cursors, input, the D3D8 device,
-frame and render-state models with completed visibility counts, and the
+frame and render-state models with completed visibility counts, the
+resource adapter's table of owned resources, and the
 DirectSound device, buffers and effects. Guest RAM rewinds through
 `guest_snapshot.c`. The compare skips host-scheduled ranges: audio worker
 counters, QPC bookkeeping, XAPI fiber and guest thread stacks, and the whole
@@ -1107,7 +1110,10 @@ Some frames cannot be rewound and are skipped rather than reported:
 On this branch a loop run from frame 600 through the scripted Story fight
 and back to the menus matched 6,295 frames with no mismatch. It skipped three
 display mode changes and one save. With asynchronous reads, 102 more frames
-were skipped.
+were skipped. With the owned-resource table in the state, a loop run of 540 s
+matched 15,636 frames, from 601 to 16,724, through the Story fights and their
+stage loads; it skipped five display mode changes, two saves and one frame
+whose guest thread could not be rewound.
 
 `RECOMP_ROLLBACK=loopback` keeps the same state in a ring of saves
 and rewinds it on mispredicted input; `docs/rollback-netcode.md` describes

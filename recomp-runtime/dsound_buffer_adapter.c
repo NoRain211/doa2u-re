@@ -425,6 +425,8 @@ static uint32_t heard_span(Buffer *buffer, uint64_t now, bool background, uint32
     return bytes;
 }
 
+static void output_span(Buffer *buffer, uint32_t offset, uint32_t bytes, bool background);
+
 /* Copies the cursor's span up to now into host output. The pump thread
    (background) batches >= 10 ms and leaves failures to the game thread. */
 static void pump(Buffer *buffer, uint64_t now, bool background)
@@ -451,7 +453,18 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
         if (background && now < buffer->model.last_ms + 10u) return;
         bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
     }
-    if (!bytes) return;
+    if (bytes) output_span(buffer, offset, bytes, background);
+}
+
+/* Apart from pump, so a call with nothing to play skips probing this 80 KB stack frame. */
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static void output_span(Buffer *buffer, uint32_t offset, uint32_t bytes, bool background)
+{
+    const uint32_t slot = (uint32_t)(buffer - buffers);
     int16_t samples[40000];
     uint8_t *pcm = (uint8_t *)samples;
     const char *failure = bytes > sizeof samples ? "dsound:buffer-output-size" : NULL;
