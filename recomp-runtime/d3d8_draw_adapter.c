@@ -1449,8 +1449,8 @@ static void widen_lines(bool transformed, RecompD3dPresenterDrawCommand *draw)
    coordinates. Each point becomes an eye-space quad, square in pixels, drawn
    with the projection alone. POINTSCALEENABLE sizes follow D3D8, as the SDK's
    point parameters (0x34ef10) encode them: Vh * Si / sqrt(A + B*De + C*De^2),
-   clamped to [MIN, MAX]. */
-static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
+   clamped to [MIN, MAX]. Returns false when nothing can be drawn. */
+static bool point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
     RecompD3dPresenterDrawCommand *draw)
 {
     float point[8];
@@ -1459,9 +1459,16 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
     const uint32_t points = draw->index_count;
     /* shortcut: unscaled sizes multiply by device+0x964, unverified here; bind them when a caller needs one. */
     if (*recomp_memory_u32(0x355438u) == 0u || *recomp_memory_u32(0x35543cu) == 0u ||
-        layout->pretransformed || layout->blend_weight_count != 0u || points > 16384u ||
-        !isfinite(point[0]) || !(point[1] >= 0.0f) || !(point[7] >= point[1]))
+        layout->pretransformed || layout->blend_weight_count != 0u || points > 16384u)
         recomp_stop(2, "d3d8:draw-points-unbound");
+    /* Stage effects (0x265e60, 0x1952f0) divide SIZE, and some MIN and MAX, by
+       the camera FOV (0x879bf8). The stair-fall camera (0x32a90) narrows it past
+       zero when its exit check (0x102190) never sees a landing, as after a Double
+       KO (issue #197); the sizes then turn negative and no sprite is drawn. */
+    if (!(point[0] >= 0.0f && point[1] >= 0.0f && point[7] >= 0.0f) ||
+        !isfinite(point[0]) || !isfinite(point[7])) return false;
+    if (!(point[7] >= point[1]))
+        recomp_stop(2, "d3d8:draw-points-size:%g,%g,%g", point[0], point[1], point[7]);
     /* SELECTARG1 of TEXTURE or DIFFUSE, or their MODULATE. The presenter modulates both,
        so a texture-only channel whitens diffuse and a diffuse-only color whitens the texel. */
     const bool color_texture = stage[12] == 2u && stage[14] == 2u;
@@ -1569,6 +1576,7 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
     draw->triangle_count = points * 2u;
     draw->cull_mode = RECOMP_D3D_CULL_NONE;
     memcpy(draw->transform, p, sizeof p);
+    return true;
 }
 
 /* D3D8 table fog as 0x34f5f0 programs it: FogEnable 0x3553d0, table mode 0x3553d4
@@ -1822,9 +1830,9 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     const bool unlit_projected = !program && !points && draw->has_texture && projected_add_stages(device);
     if (!program && !points && !unlit_projected) attach_lighting(device, &layout, draw);
     if (points && (program || *recomp_memory_u32(device + PIXEL_HANDLE) != 0u)) {
-        recomp_stop(2, "d3d8:draw-points-unbound");
+        recomp_stop(2, "d3d8:draw-points-shader:program=%u", program);
     } else if (points) {
-        point_sprites(device, &layout, draw);
+        if (!point_sprites(device, &layout, draw)) return;
     } else if (program && bump_shader(device) != 0u) {
         bump_stages(device, bump_shader(device) == 2u, draw);
     } else if (program) {

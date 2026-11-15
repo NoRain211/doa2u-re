@@ -620,6 +620,24 @@ static int point_tests(void)
     if (setjmp(stopped) == 0) { invoke(0x348240u, 1u, 1u, VERTICES, 16u); return 1; }
     CHECK(strcmp(stop_reason, "d3d8:draw-points-unbound") == 0);
     *recomp_memory_u32(0x35543cu) = 1u;
+    /* Sizes over a negative camera FOV (issue #197's Double KO stair fall) or a NaN one draw nothing. */
+    float point_saved[8];
+    recomp_guest_load(point_saved, 0x355430u, sizeof point_saved);
+    const float negative[3] = {-28.4f, -665.7f, -2662.6f}, nan_size = NAN;
+    for (uint32_t i = 0u; i < 2u; ++i) {
+        if (i == 0u) {
+            recomp_guest_store(0x355430u, &negative[0], 4u);
+            recomp_guest_store(0x355434u, &negative[1], 4u);
+            recomp_guest_store(0x35544cu, &negative[2], 4u);
+        } else {
+            recomp_guest_store(0x355430u, point_saved, sizeof point_saved);
+            recomp_guest_store(0x355430u, &nan_size, 4u);
+        }
+        memset(&submitted, 0, sizeof submitted);
+        invoke(0x348240u, 1u, 1u, VERTICES, 16u);
+        CHECK(submitted.type != RECOMP_D3D_PRESENTER_COMMAND_DRAW);
+    }
+    recomp_guest_store(0x355430u, point_saved, sizeof point_saved);
     *recomp_memory_u32(STAGES + 3u * 128u + 48u) = 7u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 1u, 1u, VERTICES, 16u); return 1; }
     CHECK(strncmp(stop_reason, "d3d8:point-sprite-stage:", 24u) == 0);
