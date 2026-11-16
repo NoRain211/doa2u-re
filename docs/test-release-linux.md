@@ -28,21 +28,18 @@ What you need (x86-64 Linux; on the Steam Deck, see below):
 The build downloads a pinned, checksummed extract-xiso to read the ISO. It
 needs glibc 2.34 or newer; elsewhere, build extract-xiso from
 github.com/XboxDev/extract-xiso and add --extractor /path/to/extract-xiso
-to step 3.
+to step 2.
 
 Build (once, about 15 to 25 minutes):
 
 1. Extract this ZIP to a new folder and open a terminal in that folder.
-2. Give the build its own Python packages:
+2. Build from your ISO. The ISO is only read; quote the path if it has
+   spaces. The script makes its own Python environment in private/venv and
+   names any missing tool before it starts:
 
-      python3 -m venv private/venv
-      private/venv/bin/pip install capstone==5.0.7
+      ./build_game.sh "/path/to/disc2.iso"
 
-3. Build from your ISO. The ISO is only read:
-
-      ./build_game.sh /path/to/disc2.iso
-
-4. Wait for "Build complete". The build is checked against the exact
+3. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
 
 Steam Deck: SteamOS has no compiler, so build inside an Ubuntu 24.04

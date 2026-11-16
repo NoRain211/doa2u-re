@@ -102,10 +102,11 @@ it). Quote the ISO path if it contains spaces:
 ```bash
 git clone --recurse-submodules https://github.com/NoRain211/doa2u-re.git
 cd doa2u-re
-python3 -m venv private/venv
-private/venv/bin/pip install capstone==5.0.7
 ./build_game.sh "/path/to/disc2.iso"
 ```
+
+`build_game.sh` creates `private/venv` and installs Capstone there itself, and
+stops at once if CMake, Ninja, Git or a C++ compiler is missing.
 
 SteamOS has a read-only system and no compiler, so build inside a container
 such as an Ubuntu 24.04 `distrobox` that shares your home folder (Bazzite
