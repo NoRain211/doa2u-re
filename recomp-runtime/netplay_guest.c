@@ -92,8 +92,10 @@ static void load_main_profile(void)
        profile. Each load restores them again, discarding edits made
        since the last one. */
     sub_00024940();
-    if (recomp_runtime.registers.eax != 0u || session_data == 0u || *recomp_memory_u32(0x0087cfa8u) != session_data)
-        return;
+    if (recomp_runtime.registers.eax != 0u || session_data == 0u) return;
+    /* The load points the data at g_profile_main +0xf200, which is
+       session_data; point it there anyway so a change can never skip this. */
+    *recomp_memory_u32(0x0087cfa8u) = session_data;
     memcpy(recomp_memory(session_data, DATA_SIZE), session_defaults, DATA_SIZE);
     kernel_call_guest(0x00021370u, NULL, 0u);
     kernel_call_guest(0x000213d0u, NULL, 0u);

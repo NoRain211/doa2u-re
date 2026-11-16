@@ -20,6 +20,7 @@ static uint32_t data_pointer = DATA;
 static uint32_t stack[128];
 static unsigned clears, reads, applied;
 static uint32_t main_result; /* what profile_main_load returns */
+static bool main_repoints; /* profile_main_load moves the data pointer */
 static uint32_t missing_read = UINT32_MAX; /* this read returns not found */
 static uint16_t read_names[2][16];
 
@@ -41,6 +42,7 @@ void sub_000244F0(void) { ++clears; } /* profile_main_clear */
 void sub_00024940(void)
 {
     memset(data, 0xcc, sizeof data);
+    if (main_repoints) data_pointer = 0x6000u;
     recomp_runtime.registers.eax = main_result;
 }
 
@@ -134,6 +136,11 @@ int main(void)
     memset(data + 0x2c68u, 0x77, 0x10u); /* an edit after the first load, then the menu loads again */
     if (load != NULL) load();
     check("every load puts the defaults back", load != NULL && all(data + 0x2c68u, 0x10u, 0u) &&
+        all(data + 0x1eu, 0x14u, 0x10u) && all(data + 0x32u, 0x14u, 0x11u));
+    main_repoints = true;
+    if (load != NULL) load();
+    main_repoints = false;
+    check("a load that moves the data pointer still gets the defaults", data_pointer == DATA &&
         all(data + 0x1eu, 0x14u, 0x10u) && all(data + 0x32u, 0x14u, 0x11u));
     main_result = (uint32_t)-7;
     applied = 0u;
