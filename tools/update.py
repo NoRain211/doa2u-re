@@ -203,6 +203,15 @@ def write(files):
         old = target.with_name(target.name + ".old")
         swap = (target.suffix in (".exe", ".dll", ".pyd") and target.exists()
                 and (target.parent == ROOT or ROOT / "tools" / "python" in target.parents))
+        if not swap and sys.platform != "win32":
+            # Overwriting a running program (the Linux launcher runs this script) fails with "text file busy";
+            # a rename over it does not.
+            partial = target.with_name(target.name + ".part")
+            partial.write_bytes(data)
+            if mode:
+                partial.chmod(mode)
+            partial.replace(target)
+            continue
         if swap:
             target.replace(old)
         try:

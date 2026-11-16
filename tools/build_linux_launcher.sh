@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds the prebuilt Linux launcher the Linux package ships, so a machine with no
+# compiler (a stock Steam Deck) can still open the BUILD GAME page. It compiles
+# tools/launcher_sdl.cpp in an Ubuntu 22.04 container against a static SDL3 and a
+# static libstdc++, which keeps its glibc requirement at 2.35. Needs Docker.
+#   tools/build_linux_launcher.sh [output]    (default private/release-assets/launcher-linux-x86_64)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="${1:-${ROOT}/private/release-assets/launcher-linux-x86_64}"
+mkdir -p "$(dirname "${OUT}")"
+# Git Bash on Windows hands Docker Windows paths, and must not rewrite the container's.
+if command -v cygpath >/dev/null 2>&1; then
+    export MSYS_NO_PATHCONV=1
+    SRC="$(cygpath -m "${ROOT}/tools")"
+    DEST="$(cygpath -m "$(dirname "${OUT}")")"
+else
+    SRC="${ROOT}/tools"
+    DEST="$(dirname "${OUT}")"
+fi
+docker run --rm --platform linux/amd64 -v "${SRC}:/src:ro" -v "${DEST}:/out" ubuntu:22.04 bash -euxc '
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config curl ca-certificates \
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev \
+    libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libdrm-dev libgbm-dev libegl-dev libgl-dev \
+    libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev libusb-1.0-0-dev
+cd /tmp
+curl -fL -o sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-3.4.12/SDL3-3.4.12.tar.gz
+echo "f07b958a9ac5020fb7a44cadb957f658b2149c3c8abb4f63145fac9303249db7  sdl.tar.gz" | sha256sum -c -
+tar xzf sdl.tar.gz
+cmake -S SDL3-3.4.12 -B sdl-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/sdl \
+    -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
+cmake --build sdl-build
+cmake --install sdl-build
+g++ -O2 -std=c++17 -o /out/launcher-linux-x86_64 /src/launcher_sdl.cpp -I/opt/sdl/include \
+    -static-libstdc++ -static-libgcc $(PKG_CONFIG_PATH=/opt/sdl/lib/pkgconfig pkg-config --static --libs sdl3)
+strip /out/launcher-linux-x86_64
+objdump -p /out/launcher-linux-x86_64 | grep NEEDED
+ldd /out/launcher-linux-x86_64
+'
+echo "Built ${OUT}"

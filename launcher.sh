@@ -6,8 +6,16 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Linux builds its launcher beside the runner (tools/launcher_sdl.cpp).
+# The Linux package ships a prebuilt launcher (tools/build_linux_launcher.sh), so its BUILD GAME
+# page works before any build. A checkout has none and uses the one the game build makes.
 if [[ "$(uname -s)" != "Darwin" ]]; then
+    PREBUILT="${ROOT}/tools/artifacts/launcher-linux-x86_64"
+    if [[ -x "${PREBUILT}" ]]; then
+        if "${PREBUILT}" "${ROOT}"; then
+            exec "${ROOT}/run_game.sh" --play --saved "$@"
+        fi
+        exit 1
+    fi
     exec "${ROOT}/run_game.sh" --play --launcher "$@"
 fi
 
