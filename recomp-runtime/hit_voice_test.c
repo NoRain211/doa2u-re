@@ -73,6 +73,7 @@ void sub_0010CE60(void)
 }
 
 static unsigned submits[2], resets[2], first_bytes;
+static int16_t submitted_sample[2];
 static const uint8_t *last_pcm;
 void recomp_audio_output_submit(uint32_t slot, const uint8_t *pcm, uint32_t bytes, uint32_t rate,
     uint32_t channels, uint32_t bits, int32_t volume)
@@ -82,6 +83,8 @@ void recomp_audio_output_submit(uint32_t slot, const uint8_t *pcm, uint32_t byte
     if (slot < RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT || slot > RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT + 1u ||
         rate != 48000u || channels != 1u || bits != 16u || bytes == 0u || bytes % 2u) abort();
     if (submits[slot - RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT]++ == 0u) first_bytes = bytes;
+    submitted_sample[slot - RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT] =
+        (int16_t)((uint16_t)pcm[0] | (uint16_t)pcm[1] << 8u);
 }
 void recomp_audio_output_reset_voice(uint32_t slot) { ++resets[slot - RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT]; }
 
@@ -89,7 +92,7 @@ static void put16(uint8_t *at, unsigned value) { at[0] = (uint8_t)value; at[1] =
 static void put32(uint8_t *at, uint32_t value) { put16(at, value & 0xffffu); put16(at + 2, value >> 16); }
 
 /* A mono 48 kHz 16-bit WAV of `frames` silent frames. */
-static void write_wav(const char *path, uint32_t frames)
+static void write_wav_sample(const char *path, uint32_t frames, int16_t sample)
 {
     uint8_t header[44] = "RIFF....WAVEfmt ";
     put32(header + 4, 36u + frames * 2u);
@@ -105,8 +108,16 @@ static void write_wav(const char *path, uint32_t frames)
     FILE *file = fopen(path, "wb");
     if (file == NULL) abort();
     fwrite(header, 1, 44, file);
-    for (uint32_t i = 0; i < frames; ++i) fputc(0, file), fputc(0, file);
+    for (uint32_t i = 0; i < frames; ++i) {
+        fputc((uint16_t)sample & 0xffu, file);
+        fputc((uint16_t)sample >> 8u, file);
+    }
     fclose(file);
+}
+
+static void write_wav(const char *path, uint32_t frames)
+{
+    write_wav_sample(path, frames, 0);
 }
 
 static void land(unsigned side, unsigned life, unsigned damage)
@@ -141,8 +152,8 @@ int main(void)
 {
     /* The 15 fighters and their DOA4 banks; no others. */
     const unsigned ids[15] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 17, 21, 24};
-    const char *names[15] = {"zac", "tin", "jan", "ein", "ryu", "kas", "gen", "hel", "bay", "bas",
-        "lei", "aya", "tng", "kor", "leo"};
+    const char *names[15] = {"zac", "tin", "jan", "ein", "ryu", "kas", "gen", "hel", "leo", "bas",
+        "lei", "aya", "tng", "kor", "bay"};
     for (unsigned i = 0; i < 15u; ++i)
         expect(names[i], recomp_hit_voice_prefix((uint8_t)ids[i]) != NULL &&
             strcmp(recomp_hit_voice_prefix((uint8_t)ids[i]), names[i]) == 0);
@@ -247,6 +258,51 @@ int main(void)
     remove("hit_voice_test_clips/kas/selections/kasumi_HIT_LV3_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_02.wav");
+
+    /* Historical guest prefixes are misleading for Leon/Bayman. Exercise
+       bank loading and actual PCM routing on BOTH sides, not just PREFIX. */
+    const char *pair[2] = {"leo", "bay"};
+    const unsigned characters[2] = {8u, 24u};
+    for (unsigned fighter = 0u; fighter < 2u; ++fighter) {
+        char path[160];
+        snprintf(path, sizeof path, "%s/%s", root, pair[fighter]);
+        make_dir(path);
+        snprintf(path, sizeof path, "%s/%s/selections", root, pair[fighter]);
+        make_dir(path);
+        for (unsigned level = 1u; level <= 3u; ++level) {
+            snprintf(path, sizeof path, "%s/%s/selections/test_HIT_LV%u_01.wav", root, pair[fighter], level);
+            write_wav_sample(path, 24000u, (int16_t)(1000u * (fighter + 1u) + 111u * level));
+        }
+        snprintf(path, sizeof path, "%s/%s/selections/voice.ini", root, pair[fighter]);
+        FILE *file = fopen(path, "wb");
+        if (file == NULL) abort();
+        fputs("meter_low=1\nmeter_high=1\ngap_ms=0\n", file);
+        fclose(file);
+    }
+    for (unsigned swap = 0u; swap < 2u; ++swap) {
+        recomp_hit_voice_install(false, root);
+        for (unsigned side = 0u; side < 2u; ++side)
+            ram[0x01u + 0x94u * side] = (uint8_t)characters[side ^ swap];
+        const unsigned damage[3] = {10u, 25u, 40u};
+        for (unsigned level = 1u; level <= 3u; ++level) {
+            for (unsigned side = 0u; side < 2u; ++side) {
+                const unsigned fighter = side ^ swap, before = submits[side];
+                hit(side, 200u, damage[level - 1u], damage[level - 1u]);
+                expect(fighter == 0u ? "Leon plays Leon's selected grunt" : "Bayman plays Bayman's selected grunt",
+                    submits[side] > before && submitted_sample[side] == (int16_t)(1000u * (fighter + 1u) + 111u * level));
+            }
+        }
+    }
+    recomp_hit_voice_set_choice(0u);
+    for (unsigned fighter = 0u; fighter < 2u; ++fighter) {
+        char path[160];
+        for (unsigned level = 1u; level <= 3u; ++level) {
+            snprintf(path, sizeof path, "%s/%s/selections/test_HIT_LV%u_01.wav", root, pair[fighter], level);
+            remove(path);
+        }
+        snprintf(path, sizeof path, "%s/%s/selections/voice.ini", root, pair[fighter]);
+        remove(path);
+    }
 
     if (failures == 0) puts("hit voice tests passed");
     return failures != 0;
