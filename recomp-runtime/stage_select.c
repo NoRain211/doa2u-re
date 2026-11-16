@@ -195,7 +195,7 @@ enum {
     ROTATION_INDEX = 0x008783b5u,
     ROTATION_COUNT = 21u,
     RANDOM_FROM_PICK = 0x000c7e8bu, /* return addresses of the draws from 0x692bd0 */
-    RANDOM_FROM_REMATCH = 0x000c4483u,
+    RANDOM_FROM_REMATCH = 0x000c4483u, /* in 0xc4460, called only from 0xc7c80 (0xc7ef1) */
 };
 #define MODE_PENDING_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc18u)  /* Miyama follows the 21st stage */
 #define MODE_DRAWN_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc19u)    /* the draw landed on Miyama */
