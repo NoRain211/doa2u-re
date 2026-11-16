@@ -128,7 +128,8 @@ static int test_stage_select(void)
 
 /* Up on the Miyama row is the only way to reach the other three variants: it
    steps 18 to 64, 63 and 65, then back to 18, sounds the row and commits the
-   preview each time. X (27, a black void) does nothing there. Other rows and
+   preview each time; Down steps back the same way. X (27, a black void) does
+   nothing there. Other rows and
    other presses stay the game's. */
 static int test_miyama_variants(void)
 {
@@ -148,6 +149,11 @@ static int test_miyama_variants(void)
             failed = "Miyama up";
             break;
         }
+    }
+    for (unsigned i = 1u; i <= 4u && failed == NULL; ++i) {
+        const uint8_t id = MIYAMA_IDS[(4u - i) % 4u]; /* 65, 63, 64, 18 */
+        *recomp_memory_u32(0x87d298u) = i == 4u ? 0x20000u : 0x2u; /* D-pad Down, then left-stick down */
+        if (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u || kernel_page[1] != id || commit_id != id) failed = "Miyama down";
     }
     stage_cursor = 3u;
     original_calls = 0u;
@@ -251,6 +257,10 @@ static int test_mode_rotations(void)
     for (unsigned i = 0u; i < 4u && failed == NULL; ++i)
         if (call_cdecl(0x000c7c80u, 0u, 0u) != expected[i]) failed = "rotation";
     if (failed == NULL && (rotation_index != 1u || kernel_page[0x18] != 0u)) failed = "rotation index";
+    kernel_page[0x18] = 1u; /* a pending step the index has since left behind */
+    rotation_index = 5u;
+    if (failed == NULL && (call_cdecl(0x000c7c80u, 0u, 0u) != 15u || rotation_index != 6u || kernel_page[0x18] != 0u))
+        failed = "stale pending";
     pick_draws = 1u;
     drawn_value = 21u;
     if (failed == NULL && (call_cdecl(0x000c7c80u, 0u, 0u) != 63u || kernel_page[0x19] != 0u)) failed = "Miyama draw";

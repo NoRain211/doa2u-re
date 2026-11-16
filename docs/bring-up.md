@@ -774,7 +774,8 @@ layout to 0 for all of them, as Story's ladder does for the only two it uses
 (18 and 64). The game's own confirm handler (`0x1357f0`) already committed 27,
 63 and 65 from 64 with X, Y and Left trigger plus A or Start, but retail never
 offers 64, so that path was dead. D-pad Up (or left-stick up) on the Miyama
-row now steps the entry's id through 18, 64, 63, 65 and back, playing the row
+row now steps the entry's id through 18, 64, 63, 65 and back, and Down steps
+the other way, playing the row
 sound (`0xfed70`) and committing the new id to the preview through the call a
 row change makes (`0x12f360`); after a confirm it does nothing. 27 showed a
 black void in game, so it is left out of the cycle and X on the row does

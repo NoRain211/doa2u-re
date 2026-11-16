@@ -16,7 +16,7 @@
    data follows the table, so its entry lives in the reserved kernel page.
    Labels 61, 14 and 36 are the game's unused Miyama name and thumbnails.
 
-   Up on that row steps its id through the ids that share the boss stage's
+   Up and Down on that row step its id through the ids that share the boss stage's
    data, because retail offers only 18 of them and its own hidden X, Y and Left
    trigger picks reach the others only from 64. 27 is left out (and X with it):
    it showed a black void in game. */
@@ -34,6 +34,8 @@ enum {
     STAGE_PAD_STRIDE = 0x30u,
     STAGE_PAD_UP = 0x00000001u,
     STAGE_PAD_STICK_UP = 0x00010000u,
+    STAGE_PAD_DOWN = 0x00000002u,
+    STAGE_PAD_STICK_DOWN = 0x00020000u,
     STAGE_PAD_X = 0x00000400u, /* the game's pick of 27 from 64 */
     STAGE_CURSOR_SFX = 0x23u,
     STAGE_LOAD_SLOT_DATA = 0x001364e0u,
@@ -59,10 +61,11 @@ static bool miyama_stage(uint8_t id)
     return false;
 }
 
-static uint8_t miyama_next_stage(uint8_t id)
+/* steps is 1 forward or 3 (one back) */
+static uint8_t miyama_step_stage(uint8_t id, unsigned steps)
 {
     for (unsigned i = 0u; i < 4u; ++i)
-        if (id == MIYAMA_STAGES[i]) return MIYAMA_STAGES[(i + 1u) % 4u];
+        if (id == MIYAMA_STAGES[i]) return MIYAMA_STAGES[(i + steps) % 4u];
     return MIYAMA_STAGE;
 }
 
@@ -145,8 +148,8 @@ static void stage_select_find_stage(void)
 }
 
 /* 0x1357f0 (pad slot): on the Miyama row, Up steps the entry to its next
-   variant and reloads the preview, which is the only way to reach the other
-   three, and X does nothing. Every other row, press and frame is the game's
+   variant and Down to its previous one, reloading the preview; that is the
+   only way to reach the other three, and X does nothing. Every other row, press and frame is the game's
    own handler, whose hidden Y and Left trigger picks below 64 stay. */
 static void stage_select_confirm_input(void)
 {
@@ -156,9 +159,11 @@ static void stage_select_confirm_input(void)
     const uint32_t pressed = *recomp_memory_u32(STAGE_PAD_PRESSED + pad * STAGE_PAD_STRIDE);
     /* A second player's grid still runs after the first confirms; keep the chosen id. */
     const bool confirming = (guest_byte(STAGE_CONFIRMING) | guest_byte(STAGE_CONFIRMING + 1u)) != 0u;
-    if (entry == MIYAMA_ENTRY_ADDRESS && !confirming && (pressed & (STAGE_PAD_UP | STAGE_PAD_STICK_UP)) != 0u) {
+    const bool up = (pressed & (STAGE_PAD_UP | STAGE_PAD_STICK_UP)) != 0u;
+    const bool down = (pressed & (STAGE_PAD_DOWN | STAGE_PAD_STICK_DOWN)) != 0u;
+    if (entry == MIYAMA_ENTRY_ADDRESS && !confirming && (up || down)) {
         uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
-        const uint8_t id = miyama_next_stage(miyama[1]);
+        const uint8_t id = miyama_step_stage(miyama[1], up ? 1u : 3u);
         miyama[1] = miyama[2] = miyama[3] = id;
         const uint32_t sfx = STAGE_CURSOR_SFX;
         const uint32_t commit[4] = {1u, id, STAGE_LOAD_SLOT_DATA, 0xffffffffu};
@@ -259,6 +264,7 @@ static void stage_pick_next(void)
     uint8_t *drawn = recomp_memory(MODE_DRAWN_ADDRESS, 1u);
     uint8_t *index = recomp_memory(ROTATION_INDEX, 1u);
     const uint8_t before = *index;
+    if (before != 0u) *pending = 0u; /* Miyama only follows the wrap to 0 */
     *drawn = 0u;
     uint32_t stage = kernel_call_lifted(sub_000C7C80, NULL, 0u) & 0xffu;
     if (*drawn != 0u) {
