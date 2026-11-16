@@ -95,10 +95,16 @@ glibc 2.34 or newer; on other systems, build `extract-xiso` as in the macOS
 section and pass it with `--extractor`. `build_game.sh` builds SDL3 when the
 distribution has none:
 
+Run these from inside the clone. `build_game.sh` sits at its top level, so
+`No such file or directory` means you are in the wrong folder (`ls` should list
+it). Quote the ISO path if it contains spaces:
+
 ```bash
+git clone --recurse-submodules https://github.com/NoRain211/doa2u-re.git
+cd doa2u-re
 python3 -m venv private/venv
 private/venv/bin/pip install capstone==5.0.7
-./build_game.sh /path/to/disc2.iso
+./build_game.sh "/path/to/disc2.iso"
 ```
 
 SteamOS has a read-only system and no compiler, so build inside a container
