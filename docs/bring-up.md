@@ -762,16 +762,34 @@ Stage Select also offers Tengu's boss stage (issue #117). Its list
 (`stage_select_build_rows`, `0x1354a0`) writes one-byte entry numbers into
 rows at `0xdf5f10`, indexing the 24-byte entries at `0x6e22b0`, and appends
 Random; every other read goes through `0x135410`, `0x135510` and
-`0x135580`. `stage_select.c`
-replaces those four and adds stage 18 (the Miyama his story fight loads)
+`0x135580`, and a row's confirm through `0x1357f0`. `stage_select.c`
+replaces those five and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. Random's pick
-(`0x135700`) can then choose it too. The tag list stays as it was.
-Only Sparring was played with it. The stage's season variants (ids 27, 64,
-65) load inconsistently and are left out. Random's row moves one place, so
-online players need this build on both sides, which netplay's build check
-already requires.
+`0x03ff0c00`, since other data follows the table. The tag list stays as it was.
+
+Ids 18, 27, 63, 64 and 65 are one stage group (`0x693370`) with identical data
+and area descriptors. Stage Select's preview load (`0x12e720`) sets the stage
+layout to 0 for all of them, as Story's ladder does for the only two it uses
+(18 and 64). The game's own confirm handler (`0x1357f0`) already committed 27,
+63 and 65 from 64 with X, Y and Left trigger plus A or Start, but retail never
+offers 64, so that path was dead. D-pad Up (or left-stick up) on the Miyama
+row now steps the entry's id through 18, 64, 63, 65 and back, playing the row
+sound (`0xfed70`) and committing the new id to the preview through the call a
+row change makes (`0x12f360`); after a confirm it does nothing. 27 showed a
+black void in game, so it is left out of the cycle and X on the row does
+nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
+changes. The entry's id bytes hold the pick, and it stays across visits to
+the screen. Random's `row_stage(row, 0)` and the confirm take the current
+variant; find-stage (`0x135580`), which only the online match scene uses,
+writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
+so any variant replays without a row. Played in game: the Up cycle, a fight
+on each variant, the X, Y and Left trigger picks, the kept variant and
+Random; 27 was the black void. Online play and the online match scene's
+restore were not tested. The variant is a stage id the game already syncs, the entry
+sits in the kernel page that rollback restores, and Up is read from the
+lockstepped per-player pad block, so both sides need this build, which
+netplay's build check already requires.
 
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) points 0xf200 into the active profile's 0x12118-byte
