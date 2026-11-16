@@ -281,7 +281,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, intro, unlock, cpuCostumes, freeCamera, dedication, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -293,8 +293,10 @@ class LauncherForm : Form
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
-    string task = "build"; // what build runs: "build", or "import" (tools\import_soundtrack.py)
+    string task = "build"; // "build", soundtrack "import", or "voices"
     Row importRow;
+    // A DOA4 disc imported for its music then gives its hit voices too, in one go.
+    string voicesNext;
     // The newer version a check found, and whether a check or install is running on its thread.
     // Build, play and exit wait for an install, which replaces the tools and launchers.
     string pending;
@@ -362,15 +364,21 @@ class LauncherForm : Form
         lifeBarCustom = Game.Str(settings, "lifeBarCustom", "FFFFFF");
         hitVoices = Game.Bool(settings, "hitVoices", true);
         hitVoiceVolume = Game.Str(settings, "hitVoiceVolume", "normal");
+        voiceSetting = new Row { Label = "Hit Voices", Info = "Imported DOA4 hit grunts and KO voices; offline only",
+            Names = new[] { "Off", "Quiet", "Normal", "Loud" }, Default = 2,
+            Index = !hitVoices ? 0 : hitVoiceVolume == "quiet" ? 1 : hitVoiceVolume == "loud" ? 3 : 2 };
         koReplay = Game.Str(settings, "koReplay", "dynamic");
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
         var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 10 minutes", Action = "build" };
-        importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3 or 4 ISO to add its music", Action = "import" };
+        importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3 or 4 ISO to add its music; DOA4 adds the hit voices too", Action = "import" };
         pages = new[] {
             new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape, renderer and VRR", Rows = PageRows(resolution, msaa, smaa, screen, renderer, vrr) },
-            new Page { Name = "AUDIO SETTINGS", Info = "Chooses stereo or 5.1 surround", Rows = PageRows(surround) },
+            new Page { Name = "AUDIO SETTINGS", Info = "Choose the output, import DOA4 hit voices from your ISO, or edit your clips",
+                Rows = PageRows(surround, voiceSetting,
+                    new Row { Label = "Import DOA4 Voices", Info = "Choose your Dead or Alive 4 ISO; your existing clip selections are kept", Action = "voices" },
+                    new Row { Label = "Edit Voices", Info = "Pick each fighter's hit and KO clips and tune how often they play", Action = "voice-editor" }) },
             new Page { Name = "MOVIES", Info = "Plays or skips the logo and opening movies at boot", Rows = PageRows(intro) },
             new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks, CPU costumes, free camera and dedication card", Rows = PageRows(unlock, cpuCostumes, freeCamera, dedication) },
             new Page { Name = "BUILD GAME", Info = BuildStatus(), Rows = new[] { chooseGame, buildRow, new Row { Label = "Exit", Info = "Returns to the menu", Action = "back" } } },
@@ -483,7 +491,8 @@ class LauncherForm : Form
             { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
-            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", hitVoices }, { "hitVoiceVolume", hitVoiceVolume }, { "koReplay", koReplay } };
+            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
+            { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }
@@ -491,7 +500,7 @@ class LauncherForm : Form
     string Verb(string action)
     {
         return action == "build" ? "BUILD" : action == "default" ? "RESET" : action == "back" ? "BACK"
-            : action == "update" ? (pending != null ? "INSTALL" : "CHECK") : action == "names" ? "EDIT" : "CHOOSE";
+            : action == "update" ? (pending != null ? "INSTALL" : "CHECK") : action == "names" || action == "voice-editor" ? "EDIT" : "CHOOSE";
     }
 
     // The generated backdrop (tools/launcher-background.jpg, embedded by package_test.py) between letterbox bars.
@@ -681,18 +690,27 @@ class LauncherForm : Form
         timer.Start();
     }
 
-    // Imports a DOA3 or DOA4 disc's music into jukebox\, as a build runs.
-    void StartImport(string iso)
+    // A DOA3 disc gives the Jukebox its music; a DOA4 disc its music, then the fighters' hit voices.
+    void ImportDisc(string iso, string game = null)
     {
-        if (build != null) { notice = "Wait for the " + (task == "import" ? "import" : "build") + " to finish"; return; }
+        if (game == null) game = build == null ? DetectDisc(iso) : "unknown";
+        voicesNext = game == "doa4" ? iso : null;
+        StartImport(iso);
+    }
+
+    // Imports a DOA3 or DOA4 disc's music into jukebox\, as a build runs.
+    void StartImport(string iso, bool voices = false)
+    {
+        if (build != null) { notice = "Wait for the " + (task != "build" ? "import" : "build") + " to finish"; return; }
         if (installing) { notice = "Wait for the update to finish"; return; }
         if (Game.Python == null) { MessageBox.Show(Game.PythonMessage, Game.Title); return; }
         lock (buildLines) buildLines.Clear();
         buildStart = DateTime.Now;
-        build = Game.StartPython(@"tools\import_soundtrack.py", "\"" + iso + "\"", line => { lock (buildLines) buildLines.Add(line); });
-        task = "import";
-        menu = JukeboxPage; inPage = true; row = 0;
-        notice = "Importing the soundtrack";
+        build = Game.StartPython(voices ? @"tools\import_doa4_voices.py" : @"tools\import_soundtrack.py",
+            "\"" + iso + "\"", line => { lock (buildLines) buildLines.Add(line); });
+        task = voices ? "voices" : "import";
+        menu = voices ? 1 : JukeboxPage; inPage = true; row = voices ? 2 : 0;
+        notice = voices ? "Importing DOA4 hit voices" : "Importing the soundtrack";
         timer.Start();
     }
 
@@ -710,7 +728,7 @@ class LauncherForm : Form
     {
         string last;
         lock (buildLines) last = buildLines.LastOrDefault();
-        notice = (task == "import" ? "Importing " : "Building ") + (DateTime.Now - buildStart).ToString(@"mm\:ss") + (last != null ? "  \u00B7  " + last.Trim() : "");
+        notice = (task != "build" ? "Importing " : "Building ") + (DateTime.Now - buildStart).ToString(@"mm\:ss") + (last != null ? "  \u00B7  " + last.Trim() : "");
         if (build.HasExited) { timer.Stop(); FinishBuild(); }
         Invalidate();
     }
@@ -724,14 +742,23 @@ class LauncherForm : Form
         build = null;
         string[] lines;
         lock (buildLines) lines = buildLines.ToArray();
-        if (task == "import")
+        if (task != "build")
         {
+            bool voices = task == "voices";
             task = "build";
-            string importLog = Game.Private("import.log");
+            string importLog = Game.Private(voices ? "voice-import.log" : "import.log");
             try { File.WriteAllLines(importLog, lines); } catch (IOException) { }
             pages[JukeboxPage].Info = JukeboxStatus();
-            if (code == 0) { notice = "Imported. Open JUKEBOX in the game's main menu"; return; }
-            notice = @"Import failed; see private\import.log";
+            if (code == 0 && !voices && voicesNext != null) { string iso = voicesNext; voicesNext = null; StartImport(iso, true); return; }
+            voicesNext = null;
+            if (code == 0 && voices && voiceSetting.Index == 0)
+            {
+                // The player imported voices to hear them: turn Hit Voices on.
+                voiceSetting.Index = voiceSetting.Default;
+                try { Game.SaveSettings(Settings()); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            if (code == 0) { notice = voices ? "Voices imported. Choose Edit Voices to customize your clips" : "Imported. Open JUKEBOX in the game's main menu"; return; }
+            notice = voices ? @"Voice import failed; see private\voice-import.log" : @"Import failed; see private\import.log";
             MessageBox.Show("The import failed:\n\n" + string.Join("\n", lines.Skip(Math.Max(0, lines.Length - 8))) + "\n\nFull output: " + Game.RedactPrivate(importLog), Game.Title);
             return;
         }
@@ -749,7 +776,7 @@ class LauncherForm : Form
         if (installing) { notice = "Wait for the update to finish"; e.Cancel = true; Invalidate(); return; }
         if (build != null && !build.HasExited)
         {
-            if (MessageBox.Show("Stop the build?", Game.Title, MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
+            if (MessageBox.Show(task == "build" ? "Stop the build?" : "Stop the import?", Game.Title, MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
             timer.Stop();
             using (var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + build.Id) { UseShellExecute = false, CreateNoWindow = true }))
                 kill.WaitForExit();
@@ -795,7 +822,7 @@ class LauncherForm : Form
             else if (r.Action == "back") inPage = false;
             else if (r.Action == "game")
             {
-                if (build != null) { notice = "Wait for the " + (task == "import" ? "import" : "build") + " to finish"; return; }
+                if (build != null) { notice = "Wait for the " + (task != "build" ? "import" : "build") + " to finish"; return; }
                 using (var dialog = new OpenFileDialog { Title = "Dead or Alive Ultimate Disc 2 ISO", Filter = "Xbox ISO|*.iso;*.xiso|All files|*.*" })
                     if (dialog.ShowDialog() == DialogResult.OK) UseDisc(dialog.FileName);
             }
@@ -803,7 +830,20 @@ class LauncherForm : Form
             else if (r.Action == "import")
             {
                 using (var dialog = new OpenFileDialog { Title = "Dead or Alive 3 or Dead or Alive 4 ISO", Filter = "Xbox or Xbox 360 ISO|*.iso;*.xiso|All files|*.*" })
-                    if (dialog.ShowDialog() == DialogResult.OK) StartImport(dialog.FileName);
+                    if (dialog.ShowDialog() == DialogResult.OK) ImportDisc(dialog.FileName);
+            }
+            else if (r.Action == "voices")
+            {
+                using (var dialog = new OpenFileDialog { Title = "Import voices from your Dead or Alive 4 ISO", Filter = "Xbox 360 ISO|*.iso;*.xiso|All files|*.*" })
+                    if (dialog.ShowDialog() == DialogResult.OK) StartImport(dialog.FileName, true);
+            }
+            else if (r.Action == "voice-editor")
+            {
+                if (build != null) { notice = "Wait for the current build or import to finish"; return; }
+                string editor = Path.Combine(Game.Root, "VoiceEditor.exe");
+                if (!File.Exists(editor)) { notice = "Build the game to get the Voice Editor"; return; }
+                try { Process.Start(editor); }
+                catch (Exception error) { notice = "Could not open Voice Editor: " + error.Message; }
             }
             else if (r.Action == "update") Update(false);
             else if (r.Action == "names")
@@ -875,7 +915,7 @@ class LauncherForm : Form
         if (path == null) return;
         // A DOA3 or DOA4 disc goes to the Jukebox; anything else is the game's disc.
         string game = build == null ? DetectDisc(path) : "unknown";
-        if (game == "doa3" || game == "doa4") StartImport(path);
+        if (game == "doa3" || game == "doa4") ImportDisc(path, game);
         else UseDisc(path);
         Activate();
         Invalidate();

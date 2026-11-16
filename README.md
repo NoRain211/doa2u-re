@@ -89,7 +89,11 @@ keeps running.
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
-  of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
+  of Dead or Alive 4, drop its ISO on the launcher (or choose it with
+  AUDIO SETTINGS' **Import DOA4 Voices**): it imports the disc's music for
+  the Jukebox, then the voices, and turns Hit Voices on. No extraction is
+  needed; on Windows it fetches the ffmpeg it needs the first time. By hand,
+  `python tools/import_doa4_voices.py <DOA4 ISO, extracted disc or snd.afs>`
   decodes every voice clip of all 15 fighters into
   `private\doa4-voice-all\<fighter>` and fills each fighter's `selections`
   folder from `tools\doa4_voice_selections.json`, a mapping of which DOA4
@@ -108,7 +112,7 @@ keeps running.
   mapping** button (or the importer's `--save-selections`) writes your picks
   back into the mapping file to share them. Hits are
   graded by the move's base damage, before combo scaling. It needs an
-  ffmpeg with XMA support; on Windows the build fetches one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
+  ffmpeg with XMA support; on Windows the importers and the build fetch one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
   row sets them Off, Quiet, Normal or Loud. Online they stay off, since a
   rollback would replay them.
 - **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**

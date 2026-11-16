@@ -38,7 +38,7 @@ import subprocess
 import sys
 import tempfile
 
-from build_prerequisites import find_ffmpeg
+from build_prerequisites import ffmpeg as fetch_ffmpeg
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT = os.path.join(ROOT, "jukebox")
@@ -629,7 +629,7 @@ def main():
         if game == "doa3":
             import_doa3(source, args.out, find_encoder(args.adx_encoder))
         elif game == "doa4":
-            import_doa4(source, args.out, args.ffmpeg or find_ffmpeg(ROOT), find_encoder(args.adx_encoder))
+            import_doa4(source, args.out, args.ffmpeg or fetch_ffmpeg(ROOT), find_encoder(args.adx_encoder))
         elif game == "doa2u":
             import_doa2u(source, args.out, find_encoder(args.adx_encoder))
         else:
