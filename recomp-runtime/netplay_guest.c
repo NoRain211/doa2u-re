@@ -86,7 +86,11 @@ static void load_main_profile(void)
        played its Versus rules and controller settings. Let the load finish
        (the profile stays loaded for its saves), then put the defaults back
        and re-apply the volume and vibration the load took from the data
-       (0x21370, 0x213d0). */
+       (0x21370, 0x213d0). Session saves go to the throwaway copy in
+       .recomp-storage/netplay, wiped at each session start, so a save
+       after this writes the defaults there and never into a player's own
+       profile. Each load restores them again, discarding edits made
+       since the last one. */
     sub_00024940();
     if (recomp_runtime.registers.eax != 0u || session_data == 0u || *recomp_memory_u32(0x0087cfa8u) != session_data)
         return;

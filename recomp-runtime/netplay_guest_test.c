@@ -131,6 +131,10 @@ int main(void)
         load != NULL && all(data + 0x1eu, 0x14u, 0x10u) && all(data + 0x32u, 0x14u, 0x11u) &&
         all(data, 0x1eu, 0u) && all(data + 0x46u, sizeof data - 0x46u, 0u) && applied == 2u &&
         recomp_runtime.registers.eax == 0u);
+    memset(data + 0x2c68u, 0x77, 0x10u); /* an edit after the first load, then the menu loads again */
+    if (load != NULL) load();
+    check("every load puts the defaults back", load != NULL && all(data + 0x2c68u, 0x10u, 0u) &&
+        all(data + 0x1eu, 0x14u, 0x10u) && all(data + 0x32u, 0x14u, 0x11u));
     main_result = (uint32_t)-7;
     applied = 0u;
     if (load != NULL) load();
