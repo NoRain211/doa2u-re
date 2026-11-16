@@ -281,19 +281,27 @@ void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
     const float aspect = recomp_d3d8_content_aspect();
     if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen) return;
     const float width = (float)draw->target.color.width;
-    float left = INFINITY, right = -INFINITY;
+    float left = INFINITY, right = -INFINITY, top = INFINITY, bottom = -INFINITY;
     /* An indexed draw may share its buffer, so only the vertices it uses count. */
     const uint16_t *indices = draw->index_count != 0u ? draw->index_bytes : NULL;
     const uint32_t count = indices != NULL ? draw->index_count : draw->vertex_count;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t vertex = indices != NULL ? indices[i] : i;
         if (vertex >= draw->vertex_count) continue;
-        float x;
-        memcpy(&x, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof x);
-        if (!isfinite(x)) continue;
-        left = fminf(left, x);
-        right = fmaxf(right, x);
+        float xy[2];
+        memcpy(xy, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof xy);
+        if (!isfinite(xy[0]) || !isfinite(xy[1])) continue;
+        left = fminf(left, xy[0]);
+        right = fmaxf(right, xy[0]);
+        top = fminf(top, xy[1]);
+        bottom = fmaxf(bottom, xy[1]);
     }
+    /* A screen effect laid over the whole height from one of the game's own
+       render targets (Danger Zone's glow) fills the screen like a fade, even
+       drawn narrower than the target; a picture in a menu panel is shorter. */
+    if (draw->has_texture && draw->texture.render_target && top <= 1.0f &&
+        bottom >= (float)draw->target.color.height - 1.0f)
+        return;
     float scale[2];
     recomp_widescreen_2d_scale(aspect, width, left, right, scale);
     if (scale[0] == 1.0f && scale[1] == 1.0f) return;
