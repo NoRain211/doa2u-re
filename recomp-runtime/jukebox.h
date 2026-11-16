@@ -42,16 +42,12 @@ unsigned recomp_jukebox_choices(unsigned row);   /* left/right steps through the
 unsigned recomp_jukebox_choice(unsigned row);
 void recomp_jukebox_choose(unsigned row, unsigned choice);
 void recomp_jukebox_confirm(unsigned row);
-/* ASCII, to show beside the row's label; and the help line for a row. */
+/* UTF-8, to show beside the row's label; and the help line for a row. */
 const char *recomp_jukebox_value(unsigned row);
 const char *recomp_jukebox_help(unsigned row);
 
-/* Once a frame: feeds the output; with private/claude-scratch/probe present,
-   also saves the menu's word art there (for its lettering). */
+/* Once a frame: feeds the output. */
 void recomp_jukebox_pump(void);
-/* In a main menu hook (game context): with the probe folder present, saves
-   the game's message text there once. */
-void recomp_jukebox_probe_messages(void);
 
 /* For tests: a DOA2U music file's name in the Jukebox, or NULL to leave it out. */
 const char *recomp_jukebox_doa2u_name(const char *file);

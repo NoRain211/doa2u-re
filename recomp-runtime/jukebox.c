@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "jukebox.h"
 #include "adx_decoder.h"
 #include "audio_output.h"
@@ -6,6 +9,8 @@
 #include "kernel_abi.h"
 #include "mod_loader.h"
 #include "runner_assets.h"
+#include "atomic_file.h"
+#include "utf8_text.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -54,7 +59,7 @@ typedef struct Album {
 
 static Album albums[MAX_ALBUMS];
 static unsigned album_count;
-static char disc_root[PATH_SIZE], jukebox_root[PATH_SIZE], probe_root[PATH_SIZE];
+static char disc_root[PATH_SIZE], jukebox_root[PATH_SIZE];
 
 /* DOA2U's music table (0x6a0b2c: label, ?, file; 68 entries of 16 bytes) by
    file, in its order, with the label made readable; files it lists twice
@@ -506,6 +511,10 @@ static bool next_sample(int16_t out[2])
 
 static void advance(void)
 {
+    if (player.album >= album_count || albums[player.album].count == 0u) {
+        stop();
+        return;
+    }
     const Album *album = &albums[player.album];
     unsigned next = player.track + 1u;
     if (mode == MODE_SHUFFLE && album->count > 1u) {
@@ -597,6 +606,8 @@ static bool apply(Target *target)
         if (source == NULL) {
             fprintf(stderr, "recomp jukebox: cannot read %s for %s\n", track->name, target->name);
             target->album = target->track = -1;
+            recomp_mod_assign(BGM, (unsigned)target->entry, NULL);
+            return false;
         }
     }
     if (!recomp_mod_assign(BGM, (unsigned)target->entry, source)) {
@@ -610,9 +621,9 @@ static bool apply(Target *target)
 
 static void save_assignments(void)
 {
-    char path[PATH_SIZE];
+    char path[PATH_SIZE], temporary[PATH_SIZE + 64];
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
-    FILE *file = fopen(path, "w");
+    FILE *file = recomp_atomic_open(path, temporary, sizeof temporary);
     if (file == NULL) {
         fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
         return;
@@ -623,7 +634,8 @@ static void save_assignments(void)
         fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
             albums[targets[i].album].tracks[targets[i].track].file);
     }
-    fclose(file);
+    if (!recomp_atomic_commit(file, temporary, path, true))
+        fprintf(stderr, "recomp jukebox: cannot save assignments; previous file kept\n");
 }
 
 static void load_assignments(void)
@@ -653,19 +665,6 @@ static void load_assignments(void)
         }
     }
     fclose(file);
-}
-
-/* The mod loader's hook, on its reading thread: the game's music starting.
-   It logs each track with two bytes to learn from: the main menu's track,
-   and which byte holds the fight's stage. */
-static const RecompModSource *music_starts(const char *key, unsigned index, const RecompModSource *wanted)
-{
-    (void)wanted;
-    if (strcmp(key, BGM) != 0) return NULL;
-    const char *name = recomp_mod_entry_name(BGM, index);
-    fprintf(stderr, "recomp jukebox: music starts: %s (entry %u), byte 0x8783a9 = %u, 0x878394 = %u\n",
-        name != NULL ? name : "?", index, *recomp_memory(0x008783a9u, 1u), *recomp_memory(0x00878394u, 1u));
-    return NULL;
 }
 
 /* ---- The page -------------------------------------------------------------- */
@@ -698,7 +697,6 @@ uint64_t recomp_jukebox_prepare(const char *disc, const char *private_dir)
         if (rename(old_root, jukebox_root) == 0) fprintf(stderr, "recomp jukebox: moved %s to %s\n", old_root, jukebox_root);
         else snprintf(jukebox_root, sizeof jukebox_root, "%s", old_root);
     }
-    snprintf(probe_root, sizeof probe_root, "%s/claude-scratch/probe", base);
     load_library();
     uint64_t largest = 0u;
     for (unsigned a = 0u; a < album_count; ++a)
@@ -725,7 +723,7 @@ void recomp_jukebox_install(bool online)
     }
     recomp_mod_loader_enable_slots(!online);
     assigning = target_count > 0u && targets[0].entry >= 0;
-    recomp_mod_entry_start = music_starts;
+    recomp_mod_entry_start = NULL;
     if (!assigning) {
         fprintf(stderr, "recomp jukebox: bgm.afs has no slots; tracks cannot be assigned\n");
         return;
@@ -747,6 +745,7 @@ bool recomp_jukebox_take_request(void)
 
 void recomp_jukebox_page_opened(void)
 {
+    stop(); /* Album indexes can change while the library is reloaded. */
     load_library(); /* an album imported since shows */
     for (unsigned i = 0u; i < target_count; ++i) targets[i].album = targets[i].track = -1;
     if (assigning) load_assignments();
@@ -850,8 +849,25 @@ void recomp_jukebox_confirm(unsigned row)
 static const char *fit(char *out, size_t size, const char *text)
 {
     enum { MAX = 26 };
-    snprintf(out, size, "%s", text);
-    if (strlen(out) > MAX && size > MAX) strcpy(out + MAX - 3, "...");
+    if (size == 0u) return out;
+    const char *end = text;
+    unsigned count = 0u;
+    while (*end != '\0' && count < MAX) { recomp_utf8_next(&end); ++count; }
+    const bool shortened = *end != '\0' || (size_t)(end - text) >= size;
+    end = text;
+    count = 0u;
+    const size_t room = shortened && size >= 4u ? size - 4u : size - 1u;
+    while (*end != '\0' && count < (shortened ? MAX - 3u : MAX)) {
+        const char *next = end;
+        recomp_utf8_next(&next);
+        if ((size_t)(next - text) > room) break;
+        end = next;
+        ++count;
+    }
+    const size_t bytes = (size_t)(end - text);
+    memcpy(out, text, bytes);
+    out[bytes] = '\0';
+    if (shortened && size >= 4u) memcpy(out + bytes, "...", 4u);
     return out;
 }
 
@@ -898,80 +914,8 @@ const char *recomp_jukebox_help(unsigned row)
     }
 }
 
-/* ---- The probe ----------------------------------------------------------- */
-
-/* With private/claude-scratch/probe present (a developer's folder), the
-   menu's word art (sprite group 7, the main menu labels) and the game's
-   message text are saved there once, to letter new labels from. */
-static bool probe_on(void)
-{
-    struct stat info;
-    return probe_root[0] != '\0' && stat(probe_root, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR;
-}
-
-static bool find_sprite(uint32_t id, RecompGameSprite *s)
-{
-    for (int h = 1; h <= 256; ++h)
-        if (recomp_game_sprite(id, h, s)) return true;
-    return false;
-}
-
-static void save_sprite(uint32_t id)
-{
-    RecompGameSprite s;
-    if (!find_sprite(id, &s)) return;
-    const int w = s.right - s.left, h = s.bottom - s.top;
-    char path[PATH_SIZE];
-    snprintf(path, sizeof path, "%s/sprite_%05x.pam", probe_root, (unsigned)id);
-    FILE *file = fopen(path, "wb");
-    if (file == NULL) return;
-    fprintf(file, "P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", w, h);
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            const uint32_t argb = recomp_game_sprite_colour(&s, recomp_game_sprite_index(&s, x, y));
-            const uint8_t px[4] = {(uint8_t)(argb >> 16), (uint8_t)(argb >> 8), (uint8_t)argb, (uint8_t)(argb >> 24)};
-            fwrite(px, 1u, 4u, file);
-        }
-    fclose(file);
-}
-
+/* Once a frame, with no developer probes in the release path. */
 void recomp_jukebox_pump(void)
 {
     feed();
-    static bool sprites_saved;
-    if (sprites_saved || !probe_on()) return;
-    RecompGameSprite s;
-    if (!find_sprite(0x70008u, &s)) return;
-    for (uint32_t i = 0u; i < 0x40u; ++i) save_sprite(0x70000u | i);
-    sprites_saved = true;
-    fprintf(stderr, "recomp jukebox: probe saved the main menu's word art\n");
-}
-
-extern void sub_0006A3E0(void);
-
-void recomp_jukebox_probe_messages(void)
-{
-    static bool saved;
-    if (saved || !probe_on()) return;
-    saved = true;
-    char path[PATH_SIZE];
-    snprintf(path, sizeof path, "%s/messages.txt", probe_root);
-    FILE *file = fopen(path, "w");
-    if (file == NULL) return;
-    for (uint32_t n = 0u; n < 0x600u; ++n) {
-        const uint32_t args[2] = {n, 1u};
-        const uint32_t text = kernel_call_lifted(sub_0006A3E0, args, 2u);
-        if (text == 0u || text >= 0x04000000u) continue;
-        fprintf(file, "%04x\t", (unsigned)n);
-        for (unsigned c = 0u; c < 200u; ++c) {
-            const uint16_t ch = *recomp_memory_u16(text + 2u * c);
-            if (ch == 0u) break;
-            if (ch == '\n') fputs("\\n", file);
-            else if (ch < 0x80u) fputc((int)ch, file);
-            else fprintf(file, "\\u%04x", ch);
-        }
-        fputc('\n', file);
-    }
-    fclose(file);
-    fprintf(stderr, "recomp jukebox: probe saved the game's messages\n");
 }

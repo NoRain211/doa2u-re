@@ -140,6 +140,8 @@ def ffmpeg(root):
     """On Windows, fetch the pinned ffmpeg into tools/ffmpeg once (ffmpeg.exe and its licence); return find_ffmpeg."""
     target = Path(root) / FFMPEG
     if sys.platform == "win32" and not (target / "ffmpeg.exe").is_file():
+        if target.exists():
+            raise ValueError(f"{target} exists but has no ffmpeg.exe. Delete it and rerun.")
         (Path(root) / "private").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=Path(root) / "private") as folder:
             archive = Path(folder) / "ffmpeg.zip"
@@ -154,5 +156,12 @@ def ffmpeg(root):
             if not (staging / "ffmpeg.exe").is_file():
                 raise ValueError(f"{FFMPEG_URL} holds no bin/ffmpeg.exe")
             target.parent.mkdir(parents=True, exist_ok=True)
-            staging.replace(target)
+            for attempt in range(30):
+                try:
+                    staging.replace(target)
+                    break
+                except PermissionError:
+                    if attempt == 29:
+                        raise
+                    time.sleep(1)
     return find_ffmpeg(root)

@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "mod_loader.h"
 #include "adx_encoder.h"
+#include "adx_decoder.h"
+#include "atomic_file.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -424,7 +429,19 @@ static void converted(const char *wav, bool loop_whole, char *out, size_t out_si
     snprintf(name, sizeof name, "%016llx.adx", (unsigned long long)hash);
     make_directory(cache_root);
     join(out, out_size, cache_root, name);
-    if (is_file(out, NULL, NULL)) return;
+    HostFile cached;
+    if (host_open(&cached, out)) {
+        uint8_t header[4096];
+        uint32_t got = 0u;
+        RecompAdxDecoder decoder;
+        const bool read = host_read(&cached, 0u, header, sizeof header, &got);
+        const uint32_t start = read ? recomp_adx_open(&decoder, header, got) : 0u;
+        const uint64_t frames = start != 0u ? ((uint64_t)decoder.total_samples + 31u) / 32u : 0u;
+        const bool complete = start != 0u && frames > 0u &&
+            start + frames * 18u * decoder.channels <= cached.size;
+        host_close(&cached);
+        if (complete) return;
+    }
     size_t bytes;
     uint8_t *data = read_whole(wav, &bytes);
     uint32_t frames, channels, rate;
@@ -440,12 +457,12 @@ static void converted(const char *wav, bool loop_whole, char *out, size_t out_si
     size_t adx_size = 0u;
     uint8_t *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &adx_size);
     free(pcm);
-    FILE *file = adx != NULL ? fopen(out, "wb") : NULL;
+    char temporary[PATH_SIZE + 64];
+    FILE *file = adx != NULL ? recomp_atomic_open(out, temporary, sizeof temporary) : NULL;
     const bool written = file != NULL && fwrite(adx, 1u, adx_size, file) == adx_size;
-    if (file != NULL) fclose(file);
+    const bool committed = file != NULL && recomp_atomic_commit(file, temporary, out, written);
     free(adx);
-    if (!written) {
-        remove(out);
+    if (!committed) {
         out[0] = '\0';
         return;
     }
@@ -792,6 +809,14 @@ const RecompModOverlay *recomp_mod_overlay(const char *key, uint64_t real_size)
 }
 
 void recomp_mod_loader_enable_slots(bool enabled) { slots_enabled = enabled; }
+
+bool recomp_mod_entry_offset(const char *key, uint64_t real_size, unsigned index, uint64_t *offset)
+{
+    const RecompModOverlay *o = recomp_mod_overlay(key, real_size);
+    if (o == NULL || index >= le32(o->header + 4u)) return false;
+    *offset = le32(o->header + 8u + 8u * index);
+    return true;
+}
 
 uint64_t recomp_mod_overlay_size(const RecompModOverlay *overlay)
 {

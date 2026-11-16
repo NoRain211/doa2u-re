@@ -1632,13 +1632,17 @@ static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_
         return;
     }
     const uint16_t *index = draw->index_bytes;
-    uint32_t start = 0u, pieces = 0u;
+    static uint32_t tags[65536], generation;
+    uint32_t pieces = 0u;
     uint32_t starts[513];
     for (uint32_t t = 0u; t < triangles; ++t) {
-        bool shared = false;
-        for (uint32_t a = start * 3u; a < t * 3u && !shared; ++a)
-            for (uint32_t b = 0u; b < 3u; ++b) shared = shared || index[a] == index[t * 3u + b];
-        if (t == 0u || !shared) { starts[pieces++] = t; start = t; }
+        bool shared = t != 0u && (tags[index[t * 3u]] == generation ||
+            tags[index[t * 3u + 1u]] == generation || tags[index[t * 3u + 2u]] == generation);
+        if (!shared) {
+            starts[pieces++] = t;
+            if (++generation == 0u) { memset(tags, 0, sizeof tags); ++generation; }
+        }
+        for (uint32_t b = 0u; b < 3u; ++b) tags[index[t * 3u + b]] = generation;
     }
     if (pieces < 2u) {
         recomp_d3d8_submit(command);

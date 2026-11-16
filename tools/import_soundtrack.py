@@ -33,6 +33,7 @@ committed.
 """
 import argparse
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -408,14 +409,39 @@ def read_names(folder):
     return names
 
 
+def atomic_text(path, text):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=os.path.dirname(path), delete=False) as file:
+            temporary = file.name
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def record_text(text):
+    return re.sub(r"[\t\r\n]", " ", text)
+
+
+def safe_cue(cue):
+    return re.sub(r"[^A-Za-z0-9_-]", "_", cue)[:48] or "track"
+
+
 def write_tracks(folder, title, tracks):
     """tracks: [(file, loop start, loop end, name)] in samples. -1 loops at the ADX header's own
     points, or not at all if it has none; -2 never loops."""
-    with open(os.path.join(folder, "tracks.txt"), "w", encoding="utf-8", newline="\n") as file:
-        file.write(f"#title\t{title}\n")
-        file.write("# file<TAB>loop start sample<TAB>loop end sample<TAB>name. -1: the file's own loop; -2: no loop.\n")
-        for name, start, end, label in tracks:
-            file.write(f"{name}\t{start}\t{end}\t{label}\n")
+    lines = [f"#title\t{record_text(title)}",
+             "# file<TAB>loop start sample<TAB>loop end sample<TAB>name. -1: the file's own loop; -2: no loop."]
+    for name, start, end, label in tracks:
+        if name in (".", "..") or not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+            raise ValueError("invalid track file name")
+        lines.append(f"{name}\t{start}\t{end}\t{record_text(label)}")
+    atomic_text(os.path.join(folder, "tracks.txt"), "\n".join(lines) + "\n")
 
 
 # DOA2U's own music plays at about -17 dBFS (RMS); DOA3's at about -23.5 and DOA4's at about -12.
@@ -437,7 +463,7 @@ def level_album(folder, encoder):
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
         return 0
-    count = 0
+    count = failed = 0
     for line in lines:
         parts = line.split("\t")
         if line.startswith("#") or len(parts) < 4:
@@ -446,6 +472,7 @@ def level_album(folder, encoder):
         scratch = track + ".level"
         result = subprocess.run([encoder, "--level", str(LEVEL_DB), track, scratch], capture_output=True, text=True)
         if result.returncode != 0:
+            failed += 1
             print(f"  {parts[0]}: not levelled ({result.stderr.strip()})")
             if os.path.exists(scratch):
                 os.remove(scratch)
@@ -453,10 +480,10 @@ def level_album(folder, encoder):
         os.replace(scratch, track)
         count += 1
         print(f"  {parts[0]}: {result.stdout.strip()}", flush=True)
-    at = 1 if lines and lines[0].startswith("#title") else 0
-    lines.insert(at, mark)
-    with open(path, "w", encoding="utf-8", newline="\n") as file:
-        file.write("\n".join(lines) + "\n")
+    if failed == 0:
+        at = 1 if lines and lines[0].startswith("#title") else 0
+        lines.insert(at, mark)
+        atomic_text(path, "\n".join(lines) + "\n")
     return count
 
 
@@ -554,11 +581,11 @@ def import_doa4(source, out, ffmpeg, encoder=None):
     kept = read_names(folder)
     groups = {}  # (intro, loop) -> its cues, in bank order: rmx_kas and rmx_alp are one remix
     for cue, intro, loop in cue_tracks(sounds):
-        if all(w is None or w < len(waves) for w in (intro, loop)):
+        if any(w is not None for w in (intro, loop)) and all(w is None or 0 <= w < len(waves) for w in (intro, loop)):
             groups.setdefault((intro, loop), []).append(cue)
     # Themes first by name, then the rest, then the remixes.
     order = sorted(groups.items(), key=lambda g: (g[1][0].startswith("rmx_"),
-        g[1][0].split("_")[1] not in DOA4_FIGHTERS, group_name(g[1])))
+        (g[1][0].split("_") + [""])[1] not in DOA4_FIGHTERS, group_name(g[1])))
     tracks = []
     if not encoder:
         print("recomp_adx_encode is not built yet (build the game first); encoding with ffmpeg instead.")
@@ -570,7 +597,7 @@ def import_doa4(source, out, ffmpeg, encoder=None):
                 offset, length, channels, _, samples = waves[w]
                 pcm.append(decode(ffmpeg, bank_data[offset:offset + length], channels, rate, samples,
                     os.path.join(scratch, f"{w}.pcm")))
-            name = f"{len(tracks) + 1:02d}_{cues[0]}.adx"
+            name = f"{len(tracks) + 1:02d}_{safe_cue(cues[0])}.adx"
             frames = [len(p) // 4 for p in pcm]
             start, end = (frames[0], frames[0] + frames[1]) if loop is not None else (-2, -2)
             target = os.path.join(folder, name)

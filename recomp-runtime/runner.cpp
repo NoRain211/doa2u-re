@@ -315,7 +315,15 @@ static std::uint64_t afsEntryOffset(const char *path, const char *name)
     if (toc[header[1] * 2u] == 0u || toc[header[1] * 2u + 1u] < names.size() ||
         !file.seekg(toc[header[1] * 2u]) || !file.read(names.data(), names.size())) return 0u;
     for (std::uint32_t i = 0; i < header[1]; ++i)
-        if (std::strncmp(&names[i * 48u], name, 32u) == 0) return toc[i * 2u];
+        if (std::strncmp(&names[i * 48u], name, 32u) == 0) {
+            std::error_code error;
+            const auto size = std::filesystem::file_size(std::filesystem::u8path(path), error);
+            char key[1024];
+            std::uint64_t served;
+            if (!error && recomp_mod_key(recomp_disc_root_path, path, key, sizeof key) &&
+                recomp_mod_entry_offset(key, size, i, &served)) return served;
+            return toc[i * 2u];
+        }
     return 0u;
 }
 
@@ -720,8 +728,8 @@ static void bootGuest()
     installPcSettings(online);
     /* The Jukebox plays over the game and changes its music: offline only. */
     recomp_jukebox_install(online);
+    staffrollOffsets.clear();
     recomp_menu_quit_set_jukebox(online ? nullptr : recomp_jukebox_request_page);
-    recomp_menu_quit_set_probe(recomp_jukebox_probe_messages);
     recomp_menu_quit_install();
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;

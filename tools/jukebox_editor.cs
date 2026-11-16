@@ -157,6 +157,7 @@ class JukeboxEditor : Form
 
     readonly string root, jukebox, disc;
     readonly List<Album> albums = new List<Album>();
+    readonly HashSet<string> editedSlots = new HashSet<string>();
     readonly Dictionary<string, string> assigned = new Dictionary<string, string>(); // music file -> "TAB\tfile"
     readonly ListBox albumList = new ListBox();
     readonly TextBox title = new TextBox();
@@ -322,28 +323,39 @@ class JukeboxEditor : Form
     {
         var album = new Album { Tab = "DOA2U", Title = "Dead or Alive 2 Ultimate", Folder = "doa2u" };
         string path = Path.Combine(disc, "DOA2", "bgm.afs");
-        using (var file = File.OpenRead(path))
+        try
         {
-            var head = new byte[8];
-            file.Read(head, 0, 8);
-            int count = (int)Le32(head, 4);
-            var table = new byte[8 * (count + 1)];
-            file.Read(table, 0, table.Length);
-            uint namesAt = Le32(table, 8 * count), namesSize = Le32(table, 8 * count + 4);
-            var names = new byte[namesSize];
-            file.Seek(namesAt, SeekOrigin.Begin);
-            file.Read(names, 0, names.Length);
-            for (int n = 0; n < Doa2u.GetLength(0); ++n)
-                for (int i = 0; i < count; ++i)
-                {
-                    string entry = Encoding.ASCII.GetString(names, 48 * i, 32).TrimEnd('\0').ToLowerInvariant();
-                    if (entry != Doa2u[n, 0]) continue;
-                    var track = new Track { File = Doa2u[n, 0], Name = Doa2u[n, 1], Path = path, Offset = Le32(table, 8 * i), Size = Le32(table, 8 * i + 4) };
-                    track.Seconds = Seconds(track);
-                    album.Tracks.Add(track);
-                    break;
-                }
+            using (var file = File.OpenRead(path))
+            using (var reader = new BinaryReader(file))
+            {
+                byte[] head = reader.ReadBytes(8);
+                if (head.Length != 8 || Le32(head, 0) != 0x00534641u) return album;
+                uint rawCount = Le32(head, 4);
+                if (rawCount == 0 || rawCount > 4096) return album;
+                int count = (int)rawCount;
+                byte[] table = reader.ReadBytes(8 * (count + 1));
+                if (table.Length != 8 * (count + 1)) return album;
+                uint namesAt = Le32(table, 8 * count), namesSize = Le32(table, 8 * count + 4);
+                if (namesSize < 48u * rawCount || (ulong)namesAt + namesSize > (ulong)file.Length) return album;
+                file.Seek(namesAt, SeekOrigin.Begin);
+                byte[] names = reader.ReadBytes(48 * count);
+                if (names.Length != 48 * count) return album;
+                for (int n = 0; n < Doa2u.GetLength(0); ++n)
+                    for (int i = 0; i < count; ++i)
+                    {
+                        string entry = Encoding.ASCII.GetString(names, 48 * i, 32).TrimEnd('\0').ToLowerInvariant();
+                        if (entry != Doa2u[n, 0]) continue;
+                        uint offset = Le32(table, 8 * i), size = Le32(table, 8 * i + 4);
+                        if ((ulong)offset + size > (ulong)file.Length) continue;
+                        var track = new Track { File = Doa2u[n, 0], Name = Doa2u[n, 1], Path = path, Offset = offset, Size = size };
+                        track.Seconds = Seconds(track);
+                        album.Tracks.Add(track);
+                        break;
+                    }
+            }
         }
+        catch (IOException) { album.Tracks.Clear(); }
+        catch (UnauthorizedAccessException) { album.Tracks.Clear(); }
         return album;
     }
 
@@ -398,17 +410,35 @@ class JukeboxEditor : Form
         }
     }
 
-    void LoadAssignments()
+    static Dictionary<string, string> ReadAssignments(string path)
     {
-        assigned.Clear();
-        string path = Path.Combine(jukebox, "assignments.txt");
-        if (!File.Exists(path)) return;
+        var result = new Dictionary<string, string>();
+        if (!File.Exists(path)) return result;
         foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
         {
             if (line.StartsWith("#")) continue;
             string[] field = line.Split('\t');
-            if (field.Length >= 3) assigned[field[0]] = field[1] + "\t" + field[2];
+            if (field.Length >= 3) result[field[0]] = field[1] + "\t" + field[2];
         }
+        return result;
+    }
+
+    static Dictionary<string, string> MergeAssignments(string path, Dictionary<string, string> picks, IEnumerable<string> edited)
+    {
+        var latest = ReadAssignments(path);
+        foreach (string key in edited)
+        {
+            string pick;
+            if (picks.TryGetValue(key, out pick)) latest[key] = pick;
+            else latest.Remove(key);
+        }
+        return latest;
+    }
+
+    void LoadAssignments()
+    {
+        assigned.Clear();
+        foreach (var pair in ReadAssignments(Path.Combine(jukebox, "assignments.txt"))) assigned[pair.Key] = pair.Value;
     }
 
     static byte[] Bytes(Track track)
@@ -504,6 +534,7 @@ class JukeboxEditor : Form
     {
         if (loading || e.RowIndex < 0 || e.ColumnIndex != 1) return;
         string music = (string)slots.Rows[e.RowIndex].Tag, value = Convert.ToString(slots.Rows[e.RowIndex].Cells[1].Value);
+        editedSlots.Add(music);
         assigned.Remove(music);
         foreach (Album album in albums)
             foreach (Track track in album.Tracks)
@@ -548,12 +579,32 @@ class JukeboxEditor : Form
 
     // ---- Writing --------------------------------------------------------------
 
+    static void AtomicText(string path, string text)
+    {
+        string temporary = path + ".tmp." + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+                file.Write(bytes, 0, bytes.Length);
+                file.Flush(true);
+            }
+            if (File.Exists(path)) File.Replace(temporary, path, null);
+            else File.Move(temporary, path);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     bool Save()
     {
         if (grid.IsCurrentCellInEditMode) grid.EndEdit();
         try
         {
             Directory.CreateDirectory(jukebox);
+            if (slots.IsCurrentCellInEditMode) slots.EndEdit();
+            string assignmentPath = Path.Combine(jukebox, "assignments.txt");
+            var latest = MergeAssignments(assignmentPath, assigned, editedSlots);
             foreach (Album album in albums)
             {
                 string folder = Path.Combine(jukebox, album.Folder);
@@ -564,15 +615,14 @@ class JukeboxEditor : Form
                 text.Append("# Leave the file name before \"=\" as it is.\n\n");
                 text.Append("album = " + album.Title + "\n\n");
                 foreach (Track track in album.Tracks) text.Append(track.File + " = " + track.Name + "\n");
-                File.WriteAllText(Path.Combine(folder, "names.txt"), text.ToString(), new UTF8Encoding(false));
+                AtomicText(Path.Combine(folder, "names.txt"), text.ToString());
             }
             var lines = new StringBuilder("# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n");
-            for (int n = 0; n < Doa2u.GetLength(0); ++n)
-            {
-                string pick;
-                if (assigned.TryGetValue(Doa2u[n, 0], out pick)) lines.Append(Doa2u[n, 0] + "\t" + pick + "\n");
-            }
-            File.WriteAllText(Path.Combine(jukebox, "assignments.txt"), lines.ToString(), new UTF8Encoding(false));
+            foreach (var pair in latest.OrderBy(pair => pair.Key)) lines.Append(pair.Key + "\t" + pair.Value + "\n");
+            AtomicText(assignmentPath, lines.ToString());
+            assigned.Clear();
+            foreach (var pair in latest) assigned[pair.Key] = pair.Value;
+            editedSlots.Clear();
             dirty = false;
             status.Text = "Saved. Restart the game if it is running to hear the changes.";
             return true;

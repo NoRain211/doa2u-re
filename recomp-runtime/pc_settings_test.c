@@ -230,7 +230,8 @@ unsigned recomp_jukebox_choices(unsigned row) { return row == 1u ? 46u : 3u; }
 unsigned recomp_jukebox_choice(unsigned row) { return jb_choice[row]; }
 void recomp_jukebox_choose(unsigned row, unsigned choice) { jb_choice[row] = choice; }
 void recomp_jukebox_confirm(unsigned row) { jb_confirmed = row; }
-const char *recomp_jukebox_value(unsigned row) { return row == 1u ? "Ayane" : "DOA4"; }
+static const char *jb_track = "Ayane";
+const char *recomp_jukebox_value(unsigned row) { return row == 1u ? jb_track : "DOA4"; }
 const char *recomp_jukebox_help(unsigned row) { (void)row; return "Help"; }
 
 /* ---- Host ---------------------------------------------------------------------- */
@@ -609,6 +610,14 @@ int main(void)
         rd16(labels[2] + 2u) == 'L');
     expect("jukebox values", value_count == RECOMP_JUKEBOX_ROWS && ascii(values[1]) == 'A' && rd16(values[1] + 10u) == 0u &&
         ascii(values[0]) == 'D');
+    jb_track = "Caf\xc3\xa9 \xe6\x97\xa5\xf0\x9f\x8e\xb5";
+    hook(draw, &context, 1u);
+    expect("UTF-8 names become UTF-16", rd16(values[1] + 6u) == 0xe9u &&
+        rd16(values[1] + 10u) == 0x65e5u && rd16(values[1] + 12u) == 0xd83cu && rd16(values[1] + 14u) == 0xdfb5u);
+    jb_track = "bad\xc0x";
+    hook(draw, &context, 1u);
+    expect("invalid UTF-8 is replaced", rd16(values[1] + 6u) == '?' && rd16(values[1] + 8u) == 'x');
+    jb_track = "Ayane";
     /* The top list stays hidden beside it. */
     drawn_count = 0u;
     hook(0x00095a70u, &context, 1u);

@@ -3,6 +3,9 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
+from pathlib import Path
+from types import SimpleNamespace
 
 import import_soundtrack as soundtrack
 
@@ -68,6 +71,64 @@ class NameTests(unittest.TestCase):
         self.assertEqual(soundtrack.group_name(["rmx_kas", "rmx_alp"]), "Kasumi / Alpha-152 (Remix)")
         self.assertEqual(soundtrack.group_name(["bgm_bas", "bgm_bas_doa2", "bgm_bas_doa3"]), "Bass")
         self.assertEqual(soundtrack.group_name(["bgm_select", "bgm_ups"]), "Character Select")
+
+
+class ImportFailureTests(unittest.TestCase):
+    def test_cue_and_labels_cannot_inject_paths_or_records(self):
+        self.assertEqual(soundtrack.safe_cue("x/../../bad\n\t"), "x_______bad__")
+        self.assertLessEqual(len(soundtrack.safe_cue("x" * 200)), 48)
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album\nInjected", [("01.adx", -1, -1, "Name\tOther\nRow")])
+            lines = Path(folder, "tracks.txt").read_text().splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertEqual(len(lines[2].split("\t")), 4)
+            with self.assertRaises(ValueError):
+                soundtrack.write_tracks(folder, "Album", [("x/../bad.adx", -1, -1, "Name")])
+
+    def test_failed_level_is_retried_and_no_completion_mark_is_written(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One"), ("two.adx", -1, -1, "Two")])
+            for name in ("one.adx", "two.adx"): Path(folder, name).write_bytes(b"old")
+            def encode(args, **kwargs):
+                if args[-2].endswith("two.adx") and fail[0]:
+                    return SimpleNamespace(returncode=1, stderr="disk full", stdout="")
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+            fail = [True]
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+                self.assertNotIn("#level", Path(folder, "tracks.txt").read_text())
+                self.assertEqual(Path(folder, "two.adx").read_bytes(), b"old")
+                fail[0] = False
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 2)
+                self.assertIn("#level", Path(folder, "tracks.txt").read_text())
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+
+    def test_import_rejects_negative_wave_indices_and_sanitizes_cue_files(self):
+        sound = b"KBDSbgm_stream" + bytes(100)
+        source = mock.Mock()
+        source.read.side_effect = lambda name: b"bank" if name.endswith(".xwb") else afs([sound])
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(soundtrack, "wave_bank", return_value=[(0, 4, 2, 48000, 1)]), \
+                mock.patch.object(soundtrack, "cue_tracks", return_value=[("bad", -1, None), ("bgm_x/../evil\n", 0, None)]), \
+                mock.patch.object(soundtrack, "decode", return_value=bytes(4)), \
+                mock.patch.object(soundtrack, "import_movies"), \
+                mock.patch.object(soundtrack, "level_album"), \
+                mock.patch.object(soundtrack.subprocess, "run") as run:
+            self.assertEqual(soundtrack.import_doa4(source, folder, "ffmpeg", None), 1)
+            lines = Path(folder, "doa4", "tracks.txt").read_text().splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertTrue(lines[2].startswith("01_bgm_x____evil_.adx\t"))
+            self.assertEqual(run.call_count, 1)
+
+    def test_failed_manifest_replace_keeps_previous_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "tracks.txt")
+            path.write_text("old")
+            with mock.patch.object(soundtrack.os, "replace", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError): soundtrack.atomic_text(str(path), "new")
+            self.assertEqual(path.read_text(), "old")
+            self.assertEqual(list(Path(folder).iterdir()), [path])
 
 
 class DiscTests(unittest.TestCase):

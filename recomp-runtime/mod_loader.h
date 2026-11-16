@@ -52,6 +52,8 @@ const char *recomp_mod_replacement(const char *key);
 /* The overlay for this file, when its size is the original's; else NULL. */
 const RecompModOverlay *recomp_mod_overlay(const char *key, uint64_t real_size);
 uint64_t recomp_mod_overlay_size(const RecompModOverlay *overlay);
+/* An entry's offset in the layout served to the guest; false without an overlay. */
+bool recomp_mod_entry_offset(const char *key, uint64_t real_size, unsigned index, uint64_t *offset);
 
 /* Reads from the original file; returns false on a host read error. */
 typedef bool (*RecompModBaseRead)(void *context, uint64_t offset, void *buffer, uint32_t length, uint32_t *read);

@@ -4,6 +4,7 @@
 #include "kernel_abi.h"
 #include "runner_assets.h"
 #include "jukebox.h"
+#include "utf8_text.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -305,11 +306,20 @@ static void reset_jb_layout(void)
     for (unsigned record = 0u; record < 2u * JB_ROWS; ++record) set_u32(jb_layout + record * 28u + 0xcu, 0u);
 }
 
-/* ASCII into a guest UTF-16 buffer of size units; returns it. */
+/* UTF-8 into a guest UTF-16 buffer of size units; returns it. */
 static uint32_t put_text(uint32_t buffer, unsigned size, const char *text)
 {
     unsigned n = 0u;
-    for (; text[n] != '\0' && n + 1u < size; ++n) set_u16(buffer + 2u * n, (uint8_t)text[n]);
+    while (*text != '\0' && n + 1u < size) {
+        uint32_t value = recomp_utf8_next(&text);
+        if (value > 0xffffu) {
+            if (n + 2u >= size) break;
+            value -= 0x10000u;
+            set_u16(buffer + 2u * n++, (uint16_t)(0xd800u + (value >> 10)));
+            value = 0xdc00u + (value & 0x3ffu);
+        }
+        set_u16(buffer + 2u * n++, (uint16_t)value);
+    }
     set_u16(buffer + 2u * n, 0u);
     return buffer;
 }

@@ -294,6 +294,7 @@ class LauncherForm : Form
     bool built = File.Exists(Game.Runner);
     Process build;
     string task = "build"; // what build runs: "build", or "import" (tools\import_soundtrack.py)
+    bool detecting;
     Row importRow;
     // The newer version a check found, and whether a check or install is running on its thread.
     // Build, play and exit wait for an install, which replaces the tools and launchers.
@@ -702,8 +703,37 @@ class LauncherForm : Form
         if (Game.Python == null) return "unknown";
         var lines = new List<string>();
         using (Process detect = Game.StartPython(@"tools\import_soundtrack.py", "--detect \"" + iso + "\"", line => { lock (lines) lines.Add(line); }))
-            if (!detect.WaitForExit(60000)) return "unknown";
+        {
+            if (!detect.WaitForExit(60000))
+            {
+                try { detect.Kill(); detect.WaitForExit(); } catch (InvalidOperationException) { }
+                return "unknown";
+            }
+            detect.WaitForExit(); // Wait for both asynchronous output readers to finish.
+            if (detect.ExitCode != 0) return "unknown";
+        }
         lock (lines) return lines.LastOrDefault() ?? "unknown";
+    }
+
+    void DetectDiscAsync(string path, Action<string> complete)
+    {
+        if (detecting || build != null || installing) { notice = "Wait for the current task to finish"; Invalidate(); return; }
+        detecting = true;
+        notice = "Checking the disc...";
+        Invalidate();
+        System.Threading.ThreadPool.QueueUserWorkItem(delegate
+        {
+            string game = "unknown";
+            try { game = DetectDisc(path); }
+            catch (Exception) { }
+            if (IsDisposed || Disposing) return;
+            try { BeginInvoke((Action)delegate
+            {
+                detecting = false;
+                if (build == null && !installing) complete(game);
+                Invalidate();
+            }); } catch (InvalidOperationException) { }
+        });
     }
 
     void BuildTick()
@@ -873,10 +903,12 @@ class LauncherForm : Form
     {
         string path = Dropped(e);
         if (path == null) return;
-        // A DOA3 or DOA4 disc goes to the Jukebox; anything else is the game's disc.
-        string game = build == null ? DetectDisc(path) : "unknown";
-        if (game == "doa3" || game == "doa4") StartImport(path);
-        else UseDisc(path);
+        DetectDiscAsync(path, delegate(string game)
+        {
+            if (game == "doa3" || game == "doa4") StartImport(path);
+            else if (game == "doa2u") UseDisc(path);
+            else notice = "Could not identify this disc. Your Disc 2 choice was kept.";
+        });
         Activate();
         Invalidate();
     }

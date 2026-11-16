@@ -1,7 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "adx_decoder.h"
 #include "adx_encoder.h"
 #include "mod_loader.h"
+#include "atomic_file.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -13,6 +17,7 @@
 #define make_dir(p) _mkdir(p)
 #else
 #include <unistd.h>
+#include <dirent.h>
 #define make_dir(p) mkdir(p, 0777)
 #endif
 
@@ -179,6 +184,12 @@ static void test_reserved_slots(const char *root)
     base_file = fopen(path, "rb");
     read_all(overlay, data, size);
     const uint32_t o1 = get32(data + 16), s1 = get32(data + 20);
+    uint64_t served = 0u;
+    CHECK(recomp_mod_entry_offset("doa2/bgm.afs", 10240u, 1u, &served) && served == o1 && served != 4096u);
+    CHECK(!recomp_mod_entry_offset("doa2/bgm.afs", 10240u, 3u, &served));
+    recomp_mod_loader_enable_slots(false);
+    CHECK(!recomp_mod_entry_offset("doa2/bgm.afs", 10240u, 1u, &served));
+    recomp_mod_loader_enable_slots(true);
     CHECK(s1 == 6144u && data[o1] == 'b' && data[o1 + 2999u] == 'b' && data[o1 + 3000u] == 0u);
     const RecompModSource *q = recomp_mod_source(track, 0u, 0u);
     CHECK(q != NULL && recomp_mod_assign("doa2/bgm.afs", 1u, q));
@@ -284,6 +295,96 @@ static void test_wav(void)
     free(pcm);
 }
 
+static bool cached_adx(const char *folder, char *out, size_t size)
+{
+#ifdef _WIN32
+    char pattern[700];
+    snprintf(pattern, sizeof pattern, "%s/*.adx", folder);
+    WIN32_FIND_DATAA found;
+    HANDLE find = FindFirstFileA(pattern, &found);
+    if (find == INVALID_HANDLE_VALUE) return false;
+    snprintf(out, size, "%s/%s", folder, found.cFileName);
+    FindClose(find);
+    return true;
+#else
+    DIR *dir = opendir(folder);
+    if (dir == NULL) return false;
+    bool found = false;
+    for (struct dirent *entry; (entry = readdir(dir)) != NULL;) {
+        const size_t n = strlen(entry->d_name);
+        if (n < 4u || strcmp(entry->d_name + n - 4u, ".adx") != 0) continue;
+        snprintf(out, size, "%s/%s", folder, entry->d_name);
+        found = true;
+        break;
+    }
+    closedir(dir);
+    return found;
+#endif
+}
+
+static void test_cache_recovery(const char *root)
+{
+    char disc[700], mods[700], path[800], cache[800], cached[900], stale[950];
+    snprintf(disc, sizeof disc, "%s/cache-disc", root);
+    make_dir(disc);
+    snprintf(path, sizeof path, "%s/doa2", disc); make_dir(path);
+    snprintf(path, sizeof path, "%s/doa2/bgm.afs", disc); make_archive(path);
+    snprintf(mods, sizeof mods, "%s/cache-mods", root); make_dir(mods);
+    snprintf(path, sizeof path, "%s/a", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/a/doa2", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/a/doa2/bgm.afs", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/a/doa2/bgm.afs/aaa.wav", mods);
+    uint8_t wav[52] = {0};
+    memcpy(wav, "RIFF", 4u); put32(wav + 4, 44u); memcpy(wav + 8, "WAVEfmt ", 8u);
+    put32(wav + 16, 16u); wav[20] = 1u; wav[22] = 1u;
+    put32(wav + 24, 22050u); put32(wav + 28, 44100u); wav[32] = 2u; wav[34] = 16u;
+    memcpy(wav + 36, "data", 4u); put32(wav + 40, 8u); wav[44] = 0x40u;
+    write_file(path, wav, sizeof wav);
+    CHECK(recomp_mod_loader_install(mods, disc));
+    snprintf(cache, sizeof cache, "%s/.cache", mods);
+    CHECK(cached_adx(cache, cached, sizeof cached));
+    recomp_mod_loader_shutdown();
+    /* An old final cache was interrupted; a stale temp must never be served. */
+    write_file(cached, "partial", 7u);
+    snprintf(stale, sizeof stale, "%s.tmp.stale", cached);
+    write_file(stale, "partial", 7u);
+    CHECK(recomp_mod_loader_install(mods, disc));
+    FILE *file = fopen(cached, "rb");
+    uint8_t data[128] = {0};
+    size_t bytes = file != NULL ? fread(data, 1u, sizeof data, file) : 0u;
+    if (file != NULL) fclose(file);
+    RecompAdxDecoder decoder;
+    CHECK(recomp_adx_open(&decoder, data, (uint32_t)bytes) != 0u && decoder.total_samples == 4u);
+    const RecompModOverlay *overlay = recomp_mod_overlay("doa2/bgm.afs", 10240u);
+    CHECK(overlay != NULL);
+    recomp_mod_loader_shutdown();
+    remove(stale);
+}
+
+static void test_atomic_file(const char *root)
+{
+    char path[600], temporary[700];
+    snprintf(path, sizeof path, "%s/atomic.txt", root);
+    write_file(path, "original", 8u);
+    FILE *file = recomp_atomic_open(path, temporary, sizeof temporary);
+    CHECK(file != NULL);
+    if (file == NULL) return;
+    fwrite("partial", 1u, 7u, file);
+    CHECK(!recomp_atomic_commit(file, temporary, path, false));
+    char bytes[8] = {0};
+    file = fopen(path, "rb");
+    CHECK(file != NULL && fread(bytes, 1u, sizeof bytes, file) == sizeof bytes && memcmp(bytes, "original", 8u) == 0);
+    if (file != NULL) fclose(file);
+    file = recomp_atomic_open(path, temporary, sizeof temporary);
+    CHECK(file != NULL);
+    if (file == NULL) return;
+    fwrite("complete", 1u, 8u, file);
+    CHECK(recomp_atomic_commit(file, temporary, path, true));
+    file = fopen(path, "rb");
+    CHECK(file != NULL && fread(bytes, 1u, sizeof bytes, file) == sizeof bytes && memcmp(bytes, "complete", 8u) == 0);
+    if (file != NULL) fclose(file);
+}
+
 int main(void)
 {
     char root[512];
@@ -298,6 +399,8 @@ int main(void)
     test_reserved_slots(root);
     test_adx_round_trip();
     test_wav();
+    test_atomic_file(root);
+    test_cache_recovery(root);
     if (failures == 0) printf("mod loader: ok\n");
     return failures == 0 ? 0 : 1;
 }
