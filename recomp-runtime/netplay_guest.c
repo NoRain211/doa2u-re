@@ -10,8 +10,12 @@ static bool fight_names_set;
 static uint16_t side_profiles[2][16]; /* UTF-16, as the game names profiles */
 static bool side_profiles_set;
 static uint8_t profile_slot[0x12140u];
+enum { DATA_SIZE = 0x2f18u }; /* the game data, from 0xf200 to the end of a 0x12118-byte profile */
+static uint32_t session_data; /* where profile_main_clear points the game data */
+static uint8_t session_defaults[DATA_SIZE]; /* that data as clear_main_profile left it */
 
 extern void sub_000244F0(void);
+extern void sub_00024940(void);
 
 void recomp_netplay_guest_set_fight_names(const char *side0, const char *side1, uint32_t local_side)
 {
@@ -31,6 +35,7 @@ void recomp_netplay_guest_set_side_profiles(const uint16_t *side0, const uint16_
 {
     const uint16_t *names[2] = {side0, side1};
     side_profiles_set = false;
+    session_data = 0u;
     for (unsigned side = 0u; side < 2u; ++side) {
         unsigned length = 0u;
         for (; names[side] != NULL && names[side][length] != 0u && length + 1u < 16u; ++length)
@@ -68,6 +73,27 @@ static void clear_main_profile(void)
     const uint32_t data = *recomp_memory_u32(0x0087cfa8u);
     for (unsigned side = 0u; side < 2u; ++side)
         if (found[side]) memcpy(recomp_memory(data + 0x1eu + side * 0x14u, 0x14u), layouts[side], 0x14u);
+    memcpy(session_defaults, recomp_memory(data, DATA_SIZE), DATA_SIZE);
+    session_data = data;
+}
+
+static void load_main_profile(void)
+{
+    /* 0x24940 profile_main_load(name, flag) reads a profile into g_profile_main
+       (0x7ef8e0), whose game data at +0xf200 is the default data from
+       profile_main_clear. The game's profile menus load the first profile in
+       the save folder, whichever player owns it, and both players then
+       played its Versus rules and controller settings. Let the load finish
+       (the profile stays loaded for its saves), then put the defaults back
+       and re-apply the volume and vibration the load took from the data
+       (0x21370, 0x213d0). */
+    sub_00024940();
+    if (recomp_runtime.registers.eax != 0u || session_data == 0u || *recomp_memory_u32(0x0087cfa8u) != session_data)
+        return;
+    memcpy(recomp_memory(session_data, DATA_SIZE), session_defaults, DATA_SIZE);
+    kernel_call_guest(0x00021370u, NULL, 0u);
+    kernel_call_guest(0x000213d0u, NULL, 0u);
+    recomp_runtime.registers.eax = 0u;
 }
 
 static void draw_fight_name(void)
@@ -105,5 +131,6 @@ RecompFunction recomp_netplay_guest_lookup_manual(uint32_t guest_address)
 {
     if (fight_names_set && guest_address == 0x0012b460u) return draw_fight_name;
     if (side_profiles_set && guest_address == 0x000244f0u) return clear_main_profile;
+    if (side_profiles_set && guest_address == 0x00024940u) return load_main_profile;
     return NULL;
 }

@@ -15,10 +15,11 @@ enum {
 RecompRuntime recomp_runtime;
 uint8_t *recomp_fast_ram;
 static uint8_t slot[SLOT_SIZE];
-static uint8_t data[0x50];
+static uint8_t data[0x2f18];
 static uint32_t data_pointer = DATA;
 static uint32_t stack[128];
-static unsigned clears, reads;
+static unsigned clears, reads, applied;
+static uint32_t main_result; /* what profile_main_load returns */
 static uint32_t missing_read = UINT32_MAX; /* this read returns not found */
 static uint16_t read_names[2][16];
 
@@ -36,12 +37,22 @@ uint32_t *recomp_memory_u32_checked(uint32_t address)
 }
 
 void sub_000244F0(void) { ++clears; } /* profile_main_clear */
+/* profile_main_load reads the profile over the game data. */
+void sub_00024940(void)
+{
+    memset(data, 0xcc, sizeof data);
+    recomp_runtime.registers.eax = main_result;
+}
 
 /* profile_read_into_struct (0x24010) overwrites the slot and leaves the
    profile's controller 1 settings at +0xf200 +0x1e. */
 void recomp_dispatch_indirect_site(uint32_t guest_address, uint32_t saved_esp, const char *member, int line)
 {
     (void)saved_esp; (void)member; (void)line;
+    if (guest_address == 0x00021370u || guest_address == 0x000213d0u) {
+        ++applied;
+        return;
+    }
     if (guest_address != 0x00024010u) return;
     const uint32_t esp = recomp_runtime.registers.esp;
     const uint32_t name = *recomp_memory_u32(esp + 4u), profile = *recomp_memory_u32(esp + 8u);
@@ -112,7 +123,23 @@ int main(void)
     clear_profile(split, NULL);
     check("a long name stops before a split pair", reads == 1u && read_names[0][13] == 'a' && read_names[0][14] == 0u);
 
+    clear_profile(ann, bob);
+    RecompFunction load = recomp_netplay_guest_lookup_manual(0x00024940u);
+    applied = 0u;
+    if (load != NULL) load();
+    check("a profile the game loads does not replace the session data",
+        load != NULL && all(data + 0x1eu, 0x14u, 0x10u) && all(data + 0x32u, 0x14u, 0x11u) &&
+        all(data, 0x1eu, 0u) && all(data + 0x46u, sizeof data - 0x46u, 0u) && applied == 2u &&
+        recomp_runtime.registers.eax == 0u);
+    main_result = (uint32_t)-7;
+    applied = 0u;
+    if (load != NULL) load();
+    main_result = 0u;
+    check("a failed load leaves the game's data alone", all(data, sizeof data, 0xccu) && applied == 0u &&
+        recomp_runtime.registers.eax == (uint32_t)-7);
+
     clear_profile(NULL, NULL);
+    check("no profiles unhook profile_main_load", recomp_netplay_guest_lookup_manual(0x00024940u) == NULL);
     check("no profiles unhook profile_main_clear", recomp_netplay_guest_lookup_manual(0x000244f0u) == NULL);
     return failures == 0 ? 0 : 1;
 }

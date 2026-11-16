@@ -523,6 +523,14 @@ session folder and give its controller 1 settings (button type or free
 buttons, vibration and analog command) to that player's port. With the
 joiner's profile on Type C, two scripted runners gave port 2 Type C and
 port 1 the host's Type A, and matched guest RAM through frame 1,800. The
+game's own profile menus still load the first profile in the save folder
+(`profile_main_load`, `0x24940`), whoever owns it; that made the guest's
+Versus rules and controller settings (issue 169) the current data on both
+sides. The runner lets the load finish, then puts the default game data
+back and re-applies the volume and vibration the load set; the profile
+stays loaded for its saves. Two runners that walked to Versus character
+select read the default volumes (0x50) and none of the profile's stats from
+the data in both, with guest RAM identical. The
 cached archives in partitions 3 to
 5 stay shared; `run_game.py` prepares them the same way on every machine.
 During a session the host reports no file times, which differ between
