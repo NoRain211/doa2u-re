@@ -779,9 +779,12 @@ save slot and holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start
 at 2; the select screen (`0x11e410`) shows `min(byte, count)` with counts from
 `0x6e0f08`. Characters 0x11, 0x18 and 0x15 need the flags at +0x2ed2, +0x2ed3
-and +0x2ed4 (`0x11e5f0`). After each Swap, `unlock_profile.c` records the
-live profile's 18 values as earned, then sets each costume byte to its count
-and the three flags to 1. The records sit in the reserved kernel page at
+and +0x2ed4 (`0x11e5f0`). The main menu list (`0x134330`) hides the item
+collection (mode 0xb) until +0x2ed5 is set and CG Gallery (0x17) until +0x2ed6
+is; the game sets them only after a fight, from earned values. After each Swap,
+`unlock_profile.c` records the live profile's 20 values as earned, then sets
+each costume byte to its count, the character flags and +0x2ed6 to 1 and
++0x2ed5 to 3. The records sit in the reserved kernel page at
 `0x03ff0d00` (eight of 0x20 bytes), so rollback restores them. Every slot
 save goes through `0x21b50` or `0x21bb0` and every load through `0x21d90` or
 `0x21de0` (cdecl name, slot); the saves write the earned values and unlock
