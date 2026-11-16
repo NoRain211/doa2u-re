@@ -79,7 +79,9 @@ and Ubuntu, `libshaderc.so.1` from the `libshaderc1` package.
 
 Build in an x86-64 distribution with CMake, Ninja, a C++17 compiler, Git,
 Python 3.12 or newer with the `venv` module and SDL3's build dependencies.
-A fresh container has none of these. On Ubuntu 24.04 or Debian 13:
+A fresh container has none of these. `./install_deps.sh` installs them with
+apt, dnf or pacman (`--print` only shows the command). On Ubuntu 24.04 or
+Debian 13 the same packages are:
 
 ```bash
 sudo apt install build-essential cmake ninja-build git python3-venv \

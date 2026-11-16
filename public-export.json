@@ -16,6 +16,7 @@
     "run_game.sh",
     "launcher.sh",
     "build_game.sh",
+    "install_deps.sh",
     "public-export.json",
     "docs/reuse.md",
     "docs/free-camera.md",

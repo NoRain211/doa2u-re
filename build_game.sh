@@ -29,7 +29,7 @@ if [[ " $* " != *" --lift-only "* ]]; then
         command -v "${tool}" >/dev/null || missing+=("${tool}")
     done
     if (( ${#missing[@]} )); then
-        echo "Missing build tools: ${missing[*]}. See the apt line in docs/building.md"              "(Debian/Ubuntu: sudo apt install build-essential cmake ninja-build git)." >&2
+        echo "Missing build tools: ${missing[*]}. On Linux run ./install_deps.sh; on macOS see docs/building.md." >&2
         exit 1
     fi
 fi

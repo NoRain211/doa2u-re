@@ -5,7 +5,9 @@ This is an early build. It contains no game files. You
 build the game yourself from your own copy of Dead or Alive Ultimate
 (Xbox, USA), Disc 2. Other regions, versions and Disc 1 are refused.
 
-What you need (x86-64 Linux; on the Steam Deck, see below):
+What you need (x86-64 Linux; on the Steam Deck, see below). On apt, dnf or
+pacman systems, ./install_deps.sh installs everything below except the
+Vulkan driver for an NVIDIA GPU:
 
 - A C++17 compiler, CMake 3.20 or newer, Ninja, Git, Python 3.12 or newer
   with its venv module, the shaderc library and a Vulkan driver. On
