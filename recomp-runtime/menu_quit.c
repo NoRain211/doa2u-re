@@ -70,13 +70,27 @@ typedef struct Piece {
     int16_t from, to;
     int8_t top, bottom;  /* rows; 0 and 0 for all */
     int8_t dx, extra;    /* a tail's place on its letter; extra width for the letter */
+    int8_t turn;         /* nonzero: the slice turned half round, row y drawn at turn - y (the slant kept) */
 } Piece;
 static const Piece PIECES[] = {
-    {u'Q', 0x70014, 545, 675, 0, 0, 0, 1}, {0, 0x70017, 170, 230, 10, 16, 8, 0},
-    {u'U', 0x7000a, 85, 195, 0, 0, 0, 0}, {u'I', 0x7000b, 205, 265, 0, 0, 0, 0},
-    {u'T', 0x7000b, 85, 205, 0, 0, 0, 0}, {u' ', 0, 0, 90, 0, 0, 0, 0},
-    {u'G', 0x7000e, 405, 530, 0, 0, 0, 0}, {u'A', 0x7000e, 530, 655, 0, 0, 0, 0},
-    {u'M', 0x7000b, 265, 405, 0, 0, 0, 0}, {u'E', 0x7000b, 405, 515, 0, 0, 0, 0},
+    {u'Q', 0x70014, 545, 675, 0, 0, 0, 1, 0}, {0, 0x70017, 170, 230, 10, 16, 8, 0, 0},
+    {u'U', 0x7000a, 85, 195, 0, 0, 0, 0, 0}, {u'I', 0x7000b, 205, 265, 0, 0, 0, 0, 0},
+    {u'T', 0x7000b, 85, 205, 0, 0, 0, 0, 0}, {u' ', 0, 0, 90, 0, 0, 0, 0, 0},
+    {u'G', 0x7000e, 405, 530, 0, 0, 0, 0, 0}, {u'A', 0x7000e, 530, 655, 0, 0, 0, 0, 0},
+    {u'M', 0x7000b, 265, 405, 0, 0, 0, 0, 0}, {u'E', 0x7000b, 405, 515, 0, 0, 0, 0, 0},
+};
+/* JUKEBOX from the same words: U of USER, K of TIME ATTACK (cut clear of the
+   C's foot), E B O of BOOSTER. J is the I of TIME (its thick stem and top
+   serif, bottom serif cut off) standing on the foot of USER's U as its hook.
+   X is the arms of STORY's Y above their joint, and the same arms turned half
+   round below it: the Y's thick arm (top left) carries on to the bottom right
+   and its thin arm to the bottom left, as the font's X would draw them. */
+static const Piece JUKEBOX_PIECES[] = {
+    {u'J', 0x7000a, 115, 165, 12, 16, 0, 4, 0}, {0, 0x7000b, 205, 265, 0, 13, 1, 0, 0},
+    {u'U', 0x7000a, 85, 195, 0, 0, 0, 0, 0}, {u'K', 0x7000b, 1175, 1310, 0, 0, 0, 0, 0},
+    {u'E', 0x70010, 665, 780, 0, 0, 0, 0, 0}, {u'B', 0x70010, 85, 205, 0, 0, 0, 0, 0},
+    {u'O', 0x70010, 205, 325, 0, 0, 0, 0, 0},
+    {u'X', 0x70008, 545, 665, 0, 9, 0, 0, 0}, {0, 0x70008, 545, 665, 0, 9, 1, 0, 17},
 };
 
 /* The help line per game language (Japanese reads English). */
@@ -225,17 +239,17 @@ static void cast_shadow(uint32_t palette_data, uint8_t image[32][128])
         }
 }
 
-/* Makes the label once the menu's art is loaded; false until then. */
-static bool make_label(void)
+/* Makes a label from pieces once the menu's art is loaded; false until then. */
+static bool make_label_from(const Piece *pieces, size_t count, unsigned slot, const char *name)
 {
     RecompGameSprite first;
-    if (!recomp_game_sprite(PIECES[0].sprite, WORD_H, &first)) return false;
+    if (!recomp_game_sprite(pieces[0].sprite, WORD_H, &first)) return false;
     const uint32_t palette_data = first.colours;
     static uint8_t image[LABEL_H][LABEL_W];
     memset(image, 0, sizeof image);
     float pen = LEAN * (float)WORD_H, letter_pen = pen;
-    for (size_t p = 0u; p < sizeof PIECES / sizeof PIECES[0]; ++p) {
-        const Piece *piece = &PIECES[p];
+    for (size_t p = 0u; p < count; ++p) {
+        const Piece *piece = &pieces[p];
         if (piece->c == u' ') {
             pen += piece->to / 10.0f;
             continue;
@@ -250,18 +264,23 @@ static bool make_label(void)
             for (int x = 0; x < word.right - word.left; ++x) {
                 const float u = lean_u(x, y);
                 if (u < u0 || u >= u1) continue;
-                const int dx = x + shift;
+                /* Turned: the row moves to turn - y and u to at + (u1 - u). */
+                const int ty = piece->turn != 0 ? piece->turn - y : y;
+                if (ty < 0 || ty >= WORD_H) continue;
+                const int dx = piece->turn != 0
+                    ? (int)lrintf(at + u1 - u + LEAN * (float)(WORD_H - 1 - ty) - LEAN * (float)WORD_H)
+                    : x + shift;
                 if (dx < 0 || dx >= LABEL_W) continue;
                 uint8_t index = recomp_game_sprite_index(&word, x, y);
                 const uint32_t argb = u32(palette_data + 4u * index);
                 if (shadow_colour(argb)) continue;
-                if (rank(palette_data, index) <= rank(palette_data, image[y][dx])) continue;
+                if (rank(palette_data, index) <= rank(palette_data, image[ty][dx])) continue;
                 const unsigned red = (argb >> 16) & 0xffu;
                 if (red > 110u && dx != x) {
                     const float grey = red * brightness_ramp((float)dx) / brightness_ramp((float)x);
                     index = grey_index(palette_data, index, grey > 255.0f ? 255u : (unsigned)lrintf(grey));
                 }
-                image[y][dx] = index;
+                image[ty][dx] = index;
             }
         }
         if (piece->c != 0) {
@@ -271,113 +290,23 @@ static bool make_label(void)
     }
     cast_shadow(palette_data, image);
     const int width = (int)pen + 8 < LABEL_W ? (int)pen + 8 : LABEL_W;
-    recomp_runner_sprite_pixels(RECOMP_RUNNER_SPRITE_QUIT_LABEL, &image[0][0]);
-    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_QUIT_LABEL, width, WORD_H);
+    recomp_runner_sprite_pixels(slot, &image[0][0]);
+    recomp_runner_sprite_size(slot, width, WORD_H);
     /* The label draws in the menu labels' palette. */
-    recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_QUIT_LABEL, first.palette);
-    fprintf(stderr, "recomp menu quit: label made, %d pixels wide\n", width);
+    recomp_runner_sprite_palette(slot, first.palette);
+    fprintf(stderr, "recomp menu %s: label made, %d pixels wide\n", name, width);
     return true;
 }
 
-/* ---- The Jukebox's label ------------------------------------------------ */
-
-/* The menu's words hold no J, K, B or X, so JUKEBOX is drawn: each letter is
-   strokes (polylines in a 10 x 15 box, y down), slanted as the words are,
-   with the body in the words' greys brightening left to right, their dark
-   outline, and the shadow make_label casts. */
-typedef struct Stroke { int count; float x[8], y[8]; } Stroke;
-typedef struct Glyph { float width; int count; Stroke strokes[3]; } Glyph;
-static const Glyph JUKEBOX_GLYPHS[7] = {
-    {8.0f, 1, {{6, {7, 7, 6.4f, 4, 1.6f, 1}, {0, 11, 13.6f, 15, 13.6f, 11.5f}}}},                  /* J */
-    {10.0f, 1, {{7, {1, 1, 1.8f, 5, 8.2f, 9, 9}, {0, 10, 13.8f, 15, 13.8f, 10, 0}}}},                /* U */
-    {10.0f, 3, {{2, {1, 1}, {0, 15}}, {2, {9, 2}, {0, 8}}, {2, {4.5f, 9.5f}, {6.2f, 15}}}},          /* K */
-    {8.0f, 2, {{4, {8, 1, 1, 8}, {0, 0, 15, 15}}, {2, {1, 6.5f}, {7.5f, 7.5f}}}},                    /* E */
-    {9.0f, 3, {{2, {1, 1}, {0, 15}}, {7, {1, 5.5f, 7.5f, 8, 7.5f, 5.5f, 1}, {0, 0, 1, 3.6f, 6.1f, 7.3f, 7.3f}},
-               {7, {1, 6, 8.3f, 9, 8.3f, 6, 1}, {7.3f, 7.3f, 8.5f, 11.1f, 13.8f, 15, 15}}}},          /* B */
-    {10.0f, 2, {{8, {5, 2.2f, 1, 1.4f, 3, 5, 7.8f, 9}, {0, 1.3f, 5, 10.8f, 14, 15, 13.7f, 10}},
-                {4, {9, 8.6f, 7, 5}, {10, 4.2f, 1, 0}}}},                                             /* O */
-    {10.0f, 2, {{2, {1, 9}, {0, 15}}, {2, {9, 1}, {0, 15}}}},                                       /* X */
-};
-
-static float segment_distance_xy(float px, float py, float ax, float ay, float bx, float by)
+static bool make_label(void)
 {
-    const float dx = bx - ax, dy = by - ay, length = dx * dx + dy * dy;
-    float t = length > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / length : 0.0f;
-    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
-    const float ex = ax + t * dx - px, ey = ay + t * dy - py;
-    return sqrtf(ex * ex + ey * ey);
-}
-
-/* The palette entry nearest a colour and alpha. */
-static uint8_t nearest_index(uint32_t palette_data, unsigned grey, unsigned alpha)
-{
-    unsigned best = 0u, best_distance = 1u << 30;
-    for (unsigned i = 1u; i < 256u; ++i) {
-        const uint32_t argb = u32(palette_data + 4u * i);
-        if (shadow_colour(argb)) continue;
-        const int a = (int)(argb >> 24), r = (int)((argb >> 16) & 0xffu), g = (int)((argb >> 8) & 0xffu), b = (int)(argb & 0xffu);
-        const int dg = (r + g + b) / 3 - (int)grey, da = a - (int)alpha, chroma = abs(r - g) + abs(g - b);
-        const unsigned d = (unsigned)(dg * dg + 4 * da * da + 8 * chroma * chroma);
-        if (d < best_distance) { best_distance = d; best = i; }
-    }
-    return (uint8_t)best;
+    return make_label_from(PIECES, sizeof PIECES / sizeof PIECES[0], RECOMP_RUNNER_SPRITE_QUIT_LABEL, "quit");
 }
 
 static bool make_jukebox_label(void)
 {
-    enum { SS = 4, TOP = 4 };
-    const float HALF = 1.45f, OUTLINE = 1.1f, GAP = 3.0f, WIDE = 1.1f, OUTLINE_GREY = 40.0f;
-    RecompGameSprite first;
-    if (!recomp_game_sprite(PIECES[0].sprite, WORD_H, &first)) return false;
-    const uint32_t palette_data = first.colours;
-    static uint8_t image[LABEL_H][LABEL_W];
-    memset(image, 0, sizeof image);
-    /* Every stroke's segments, placed and slanted. */
-    float seg[64][4];
-    int segs = 0;
-    float pen = 1.0f + LEAN * (float)WORD_H;
-    for (int g = 0; g < 7; ++g) {
-        const Glyph *glyph = &JUKEBOX_GLYPHS[g];
-        for (int k = 0; k < glyph->count; ++k) {
-            const Stroke *stroke = &glyph->strokes[k];
-            for (int i = 0; i + 1 < stroke->count && segs < 64; ++i) {
-                const float y0 = TOP + stroke->y[i], y1 = TOP + stroke->y[i + 1];
-                seg[segs][0] = pen + WIDE * stroke->x[i] + LEAN * (float)(WORD_H - 1) - LEAN * y0;
-                seg[segs][1] = y0;
-                seg[segs][2] = pen + WIDE * stroke->x[i + 1] + LEAN * (float)(WORD_H - 1) - LEAN * y1;
-                seg[segs][3] = y1;
-                ++segs;
-            }
-        }
-        pen += WIDE * glyph->width + GAP;
-    }
-    const int width = (int)pen + 8 < LABEL_W ? (int)pen + 8 : LABEL_W;
-    for (int y = 0; y < WORD_H; ++y)
-        for (int x = 0; x < width; ++x) {
-            int body = 0, line = 0;
-            for (int sy = 0; sy < SS; ++sy)
-                for (int sx = 0; sx < SS; ++sx) {
-                    const float px = (float)x + (sx + 0.5f) / SS, py = (float)y + (sy + 0.5f) / SS;
-                    float d = 1e9f;
-                    for (int i = 0; i < segs; ++i) {
-                        const float e = segment_distance_xy(px, py, seg[i][0], seg[i][1], seg[i][2], seg[i][3]);
-                        if (e < d) d = e;
-                    }
-                    if (d <= HALF) ++body;
-                    else if (d <= HALF + OUTLINE) ++line;
-                }
-            const float cover = (float)(body + line) / (SS * SS);
-            if (cover <= 0.05f) continue;
-            const float b = (float)body / (float)(body + line);
-            const float grey = OUTLINE_GREY + (255.0f * brightness_ramp((float)x) - OUTLINE_GREY) * b;
-            image[y][x] = nearest_index(palette_data, (unsigned)lrintf(grey), (unsigned)lrintf(255.0f * cover));
-        }
-    cast_shadow(palette_data, image);
-    recomp_runner_sprite_pixels(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, &image[0][0]);
-    recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, width, WORD_H);
-    recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, first.palette);
-    fprintf(stderr, "recomp menu jukebox: label made, %d pixels wide\n", width);
-    return true;
+    return make_label_from(JUKEBOX_PIECES, sizeof JUKEBOX_PIECES / sizeof JUKEBOX_PIECES[0],
+                           RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, "jukebox");
 }
 
 /* ---- Install -------------------------------------------------------- */
