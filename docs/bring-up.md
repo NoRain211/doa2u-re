@@ -791,6 +791,23 @@ sits in the kernel page that rollback restores, and Up is read from the
 lockstepped per-player pad block, so both sides need this build, which
 netplay's build check already requires.
 
+Modes that pick stages without Stage Select read fixed lists, so Miyama is
+added to those too. Time Attack (game mode 4) fills one stage per opponent
+from the 20 stages at `0x692ba4` (`battle_fill_random_stages`, `0xc7fd0`,
+cdecl list and count); a pick in a stage group becomes a random member of
+that group. The fill now gets that pool plus 18, with the
+Miyama group narrowed to 18, 64, 63 and 65 only while it runs, so 27 never
+comes up. `battle_pick_next_stage` (`0xc7c80`) steps rematches through the 21
+stages at `0x692bd0` (`g_stage_rotation_index`, `0x8783b5`) or draws one at
+random through `rand_below` (`0xc4410`, `rand() % EAX`, from `0xc7e86` and
+`0xc447e`). Miyama now follows the 21st stage of the rotation, and the draw is
+from 22, the 22nd being Miyama; both take the row's current variant. The
+pending step and the draw's result sit in the reserved kernel page after the
+Miyama entry (`0x03ff0c18`, the pool copy at `0x03ff0c20`), so rollback
+restores them. Survival always uses stage 9, Story its ladder and the tag
+lists stay as they were. Time Attack was played with this build; which menu
+paths reach the rotation and the draw was not traced.
+
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) points 0xf200 into the active profile's 0x12118-byte
 save slot and holds one costume byte per character at +0x2ed8, in the

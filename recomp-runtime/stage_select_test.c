@@ -16,7 +16,10 @@ static uint8_t stage_tag_match;                    /* at 0x87d49d */
 static uint8_t stage_cursor;                       /* at 0xdf57c4 */
 static uint8_t stage_confirming[2];               /* at 0xdf57ce */
 static uint8_t stage_rows[32];                     /* at 0xdf5f10 */
-static uint8_t kernel_page[0x20];                  /* reserved page +0xc00 */
+static uint8_t kernel_page[0x40];                  /* reserved page +0xc00 */
+static uint8_t stage_groups[8];                    /* at 0x693370 */
+static uint8_t time_attack_pool[0x16];             /* at 0x692ba4 */
+static uint8_t rotation_index;                     /* at 0x8783b5 */
 
 /* The ids one stage group (0x693370) holds; Up steps through them in order. */
 static const uint8_t MIYAMA_IDS[4] = {18u, 64u, 63u, 65u};
@@ -36,6 +39,10 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= XBOX_KERNEL_DATA_BASE + 0xc00u && address + width <= XBOX_KERNEL_DATA_BASE + 0xc00u + sizeof kernel_page)
         return &kernel_page[address - XBOX_KERNEL_DATA_BASE - 0xc00u];
     if (address == 0x3000u && width == 1u) return &variant_out;
+    if (address >= 0x693370u && address + width <= 0x693370u + sizeof stage_groups) return &stage_groups[address - 0x693370u];
+    if (address >= 0x692ba4u && address + width <= 0x692ba4u + sizeof time_attack_pool)
+        return &time_attack_pool[address - 0x692ba4u];
+    if (address == 0x8783b5u && width == 1u) return &rotation_index;
     abort();
 }
 uint32_t *recomp_memory_u32_checked(uint32_t address)
@@ -180,8 +187,88 @@ static int test_miyama_variants(void)
     return failed == NULL;
 }
 
+/* The lifted stage pickers, as the game runs them: the fill copies the pool
+   and the group it sees, the draw returns a set value, and the next-stage
+   pick either steps the 21-stage rotation or draws from it through 0xc4410. */
+static uint32_t fill_list, fill_count, fill_group_list, drawn_value, pick_draws;
+static uint8_t fill_pool[0x20], fill_group_count;
+static const uint8_t ROTATION[21] = {0, 8, 9, 10, 12, 15, 19, 21, 24, 31, 41, 48, 49, 50, 51, 52, 53, 57, 54, 55, 56};
+
+void sub_000C7FD0(void)
+{
+    fill_list = arg(1u);
+    fill_count = arg(2u);
+    if (fill_list == XBOX_KERNEL_DATA_BASE + 0xc20u) memcpy(fill_pool, recomp_memory(fill_list, sizeof fill_pool), sizeof fill_pool);
+    memcpy(&fill_group_list, stage_groups, 4u);
+    fill_group_count = stage_groups[4];
+    ret(0u);
+}
+void sub_000C4410(void)
+{
+    ret(drawn_value);
+}
+void sub_000C7C80(void)
+{
+    uint8_t stage;
+    if (pick_draws) {
+        recomp_runtime.registers.esp -= 4u;
+        *recomp_memory_u32(recomp_runtime.registers.esp) = 0x000c7e8bu;
+        recomp_runtime.registers.eax = 21u;
+        recomp_stage_select_lookup_manual(0x000c4410u)();
+        stage = ROTATION[recomp_runtime.registers.eax];
+    } else {
+        stage = ROTATION[rotation_index];
+        if (++rotation_index >= 21u) rotation_index = 0u;
+    }
+    ret(0xabcd00u | stage);
+}
+
+/* Time Attack's pool gains Miyama, with its group narrowed to the four
+   variants only while the fill runs; other pools pass through. The rotation
+   runs Miyama after its 21st stage, and the draw's 22nd result is Miyama, both
+   on the row's current variant. Draws from other callers are left alone. */
+static int test_mode_rotations(void)
+{
+    const char *failed = NULL;
+    static const uint8_t pool[] = {48, 53, 0, 12, 52, 50, 15, 57, 19, 31, 41, 21, 8, 49, 10, 9, 56, 51, 55, 54, 0xff};
+    memcpy(time_attack_pool, pool, sizeof pool);
+    const uint32_t group_list = 0x693300u;
+    memcpy(stage_groups, &group_list, 4u);
+    stage_groups[4] = 5u;
+    kernel_page[1] = kernel_page[2] = kernel_page[3] = 63u;
+    call_cdecl(0x000c7fd0u, 0x692ba4u, 8u);
+    uint32_t restored;
+    memcpy(&restored, stage_groups, 4u);
+    if (fill_list != XBOX_KERNEL_DATA_BASE + 0xc20u || fill_count != 8u || memcmp(fill_pool, pool, 20u) != 0 ||
+        fill_pool[20] != 18u || fill_pool[21] != 0xffu) failed = "time attack pool";
+    else if (fill_group_list != XBOX_KERNEL_DATA_BASE + 0xc1cu || fill_group_count != 4u ||
+        memcmp(&kernel_page[0x1c], MIYAMA_IDS, 4u) != 0) failed = "narrowed group";
+    else if (restored != group_list || stage_groups[4] != 5u) failed = "restored group";
+    else if (call_cdecl(0x000c7fd0u, 0x692b00u, 3u) != 0u || fill_list != 0x692b00u || fill_count != 3u)
+        failed = "other pool";
+    rotation_index = 19u;
+    static const uint8_t expected[4] = {55u, 56u, 63u, 0u};
+    for (unsigned i = 0u; i < 4u && failed == NULL; ++i)
+        if (call_cdecl(0x000c7c80u, 0u, 0u) != expected[i]) failed = "rotation";
+    if (failed == NULL && (rotation_index != 1u || kernel_page[0x18] != 0u)) failed = "rotation index";
+    pick_draws = 1u;
+    drawn_value = 21u;
+    if (failed == NULL && (call_cdecl(0x000c7c80u, 0u, 0u) != 63u || kernel_page[0x19] != 0u)) failed = "Miyama draw";
+    drawn_value = 4u;
+    if (failed == NULL && call_cdecl(0x000c7c80u, 0u, 0u) != 12u) failed = "stage draw";
+    pick_draws = 0u;
+    *recomp_memory_u32(0x1000u) = 0x00123456u; /* a draw from elsewhere */
+    recomp_runtime.registers.esp = 0x1000u;
+    recomp_runtime.registers.eax = 21u;
+    drawn_value = 21u;
+    recomp_stage_select_lookup_manual(0x000c4410u)();
+    if (failed == NULL && (recomp_runtime.registers.eax != 21u || kernel_page[0x19] != 0u)) failed = "other draw";
+    if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
+    return failed == NULL;
+}
+
 int main(void)
 {
     if (recomp_stage_select_lookup_manual(0x00135400u) != NULL) return 1;
-    return test_stage_select() && test_miyama_variants() ? 0 : 1;
+    return test_stage_select() && test_miyama_variants() && test_mode_rotations() ? 0 : 1;
 }

@@ -175,6 +175,107 @@ static void stage_select_confirm_input(void)
     kernel_return(0u, confirmed);
 }
 
+/* Modes that pick stages without Stage Select read fixed lists: Time Attack
+   fills one stage per opponent from the pool at 0x692ba4 (0xc7fd0, which
+   swaps a pick in a stage group for a random member), and 0xc7c80 steps
+   rematches through the 21 stages at 0x692bd0 or draws one of them at random
+   (0xc4410, rand % EAX, from 0xc7e86 and 0xc447e). These add Miyama to each:
+   to the pool, with its group narrowed to the four variants while the fill
+   runs; after the 21st stage of the rotation; and as a 22nd random draw. The
+   rotation and draw take the row's current variant. The state sits in the
+   kernel page after the entry, so rollback restores it. */
+enum {
+    STAGE_GROUPS = 0x00693370u, /* per group: member list, member count */
+    TIME_ATTACK_POOL = 0x00692ba4u,
+    ROTATION_INDEX = 0x008783b5u,
+    ROTATION_COUNT = 21u,
+    RANDOM_FROM_PICK = 0x000c7e8bu, /* return addresses of the draws from 0x692bd0 */
+    RANDOM_FROM_REMATCH = 0x000c4483u,
+};
+#define MODE_PENDING_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc18u)  /* Miyama follows the 21st stage */
+#define MODE_DRAWN_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc19u)    /* the draw landed on Miyama */
+#define MODE_GROUP_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc1cu)    /* the four variants */
+#define MODE_POOL_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc20u)     /* the pool and Miyama */
+#define MODE_POOL_SIZE 0x20u
+
+extern void sub_000C4410(void);
+extern void sub_000C7C80(void);
+extern void sub_000C7FD0(void);
+
+static uint8_t miyama_current(void)
+{
+    const uint8_t id = guest_byte(MIYAMA_ENTRY_ADDRESS + 1u);
+    return miyama_stage(id) ? id : MIYAMA_STAGE;
+}
+
+static void stage_fill_random_stages(void)
+{
+    uint32_t args[2] = {*recomp_memory_u32(recomp_runtime.registers.esp + 4u),
+        *recomp_memory_u32(recomp_runtime.registers.esp + 8u)};
+    if (args[0] != TIME_ATTACK_POOL) {
+        kernel_return(0u, kernel_call_lifted(sub_000C7FD0, args, 2u));
+        return;
+    }
+    uint8_t *pool = recomp_memory(MODE_POOL_ADDRESS, MODE_POOL_SIZE);
+    uint32_t count = 0u;
+    while (count < MODE_POOL_SIZE - 2u && guest_byte(TIME_ATTACK_POOL + count) != 0xffu) {
+        pool[count] = guest_byte(TIME_ATTACK_POOL + count);
+        ++count;
+    }
+    pool[count] = MIYAMA_STAGE;
+    pool[count + 1u] = 0xffu;
+    memcpy(recomp_memory(MODE_GROUP_ADDRESS, 4u), MIYAMA_STAGES, 4u);
+    uint8_t *group = recomp_memory(STAGE_GROUPS, 5u); /* Miyama's group comes first */
+    uint8_t saved[5];
+    memcpy(saved, group, 5u);
+    const uint32_t list = MODE_GROUP_ADDRESS;
+    memcpy(group, &list, 4u);
+    group[4] = 4u;
+    args[0] = MODE_POOL_ADDRESS;
+    const uint32_t result = kernel_call_lifted(sub_000C7FD0, args, 2u);
+    memcpy(group, saved, 5u);
+    kernel_return(0u, result);
+}
+
+static void stage_random_below(void)
+{
+    const uint32_t from = *recomp_memory_u32(recomp_runtime.registers.esp);
+    if (recomp_runtime.registers.eax != ROTATION_COUNT || (from != RANDOM_FROM_PICK && from != RANDOM_FROM_REMATCH)) {
+        kernel_return(0u, kernel_call_lifted(sub_000C4410, NULL, 0u));
+        return;
+    }
+    recomp_runtime.registers.eax = ROTATION_COUNT + 1u;
+    uint32_t drawn = kernel_call_lifted(sub_000C4410, NULL, 0u);
+    if (drawn == ROTATION_COUNT) { /* the caller reads 0x692bd0[0]; the pick replaces it */
+        *recomp_memory(MODE_DRAWN_ADDRESS, 1u) = 1u;
+        drawn = 0u;
+    }
+    kernel_return(0u, drawn);
+}
+
+static void stage_pick_next(void)
+{
+    uint8_t *pending = recomp_memory(MODE_PENDING_ADDRESS, 1u);
+    uint8_t *drawn = recomp_memory(MODE_DRAWN_ADDRESS, 1u);
+    uint8_t *index = recomp_memory(ROTATION_INDEX, 1u);
+    const uint8_t before = *index;
+    *drawn = 0u;
+    uint32_t stage = kernel_call_lifted(sub_000C7C80, NULL, 0u) & 0xffu;
+    if (*drawn != 0u) {
+        *drawn = 0u;
+        stage = miyama_current();
+    } else if (*index != before) { /* the rotation stepped */
+        if (*pending != 0u) {
+            *pending = 0u;
+            *index = before;
+            stage = miyama_current();
+        } else if (before == ROTATION_COUNT - 1u) {
+            *pending = 1u;
+        }
+    }
+    kernel_return(0u, stage);
+}
+
 RecompFunction recomp_stage_select_lookup_manual(uint32_t guest_address)
 {
     switch (guest_address) {
@@ -183,6 +284,9 @@ RecompFunction recomp_stage_select_lookup_manual(uint32_t guest_address)
     case 0x00135510u: return stage_select_row_stage;
     case 0x00135580u: return stage_select_find_stage;
     case 0x001357f0u: return stage_select_confirm_input;
+    case 0x000c4410u: return stage_random_below;
+    case 0x000c7c80u: return stage_pick_next;
+    case 0x000c7fd0u: return stage_fill_random_stages;
     default: return NULL;
     }
 }
