@@ -85,8 +85,9 @@ static void load_main_profile(void)
        the save folder, whichever player owns it, and both players then
        played its Versus rules and controller settings. Let the load finish
        (the profile stays loaded for its saves), then put the defaults back
-       and re-apply the volume and vibration the load took from the data
-       (0x21370, 0x213d0). Session saves go to the throwaway copy in
+       and re-apply the display gamma (0x21370 profile_apply_gamma) and
+       the three volumes (0x213d0 profile_apply_volumes) the load applied
+       from the profile; the game re-reads them only in menus. Session saves go to the throwaway copy in
        .recomp-storage/netplay, wiped at each session start, so a save
        after this writes the defaults there and never into a player's own
        profile. Each load restores them again, discarding edits made

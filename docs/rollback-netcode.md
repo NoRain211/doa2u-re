@@ -527,7 +527,8 @@ game's own profile menus still load the first profile in the save folder
 (`profile_main_load`, `0x24940`), whoever owns it; that made the guest's
 Versus rules and controller settings (issue 169) the current data on both
 sides. The runner lets the load finish, then puts the default game data
-back and re-applies the volume and vibration the load set; the profile
+back and re-applies the display gamma and three volumes the load set
+(`0x21370`, `0x213d0`); the profile
 stays loaded for its saves. Two runners that walked to Versus character
 select read the default volumes (0x50) and none of the profile's stats from
 the data in both, with guest RAM identical. The
