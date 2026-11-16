@@ -25,13 +25,14 @@ uint32_t recomp_runner_alloc(uint32_t size, uint32_t alignment);
    12-byte rectangle {left, top, right, bottom, u16 index, u16 group} and
    0xaa9b0 its texture entry {texture, palette}. The game has 0x1a5 groups,
    which it loads and unloads by number, so the runner's are a group past them. */
-enum { RECOMP_RUNNER_SPRITE_GROUP = 0x1f0, RECOMP_RUNNER_SPRITE_SLOTS = 8 };
+enum { RECOMP_RUNNER_SPRITE_GROUP = 0x1f0, RECOMP_RUNNER_SPRITE_SLOTS = 9 };
 enum {
     RECOMP_RUNNER_SPRITE_PC_WHITE = 0,  /* PC Settings' label and its glow */
     RECOMP_RUNNER_SPRITE_PC_GLOW = 1,
     RECOMP_RUNNER_SPRITE_QUIT_LABEL = 2, /* the main menu's Quit Game label and pictures */
     RECOMP_RUNNER_SPRITE_QUIT_PICTURE = 3,
     RECOMP_RUNNER_SPRITE_QUIT_WIDE = 4,
+    RECOMP_RUNNER_SPRITE_DAMAGE_LABEL = 8, /* DAMAGE under the fight's combo counter */
 };
 static inline uint32_t recomp_runner_sprite_id(unsigned slot)
 {
