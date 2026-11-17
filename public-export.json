@@ -16,6 +16,8 @@
     "run_game.sh",
     "launcher.sh",
     "build_game.sh",
+    "build_steamdeck.sh",
+    "install_deps.sh",
     "public-export.json",
     "docs/reuse.md",
     "docs/free-camera.md",
@@ -26,6 +28,7 @@
     "docs/test-release-linux.md",
     "docs/rollback-netcode.md",
     "docs/matchmaking.md",
+    "docs/xbox-live.md",
     "private/README.md",
     "recomp-runtime/**",
     "tools/extract_iso.py",
@@ -36,6 +39,7 @@
     "tools/matchmaker.py",
     "tools/matchmaker.service",
     "tools/test_matchmaker.py",
+    "tools/live_vectors.json",
     "tools/public_export.py",
     "tools/xbe_info.py",
     "tools/xboxrecomp",
@@ -111,6 +115,10 @@
     ".jsonl"
   ],
   "byte_literal_exceptions": [
+    {
+      "sha256": "640be49999b84c9cedbbc66ef9ea1de4cbbc51b9bd4d263aaf1767b2b7eb5ef0",
+      "reason": "A made-up Live session id (\"D2INV\" and three counters) the in-memory Live backend seeds and its test reads back; not retail data."
+    },
     {
       "sha256": "3678064993b9a107c5cd38e2cd987029c88ad69b623c1d0e77efb39613a22e4a",
       "reason": "The default matchmaker's host:port XORed with 0x5a in netplay_menu.cpp; the runner's own server setting, not retail data."

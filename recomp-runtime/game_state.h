@@ -31,6 +31,14 @@ bool recomp_game_round_live(void);
 bool recomp_game_walk_to_versus(uint32_t frame, bool select, RecompInputGamepad *pad);
 /* The front end (g_game_mode_state 4) on its main menu (frontend scene 0). */
 bool recomp_game_at_main_menu(void);
+/* A Live match's two fighters, from the session's slot table (g_session_players
+   0xf192a8): slots 0 and 1 hold the fighters, each member's sockaddr at +0x14
+   with sin_addr at +0x18, and the local member is the one whose XUID is the
+   logged-on user's (g_online_users 0xf1cba8, +0) or that is marked at +0x2c.
+   Writes their virtual addresses (network order) to local and opponent when
+   not NULL. False when the table does not name two fighters or cannot tell
+   the local one; the caller then keeps the game's own lockstep. */
+bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent);
 
 #ifdef __cplusplus
 }

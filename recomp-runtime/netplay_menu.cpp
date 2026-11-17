@@ -142,6 +142,17 @@ static std::string defaultMatchmaker()
     return server;
 }
 
+} // namespace netplay_menu
+
+// The menu and the Live client must reach the same server; live_bridge.cpp asks for its name.
+bool recomp_netplay_default_matchmaker(std::string &server)
+{
+    server = netplay_menu::defaultMatchmaker();
+    return !server.empty();
+}
+
+namespace netplay_menu {
+
 // Looks up the matchmaker from NETPLAY SETTINGS, or the default when none is set. Call after a socket
 // opened, which starts Windows sockets.
 void lookUpMatchmaker()

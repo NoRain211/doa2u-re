@@ -624,6 +624,7 @@ int main(int argc, char **argv)
     }
     recomp_disc_root_path = discRoot.c_str();
     recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
+    if (launch.hostPort == 0u && launch.join.empty() && replayPath.empty()) recomp_netplay_session_start_live();
     if ((launch.hostPort != 0u || !launch.join.empty()) && !recomp_netplay_session_connect(launch)) return 1;
     if (!replayPath.empty() && !recomp_netplay_session_load_replay(replayPath)) return 1;
     bootGuest();

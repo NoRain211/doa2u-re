@@ -202,6 +202,23 @@ add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
 add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
 add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
 
+# WP1 Guest Xbox Live API: the guest's XOnline/XNet thunks over
+# RecompLiveBackend (live_backend.h), plus the in-memory backend for tests.
+# The transport work package adds live_transport.c and the real
+# recomp_live_transport_lookup; live_xapi.c carries a fallback until then.
+add_executable(recomp_live_xapi_test live_xapi.c live_backend.c live_backend_local.c
+    live_xapi_test.c)
+add_test(NAME recomp-runtime-live-xapi COMMAND recomp_live_xapi_test)
+if(WIN32)
+    # XNetRandom asks BCryptGenRandom for OS entropy, as live_identity.c does.
+    target_link_libraries(recomp_live_xapi_test PRIVATE bcrypt)
+    target_link_libraries(recomp_manual_test PRIVATE bcrypt)
+endif()
+# program_manual.c binds the Live guest API first, so the unbound-lookup test
+# links the same sources; its stub for the kernel host's pool allocator lives in
+# program_manual_test.c.
+target_sources(recomp_manual_test PRIVATE live_xapi.c live_backend.c live_backend_local.c)
+
 add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)
@@ -380,6 +397,32 @@ add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_te
 add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
 target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+
+# Native Xbox Live's transport: the game's socket, the matchmaker and every
+# peer share one socket, and a bound rollback session rides the same route.
+add_executable(recomp_live_transport_test netplay.c netplay_room.c netplay_names.c rollback.c live_transport.c
+    live_transport_test.c)
+if(WIN32)
+    target_link_libraries(recomp_live_transport_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-live-transport COMMAND recomp_live_transport_test)
+
+# WP3: the Live matchmaker client (tools/matchmaker.py's kinds 12..33) and the
+# identity it logs on with. The transport is WP2's; this test stands in for it
+# and checks every kind against tools/live_vectors.json, which the Python
+# tests hold to the same bytes.
+add_executable(recomp_live_client_test live_client.c live_identity.c live_client_test.c)
+target_include_directories(recomp_live_client_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../xbe")
+target_link_libraries(recomp_live_client_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-live-client COMMAND recomp_live_client_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/live_vectors.json")
+
+# WP4, rollback for Live fights: the stop bit, the fight-only hash ranges, the
+# player index and the fight hooks, over fake guest pages. netplay_session.cpp
+# and the game's own bodies are stubbed inside the test.
+add_executable(recomp_live_fight_test live_fight_rules.c live_fight.c game_state.c live_fight_test.c)
+add_test(NAME recomp-runtime-live-fight COMMAND recomp_live_fight_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
@@ -692,8 +735,9 @@ if(RECOMP_PROGRAM_DIR)
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        live_client.c live_identity.c live_bridge.cpp
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
-        host_diagnostics.cpp)
+        host_diagnostics.cpp live_fight.c live_fight_rules.c)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
     set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
@@ -778,4 +822,8 @@ if(RECOMP_PROGRAM_DIR)
         add_executable(recomp_launcher ../tools/launcher_sdl.cpp)
         recomp_use_sdl3(recomp_launcher)
     endif()
+
+    # Xbox Live: the guest XOnline/XNet API and the one socket it shares with
+    # the matchmaker and every peer (live_transport.c).
+    target_sources(recomp_runner_objects PRIVATE live_xapi.c live_backend.c live_backend_local.c live_transport.c)
 endif()

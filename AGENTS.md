@@ -12,6 +12,8 @@ D3D8 5849 device, frame and state APIs to the shared semantic presenter.
 DirectSound 5849 owns native device/buffer lifetime and PCM output.
 Effects-image download owns decoded maps/state and binds native I3DL2 reverb.
 XAPI fibers run on native Windows fibers through `fiber_adapter.c`.
+XOnline and XNet bind to the Live adapter (`live_xapi.c`) when `RECOMP_LIVE`
+starts a backend; read `docs/xbox-live.md` before extending it.
 3D voices render through the game's HRTF tables with crosstalk bins folded to
 stereo. Recording sends and additional DSP processing remain guarded.
 Read the audio limits in `docs/bring-up.md` before extending this adapter.
@@ -49,10 +51,15 @@ ask the user to save the program (Ctrl+S) after naming.
 3. Keep all private inputs and output under `private/`; only its README is
    tracked. New public files must be included in `public-export.json`.
 4. Report observed behavior; forced state remains a hypothesis.
-5. Keep the ISO in its original location and extract it only once. Use
-   hardlinks for play folders; do not copy disc trees or storage caches.
-6. Preserve imported discs, ISOs, play folders with saves, releases, and the
-   executable folder open in Ghidra. Remove task-owned scratch dumps when done.
+5. Keep the ISO in its original location and extract it only once. After a
+   build, `private/play-disc` holds the disc; `private/imported-disc` keeps
+   only its `receipt.json`. Use hardlinks for other play folders; do not copy
+   disc trees or storage caches.
+6. Preserve `private/play-disc` (the disc and saves), `private/imported-disc`
+   (receipt), ISOs, releases, and the executable folder open in Ghidra.
+   Remove task-owned scratch dumps when done.
+7. `tools/build_game.py <iso>` deletes `private/imported-disc/disc` after a
+   successful build; `--build-only` and `--lift-only` keep it.
 
 ## Lifter and shared source
 
