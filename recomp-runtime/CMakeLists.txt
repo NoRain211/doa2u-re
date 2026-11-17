@@ -731,6 +731,9 @@ if(RECOMP_PROGRAM_DIR)
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp)
+    # program_manual.c binds the Live guest API first, so the runner links its
+    # adapter; its transport and start-up come with the Live fight wiring.
+    target_sources(recomp_runner_objects PRIVATE live_xapi.c live_backend.c)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
     set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
