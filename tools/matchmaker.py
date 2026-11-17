@@ -81,6 +81,8 @@ WALL_EPOCH = 1e9  # a wall clock time is past 2001; a store from before it held 
 LIVE_PER_SECOND = 100  # Live packets per address between sweeps; resends every 500 ms are 2
 LIVE_BYTES_PER_SECOND = 256 * 1024  # answer bytes per address between sweeps: three full 100-row group-7 reads
 STORE_SECONDS = 30.0  # at most this often is --store written
+BAD_ENTRY = (KeyError, TypeError, ValueError, AttributeError, IndexError,
+             OverflowError)  # an entry raising one of these is skipped, never the whole store
 DATAGRAM_MAGIC = b"D2GD"  # the game's datagram, as live_transport.c wraps it
 DATAGRAM_KINDS = (1, 2)  # a game datagram, or a punch the transports exchange
 DATAGRAM_HEAD = 11  # magic, version, 4-byte sender virtual address, 2-byte guest port
@@ -1170,8 +1172,8 @@ class Matchmaker:
             """The loop clock's time from a store's wall clock one; an old store held monotonic seconds."""
             try:
                 when = float(value)
-            except (TypeError, ValueError):
-                return loaded
+            except (TypeError, ValueError):  # no time at all: heard now, as an absent seen is
+                return loaded  # one too large for float() raises, and its section skips the entry
             if when < WALL_EPOCH:
                 return loaded
             return loaded - max(0.0, wall - when)
@@ -1186,7 +1188,7 @@ class Matchmaker:
                 account = Account(int(entry["xuid"]), bytes.fromhex(entry["proof"])[:32],
                                    printable(entry["gamertag"].encode("utf-8")) or b"PLAYER", int(entry["title"]))
                 account.seen = heard(entry.get("seen", loaded))
-            except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             if account.xuid == 0 or account.xuid in self.accounts or len(account.proof) != 32:
@@ -1197,7 +1199,7 @@ class Matchmaker:
         for entry in entries("friends"):
             try:
                 first, second = pair(entry)
-            except (KeyError, TypeError, ValueError, IndexError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             self.add_friend(first, second)
@@ -1205,7 +1207,7 @@ class Matchmaker:
             try:
                 source, target = int(entry[0]), int(entry[1])
                 when = heard(entry[2]) if len(entry) > 2 else loaded
-            except (KeyError, TypeError, ValueError, IndexError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             self.requests[(source, target)] = when
@@ -1214,14 +1216,14 @@ class Matchmaker:
                 invite = Invite(bytes.fromhex(entry["kid"]), entry["answer"],
                                 heard(entry["seen"]) if "seen" in entry else loaded)
                 from_xuid, to_xuid = int(entry["from"]), int(entry["to"])
-            except (KeyError, TypeError, ValueError, AttributeError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             self.invites[(from_xuid, to_xuid)] = invite
         for entry in entries("mutes"):
             try:
                 owner, muted = pair(entry)
-            except (KeyError, TypeError, ValueError, IndexError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             self.mutes.setdefault(owner, set()).add(muted)
@@ -1229,7 +1231,7 @@ class Matchmaker:
             try:
                 stats = {(int(stat_id), int(kind), int(value)) for stat_id, kind, value in entry["stats"]}
                 board, xuid = int(entry["board"]), int(entry["xuid"])
-            except (KeyError, TypeError, ValueError, AttributeError):
+            except BAD_ENTRY:
                 skipped += 1
                 continue
             self.stats[(board, xuid)] = {stat_id: (kind, value) for stat_id, kind, value in stats}
