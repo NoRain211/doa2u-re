@@ -177,27 +177,28 @@ static void draw_sprite(uint32_t record, uint32_t id, unsigned x, unsigned y)
 }
 
 /* DAMAGE in the lettering of the fight's popups (CRITICAL, COUNTER, HOLD...):
-   each popup word is a soft fill (pages 52, 54, 56) and an outline drawn
-   under it (the next page, same rectangle). The letters are cut from both,
-   D of HOLD, A of CRITICAL, M of COMBO, C and E of CLOSE, the G being the
-   C with the E's middle arm as its bar and a piece of the E's stem as its
-   spur; the fill is white, as the counter's HIT COMBO is. Pieces are in
-   texels of their word; an add-on (letter 0) goes dx into the letter before.
-   Made at run time from the game's own art, once a fight has loaded it. */
+   each popup word is a soft fill (pages 52, 54, 56) with an outline page under
+   it. The letters are cut from the fills alone, as the counter's HIT COMBO
+   above is plain white and the popups' outline speckles at this size: D of
+   HOLD, A of CRITICAL, M of COMBO, C and E of CLOSE, the G being the C with
+   the E's middle arm as its bar and a piece of the E's stem as its spur.
+   Pieces are in texels of their word; an add-on (letter 0) goes dx into the
+   letter before. Made at run time from the game's own art, once a fight has
+   loaded it. */
 typedef struct LabelPiece {
-    uint32_t fill, outline;
+    uint32_t fill;
     int16_t from, to;
     int8_t top, bottom, dx, letter;
 } LabelPiece;
 static const LabelPiece DAMAGE_PIECES[] = {
-    {0x1017du, 0x10182u, 42, 55, 0, 15, 0, 1},   /* D of HOLD */
-    {0x10165u, 0x1016bu, 61, 75, 0, 15, 0, 1},   /* A of CRITICAL */
-    {0x10173u, 0x10177u, 29, 43, 0, 15, 0, 1},   /* M of COMBO */
-    {0x10165u, 0x1016bu, 61, 75, 0, 15, 0, 1},   /* A */
-    {0x10166u, 0x1016cu, 1, 13, 0, 15, 0, 1},    /* C of CLOSE: the G */
-    {0x10166u, 0x1016cu, 58, 62, 7, 9, 5, 0},    /*   its bar, the E's middle arm */
-    {0x10166u, 0x1016cu, 52, 56, 7, 13, 8, 0},   /*   its spur, the E's stem */
-    {0x10166u, 0x1016cu, 53, 64, 0, 15, 0, 1},   /* E of CLOSE */
+    {0x1017du, 42, 55, 0, 15, 0, 1},   /* D of HOLD */
+    {0x10165u, 61, 75, 0, 15, 0, 1},   /* A of CRITICAL */
+    {0x10173u, 29, 43, 0, 15, 0, 1},   /* M of COMBO */
+    {0x10165u, 61, 75, 0, 15, 0, 1},   /* A */
+    {0x10166u, 1, 13, 0, 15, 0, 1},    /* C of CLOSE: the G */
+    {0x10166u, 58, 62, 7, 9, 5, 0},    /*   its bar, the E's middle arm */
+    {0x10166u, 52, 56, 7, 13, 8, 0},   /*   its spur, the E's stem */
+    {0x10166u, 53, 64, 0, 15, 0, 1},   /* E of CLOSE */
 };
 enum { LABEL_W = 128, LABEL_H = 16, WORD_H = 16, LEVELS = 16 };
 static uint32_t label_palette, label_colours;
@@ -211,32 +212,22 @@ static float coverage(const RecompGameSprite *sprite, int x, int y)
 
 static bool make_damage_label(void)
 {
-    static float fill[LABEL_H][LABEL_W], outline[LABEL_H][LABEL_W];
+    static float fill[LABEL_H][LABEL_W];
     static uint8_t image[LABEL_H][LABEL_W];
     memset(fill, 0, sizeof fill);
-    memset(outline, 0, sizeof outline);
     int pen = 1, letter_pen = 1;
     for (size_t p = 0u; p < sizeof DAMAGE_PIECES / sizeof DAMAGE_PIECES[0]; ++p) {
         const LabelPiece *piece = &DAMAGE_PIECES[p];
-        RecompGameSprite f, o;
-        if (!recomp_game_sprite(piece->fill, WORD_H, &f) || !recomp_game_sprite(piece->outline, WORD_H, &o)) return false;
-        if (piece->to > f.right - f.left || piece->to > o.right - o.left) return false;
+        RecompGameSprite f;
+        if (!recomp_game_sprite(piece->fill, WORD_H, &f)) return false;
+        if (piece->to > f.right - f.left) return false;
         const int at = piece->letter ? pen : letter_pen + piece->dx;
         for (int y = piece->top; y < piece->bottom; ++y)
             for (int u = piece->from; u < piece->to; ++u) {
                 const int x = at + u - piece->from;
                 if (x < 0 || x >= LABEL_W) continue;
-                const float pf = coverage(&f, u, y), po = coverage(&o, u, y);
-                if (piece->letter) {
-                    if (pf > fill[y][x]) fill[y][x] = pf;
-                    if (po > outline[y][x]) outline[y][x] = po;
-                } else {
-                    /* An add-on keeps the letter's outline where the letter is solid, and
-                       adds its own outline only outside both fills. */
-                    const float before = fill[y][x];
-                    if (pf > fill[y][x]) fill[y][x] = pf;
-                    if (before <= 0.6f && pf <= 0.6f && po > outline[y][x]) outline[y][x] = po;
-                }
+                const float pf = coverage(&f, u, y);
+                if (pf > fill[y][x]) fill[y][x] = pf;
             }
         if (piece->letter) {
             letter_pen = pen;
@@ -244,12 +235,8 @@ static bool make_damage_label(void)
         }
     }
     for (int y = 0; y < LABEL_H; ++y)
-        for (int x = 0; x < LABEL_W; ++x) {
-            /* The popups' dark outline speckles at this size; the counter's HIT COMBO
-               above is plain white, so the label is the fill alone. */
-            const int a = (int)lrintf(fill[y][x] * (LEVELS - 1)), b = 0;
-            image[y][x] = (uint8_t)(a * LEVELS + b);
-        }
+        for (int x = 0; x < LABEL_W; ++x)
+            image[y][x] = (uint8_t)lrintf(fill[y][x] * (LEVELS - 1));
     recomp_runner_sprite_pixels(RECOMP_RUNNER_SPRITE_DAMAGE_LABEL, &image[0][0]);
     label_width = pen < LABEL_W ? pen : LABEL_W;
     recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_DAMAGE_LABEL, label_width, LABEL_H - 1);
@@ -257,20 +244,16 @@ static bool make_damage_label(void)
     return true;
 }
 
-/* Index a * 16 + b: white fill coverage a over a black outline of coverage b. */
+/* Indexed by the fill's coverage: white, as the counter's HIT COMBO is. */
 static void damage_label_install(void)
 {
     label_made = false;
     label_palette = recomp_runner_palette(&label_colours);
     if (label_palette == 0u) return;
-    for (unsigned a = 0u; a < LEVELS; ++a)
-        for (unsigned b = 0u; b < LEVELS; ++b) {
-            const float f = a / (float)(LEVELS - 1), o = b / (float)(LEVELS - 1);
-            const float alpha = f + o * (1.0f - f);
-            const unsigned grey = alpha > 0.0f ? (unsigned)lrintf(255.0f * f / alpha) : 0u;
-            const unsigned A = (unsigned)lrintf(255.0f * alpha);
-            *recomp_memory_u32(label_colours + 4u * (a * LEVELS + b)) = A << 24 | grey << 16 | grey << 8 | grey;
-        }
+    for (unsigned a = 0u; a < LEVELS; ++a) {
+        const unsigned alpha = (unsigned)lrintf(255.0f * a / (float)(LEVELS - 1));
+        *recomp_memory_u32(label_colours + 4u * a) = alpha << 24 | 0xffffffu;
+    }
     recomp_runner_sprite(RECOMP_RUNNER_SPRITE_DAMAGE_LABEL, 7u, 4u, label_palette);
 }
 
@@ -282,7 +265,10 @@ static void draw_damage(uint32_t scratch, unsigned side)
     const unsigned damage = combo_damage(side);
     if (!damage_shown(side) || damage == 0u) return;
     if (!label_made) label_made = make_damage_label();
-    const unsigned units = side == 0u ? 48u + (counter_hits(side) >= 10u ? DIGIT_STEP : 0u) : 491u + 48u;
+    /* A lone hit draws no counter, so its digits start where a single-digit
+       counter's do even if an earlier combo left ten or more hits behind. */
+    const bool tens = counter_shown(side) && counter_hits(side) >= 10u;
+    const unsigned first = side == 0u ? 48u : 491u + 48u - (tens ? DIGIT_STEP : 0u);
     const unsigned y = *recomp_memory_u32(HUD_Y) + 0x58u + (counter_shown(side) ? LINE : 0u);
     call(UI_RESET, NULL, 0u);
     put32(SPRITE_SCALE, *recomp_memory_u32(COUNTER_SCALE));
@@ -291,7 +277,6 @@ static void draw_damage(uint32_t scratch, unsigned side)
     *recomp_memory(SPRITE_MODE, 1u) = *recomp_memory(DEMO_FLAG, 1u) == 1u ? 4u : 2u;
     const unsigned value = damage > 9999u ? 9999u : damage;
     const unsigned digits = value >= 1000u ? 4u : value >= 100u ? 3u : value >= 10u ? 2u : 1u;
-    const unsigned first = units - (counter_hits(side) >= 10u ? DIGIT_STEP : 0u);
     unsigned rest = value;
     for (unsigned i = digits; i > 0u; --i) {
         draw_sprite(scratch, DIGIT_SPRITE + rest % 10u, first + DIGIT_STEP * (i - 1u), y);
