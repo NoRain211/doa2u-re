@@ -1379,6 +1379,22 @@ class LiveTest(unittest.TestCase):
             self.assertIn("skipped 7 malformed entries", errors.getvalue())
             self.assertEqual(len(errors.getvalue().splitlines()), 1)
 
+    def test_a_store_number_too_large_for_float_is_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            huge = int("9" * 400)  # float() of it raises OverflowError, not ValueError
+            data = {"version": 1, "accounts": [], "friends": [], "requests": [[A, B, huge]],
+                    "invites": [{"kid": NO_KID.hex(), "from": A, "to": B, "answer": "", "seen": huge}],
+                    "mutes": [], "stats": []}
+            Path(path).write_text(json.dumps(data), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.assertNotIn((A, B), server.requests)
+            self.assertEqual(server.invites, {})
+            self.assertIn("skipped 2 malformed entries", errors.getvalue())
+            self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
     def test_a_failed_store_write_keeps_the_last_file_and_removes_its_temp(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "live.json")
