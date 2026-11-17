@@ -28,6 +28,7 @@
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
+#include "sha.h"
 #include "synctest.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
@@ -215,9 +216,10 @@ static std::string installMods(const std::string &discRoot)
     if (recomp_mod_loader_count() == 0u) return digest;
     char hex[17];
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(recomp_mod_loader_digest()));
-    if (digest.size() >= 16u) digest.replace(digest.size() - 16u, 16u, hex);
-    else digest += hex;
-    return digest;
+    /* A lobby carries RECOMP_NETPLAY_DIGEST_BYTES, so hash both identities into
+       it: dropping either half would pair builds or mod sets that differ. */
+    const std::string combined = digest + '\n' + hex;
+    return doaxbv::sha256Hex(std::vector<std::uint8_t>(combined.begin(), combined.end()));
 }
 
 static void installPcSettings(bool online)

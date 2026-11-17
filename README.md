@@ -124,11 +124,11 @@ keeps running.
   drawn like the game's own, that asks before it closes the game.
 - **Mods.** Files in a `mods` folder beside the launcher replace the
   game's files without touching the disc. Each folder in it is a mod that
-  mirrors the disc: `mods\<mod>\DOA2\doa2_op.sfd` replaces a whole file,
+  mirrors the disc: `mods\<mod>\DOA2\<file>.sfd` replaces a whole file,
   and a folder named after one of the game's archives replaces single
   entries in it, by their name in the archive or their number:
-  `mods\<mod>\DOA2\bgm.afs\bgm_doa2_ay.adx` (or `10.adx`) replaces Ayane's
-  theme. An entry can be a plain WAV (8 to 32-bit PCM, mono or stereo, any
+  `mods\<mod>\DOA2\<archive>.afs\<entry>.adx` (or `<number>.adx`). An entry
+  can be a plain WAV (8 to 32-bit PCM, mono or stereo, any
   rate): it is encoded to ADX once and kept in `mods\.cache`, and loops
   where its `smpl` chunk says or, if the track it replaces looped, over the
   whole song. Mods load by folder name, or in the order `mods\order.txt`
