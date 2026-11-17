@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "matchmaker_wire.h"
 #include "netplay_wire.h"
 
 static void put_pad(uint8_t *out, const RecompInputGamepad *pad)
@@ -268,17 +269,9 @@ bool recomp_netplay_route_address(char *text, size_t size)
     return found;
 }
 
-/* The matchmaker's packets (tools/matchmaker.py): "D2MM", version, kind,
-   the client socket's nonce, then for HOST, JOIN, LEAVE and RELAY the
-   server's cookie, then a body whose numbers are big endian. */
-static const uint8_t MATCH_MAGIC[4] = {'D', '2', 'M', 'M'};
+/* The matchmaker's packets live in matchmaker_wire.h; these are the sizes
+   only a room's requests and answers use. */
 enum {
-    MATCH_VERSION = 2u,
-    MATCH_HOST = 1u, MATCH_HOSTED, MATCH_LIST, MATCH_ROOMS, MATCH_JOIN, MATCH_PEER, MATCH_GONE, MATCH_LEAVE,
-    MATCH_RELAY, MATCH_COOKIE,
-    MATCH_HEADER = 6u,
-    MATCH_BODY = MATCH_HEADER + RECOMP_NETPLAY_TOKEN_BYTES, /* after the nonce */
-    MATCH_ASKED = MATCH_BODY + RECOMP_NETPLAY_TOKEN_BYTES,  /* after the cookie */
     MATCH_LIST_BYTES = 512u, /* a list request is padded, so its answer is never larger */
     MATCH_ENTRY = 42u, /* ends with the host's round trip to the server */
     MATCH_PEER_BYTES = MATCH_BODY + 6u + 6u + 1u + RECOMP_NETPLAY_NAME_BYTES,
@@ -332,18 +325,6 @@ bool netplay_set_route(RecompNetplay *net, const RecompNetplayRoute *route)
     return false;
 }
 
-/* Writes a packet's start and returns where its body goes. */
-static uint8_t *match_header(const RecompNetplay *net, uint8_t *out, uint8_t kind)
-{
-    memcpy(out, MATCH_MAGIC, sizeof MATCH_MAGIC);
-    out[4] = MATCH_VERSION;
-    out[5] = kind;
-    memcpy(out + MATCH_HEADER, net->match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
-    if (kind == MATCH_LIST) return out + MATCH_BODY;
-    memcpy(out + MATCH_BODY, net->match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
-    return out + MATCH_ASKED;
-}
-
 /* A relaying socket reaches its peer through the matchmaker, which knows
    where to forward. */
 void netplay_send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
@@ -357,7 +338,7 @@ void netplay_send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
     uint8_t wrapped[MATCH_ASKED + RECOMP_NETPLAY_MAX_PACKET];
     if (net->match.relay && address == net->peer_address && port == net->peer_port &&
         size <= RECOMP_NETPLAY_MAX_PACKET) {
-        memcpy(match_header(net, wrapped, MATCH_RELAY), packet, size);
+        memcpy(match_header(wrapped, MATCH_RELAY, net->match.nonce, net->match.cookie), packet, size);
         netplay_send_raw(net, net->match.server_address, net->match.server_port, wrapped, MATCH_ASKED + size);
         return;
     }
@@ -593,7 +574,7 @@ void recomp_netplay_match_host(RecompNetplay *net, const char *digest, uint8_t d
     const char *name)
 {
     uint8_t packet[MATCH_ASKED + RECOMP_NETPLAY_DIGEST_BYTES + 2u + 1u + RECOMP_NETPLAY_NAME_BYTES + 6u + 2u];
-    uint8_t *at = match_header(net, packet, MATCH_HOST);
+    uint8_t *at = match_header(packet, MATCH_HOST, net->match.nonce, net->match.cookie);
     memcpy(at, digest, RECOMP_NETPLAY_DIGEST_BYTES);
     at += RECOMP_NETPLAY_DIGEST_BYTES;
     at[0] = delay;
@@ -610,7 +591,8 @@ void recomp_netplay_match_list(RecompNetplay *net, const char *digest)
 {
     uint8_t packet[MATCH_LIST_BYTES];
     memset(packet, 0, sizeof packet);
-    memcpy(match_header(net, packet, MATCH_LIST), digest, RECOMP_NETPLAY_DIGEST_BYTES);
+    memcpy(match_header(packet, MATCH_LIST, net->match.nonce, net->match.cookie), digest,
+        RECOMP_NETPLAY_DIGEST_BYTES);
     net->match.list_sent_ms = netplay_now_ms();
     send_match(net, packet, sizeof packet);
 }
@@ -618,7 +600,7 @@ void recomp_netplay_match_list(RecompNetplay *net, const char *digest)
 void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char *digest, const char *name)
 {
     uint8_t packet[MATCH_ASKED + 4u + RECOMP_NETPLAY_DIGEST_BYTES + 1u + RECOMP_NETPLAY_NAME_BYTES + 6u];
-    uint8_t *at = match_header(net, packet, MATCH_JOIN);
+    uint8_t *at = match_header(packet, MATCH_JOIN, net->match.nonce, net->match.cookie);
     for (unsigned i = 0u; i < 4u; ++i) at[i] = (uint8_t)(room_id >> (24u - 8u * i));
     memcpy(at + 4u, digest, RECOMP_NETPLAY_DIGEST_BYTES);
     put_lan(net, put_name(at + 4u + RECOMP_NETPLAY_DIGEST_BYTES, name));
@@ -628,7 +610,7 @@ void recomp_netplay_match_join(RecompNetplay *net, uint32_t room_id, const char 
 void recomp_netplay_match_leave(RecompNetplay *net)
 {
     uint8_t packet[MATCH_ASKED];
-    (void)match_header(net, packet, MATCH_LEAVE);
+    (void)match_header(packet, MATCH_LEAVE, net->match.nonce, net->match.cookie);
     send_match(net, packet, sizeof packet);
     net->match.room_id = 0u;
 }
