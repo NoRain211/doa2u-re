@@ -90,6 +90,13 @@ extern const RecompModSource *(*recomp_mod_entry_start)(const char *key, unsigne
    game's Z: cache, or false. */
 bool recomp_mod_key(const char *disc_root, const char *host_path, char *key, size_t key_size);
 
+/* Whether this open may change the file, so a mod must not stand in for it:
+   overlays never apply to handles opened for writing. DELETE and the ACL, EA
+   and attribute rights write too, as do the supersede and overwrite
+   dispositions and the FILE_DELETE_ON_CLOSE option. The kernel passes FILE_OPEN
+   for NtOpenFile. */
+bool recomp_mod_open_writes(uint32_t desired_access, uint32_t create_disposition, uint32_t create_options);
+
 #ifdef __cplusplus
 }
 #endif
