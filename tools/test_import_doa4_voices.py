@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import io
 import json
 import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
+from test_import_soundtrack import xdvdfs_image
 
 import import_doa4_voices as voices
 
@@ -14,6 +17,41 @@ def wav(path, samples):
     with open(path, "wb") as file:
         file.write(b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<I", 16) + fmt +
             b"data" + struct.pack("<I", len(data)) + data)
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_archive_view_is_bounded_even_when_the_disc_has_following_files(self):
+        view = voices.ArchiveView(io.BytesIO(b"xxvoice-tail"), 2, 5)
+        self.assertEqual(view.read(99), b"voice")
+        self.assertEqual(view.read(1), b"")
+        view.seek(-2, 2)
+        self.assertEqual(view.read(), b"ce")
+        for offset, whence in [(-1, 0), (6, 0), (0, 7)]:
+            with self.assertRaises(ValueError): view.seek(offset, whence)
+        with self.assertRaises(ValueError): voices.ArchiveView(io.BytesIO(b"xxv"), 2, 5).read()
+
+    def test_iso_voice_archive_is_read_without_extracting_the_disc(self):
+        with tempfile.TemporaryDirectory() as root:
+            iso = os.path.join(root, "doa4.iso")
+            xdvdfs_image(iso, {"snd.afs": b"AFS\0voice", "SOUND/bgm_stream.xwb": b"DNBW"})
+            with voices.open_archive(iso) as archive:
+                self.assertEqual(archive.read(), b"AFS\0voice")
+                self.assertEqual(archive.read(), b"")
+            self.assertEqual(os.listdir(root), ["doa4.iso"])
+
+    def test_invalid_banks_create_no_output_and_never_run_the_decoder(self):
+        with tempfile.TemporaryDirectory() as root:
+            source, out = os.path.join(root, "snd.afs"), os.path.join(root, "output")
+            count = max(voices.BANKS.values()) + 1
+            end = 8 + 8 * count
+            with open(source, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<I", count) + struct.pack("<II", end, 0) * count)
+            with mock.patch.object(voices, "fetch_ffmpeg", return_value="unused"), \
+                    mock.patch.object(voices.subprocess, "run") as run:
+                with self.assertRaises((ValueError, struct.error)):
+                    voices.main([source, "--out", out])
+            self.assertFalse(os.path.exists(out))
+            run.assert_not_called()
 
 
 class MappingTests(unittest.TestCase):
