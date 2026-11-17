@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <process.h>
 #define make_dir(p) _mkdir(p)
 #else
 #include <unistd.h>
@@ -412,7 +413,7 @@ int main(void)
 {
     char root[512];
 #ifdef _WIN32
-    snprintf(root, sizeof root, "%s\\mod_loader_test_%lu", getenv("TEMP") ? getenv("TEMP") : ".", (unsigned long)rand());
+    snprintf(root, sizeof root, "%s\\mod_loader_test_%d", getenv("TEMP") ? getenv("TEMP") : ".", _getpid());
 #else
     snprintf(root, sizeof root, "/tmp/mod_loader_test_%ld", (long)getpid());
 #endif
