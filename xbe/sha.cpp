@@ -324,7 +324,13 @@ void sha256(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32]
 
 } // namespace doaxbv
 
-extern "C" void doaxbv_sha256_digest(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
+extern "C" bool doaxbv_sha256_digest(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
 {
-    doaxbv::sha256(bytes, size, digest);
+    try {
+        doaxbv::sha256(bytes, size, digest);
+        return true;
+    } catch (...) {
+        std::memset(digest, 0, 32u);
+        return false;
+    }
 }
