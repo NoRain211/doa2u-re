@@ -696,16 +696,17 @@ class LauncherForm : Form
     {
         if (game == null) { DetectDiscAsync(iso, result => ImportDisc(iso, result)); return; }
         if (game != "doa3" && game != "doa4") { notice = "Choose a Dead or Alive 3 or 4 disc to import."; return; }
-        voicesNext = game == "doa4" ? iso : null;
-        StartImport(iso);
+        StartImport(iso, false, game == "doa4");
     }
 
     // Imports a DOA3 or DOA4 disc's music into jukebox\, as a build runs.
-    void StartImport(string iso, bool voices = false)
+    void StartImport(string iso, bool voices = false, bool thenVoices = false)
     {
         if (build != null) { notice = "Wait for the " + (task != "build" ? "import" : "build") + " to finish"; return; }
         if (installing) { notice = "Wait for the update to finish"; return; }
         if (Game.Python == null) { MessageBox.Show(Game.PythonMessage, Game.Title); return; }
+        // Set only once an import really starts, so a refused one cannot chain voices later.
+        if (!voices) voicesNext = thenVoices ? iso : null;
         lock (buildLines) buildLines.Clear();
         buildStart = DateTime.Now;
         build = Game.StartPython(voices ? @"tools\import_doa4_voices.py" : @"tools\import_soundtrack.py",

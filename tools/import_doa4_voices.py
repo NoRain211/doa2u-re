@@ -175,6 +175,9 @@ def cue_waves(data):
     out = {}
     for i in range(cues):
         sound, name = s32(simple + 5 * i + 1), s32(names + 6 * i)
+        # A negative offset would index from the end; past the end, IndexError escapes the handler.
+        if not (0 <= sound < len(data) and 0 <= name < len(data)):
+            raise ValueError(f"cue {i} points outside the sound bank")
         label = data[name:data.index(b"\0", name)].decode("ascii")
         label = cue_label(label)
         if data[sound] & 1 == 0:  # a simple sound: one wave
@@ -390,7 +393,8 @@ def main(argv=None):
         if not args.no_selections and os.path.exists(args.mapping):
             with open(args.mapping, encoding="utf-8") as file:
                 apply_selections(afs, entries, args.out, args.ffmpeg, json.load(file), args.replace_selections)
-    print("Voice import complete. Your existing selections were kept. Enable Hit Voices in PC SETTINGS.", flush=True)
+    kept = "" if args.no_selections or args.replace_selections else " Your existing selections were kept."
+    print(f"Voice import complete.{kept} Enable Hit Voices in PC SETTINGS.", flush=True)
     return 0
 
 if __name__ == "__main__":

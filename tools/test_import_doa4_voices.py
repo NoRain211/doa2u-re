@@ -109,6 +109,15 @@ class BankTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     voices.cue_waves(make_sound_bank([(name, 0)]))
 
+    def test_cue_offsets_outside_the_bank_are_rejected(self):
+        bank = make_sound_bank([("zac_068_down", 0)])
+        for field, value in ((0x40 + 1, len(bank) + 10), (0x40 + 1, -4), (0x40 + 5, -1)):
+            with self.subTest(field=field, value=value):
+                broken = bytearray(bank)
+                struct.pack_into(">i", broken, field, value)
+                with self.assertRaises(ValueError):
+                    voices.cue_waves(bytes(broken))
+
     def test_safe_cue_names_map_to_their_wave(self):
         self.assertEqual(voices.cue_waves(make_sound_bank([("zac_068_down_03a", 3), ("zac_071_down_03d", 5)])),
                          {"zac_068_down_03a": 3, "zac_071_down_03d": 5})
