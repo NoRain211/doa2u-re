@@ -84,6 +84,7 @@ uint8_t *recomp_adx_encode(const int16_t *pcm, uint32_t frames, uint32_t channel
         begin_byte = data + before;
         end_byte = data + ((uint64_t)(loop_end + lead) + SAMPLES - 1u) / SAMPLES * block_bytes;
     }
+    if ((size_t)blocks > (SIZE_MAX - data - block_bytes) / block_bytes) return NULL; /* 32-bit size_t */
     const size_t bytes = data + (size_t)blocks * block_bytes + block_bytes;
     uint8_t *out = calloc(1u, bytes);
     if (out == NULL) return NULL;
@@ -160,7 +161,7 @@ int16_t *recomp_wav_read(const uint8_t *data, size_t size, uint32_t *frames, uin
             *loop_start = le32(body + 36 + 8);
             *loop_end = (int64_t)le32(body + 36 + 12) + 1; /* smpl's end is inclusive */
         }
-        at += 8u + length + (length & 1u);
+        at += 8u + (size_t)length + (length & 1u);
     }
     const bool integer = format == 1u && (bits == 8u || bits == 16u || bits == 24u || bits == 32u);
     const bool real = format == 3u && bits == 32u;

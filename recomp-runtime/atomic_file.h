@@ -11,7 +11,9 @@
 #include <unistd.h>
 #endif
 
-/* Keep the old file until a complete, flushed replacement is ready. */
+/* Keep the old file until a complete, flushed replacement is ready. A crash
+   between open and commit orphans one <path>.tmp.<pid>.<serial>; those are not
+   swept, because a sibling may belong to another process writing the same path. */
 static FILE *recomp_atomic_open(const char *path, char *temporary, size_t size)
 {
     static unsigned serial;
