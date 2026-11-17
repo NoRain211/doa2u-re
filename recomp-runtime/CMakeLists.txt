@@ -390,6 +390,16 @@ if(WIN32)
 endif()
 add_test(NAME recomp-runtime-live-transport COMMAND recomp_live_transport_test)
 
+# WP3: the Live matchmaker client (tools/matchmaker.py's kinds 12..33) and the
+# identity it logs on with. The transport is WP2's; this test stands in for it
+# and checks every kind against tools/live_vectors.json, which the Python
+# tests hold to the same bytes.
+add_executable(recomp_live_client_test live_client.c live_identity.c live_client_test.c)
+target_include_directories(recomp_live_client_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../xbe")
+target_link_libraries(recomp_live_client_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-live-client COMMAND recomp_live_client_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/live_vectors.json")
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
