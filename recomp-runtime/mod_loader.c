@@ -909,18 +909,19 @@ bool recomp_mod_overlay_read(const RecompModOverlay *o, RecompModBaseRead base, 
             break;
         case PIECE_SLOT: {
             Slot *slot = &o->slots[piece->source];
+            const bool slots = slots_enabled; /* one value for this piece's every decision */
             if (at == 0u) {
                 /* A track starting: what plays now, or this once (the hook's
                    choice). Slots off (online) play the entry's own track, so
                    two games read the same bytes whatever their albums are. */
-                const RecompModSource *next = slots_enabled ? slot->wanted : slot->original;
-                if (slots_enabled && recomp_mod_entry_start != NULL) {
+                const RecompModSource *next = slots ? slot->wanted : slot->original;
+                if (slots && recomp_mod_entry_start != NULL) {
                     const RecompModSource *once = recomp_mod_entry_start(o->key, (unsigned)piece->source, next);
                     if (once != NULL && once->size <= piece->length) next = once;
                 }
                 slot->playing = next;
             }
-            const RecompModSource *source = slots_enabled ? slot->playing : slot->original;
+            const RecompModSource *source = slots ? slot->playing : slot->original;
             uint32_t part = at < source->size ? (uint32_t)(source->size - at < want ? source->size - at : want) : 0u;
             got = 0u;
             if (part != 0u && !(source->file != NULL
