@@ -43,6 +43,7 @@ import tempfile
 
 from build_prerequisites import find_ffmpeg
 import xbe_info
+from xact import afs_table, cue_tracks, wave_bank, xma1_riff
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT = os.path.join(ROOT, "jukebox")
@@ -202,98 +203,6 @@ def detect(source):
     if source.find("bgm.afs") and source.find("voice.afs"):
         return "doa3"
     return None
-
-
-# ---- AFS archives -------------------------------------------------------------
-
-def afs_table(data):
-    if not data or data[:3] != b"AFS":
-        raise ValueError("not an AFS archive")
-    if len(data) < 8:
-        raise ValueError("truncated AFS archive header")
-    count = struct.unpack_from("<I", data, 4)[0]
-    if len(data) < 8 + 8 * count:
-        raise ValueError(f"AFS archive lists {count} files but is only {len(data)} bytes")
-    return [struct.unpack_from("<II", data, 8 + 8 * i) for i in range(count)]
-
-
-# ---- XACT 2 (Xbox 360, big-endian) --------------------------------------------
-
-def be_at(data, at, fmt, what):
-    """struct.unpack_from in a big-endian bank, refusing an offset outside the file."""
-    size = struct.calcsize(fmt)
-    if at < 0 or at + size > len(data):
-        raise ValueError(f"{what}: {at:#x} with {size} bytes is outside the {len(data):#x}-byte file")
-    return struct.unpack_from(fmt, data, at)
-
-
-def wave_bank(data):
-    """(offset, length, channels, rate, samples) per wave of a big-endian XACT 2 wave bank."""
-    if data[:4] != b"DNBW":
-        raise ValueError("not a big-endian wave bank")
-    if len(data) < 8 + 8 * 5:
-        raise ValueError("truncated wave bank header")
-    segments = [be_at(data, 8 + 8 * i, ">II", "wave bank segment") for i in range(5)]
-    bank = segments[0][0]
-    count = be_at(data, bank + 4, ">I", "wave bank header")[0]
-    size = be_at(data, bank + 0x48, ">I", "wave bank header")[0]
-    if size < 16:
-        raise ValueError(f"wave bank entries are {size} bytes; each is 16")
-    waves = []
-    for i in range(count):
-        flags_duration, fmt, offset, length = be_at(data, segments[1][0] + i * size, ">4I", f"wave {i}'s entry")
-        if fmt & 1 == 0:
-            raise ValueError(f"wave {i} is not XMA")
-        start = segments[4][0] + offset
-        if start + length > len(data):
-            raise ValueError(f"wave {i}'s data at {start:#x} + {length:#x} is outside the {len(data):#x}-byte file")
-        waves.append((start, length, (fmt >> 1) & 7, (fmt >> 4) & 0x7FFFF, flags_duration >> 4))
-    return waves
-
-
-def cue_tracks(data):
-    """[(cue, intro wave, loop wave or None)] of a big-endian XACT 2 sound bank.
-
-    A simple sound plays one wave once. DOA4's music cues are complex sounds:
-    their first track plays the intro at 0 ms, and every later track plays the
-    loop wave again at the end of the one before."""
-    if data[:4] != b"KBDS":
-        raise ValueError("not a big-endian sound bank")
-    if len(data) < 0x3E:
-        raise ValueError("truncated sound bank header")
-    cues = be_at(data, 0x09, ">h", "sound bank header")[0]
-    simple = be_at(data, 0x1A, ">i", "sound bank header")[0]
-    names = be_at(data, 0x3A, ">i", "sound bank header")[0]
-    if cues < 0:
-        raise ValueError(f"sound bank has {cues} cues")
-    out = []
-    for i in range(cues):
-        sound = be_at(data, simple + 5 * i + 1, ">i", f"cue {i}'s entry")[0]
-        name = be_at(data, names + 6 * i, ">i", f"cue {i}'s entry")[0]
-        end = data.find(b"\0", name) if name >= 0 else -1
-        if end < 0:
-            raise ValueError(f"cue {i}'s name at {name:#x} is not in the {len(data):#x}-byte file")
-        label = data[name:end].decode("ascii")
-        if be_at(data, sound, ">B", f"cue {i}'s sound")[0] & 1 == 0:
-            out.append((label, be_at(data, sound + 9, ">h", f"cue {i}'s sound")[0], None))
-            continue
-        waves = []
-        for k in range(be_at(data, sound + 9, ">B", f"cue {i}'s sound")[0]):
-            track = be_at(data, sound + 10 + 5 * k + 1, ">i", f"cue {i}'s track {k}")[0]
-            # one play-wave event: dword, 2 bytes, 1 byte, then the wave
-            if be_at(data, track, ">B", f"cue {i}'s track {k}")[0] >= 1:
-                waves.append(be_at(data, track + 8, ">h", f"cue {i}'s track {k}")[0])
-        if waves:
-            loop = waves[-1] if len(waves) > 1 else None
-            out.append((label, waves[0], loop))
-    return out
-
-
-def xma1_riff(raw, channels, rate):
-    fmt = struct.pack("<HHHHHBB", 0x165, 16, 0x10D6, 0, 1, 0, 2)
-    fmt += struct.pack("<IIIIBBH", rate * channels // 2, rate, 0, 0, 0, channels, 4 if channels == 1 else 3)
-    body = b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(raw)) + raw
-    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
 
 
 # ---- Names --------------------------------------------------------------------
@@ -705,7 +614,7 @@ def import_doa4(source, out, ffmpeg, encoder=None):
     os.makedirs(folder, exist_ok=True)
     kept = read_names(folder)
     groups = {}  # (intro, loop) -> its cues, in bank order: rmx_kas and rmx_alp are one remix
-    for cue, intro, loop in cue_tracks(sounds):
+    for cue, intro, loop, _complex in cue_tracks(sounds):
         if any(w is not None for w in (intro, loop)) and all(w is None or 0 <= w < len(waves) for w in (intro, loop)):
             groups.setdefault((intro, loop), []).append(cue)
     # Themes first by name, then the rest, then the remixes.
