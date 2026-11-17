@@ -280,19 +280,6 @@ if(NOT MSVC)
     target_link_libraries(recomp_adx_encode PRIVATE m)
 endif()
 
-# Mods (mod_loader.c) and the ADX encoder that turns their WAVs, and DOA4's
-# music for tools/import_soundtrack.py, into the game's ADX.
-add_executable(recomp_mod_loader_test mod_loader.c adx_encoder.c adx_decoder.c mod_loader_test.c)
-add_test(NAME recomp-runtime-mod-loader COMMAND recomp_mod_loader_test)
-add_executable(recomp_jukebox_test jukebox_test.c mod_loader.c adx_encoder.c adx_decoder.c)
-add_test(NAME recomp-runtime-jukebox COMMAND recomp_jukebox_test)
-add_executable(recomp_adx_encode adx_encode_tool.c adx_encoder.c adx_decoder.c)
-if(NOT MSVC)
-    target_link_libraries(recomp_mod_loader_test PRIVATE m)
-    target_link_libraries(recomp_jukebox_test PRIVATE m)
-    target_link_libraries(recomp_adx_encode PRIVATE m)
-endif()
-
 add_executable(recomp_sfd_format_test sfd_format.c sfd_format_test.c)
 add_test(NAME recomp-runtime-sfd-format COMMAND recomp_sfd_format_test)
 
