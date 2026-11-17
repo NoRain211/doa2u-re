@@ -112,6 +112,15 @@ int main(void)
 {
     enum { PATH_BYTES = 1200 };
     char storage[PATH_BYTES], identity_path[PATH_BYTES], temporary[PATH_BYTES], victim[PATH_BYTES];
+    /* The load takes RECOMP_LIVE_IDENTITY, when it names a file, in place of
+       the storage folder. This test checks the storage folder, so the
+       caller's choice is dropped here: the run never reads, writes or plants
+       at the player's own path. An empty value is no override. */
+#ifdef _WIN32
+    _putenv_s("RECOMP_LIVE_IDENTITY", "");
+#else
+    unsetenv("RECOMP_LIVE_IDENTITY");
+#endif
     if (!make_storage(storage, sizeof storage)) {
         fprintf(stderr, "FAIL live identity storage folder\n");
         return 1;
@@ -143,7 +152,11 @@ int main(void)
        bytes, and the identity is made beside it. */
     check("victim", write_file(victim, "outside data"));
     remove(identity_path);
-    if (plant_link(temporary, victim)) {
+    /* Windows needs the privilege or developer mode to make a link. When the
+       host refuses, only the stale-temporary case above has run, and the SKIP
+       and PASS lines below say so. */
+    const bool planted = plant_link(temporary, victim);
+    if (planted) {
         RecompLiveIdentity through;
         check("first use beside a planted link", recomp_live_identity_load(storage, &through));
         char text[64];
@@ -153,7 +166,7 @@ int main(void)
         check("the identity is made beside the link",
             file_size(identity_path) == RECOMP_LIVE_IDENTITY_SECRET_BYTES);
     } else {
-        fprintf(stderr, "skip planted link: this host cannot make one\n");
+        fprintf(stderr, "SKIP live identity planted link: this host cannot make one\n");
     }
 
     remove(identity_path);
@@ -161,6 +174,10 @@ int main(void)
     remove(victim);
     remove_folder(storage);
     if (failures != 0) return 1;
-    puts("PASS live identity keeps its account and clears a stale or planted temporary");
+    if (planted) {
+        puts("PASS live identity keeps its account and clears a stale or planted temporary");
+    } else {
+        puts("PASS live identity keeps its account and clears a stale temporary");
+    }
     return 0;
 }
