@@ -14,9 +14,9 @@ extern "C" {
    mods/ mirrors the disc, and the kernel's file bridge (kernel_file.c) serves
    a mod's file wherever the game reads the disc's.
 
-     mods/<mod>/DOA2/doa2_op.sfd           the whole file
+     mods/<mod>/DOA2/<file>.sfd            the whole file
      mods/<mod>/DOA2/bgm.afs/<entry>       one entry of an AFS archive, by its
-                                           name in the archive (bgm_doa2_ay.adx)
+                                           name in the archive (<name>.adx)
                                            or its index (10, 10.adx, 10_anything)
      mods/<mod>/mod.ini                    optional: name=, author=, version=
 
