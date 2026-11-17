@@ -131,9 +131,9 @@ def extract_xiso(root):
 
 
 def find_ffmpeg(root):
-    """The ffmpeg the build fetched (tools/ffmpeg), else the one on PATH."""
+    """The ffmpeg the build fetched (tools/ffmpeg), else the one on PATH, else None."""
     bundled = Path(root) / FFMPEG / "ffmpeg.exe"
-    return str(bundled) if bundled.is_file() else (shutil.which("ffmpeg") or "ffmpeg")
+    return str(bundled) if bundled.is_file() else shutil.which("ffmpeg")
 
 
 def ffmpeg(root):
@@ -164,4 +164,9 @@ def ffmpeg(root):
                     if attempt == 29:
                         raise
                     time.sleep(1)
-    return find_ffmpeg(root)
+    found = find_ffmpeg(root)
+    if found is None:
+        # Never the bare name "ffmpeg": a subprocess would resolve it against the working
+        # directory on Windows and run whatever file sits there.
+        raise FileNotFoundError("ffmpeg was not found: none is bundled in tools/ffmpeg and none is on PATH.")
+    return found
