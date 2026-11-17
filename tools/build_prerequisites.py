@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Find the pinned llvm-mingw compiler and, on x86-64 Linux, extract-xiso, downloading each when missing."""
+"""Find the pinned llvm-mingw compiler, ffmpeg on Windows and, on x86-64 Linux, extract-xiso,
+downloading each when missing."""
 # Adapted from committed DOAXBV tools/build_prerequisites.py at 5761e89.
 import os
 from pathlib import Path
@@ -24,6 +25,14 @@ LLVM_MINGW = Path("tools/llvm-mingw")
 EXTRACT_XISO_URL = ("https://github.com/XboxDev/extract-xiso/releases/download/build-202609111233/"
                     "extract-xiso_Linux.zip")
 EXTRACT_XISO_SHA256 = "c4b9fbf86b57c74d07fb643522740ae82034d8280ccde24528752cd1cb0b798d"
+
+
+# ffmpeg decodes DOA4's XMA audio for tools/import_doa4_voices.py and tools/import_soundtrack.py.
+# Gyan Doshi's essentials build (GPL, as this project; static, with the xma1 decoder), mirrored on GitHub.
+FFMPEG_URL = ("https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/"
+              "ffmpeg-9.0.2-essentials_build.zip")
+FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+FFMPEG = Path("tools/ffmpeg")
 
 
 def runs_upstream_linux_binary():
@@ -119,3 +128,40 @@ def extract_xiso(root):
             staged.chmod(0o755)
             staged.replace(tool)
     return tool
+
+
+def find_ffmpeg(root):
+    """The ffmpeg the build fetched (tools/ffmpeg), else the one on PATH."""
+    bundled = Path(root) / FFMPEG / "ffmpeg.exe"
+    return str(bundled) if bundled.is_file() else (shutil.which("ffmpeg") or "ffmpeg")
+
+
+def ffmpeg(root):
+    """On Windows, fetch the pinned ffmpeg into tools/ffmpeg once (ffmpeg.exe and its licence); return find_ffmpeg."""
+    target = Path(root) / FFMPEG
+    if sys.platform == "win32" and not (target / "ffmpeg.exe").is_file():
+        if target.exists():
+            raise ValueError(f"{target} exists but has no ffmpeg.exe. Delete it and rerun.")
+        (Path(root) / "private").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=Path(root) / "private") as folder:
+            archive = Path(folder) / "ffmpeg.zip"
+            print("Downloading ffmpeg for DOA4's audio (115 MB)...", flush=True)
+            fetch_verified(FFMPEG_URL, FFMPEG_SHA256, archive, "ffmpeg")
+            staging = Path(folder) / "ffmpeg"
+            staging.mkdir()
+            with zipfile.ZipFile(archive) as contents:
+                for name in contents.namelist():
+                    if name.endswith(("/bin/ffmpeg.exe", "/LICENSE", "/README.txt")):
+                        (staging / name.rsplit("/", 1)[1]).write_bytes(contents.read(name))
+            if not (staging / "ffmpeg.exe").is_file():
+                raise ValueError(f"{FFMPEG_URL} holds no bin/ffmpeg.exe")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            for attempt in range(30):
+                try:
+                    staging.replace(target)
+                    break
+                except PermissionError:
+                    if attempt == 29:
+                        raise
+                    time.sleep(1)
+    return find_ffmpeg(root)

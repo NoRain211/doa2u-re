@@ -108,7 +108,7 @@ keeps running.
   mapping** button (or the importer's `--save-selections`) writes your picks
   back into the mapping file to share them. Hits are
   graded by the move's base damage, before combo scaling. It needs an
-  ffmpeg with XMA support. PC SETTINGS' **Hit Voices**
+  ffmpeg with XMA support; on Windows the build fetches one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
   row sets them Off, Quiet, Normal or Loud. Online they stay off, since a
   rollback would replay them.
 - **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**

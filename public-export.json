@@ -34,6 +34,8 @@
     "tools/import_doa4_voices.py",
     "tools/doa4_voice_selections.json",
     "tools/test_import_doa4_voices.py",
+    "tools/test_import_soundtrack.py",
+    "tools/import_soundtrack.py",
     "tools/test_extract_iso.py",
     "tools/matchmaker.py",
     "tools/matchmaker.service",

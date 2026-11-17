@@ -1,5 +1,6 @@
 # Private inputs and generated game output
 private/**
+/jukebox/
 !private/README.md
 orig/
 dump/
@@ -15,6 +16,7 @@ recomp_dispatch.c
 recomp_funcs.h
 tools/artifacts/
 tools/llvm-mingw/
+tools/ffmpeg/
 tools/disasm/output/
 
 # Game and console artifacts
