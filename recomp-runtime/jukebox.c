@@ -901,15 +901,20 @@ static void save_assignments(void)
     size_t kept_size = 0u;
     FILE *existing = fopen(path, "r");
     if (existing != NULL) {
+        bool continuing = false; /* inside a line longer than the buffer: kept as it is */
         while (fgets(line, sizeof line, existing) != NULL) {
+            const size_t length = strlen(line);
+            const bool ended = length > 0u && line[length - 1u] == '\n';
+            const bool part = continuing || (!ended && !feof(existing));
+            continuing = !ended;
             /* Only the header is the save's: every other '#' line is the player's. */
-            if (strncmp(line, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) continue;
+            if (!part && strncmp(line, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) continue;
             char copy[sizeof line];
             snprintf(copy, sizeof copy, "%s", line);
             copy[strcspn(copy, "\r\n")] = '\0';
             char *album = strchr(copy, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
             bool ours = false;
-            if (line[0] != '#' && track != NULL) {
+            if (!part && line[0] != '#' && track != NULL) {
                 *album++ = '\0';
                 *track++ = '\0';
                 const int i = find_target(copy);
@@ -917,9 +922,7 @@ static void save_assignments(void)
                 ours = i >= 0 && (targets[i].album >= 0 || find_saved(album, track, &a, &t));
             }
             if (ours) continue;
-            const size_t length = strlen(line);
-            const bool ended = length > 0u && line[length - 1u] == '\n';
-            char *grown = realloc(kept, kept_size + length + (ended ? 1u : 2u));
+            char *grown = realloc(kept, kept_size + length + 2u);
             if (grown == NULL) { /* Writing without them would drop them. */
                 fclose(existing);
                 free(kept);
@@ -928,7 +931,7 @@ static void save_assignments(void)
             kept = grown;
             memcpy(kept + kept_size, line, length);
             kept_size += length;
-            if (!ended) kept[kept_size++] = '\n';
+            if (!ended && feof(existing)) kept[kept_size++] = '\n';
             kept[kept_size] = '\0';
         }
         fclose(existing);
@@ -957,9 +960,12 @@ static void load_assignments(void)
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
     FILE *file = fopen(path, "r");
     if (file == NULL) return;
+    bool continuing = false;
     while (fgets(line, sizeof line, file) != NULL) {
+        const bool part = continuing;
+        continuing = strchr(line, '\n') == NULL && !feof(file);
         line[strcspn(line, "\r\n")] = '\0';
-        if (line[0] == '#') continue;
+        if (part || continuing || line[0] == '#') continue; /* longer than any assignment */
         char *album = strchr(line, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
         if (track == NULL) continue;
         *album++ = '\0';

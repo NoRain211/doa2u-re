@@ -341,7 +341,7 @@ static void test_assignments(const char *base)
 {
     static uint8_t huge_data[7000];
     static const char tracks[] = "track.adx\t-2\t-2\tTrack\nhuge.adx\t-2\t-2\tHuge\n";
-    char disc[512], mods[512], private_dir[512], path[512], text[512];
+    char disc[512], mods[512], private_dir[512], path[512], text[2048];
     memset(huge_data, 'Z', sizeof huge_data);
     make_folder(base);
     snprintf(disc, sizeof disc, "%s/disc", base);
@@ -458,6 +458,20 @@ static void test_assignments(const char *base)
         /* The save's own header is written once, not kept and written again. */
         CHECK(count_text(text, "# The Jukebox's assignments:") == 1u);
         CHECK(count_text(text, "one.adx") == 1u);
+
+        /* A comment longer than the reader's 512-byte buffer: its tail looks
+           like an assignment, but it stays one comment line and assigns nothing. */
+        static char long_comment[640];
+        memset(long_comment, 'x', 511u);
+        long_comment[0] = '#';
+        snprintf(long_comment + 511, sizeof long_comment - 511u, "two.adx\tDOA3\ttrack.adx\n");
+        write_file(path, long_comment, strlen(long_comment));
+        recomp_jukebox_page_opened();
+        CHECK(targets[1].album == -1 && targets[1].track == -1);
+        page.target = 0u;
+        recomp_jukebox_confirm(ROW_TARGET);
+        (void)read_text(path, text, sizeof text);
+        CHECK(strstr(text, long_comment) != NULL);
 
         /* A target the reloaded file no longer names plays its own music. */
         remove(path);

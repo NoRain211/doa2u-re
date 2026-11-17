@@ -467,6 +467,20 @@ class JukeboxEditor : Form
         return result;
     }
 
+    // The assignments file a save writes: its header, the assignments, then the
+    // player's own comments and lines that are not assignments, as the game's save keeps them.
+    static string AssignmentText(string path, Dictionary<string, string> latest)
+    {
+        const string header = "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.";
+        var lines = new StringBuilder(header + "\n");
+        foreach (var pair in latest.OrderBy(pair => pair.Key)) lines.Append(pair.Key + "\t" + pair.Value + "\n");
+        if (File.Exists(path))
+            foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                if (line != header && line.Trim().Length != 0 && (line.StartsWith("#") || line.Split('\t').Length < 3))
+                    lines.Append(line + "\n");
+        return lines.ToString();
+    }
+
     static Dictionary<string, string> MergeAssignments(string path, Dictionary<string, string> picks, IEnumerable<string> edited)
     {
         var latest = ReadAssignments(path);
@@ -717,9 +731,7 @@ class JukeboxEditor : Form
                 Directory.CreateDirectory(folder);
                 MergeNames(Path.Combine(folder, "names.txt"), album);
             }
-            var lines = new StringBuilder("# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n");
-            foreach (var pair in latest.OrderBy(pair => pair.Key)) lines.Append(pair.Key + "\t" + pair.Value + "\n");
-            AtomicText(assignmentPath, lines.ToString());
+            AtomicText(assignmentPath, AssignmentText(assignmentPath, latest));
             assigned.Clear();
             foreach (var pair in latest) assigned[pair.Key] = pair.Value;
             editedSlots.Clear();

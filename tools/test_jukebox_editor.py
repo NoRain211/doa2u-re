@@ -96,6 +96,14 @@ static class EditorChecks
         Call("MergeNames", fresh, named);
         Check(File.ReadAllText(fresh).Contains("album = Titles") && File.ReadAllText(fresh).Contains("two.adx = Two"));
 
+        // Saving assignments keeps the player's comments and writes the header once.
+        string assignments = Path.GetFullPath("kept-assignments.txt");
+        Call("AtomicText", assignments, "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n# mine\nold.adx\tDOA3\tx.adx\n");
+        var kept = new Dictionary<string, string> { { "new.adx", "DOA4\ty.adx" } };
+        string saved = (string)Call("AssignmentText", assignments, kept);
+        Check(saved.Contains("# mine\n") && saved.Contains("new.adx\tDOA4\ty.adx\n") && !saved.Contains("old.adx"));
+        Check(saved.IndexOf("# The Jukebox's assignments") == saved.LastIndexOf("# The Jukebox's assignments"));
+
         // Two tracks can share a name: the chosen row keeps its track, not the last matching text.
         var picker = (JukeboxEditor)FormatterServices.GetUninitializedObject(typeof(JukeboxEditor));
         var shared = new Album { Tab = "DOA4", Title = "Dead or Alive 4", Folder = "doa4" };
