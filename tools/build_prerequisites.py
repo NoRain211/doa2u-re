@@ -133,7 +133,18 @@ def extract_xiso(root):
 def find_ffmpeg(root):
     """The ffmpeg the build fetched (tools/ffmpeg), else the one on PATH, else None."""
     bundled = Path(root) / FFMPEG / "ffmpeg.exe"
-    return str(bundled) if bundled.is_file() else shutil.which("ffmpeg")
+    if bundled.is_file():
+        return str(bundled)
+    # Only absolute PATH entries: a relative one resolves against the working directory, and on
+    # Windows shutil.which prepends that directory itself, so a planted ffmpeg.exe there would be
+    # found and run. Nothing this starts may come from where the tool happened to be run.
+    path = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(entry)]
+    found = shutil.which("ffmpeg", path=os.pathsep.join(path))
+    if found is None:
+        return None
+    if os.path.normcase(os.path.dirname(os.path.abspath(found))) == os.path.normcase(os.path.abspath(os.curdir)):
+        return None  # shutil.which found it there, not on PATH
+    return found
 
 
 def ffmpeg(root):
