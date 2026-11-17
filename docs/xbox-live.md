@@ -1,12 +1,11 @@
 # Xbox Live
 
-Status: with the Live fight wiring in place, the game's own Xbox Live pages
-run on the PC port against the project's matchmaker, and Live fights run on
-the rollback netcode. Two scripted runners on one machine have logged on,
-found each other with Quick Match, met in the game's lobby and played three
-Team Battle matches without a desync. Friends, invites, rankings and two
-machines across the internet have only run in unit tests. Voice chat is not
-supported.
+Status: the game's own Xbox Live pages run on the PC port against the
+project's matchmaker, and Live fights run on the rollback netcode. Two
+scripted runners on one machine have logged on, found each other with Quick
+Match, met in the game's lobby and played three Team Battle matches without
+a desync. Friends, invites, rankings and two machines across the internet
+have only run in unit tests. Voice chat is not supported.
 
 ## Turning it on
 
@@ -91,8 +90,8 @@ The Live unit tests are the ctest entries `recomp-runtime-live-xapi`,
 `tools/test_matchmaker.py`. The client test and the
 Python test share the byte transcript in `tools/live_vectors.json`.
 
-Once the Live fight wiring lands, two runners on one machine need a local
-matchmaker and two play folders, each with its own saves:
+Two runners on one machine need a local matchmaker and two play folders,
+each with its own saves:
 
     python tools/matchmaker.py --address 127.0.0.1 --port 47790 --store live-store.json
 
