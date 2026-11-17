@@ -161,11 +161,12 @@ int16_t *recomp_wav_read(const uint8_t *data, size_t size, uint32_t *frames, uin
             *loop_start = le32(body + 36 + 8);
             *loop_end = (int64_t)le32(body + 36 + 12) + 1; /* smpl's end is inclusive */
         }
-        /* A chunk that runs past the buffer ends the walk; on a 32-bit size_t
-           the advance itself would otherwise wrap and stall or go backward. */
-        const size_t step = (size_t)length + (length & 1u);
-        if (step > size - at - 8u) break;
-        at += 8u + step;
+        /* A chunk that runs past the buffer ends the walk. The step is summed in
+           64 bits: on a 32-bit size_t an odd length of 0xFFFFFFFF would wrap to
+           0 in the advance and step into the oversized chunk's body. */
+        const uint64_t step = (uint64_t)length + (length & 1u);
+        if (step > (uint64_t)(size - at - 8u)) break;
+        at += 8u + (size_t)step;
     }
     const bool integer = format == 1u && (bits == 8u || bits == 16u || bits == 24u || bits == 32u);
     const bool real = format == 3u && bits == 32u;
