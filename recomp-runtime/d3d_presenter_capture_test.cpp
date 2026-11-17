@@ -287,6 +287,175 @@ int main()
     CHECK(packet.command(0).data.draw.vertex_bytes != packet.command(1).data.draw.vertex_bytes);
     CHECK(std::memcmp(packet.command(0).data.draw.vertex_bytes, first_vertices.data(), first_vertices.size()) == 0);
     CHECK(std::memcmp(packet.command(1).data.draw.vertex_bytes, sources[0].data(), sources[0].size()) == 0);
+    // Standing texture bytes: a later fill reuses them until a lock or release
+    // drops the span; sampled changes are copied, palettes and linear surfaces
+    // always are.
+    std::vector<uint8_t> texture(4096u), linear(4096u), palette(1024u);
+    for (size_t i = 0u; i < texture.size(); ++i) {
+        texture[i] = static_cast<uint8_t>(i);
+        linear[i] = static_cast<uint8_t>(i + 3u);
+    }
+    for (size_t i = 0u; i < palette.size(); ++i) palette[i] = static_cast<uint8_t>(i + 7u);
+    const auto standingDraw = [&](bool is_linear) {
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+        auto &lit = command.data.draw;
+        lit.vertex_count = 3u;
+        lit.vertex_stride = 11u;
+        lit.index_count = 3u;
+        lit.vertex_bytes = sources[0].data();
+        lit.index_bytes = sources[1].data();
+        lit.has_texture = true;
+        lit.texture.format_byte = 0u;
+        lit.texture.linear = is_linear;
+        lit.texture.data = is_linear ? 0xa00000u : 0x900000u;
+        lit.texture.width = lit.texture.height = 64u;
+        lit.texture_bytes = is_linear ? linear.data() : texture.data();
+        lit.texture_byte_count = 4096u;
+        lit.palette_bytes = palette.data();
+        lit.palette_byte_count = 1024u;
+        return command;
+    };
+
+    packet.clear();
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    const void *first_texture = packet.command(0).data.draw.texture_bytes;
+    CHECK(std::memcmp(first_texture, texture.data(), texture.size()) == 0);
+    CHECK(packet.command(0).data.draw.palette_bytes != palette.data());
+
+    // An unsampled byte leaves the standing copy alone; the sampled word does not.
+    texture[8] = 0xffu;
+    palette[0] = 0x5au;
+    packet.clear();
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(packet.command(0).data.draw.texture_bytes == first_texture);
+    CHECK(static_cast<const uint8_t *>(first_texture)[8] != 0xffu);
+    // A palette names no address to drop, so it always refreshes.
+    CHECK(static_cast<const uint8_t *>(packet.command(0).data.draw.palette_bytes)[0] == 0x5au);
+
+    // A sampled word and a lock copy afresh; a release drops the span too.
+    texture[0] = 0xfeu;
+    packet.clear();
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(static_cast<const uint8_t *>(packet.command(0).data.draw.texture_bytes)[0] == 0xfeu);
+    texture[0] = 0u;
+
+    packet.clear();
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    CHECK(packet.addInvalidate(0x900000u, 4096u) == RECOMP_D3D_PRESENTER_OK);
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(std::memcmp(packet.command(2).data.draw.texture_bytes, texture.data(), texture.size()) == 0);
+
+    packet.clear();
+    CHECK(packet.addRelease(0x900000u, 4096u) == RECOMP_D3D_PRESENTER_OK);
+    CHECK(packet.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(std::memcmp(packet.command(1).data.draw.texture_bytes, texture.data(), texture.size()) == 0);
+
+    // Every packet keeps its own copy: a lock while another packet is open must
+    // drop this one too, or a later fill serves the bytes from before the lock.
+    {
+        D3dCapturePacket older, open;
+        CHECK(older.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        older.seal();
+        CHECK(open.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        open.seal();
+        texture[8] = 0x77u;  // outside every sampled word
+        open.clear();
+        older.clear();
+        CHECK(open.addInvalidate(0x900000u, 4096u) == RECOMP_D3D_PRESENTER_OK);
+        older.dropResident(0x900000u, 4096u);  // the presenter thread scans the other packets
+        CHECK(older.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        older.seal();
+        CHECK(static_cast<const uint8_t *>(older.command(0).data.draw.texture_bytes)[8] == 0x77u);
+        texture[8] = 0xffu;
+    }
+
+    // The mask and both reflection textures drop by their own addresses.
+    {
+        std::vector<uint8_t> mask(2048u, 0x21u), reflection(3072u, 0x31u), reflection2(2048u, 0x41u);
+        const auto extraDraw = [&] {
+            RecompD3dPresenterCommand command = standingDraw(false);
+            auto &lit = command.data.draw;
+            lit.has_alpha_mask = true;
+            lit.alpha_mask.format_byte = 0u;
+            lit.alpha_mask.data = 0xb00000u;
+            lit.alpha_mask.width = lit.alpha_mask.height = 32u;
+            lit.alpha_mask_bytes = mask.data();
+            lit.alpha_mask_byte_count = static_cast<uint32_t>(mask.size());
+            lit.has_reflection = true;
+            lit.reflection_texture.format_byte = 0u;
+            lit.reflection_texture.data = 0xc00000u;
+            lit.reflection_texture.width = lit.reflection_texture.height = 48u;
+            lit.reflection_bytes = reflection.data();
+            lit.reflection_byte_count = static_cast<uint32_t>(reflection.size());
+            lit.reflection_stage2 = true;
+            lit.reflection_stage2_texture.format_byte = 0u;
+            lit.reflection_stage2_texture.data = 0xd00000u;
+            lit.reflection_stage2_texture.width = lit.reflection_stage2_texture.height = 32u;
+            lit.reflection_stage2_bytes = reflection2.data();
+            lit.reflection_stage2_byte_count = static_cast<uint32_t>(reflection2.size());
+            return command;
+        };
+        packet.clear();
+        CHECK(packet.add(extraDraw()) == RECOMP_D3D_PRESENTER_OK);
+        packet.seal();
+        CHECK(std::memcmp(packet.command(0).data.draw.alpha_mask_bytes, mask.data(), mask.size()) == 0);
+        CHECK(std::memcmp(packet.command(0).data.draw.reflection_bytes, reflection.data(), reflection.size()) == 0);
+        CHECK(std::memcmp(packet.command(0).data.draw.reflection_stage2_bytes, reflection2.data(), reflection2.size()) == 0);
+
+        // Unsampled changes to all three: only the locked texture refreshes.
+        mask[8] = 0x22u;
+        reflection[8] = 0x32u;
+        reflection2[8] = 0x42u;
+        const auto stale = [&](const void *bytes, uint8_t expected) {
+            return static_cast<const uint8_t *>(bytes)[8] == expected;
+        };
+        packet.clear();
+        CHECK(packet.add(extraDraw()) == RECOMP_D3D_PRESENTER_OK);
+        packet.seal();
+        CHECK(stale(packet.command(0).data.draw.alpha_mask_bytes, 0x21u));
+        CHECK(stale(packet.command(0).data.draw.reflection_bytes, 0x31u));
+        CHECK(stale(packet.command(0).data.draw.reflection_stage2_bytes, 0x41u));
+
+        packet.clear();
+        CHECK(packet.addInvalidate(0xb00000u, static_cast<uint32_t>(mask.size())) == RECOMP_D3D_PRESENTER_OK);
+        CHECK(packet.add(extraDraw()) == RECOMP_D3D_PRESENTER_OK);
+        packet.seal();
+        CHECK(stale(packet.command(1).data.draw.alpha_mask_bytes, 0x22u));
+        CHECK(stale(packet.command(1).data.draw.reflection_bytes, 0x31u));
+        CHECK(stale(packet.command(1).data.draw.reflection_stage2_bytes, 0x41u));
+
+        packet.clear();
+        CHECK(packet.addInvalidate(0xc00000u, static_cast<uint32_t>(reflection.size())) == RECOMP_D3D_PRESENTER_OK);
+        CHECK(packet.add(extraDraw()) == RECOMP_D3D_PRESENTER_OK);
+        packet.seal();
+        CHECK(stale(packet.command(1).data.draw.reflection_bytes, 0x32u));
+        CHECK(stale(packet.command(1).data.draw.reflection_stage2_bytes, 0x41u));
+
+        packet.clear();
+        CHECK(packet.addInvalidate(0xd00000u, static_cast<uint32_t>(reflection2.size())) == RECOMP_D3D_PRESENTER_OK);
+        CHECK(packet.add(extraDraw()) == RECOMP_D3D_PRESENTER_OK);
+        packet.seal();
+        CHECK(stale(packet.command(1).data.draw.reflection_stage2_bytes, 0x42u));
+    }
+
+    // A linear surface is rewritten in place each frame and never stands.
+    packet.clear();
+    CHECK(packet.add(standingDraw(true)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    const void *first_linear = packet.command(0).data.draw.texture_bytes;
+    CHECK(std::memcmp(first_linear, linear.data(), linear.size()) == 0);
+    linear[0] = 0x99u;
+    packet.clear();
+    CHECK(packet.add(standingDraw(true)) == RECOMP_D3D_PRESENTER_OK);
+    packet.seal();
+    CHECK(static_cast<const uint8_t *>(packet.command(0).data.draw.texture_bytes)[0] == 0x99u);
+
     std::puts("PASS capture ownership, order, deduplication, overflow, alignment, move and reuse");
     return 0;
 }

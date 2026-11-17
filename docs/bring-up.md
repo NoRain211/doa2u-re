@@ -413,6 +413,16 @@ respectively; both use the same eye and normal inputs. The queued draw owns
 the third texture's bytes. Native pixels cover its alpha endpoints and midpoint,
 its independent matrix and CLAMP addressing, and the final diffuse RGB/alpha.
 Other third-stage combiners and coordinate sources remain guarded.
+
+A capture packet also keeps standing texture bytes: a copy keyed by guest
+address, length and sampled contents survives the present that queued it, so
+the next frame's draws reuse it instead of copying it again. A write lock,
+Register or free, the events that also invalidate presenter textures, drops
+the span in every packet; linear surfaces and palettes are rewritten in place
+and stay per-present. A raw guest store that skips those wrappers can leave
+later binds with the previous contents until the span is locked, registered or
+freed.
+
 Vertex records may overlap: SetStateUP (0x3506f0) and DrawVerticesUP copy the
 full declaration and advance by the caller's stride, even when it is smaller
 than that declaration. The adapter checks the final record's complete extent
