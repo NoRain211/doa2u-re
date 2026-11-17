@@ -436,8 +436,11 @@ static void test_assignments(const char *base)
         CHECK(entry_byte(overlay, at) == 'Q');
 
         /* A save keeps the lines it cannot place: an album that is missing for
-           now, and a music entry this build does not list. */
-        static const char held[] = "one.adx\tDOA4\tkept.adx\nghost.adx\tDOA3\ttrack.adx\n";
+           now, a music entry this build does not list, and a player's comment. */
+        static const char held[] =
+            "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n"
+            "# A comment the player keeps.\n"
+            "one.adx\tDOA4\tkept.adx\nghost.adx\tDOA3\ttrack.adx\n";
         write_file(path, held, sizeof held - 1u);
         recomp_jukebox_page_opened();
         CHECK(targets[0].album == -1 && targets[0].track == -1);
@@ -451,6 +454,9 @@ static void test_assignments(const char *base)
         CHECK(strstr(text, "two.adx\tDOA3\ttrack.adx") != NULL);
         CHECK(strstr(text, "one.adx\tDOA4\tkept.adx") != NULL);
         CHECK(strstr(text, "ghost.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(strstr(text, "# A comment the player keeps.") != NULL);
+        /* The save's own header is written once, not kept and written again. */
+        CHECK(count_text(text, "# The Jukebox's assignments:") == 1u);
         CHECK(count_text(text, "one.adx") == 1u);
 
         /* A target the reloaded file no longer names plays its own music. */

@@ -885,9 +885,14 @@ static bool find_saved(const char *album, const char *track, int *a, int *t)
     return *t >= 0;
 }
 
+/* The one line a save writes itself; the player's own comments stay. */
+static const char ASSIGNMENT_HEADER[] =
+    "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n";
+
 /* A save rewrites the assignments it holds and keeps every line it does not:
    an album that is missing for now, a music entry this build does not list,
-   or a track the game's table has yet to name. Names.txt behaves the same. */
+   a track the game's table has yet to name, or a player's own comment.
+   Names.txt behaves the same. */
 static void save_assignments(void)
 {
     char path[PATH_SIZE], temporary[PATH_SIZE + 64], line[512];
@@ -897,13 +902,14 @@ static void save_assignments(void)
     FILE *existing = fopen(path, "r");
     if (existing != NULL) {
         while (fgets(line, sizeof line, existing) != NULL) {
-            if (line[0] == '#') continue;
+            /* Only the header is the save's: every other '#' line is the player's. */
+            if (strncmp(line, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) continue;
             char copy[sizeof line];
             snprintf(copy, sizeof copy, "%s", line);
             copy[strcspn(copy, "\r\n")] = '\0';
             char *album = strchr(copy, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
             bool ours = false;
-            if (track != NULL) {
+            if (line[0] != '#' && track != NULL) {
                 *album++ = '\0';
                 *track++ = '\0';
                 const int i = find_target(copy);
@@ -933,7 +939,7 @@ static void save_assignments(void)
         fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
         return;
     }
-    bool written = fprintf(file, "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n") > 0;
+    bool written = fprintf(file, "%s", ASSIGNMENT_HEADER) > 0;
     for (unsigned i = 0u; written && i < target_count; ++i) {
         if (targets[i].album < 0) continue;
         written = fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
