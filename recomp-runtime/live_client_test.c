@@ -3,6 +3,7 @@
    Python server generated each request and answer, so this test proves the C
    client sends the same bytes and reads the same answers. The transport
    (live_transport.c) stands in here, so the test needs no socket. */
+#include "live_backend.h"
 #include "live_client.h"
 #include "live_identity.h"
 #include "live_transport.h"
@@ -887,6 +888,58 @@ static void checkIdentityFile(void)
 #endif
 }
 
+/* The in-memory backend (live_backend_local.c) stands in for the matchmaker, so
+   its leader pages and session slots must behave as tools/matchmaker.py's do. */
+static void checkLocalBackend(void)
+{
+    const RecompLiveBackend *local = recomp_live_backend_local();
+    check("the local backend exists", local != NULL);
+    if (local == NULL) return;
+    recomp_live_backend_set(local);
+    check("the local backend installs", recomp_live_backend() == local);
+    recomp_live_backend_local_reset();
+
+    /* Board 1 seeds 25, 18, 10 and 4 wins: four rows, highest first. */
+    RecompLiveLeaderRow rows[8];
+    RecompLiveRequest request = local->leader_enumerate(local->self, 1u, 0u, 0u, 2u);
+    check("the local page keeps to count", request != 0u &&
+        local->stat_results(local->self, request, rows, 8u) == 2u &&
+        rows[0].rank == 1u && rows[1].rank == 2u &&
+        local->leader_total(local->self, request) == 4u);
+    local->release(local->self, request);
+
+    /* A pivot ("around me") starts the page at that player's rank, not rank 1. */
+    request = local->leader_enumerate(local->self, 1u, 0x0009000000a1b2c4ull, 1u, 2u); /* Bob, rank 2 */
+    check("the local pivot page starts at its rank", request != 0u &&
+        local->stat_results(local->self, request, rows, 8u) == 2u &&
+        rows[0].xuid == 0x0009000000a1b2c4ull && rows[0].rank == 2u && rows[1].rank == 3u);
+    local->release(local->self, request);
+
+    /* A full request table refuses a create without using up a session slot:
+       two of the eight slots hold the seed, so six creates still fit. */
+    RecompLiveRequest filled[64];
+    unsigned filled_count = 0u;
+    while (filled_count < 64u) {
+        const RecompLiveRequest spent = local->search(local->self, 1u, NULL, 0u);
+        if (spent == 0u) break;
+        filled[filled_count++] = spent;
+    }
+    check("the local request table is bounded", filled_count < 64u);
+    const uint32_t slots[RECOMP_LIVE_SESSION_SLOTS] = {1u, 1u, 0u, 0u};
+    check("a full request table refuses the session",
+        local->session_create(local->self, slots, NULL, 0u) == 0u);
+    for (unsigned i = 0u; i < filled_count; ++i) local->release(local->self, filled[i]);
+    unsigned created = 0u;
+    for (; created < 8u; ++created) {
+        const RecompLiveRequest made = local->session_create(local->self, slots, NULL, 0u);
+        uint32_t hresult = 0u;
+        if (made == 0u || local->poll(local->self, made, &hresult) != RECOMP_LIVE_DONE) break;
+    }
+    check("the refused create kept its session slot", created == 6u);
+
+    recomp_live_backend_set(NULL);
+}
+
 static char *readFile(const char *path, size_t *size)
 {
     FILE *file = fopen(path, "rb");
@@ -921,9 +974,13 @@ int main(int argc, char **argv)
     }
     document = file;
     check("the vectors are protocol 2", readNumber(document, "protocol", 0u) == 2u);
-    uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES];
     const char *identity = findKey(document, "identity");
-    check("the vectors carry a secret", identity != NULL &&
+    if (identity == NULL) {
+        fprintf(stderr, "FAIL the vectors carry no identity\n");
+        return 1;
+    }
+    uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES] = {0u};
+    check("the vectors carry a secret",
         readHex(findKey(identity, "secret"), secret, sizeof secret) == sizeof secret);
     RecompLiveIdentity mine;
     recomp_live_identity_from_secret(secret, &mine);
@@ -963,6 +1020,7 @@ int main(int argc, char **argv)
     checkStatTypes(&mine);
     checkGroupChildren(&mine);
     checkIdentityFile();
+    checkLocalBackend();
 
     recomp_live_client_detach();
     check("detach", !recomp_live_client_attached() && server_handler == NULL);

@@ -274,7 +274,15 @@ the build digest. A client's proof is SHA-256 of `doa2u-live` and its
 six bytes of the SHA-256 of that proof. A LOGON whose XUID is not the one its
 proof gives is refused with access denied, as is another proof for an
 existing XUID, and the game shows a logon error. Search results carry XUIDs,
-so this check keeps one player from claiming another's account. A gamertag is
+so this check keeps one player from claiming another's account by guessing,
+but it is not authentication against an observer: LOGON carries the proof
+itself, unchanged, and the heartbeat repeats it every 5 s over plain UDP, so
+anyone who can read one packet can send that proof from their own socket and
+be logged on as that XUID, answering its invites, writing its stats and
+CONNECTing as it. The cookie only proves a source address that the packet
+already shows. Closing that needs a nonce the server issues and an answer
+over it, with the store keeping a verifier; today the proof is an identity
+claim from a secret no one else holds. A gamertag is
 unique among accounts:
 the server gives a taken one a digit, 1 to 9, and past those the XUID's own
 hex digits, so every player who sends the default name gets one; LOGGED
@@ -383,7 +391,10 @@ account that has been offline longest, those without stats or friends first,
 with everything that names it:
 friendships in both directions, pending requests and invites, stats rows,
 feedback, mutes, Live pairings and cached rankings. If every account is
-online, the new account is refused. A repeated request id from the same
+online, the new account is refused. Those caps are per address, so filling
+the table takes 256 addresses at the daily cap, or 1,024 minutes from one;
+a flood that gets there costs the evicted players the data the file held for
+them. A repeated request id from the same
 socket and nonce gets its first answer again for 60 s, which is what makes a
 resent SESSION_PUT one session and a resent FEEDBACK one count. At most
 2,048 answers are cached, 64 of them from one address, whose oldest answer
@@ -412,9 +423,11 @@ Without `--store` everything is in memory and a restart forgets it. With
 
 Sessions, addresses, keys, presence, feedback, Live pairings and the CONNECT
 times that allow writing another player's stats are not written. The file is
-written to `PATH.tmp` and renamed over `PATH`, at most every 30 s and at
-exit, so a crash leaves the last good file. A missing file is no error; a
-damaged one is reported on stderr and left alone.
+written to a fresh temporary file beside it at most every 30 s and at exit,
+flushed and synced to the disk there, and renamed over `PATH`, so a crash
+leaves the last good file; a write that fails is reported on stderr and
+removes its temporary file, and the last good file stays. A missing file is
+no error; a damaged one is reported on stderr and left alone.
 
 ## In the game
 
@@ -534,7 +547,17 @@ the ping estimate from both round trips.
   it shows with the same check as profile names.
 - The estimate goes through the server, so two players near each other
   and far from it see a ping higher than their direct one.
-- IPv4 only.
+- A LOGON carries its proof in the clear, and the server accepts that same
+  value for the life of the account, so a player who reads one packet can
+  act as another XUID. The identity check stops a player from claiming a
+  found XUID by guessing, not an observer from replaying; a nonce the
+  server issues and an answer over it, kept as a verifier in the store, is
+  the fix.
+- A flood from many addresses can fill the 4,096-account table, and a new
+  account then evicts the player offline longest with their friends, stats
+  and mutes. The caps are per address, so it takes at least 256 of them,
+  and eviction prefers accounts with no stats or friends; a global cap or
+  keeping evicted rows would close it.
 - The Live pages have not been run against this server in the game yet: the
   client is tested against the shared byte vectors
   ([tools/live_vectors.json](../tools/live_vectors.json)), not end to end.
