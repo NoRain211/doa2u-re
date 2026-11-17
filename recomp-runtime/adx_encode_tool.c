@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L /* atomic_file.h's fsync and fileno */
+#endif
 /* recomp_adx_encode in.wav out.adx [loop start] [loop end]: a WAV as the ADX
    the game plays, with adx_encoder.c. tools/import_soundtrack.py uses it for
    DOA4's music; loop points are in samples, end exclusive, and override the
@@ -11,6 +14,7 @@
    play as loud as DOA2U's own music. */
 #include "adx_decoder.h"
 #include "adx_encoder.h"
+#include "atomic_file.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -38,16 +42,14 @@ static unsigned char *read_file(const char *path, long *length)
     return data;
 }
 
-/* A buffered write error (a full disk) only shows at close, so the file counts
-   as written only if it closes cleanly; a partial ADX is removed. */
+/* A failed or interrupted write leaves the file it replaces intact. */
 static int write_file(const char *path, const unsigned char *data, size_t size)
 {
-    FILE *out = fopen(path, "wb");
+    char temporary[4096];
+    FILE *out = recomp_atomic_open(path, temporary, sizeof temporary);
     if (out == NULL) return 0;
-    bool ok = fwrite(data, 1u, size, out) == size;
-    if (fclose(out) != 0) ok = false;
-    if (!ok) remove(path);
-    return ok ? 1 : 0;
+    const bool written = fwrite(data, 1u, size, out) == size;
+    return recomp_atomic_commit(out, temporary, path, written) ? 1 : 0;
 }
 
 static int level(double target, const char *from, const char *to)
@@ -106,17 +108,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s in.wav out.adx [loop_start loop_end]\n", argv[0]);
         return 2;
     }
-    FILE *in = fopen(argv[1], "rb");
-    if (in == NULL) { perror(argv[1]); return 1; }
-    fseek(in, 0, SEEK_END);
-    const long length = ftell(in);
-    fseek(in, 0, SEEK_SET);
-    unsigned char *data = length > 0 ? malloc((size_t)length) : NULL;
-    if (data == NULL || fread(data, 1u, (size_t)length, in) != (size_t)length) {
-        fprintf(stderr, "%s: cannot read\n", argv[1]);
-        return 1;
-    }
-    fclose(in);
+    long length = 0;
+    unsigned char *data = read_file(argv[1], &length);
+    if (data == NULL) return 1;
     uint32_t frames, channels, rate;
     int64_t loop_start, loop_end;
     int16_t *pcm = recomp_wav_read(data, (size_t)length, &frames, &channels, &rate, &loop_start, &loop_end);
