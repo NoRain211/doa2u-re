@@ -255,6 +255,24 @@ add_test(NAME recomp-runtime-movie-color COMMAND recomp_movie_color_test)
 
 add_executable(recomp_adx_decoder_test adx_decoder.c adx_decoder_test.c)
 add_test(NAME recomp-runtime-adx-decoder COMMAND recomp_adx_decoder_test)
+add_executable(recomp_adx_encoder_test adx_encoder.c adx_decoder.c adx_encoder_test.c)
+add_test(NAME recomp-runtime-adx-encoder COMMAND recomp_adx_encoder_test)
+if(NOT MSVC)
+    target_link_libraries(recomp_adx_encoder_test PRIVATE m)
+endif()
+
+# Mods (mod_loader.c) and the ADX encoder that turns their WAVs, and DOA4's
+# music for tools/import_soundtrack.py, into the game's ADX.
+add_executable(recomp_mod_loader_test mod_loader.c adx_encoder.c adx_decoder.c mod_loader_test.c)
+add_test(NAME recomp-runtime-mod-loader COMMAND recomp_mod_loader_test)
+add_executable(recomp_jukebox_test jukebox_test.c mod_loader.c adx_encoder.c adx_decoder.c)
+add_test(NAME recomp-runtime-jukebox COMMAND recomp_jukebox_test)
+add_executable(recomp_adx_encode adx_encode_tool.c adx_encoder.c adx_decoder.c)
+if(NOT MSVC)
+    target_link_libraries(recomp_mod_loader_test PRIVATE m)
+    target_link_libraries(recomp_jukebox_test PRIVATE m)
+    target_link_libraries(recomp_adx_encode PRIVATE m)
+endif()
 
 # Mods (mod_loader.c) and the ADX encoder that turns their WAVs, and DOA4's
 # music for tools/import_soundtrack.py, into the game's ADX.
@@ -699,7 +717,7 @@ if(RECOMP_PROGRAM_DIR)
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
         dsound_api_adapter.c dsound_device_model.c dsound_buffer_adapter.c
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
-        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
+        xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c

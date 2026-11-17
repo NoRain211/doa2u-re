@@ -110,16 +110,21 @@ cd doa2u-re
 `build_game.sh` creates `private/venv` and installs Capstone there itself, and
 stops at once if CMake, Ninja, Git or a C++ compiler is missing.
 
-SteamOS has a read-only system and no compiler, so build inside a container
-such as an Ubuntu 24.04 `distrobox` that shares your home folder (Bazzite
-includes distrobox); the finished checkout then runs on SteamOS itself:
+SteamOS has a read-only system and no compiler. On a Steam Deck, keep the
+checkout under your home folder, open Konsole in Desktop Mode and run:
 
 ```bash
-distrobox create --name doa2u --image ubuntu:24.04
-distrobox enter doa2u
+./build_steamdeck.sh "/path/to/disc2.iso"
 ```
 
-Run the `apt install` above inside it. `./launcher.sh` opens a
+It installs distrobox into `~/.local` when it is missing, creates an Ubuntu
+24.04 container named `doa2u-build` that shares your home folder, runs
+`./install_deps.sh` there and then `./build_game.sh`. The ISO must be under
+your home folder too. The finished checkout runs on SteamOS itself. To do it
+by hand, create a container with `distrobox create --name doa2u --image
+ubuntu:24.04`, enter it and run `./install_deps.sh` and `./build_game.sh`.
+
+`./launcher.sh` opens a
 gamepad-friendly settings screen, then starts the game; `./run_game.sh`
 starts the game with the saved choices.
 

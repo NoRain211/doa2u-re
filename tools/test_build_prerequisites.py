@@ -127,6 +127,24 @@ class PrerequisiteTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "tools/ffmpeg.*PATH"):
                 prerequisites.ffmpeg(self.root)
 
+    def test_ffmpeg_from_the_working_directory_is_refused(self):
+        # shutil.which prepends the working directory on Windows unless NoDefaultCurrentDirectoryInExePath
+        # is set, so a planted ffmpeg.exe there must not be returned.
+        planted = os.path.join(os.getcwd(), "ffmpeg.exe")
+        for found in (planted, os.path.join(os.curdir, "ffmpeg.exe")):
+            with self.subTest(found=found), \
+                    mock.patch.object(prerequisites.shutil, "which", return_value=found):
+                self.assertIsNone(prerequisites.find_ffmpeg(self.root))
+
+    def test_ffmpeg_searches_only_absolute_path_entries(self):
+        elsewhere = tempfile.gettempdir()
+        for entries, expected in ((("system-tools", os.curdir), ""), (("system-tools", elsewhere), elsewhere)):
+            with self.subTest(entries=entries), \
+                    mock.patch.dict(os.environ, PATH=os.pathsep.join(entries)), \
+                    mock.patch.object(prerequisites.shutil, "which", return_value=None) as which:
+                prerequisites.find_ffmpeg(self.root)
+            which.assert_called_once_with("ffmpeg", path=expected)
+
     def test_bundled_ffmpeg_comes_before_path(self):
         bundled = self.root / prerequisites.FFMPEG / "ffmpeg.exe"
         bundled.parent.mkdir(parents=True)

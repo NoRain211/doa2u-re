@@ -230,6 +230,25 @@ class ImportFailureTests(unittest.TestCase):
             self.assertIn(path, said)
             self.assertNotIn("ffmpeg", said)
 
+    def test_missing_ffmpeg_is_reported_before_the_import(self):
+        source = mock.Mock()
+        with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso"]), \
+                mock.patch.object(soundtrack, "open_source", return_value=source), \
+                mock.patch.object(soundtrack, "detect", return_value="doa4"), \
+                mock.patch.object(soundtrack, "find_ffmpeg", return_value=None), \
+                mock.patch.object(soundtrack, "import_doa4") as doa4:
+            with self.assertRaises(SystemExit) as caught:
+                soundtrack.main()
+        self.assertIn("ffmpeg was not found", str(caught.exception))
+        self.assertIn("--ffmpeg", str(caught.exception))
+        doa4.assert_not_called()
+
+    def test_corrupt_afs_archive_raises_value_error(self):
+        self.assertRaises(ValueError, soundtrack.afs_table, None)
+        self.assertRaises(ValueError, soundtrack.afs_table, b"AFS\0")
+        self.assertRaises(ValueError, soundtrack.afs_table, b"AFS\0" + struct.pack("<I", 2) + bytes(8))
+        self.assertEqual(len(soundtrack.afs_table(afs([b"one", b"two"]))), 2)
+
     def test_missing_encoder_when_levelling_reports_its_path(self):
         with tempfile.TemporaryDirectory() as out:
             os.makedirs(os.path.join(out, "doa3"))
@@ -418,14 +437,36 @@ class XbeTests(unittest.TestCase):
             (movies / "late.sfd").write_bytes(movie_image(adx + b"x"))
             (movies / ending).write_bytes(movie_image(adx))
             (movies / "same.sfd").write_bytes(movie_image(adx))  # its audio is a repeat
+            (movies / "DOA4 opening (v2).sfd").write_bytes(movie_image(adx + b"y"))
             (movies / "notes.txt").write_bytes(b"not a movie")
             out = Path(folder, "out")
             out.mkdir()
             tracks = []
             soundtrack.import_movies(soundtrack.Folder(folder), str(out), "movie", {}, tracks)
-            self.assertEqual([t[0] for t in tracks], ["m_late.adx", f"m_mv_{code}.adx"])
-            self.assertEqual([t[3] for t in tracks], ["Late", f"{fighter}'s Ending"])
+            # A name the disc chose is sanitised, so tracks.txt can list it.
+            self.assertEqual([t[0] for t in tracks],
+                             ["m_doa4_opening__v2_.adx", "m_late.adx", f"m_mv_{code}.adx"])
+            self.assertEqual([t[3] for t in tracks], ["Doa4 opening (v2)", "Late", f"{fighter}'s Ending"])
+            soundtrack.write_tracks(str(out), "Album", tracks)
+            self.assertTrue(Path(out, "m_doa4_opening__v2_.adx").is_file())
             self.assertTrue(Path(out, f"m_mv_{code}.adx").is_file())
+
+    def test_movies_whose_names_sanitise_alike_keep_their_own_audio(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        with tempfile.TemporaryDirectory() as folder:
+            movies = Path(folder, "movie")
+            movies.mkdir()
+            (movies / "a b.sfd").write_bytes(movie_image(adx + b"x"))
+            (movies / "a_b.sfd").write_bytes(movie_image(adx + b"y"))
+            out = Path(folder, "out")
+            out.mkdir()
+            tracks = []
+            soundtrack.import_movies(soundtrack.Folder(folder), str(out), "movie", {}, tracks)
+            # safe_cue turns the space into _, so the second movie needs a name of its own.
+            self.assertEqual([t[0] for t in tracks], ["m_a_b.adx", "m_a_b_2.adx"])
+            self.assertEqual([t[3] for t in tracks], ["A b", "A B"])
+            self.assertEqual((out / "m_a_b.adx").read_bytes(), adx + b"x")
+            self.assertEqual((out / "m_a_b_2.adx").read_bytes(), adx + b"y")
 
 
 class BankTests(unittest.TestCase):
