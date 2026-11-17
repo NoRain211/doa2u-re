@@ -162,9 +162,11 @@ static uint32_t stream_vertices(uint32_t first, uint32_t *stride)
 }
 
 /* Grow-only buffers. Slots: 0 indices, 1 packed vertices, 2 widened lines or
-   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2. */
-static uint8_t *draw_scratch[4];
-static size_t draw_scratch_size[4];
+   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2.
+   Pieces use their own slot 4 so their index copy cannot clobber a widened
+   line's vertices. */
+static uint8_t *draw_scratch[5];
+static size_t draw_scratch_size[5];
 
 static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDrawCommand *draw);
 
@@ -1621,7 +1623,10 @@ static uint32_t draw_submitted;
    texcoords' box (d3d_draw_shader.cpp), which only works when the draw is one
    piece. A screen-space triangle list of separate pieces (a string's letters,
    a banner's tiles: "Counter Hit") is sent piece by piece, each a run of
-   triangles sharing vertices, so each piece samples only its own art. */
+   triangles sharing vertices, so each piece samples only its own art. Each
+   piece also uploads only the vertex range its indices use: a non-indexed list
+   carries identity indices, so every triangle is its own piece and the whole
+   list would otherwise be re-uploaded once per triangle. */
 static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_art)
 {
     const RecompD3dPresenterDrawCommand *draw = &command->data.draw;
@@ -1634,15 +1639,23 @@ static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_
     const uint16_t *index = draw->index_bytes;
     static uint32_t tags[65536], generation;
     uint32_t pieces = 0u;
-    uint32_t starts[513];
+    uint32_t starts[513], low[513], high[513];
     for (uint32_t t = 0u; t < triangles; ++t) {
         bool shared = t != 0u && (tags[index[t * 3u]] == generation ||
             tags[index[t * 3u + 1u]] == generation || tags[index[t * 3u + 2u]] == generation);
         if (!shared) {
-            starts[pieces++] = t;
+            starts[pieces] = t;
+            low[pieces] = 0xffffffffu;
+            high[pieces] = 0u;
+            ++pieces;
             if (++generation == 0u) { memset(tags, 0, sizeof tags); ++generation; }
         }
-        for (uint32_t b = 0u; b < 3u; ++b) tags[index[t * 3u + b]] = generation;
+        for (uint32_t b = 0u; b < 3u; ++b) {
+            const uint16_t v = index[t * 3u + b];
+            tags[v] = generation;
+            if (v < low[pieces - 1u]) low[pieces - 1u] = v;
+            if (v > high[pieces - 1u]) high[pieces - 1u] = v;
+        }
     }
     if (pieces < 2u) {
         recomp_d3d8_submit(command);
@@ -1651,9 +1664,15 @@ static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_
     starts[pieces] = triangles;
     RecompD3dPresenterCommand piece = *command;
     for (uint32_t p = 0u; p < pieces; ++p) {
-        piece.data.draw.index_bytes = index + starts[p] * 3u;
-        piece.data.draw.index_count = (starts[p + 1u] - starts[p]) * 3u;
-        piece.data.draw.triangle_count = starts[p + 1u] - starts[p];
+        const uint32_t first = starts[p] * 3u, count = (starts[p + 1u] - starts[p]) * 3u;
+        uint16_t *rebased = (uint16_t *)(void *)scratch(4u, (size_t)count * sizeof *rebased);
+        for (uint32_t i = 0u; i < count; ++i) rebased[i] = (uint16_t)(index[first + i] - low[p]);
+        piece.data.draw.index_bytes = rebased;
+        piece.data.draw.index_count = count;
+        piece.data.draw.triangle_count = count / 3u;
+        piece.data.draw.vertex_bytes =
+            (const uint8_t *)draw->vertex_bytes + (size_t)low[p] * draw->vertex_stride;
+        piece.data.draw.vertex_count = high[p] - low[p] + 1u;
         recomp_d3d8_submit(&piece);
     }
 }
