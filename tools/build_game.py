@@ -178,16 +178,68 @@ def write_functions(disasm):
             "[\n" + ",\n".join(rows) + "\n]\n", encoding="utf-8", newline="\n")
 
 
+def extracted_disc(imported):
+    """An extraction's disc: its own folder until a build succeeds, then the
+    play folder that holds every file of it."""
+    disc = imported / "disc"
+    return disc if disc.is_dir() else imported.with_name("play-disc")
+
+
+def drop_owned_extraction():
+    """Make the play folder from the extraction, select the executable there,
+    then drop the extraction's disc and keep its receipt. The play folder
+    hard-links every file, and Explorer counts each link, so the install read
+    as two discs. An extraction holding saves is never changed."""
+    from run_game import prepare_disc  # run_game imports this module
+    imported, play = ROOT / "private/imported-disc", ROOT / "private/play-disc"
+    disc = imported / "disc"
+    if not disc.is_dir() or (disc / ".recomp-storage").exists():
+        return
+
+    def same_file(path):
+        # A play folder from an earlier import, or another dump, has the same names.
+        copy = play / path.relative_to(disc)
+        return copy.is_file() and (os.path.samefile(path, copy) or (
+            copy.stat().st_size == path.stat().st_size and sha256(copy) == sha256(path)))
+
+    # The build already succeeded, so a failure here only keeps the extraction.
+    try:
+        prepare_disc(disc, play)
+        if not all(same_file(path) for path in disc.rglob("*") if path.is_file()):
+            print(f"Kept {disc}: {play} holds a different disc", flush=True)
+            return
+        select_xbe(play)
+        # Renamed first, so a file a scan holds open never leaves a partial disc behind.
+        aside = imported / "disc.old"
+        shutil.rmtree(aside, ignore_errors=True)
+        disc.rename(aside)
+    except (OSError, ValueError) as error:
+        print(f"Kept {disc}: {error}", flush=True)
+        return
+    shutil.rmtree(aside, ignore_errors=True)
+
+
+def select_xbe(disc):
+    for xbe in sorted(disc.glob("*.xbe")):
+        if sha256(xbe) == XBE_SHA256:
+            path = ROOT / "private/target.json"
+            target = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            target.update(xbe_path=xbe.relative_to(ROOT).as_posix(), xbe_sha256=XBE_SHA256)
+            path.write_text(json.dumps(target, indent=2) + "\n", encoding="utf-8")
+            return
+    raise ValueError("This build supports only Dead or Alive Ultimate (Xbox, USA) Disc 2")
+
+
 def import_disc(iso, extractor=None):
     """Extract a user's ISO once into private/imported-disc and select its game executable."""
     if not iso.is_file():
         raise ValueError("Choose your Dead or Alive Ultimate Disc 2 ISO and build again")
     imported = ROOT / "private/imported-disc"
     receipt = imported / "receipt.json"
-    if receipt.is_file():
+    if receipt.is_file() and extracted_disc(imported).is_dir():
         print("Checking the ISO against the existing extraction...", flush=True)
         if json.loads(receipt.read_text(encoding="utf-8"))["iso_sha256"] == sha256(iso):
-            print(f"Using the disc already extracted to {imported / 'disc'}", flush=True)
+            print(f"Using the disc already extracted to {extracted_disc(imported)}", flush=True)
         else:
             # Stage first, so picking the wrong ISO cannot destroy a usable import.
             staging = imported.with_name(imported.name + ".staging")
@@ -205,20 +257,14 @@ def import_disc(iso, extractor=None):
             finally:
                 if staging.exists():
                     shutil.rmtree(staging)
-    if not receipt.is_file():
+    # A receipt without its disc, or the play folder made from it, is unfinished too.
+    if not (receipt.is_file() and extracted_disc(imported).is_dir()):
         if imported.exists():
             print(f"Removing the unfinished extraction in {imported}", flush=True)
             shutil.rmtree(imported)
         bundled = ROOT / "tools/artifacts/extract-xiso.exe"
         extract(iso, imported, extractor or (bundled if bundled.is_file() else extract_xiso(ROOT)))
-    for xbe in sorted((imported / "disc").glob("*.xbe")):
-        if sha256(xbe) == XBE_SHA256:
-            path = ROOT / "private/target.json"
-            target = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-            target.update(xbe_path=xbe.relative_to(ROOT).as_posix(), xbe_sha256=XBE_SHA256)
-            path.write_text(json.dumps(target, indent=2) + "\n", encoding="utf-8")
-            return
-    raise ValueError("This build supports only Dead or Alive Ultimate (Xbox, USA) Disc 2")
+    select_xbe(extracted_disc(imported))
 
 
 def build(build_only=False, lift_only=False, iso=None, disassemble=False, extractor=None):
@@ -328,6 +374,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     if windows:
         receipt["vulkan_runner_sha256"] = sha256(runner_path(vulkan=True))
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    if iso is not None and not build_only:
+        drop_owned_extraction()
 
 
 def main():
