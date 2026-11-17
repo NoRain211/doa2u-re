@@ -20,8 +20,10 @@ music file itself:
   tools/ffmpeg on Windows; otherwise one on PATH, or given with --ffmpeg.
 
 Each disc's movies (opening, endings, logos) are Sofdec SFD files whose sound
-is ADX as well: it is taken out of them and added as tracks too. Given DOA2U's
-own disc, it adds the music of DOA2U's movies as the DOA2U Movies album.
+is ADX as well: every SFD in its movie folders is taken out of it and added as
+a track too. Given DOA2U's own disc, it adds the music of DOA2U's movies as the
+DOA2U Movies album, and its DOA1 music (DOA1/Sound, listed by Doa1.xbe) as the
+DOA1U album.
 
 The game writes names.txt beside them ("file = name"), which players edit to
 rename tracks; importing again keeps those names. Nothing this writes may be
@@ -40,6 +42,7 @@ import sys
 import tempfile
 
 from build_prerequisites import find_ffmpeg
+import xbe_info
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT = os.path.join(ROOT, "jukebox")
@@ -120,6 +123,17 @@ class Xdvdfs:
         found = self.find(path)
         return None if found is None else self._read(*found)
 
+    def list(self, path):
+        """A folder's file names, in any case; empty if it is not there."""
+        sector, size = self.root
+        for part in [p for p in path.replace("\\", "/").split("/") if p]:
+            entry = self._entries(sector, size).get(part.lower())
+            if entry is None or not entry[2]:
+                return []
+            sector, size = entry[0], entry[1]
+        return sorted((name for _start, _length, is_dir, name in self._entries(sector, size).values()
+                       if not is_dir), key=str.lower)
+
 
 class Folder:
     """The same reads from an extracted disc folder."""
@@ -152,6 +166,14 @@ class Folder:
             return None
         with open(found, "rb") as file:
             return file.read()
+
+    def list(self, path):
+        """A folder's file names; empty if it is not there."""
+        here = self._resolve(path)
+        if here is None or not os.path.isdir(here):
+            return []
+        return sorted((name for name in os.listdir(here)
+                       if os.path.isfile(os.path.join(here, name))), key=str.lower)
 
 
 def disc_root(folder):
@@ -284,6 +306,44 @@ DOA4_OTHER = {
     "shop": "Zack's Shop", "spa": "Spartan-458", "heli": "Helicopter", "market": "Market",
     "amazing": "Amazing", "eat": "Eat", "ringin": "Ringin'",
 }
+# The fighter codes the games' tables, cues and file names use. DOA1 shares them, with Raidou,
+# and gy is the slot Leon took in DOA2: Bayman's in DOA1.
+DOA3_CODES = {
+    "ay": "Ayane", "ba": "Bass", "fa": "Gen Fu", "go": "Christie", "gy": "Leon", "hi": "Helena",
+    "kl": "Zack", "km": "Ryu Hayabusa", "ko": "Hitomi", "ks": "Kasumi", "le": "Leifang", "lu": "Jann Lee",
+    "ni": "Hayate", "sa": "Bayman", "su": "Brad Wong", "tn": "Tina",
+}
+DOA1_CODES = {**{code: DOA3_CODES[code] for code in ("ks", "lu", "le", "km", "fa", "kl", "tn")},
+              "gy": "Bayman", "rd": "Raidou"}
+DOA1_OTHER = {
+    "sel": "Character Select", "name": "Name Entry", "cnt": "Continue", "clr": "Clear",
+    "trng": "Training", "opmov": "Opening Movie", "edmov": "Ending Movie", "online": "Online",
+}
+DOA1_KINDS = {"sng": "", "lose": " (Lose)", "lose2": " (Lose 2)"}
+
+
+def words_label(stem):
+    """A name from a file's own words: its underscores and hyphens become spaces."""
+    return " ".join(word.capitalize() for word in re.split(r"[_-]+", stem) if word)
+
+
+def doa1u_name(file):
+    """A track's name from its file: ks_sng is Kasumi's theme, ks_lose the one she loses to."""
+    stem = os.path.splitext(os.path.basename(file))[0]
+    code, _, kind = stem.partition("_")
+    name = DOA1_CODES.get(code) or DOA1_OTHER.get(code)
+    if name is None or (kind and kind not in DOA1_KINDS):
+        return words_label(stem)
+    return name + DOA1_KINDS.get(kind, "")
+
+
+def movie_name(file):
+    """A movie's name from its file: mv_<code> is that fighter's ending, else its own words."""
+    stem = os.path.splitext(os.path.basename(file))[0]
+    kind, _, code = stem.partition("_")
+    if kind.lower() == "mv" and code in DOA3_CODES:
+        return f"{DOA3_CODES[code]}'s Ending"
+    return words_label(stem)
 
 
 def doa4_name(cue):
@@ -351,69 +411,64 @@ def sfd_audio(data):
     return bytes(out) if out[:2] == b"\x80\x00" and len(out) > 64 else None
 
 
-def import_movies(source, folder, movies, kept, tracks, seen=None):
-    """Adds each movie's music as m_<movie>.adx: movies [(path on the disc, name)]. Skips repeats."""
+def import_movies(source, folder, where, kept, tracks, seen=None):
+    """Adds the music of each *.sfd movie in a folder on the disc as m_<movie>.adx. Skips repeats."""
     seen = set() if seen is None else seen
-    for path, label in movies:
-        data = source.read(path)
+    for file in source.list(where):
+        if not file.lower().endswith(".sfd"):
+            continue
+        data = source.read(f"{where}/{file}" if where else file)
         audio = sfd_audio(data) if data else None
         if audio is None or audio in seen:
             continue
         seen.add(audio)
-        name = "m_" + os.path.splitext(os.path.basename(path))[0].lower() + ".adx"
-        with open(os.path.join(folder, name), "wb") as file:
-            file.write(audio)
-        tracks.append((name, -2, -2, kept.get(name, label)))
+        name = "m_" + os.path.splitext(file)[0].lower() + ".adx"
+        with open(os.path.join(folder, name), "wb") as handle:
+            handle.write(audio)
+        tracks.append((name, -2, -2, kept.get(name, movie_name(file))))
         print(f"  {name}: {tracks[-1][3]}", flush=True)
     return seen
 
 
-DOA3_CODES = {
-    "ay": "Ayane", "ba": "Bass", "fa": "Gen Fu", "go": "Christie", "gy": "Leon", "hi": "Helena",
-    "kl": "Zack", "km": "Ryu Hayabusa", "ko": "Hitomi", "ks": "Kasumi", "le": "Leifang", "lu": "Jann Lee",
-    "ni": "Hayate", "sa": "Bayman", "su": "Brad Wong", "tn": "Tina",
-}
-DOA3_MOVIES = [("mv_op.sfd", "Opening Movie"), ("mv_st.sfd", "Staff Roll Movie")] + \
-    [(f"mv_{code}.sfd", f"{name}'s Ending") for code, name in DOA3_CODES.items()] + [("ninja.sfd", "Team Ninja Logo")]
-DOA4_MOVIES = [(f"movie/{stem}.sfd", f"{name}'s Ending") for stem, name in (
-    ("ayane", "Ayane"), ("bass", "Bass"), ("bayman", "Bayman"), ("brad", "Brad Wong"), ("christie", "Christie"),
-    ("eliot", "Eliot"), ("hayabusa", "Ryu Hayabusa"), ("hayate", "Hayate"), ("helena", "Helena"),
-    ("hitomi", "Hitomi"), ("jannlee", "Jann Lee"), ("kasumi", "Kasumi"), ("kokoro", "Kokoro"),
-    ("leifang", "Leifang"), ("lisa", "La Mariposa"), ("tina", "Tina"), ("zack", "Zack"))] + \
-    [("movie/doa4_usa_cm.sfd", "TV Commercial"), ("movie/ninja_vi_hd.sfd", "Team Ninja Logo")]
-# DOA1's movies (DOA1/ss_opn.sfd, ss_end.sfd) are DOA1/Sound's opmov_sng and edmov_sng, which the game reads.
-DOA2U_MOVIES = [("DOA2/doa2_op.sfd", "Opening Movie"), ("DOA2/DOA_G4.sfd", "G4 Movie"),
-    ("DOA2/2_VI_WIDE_B.sfd", "Team Ninja Logo"), ("DOA2/4_VI_STD_B.sfd", "Team Ninja Logo")]
+# Doa1.xbe's music table: a pointer per file in DOA1/Sound, in the game's order, ended by 0.
+DOA1_TABLE = 0x2E02F8
 
 
-# Dead or Alive Ultimate's DOA1 music on DOA2U's disc (DOA1/Sound), in Doa1.xbe's music table order
-# (0x2d50a8); the codes are DOA3's, and gy is the slot Leon took in DOA2: Bayman's in DOA1.
-DOA1U_NAMES = [
-    ("ks_sng", "Kasumi"), ("lu_sng", "Jann Lee"), ("le_sng", "Leifang"), ("km_sng", "Ryu Hayabusa"),
-    ("gy_sng", "Bayman"), ("fa_sng", "Gen Fu"), ("kl_sng", "Zack"), ("tn_sng", "Tina"), ("rd_sng", "Raidou"),
-    ("sel_sng", "Character Select"), ("name_sng", "Name Entry"), ("cnt_sng", "Continue"), ("clr_sng", "Clear"),
-    ("trng_sng", "Training"), ("kl_lose", "Zack (Lose)"), ("le_lose", "Leifang (Lose)"),
-    ("km_lose", "Ryu Hayabusa (Lose)"), ("lu_lose", "Jann Lee (Lose)"), ("tn_lose", "Tina (Lose)"),
-    ("gy_lose", "Bayman (Lose)"), ("fa_lose", "Gen Fu (Lose)"), ("ks_lose", "Kasumi (Lose)"),
-    ("ks_lose2", "Kasumi (Lose 2)"), ("rd_lose", "Raidou (Lose)"), ("opmov_sng", "Opening Movie"),
-    ("edmov_sng", "Ending Movie"), ("online_sng", "Online"),
-]
+def xbe_music(data, table):
+    """The file names an XBE's music table points at, in its order."""
+    base, sections = xbe_info.load(data)
+    files = []
+    for i in range(256):
+        pointer, = struct.unpack("<I", xbe_info.read(data, sections, table + 4 * i, 4))
+        if not pointer:
+            break
+        files.append(xbe_info.text(data, sections, pointer))
+    return files
 
 
 def import_doa1u(source, out, encoder=None):
     """DOA2U's disc's DOA1 music, copied (and levelled) as the DOA1U album."""
+    executable = source.read("Doa1.xbe")
+    try:
+        files = xbe_music(executable, DOA1_TABLE) if executable else []
+    except (ValueError, struct.error):
+        files = []
+    if not files:
+        print("Doa1.xbe's music list was not found; the DOA1 album is left as it is.")
+        return 0
     folder = os.path.join(out, "doa1u")
     os.makedirs(folder, exist_ok=True)
     kept = read_names(folder)
     tracks = []
-    for stem, label in DOA1U_NAMES:
-        data = source.read(f"DOA1/Sound/{stem}.adx")
+    for name in files:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in (".", ".."):
+            continue
+        data = source.read(f"DOA1/Sound/{name}")
         if not data or data[:2] != b"\x80\x00":
             continue
-        name = f"{stem}.adx"
         with open(os.path.join(folder, name), "wb") as file:
             file.write(data)
-        tracks.append((name, -1, -1, kept.get(name, label)))
+        tracks.append((name, -1, -1, kept.get(name, doa1u_name(name))))
     write_tracks(folder, "Dead or Alive Ultimate", tracks)
     print(f"Dead or Alive Ultimate (DOA1): {len(tracks)} tracks in {folder}")
     level_album(folder, encoder)
@@ -428,7 +483,7 @@ def import_doa2u(source, out, encoder=None):
     os.makedirs(folder, exist_ok=True)
     kept = read_names(folder)
     tracks = []
-    import_movies(source, folder, DOA2U_MOVIES, kept, tracks)
+    import_movies(source, folder, "DOA2", kept, tracks)
     write_tracks(folder, "Dead or Alive 2 Ultimate (Movies)", tracks)
     level_album(folder, encoder)
     print(f"Dead or Alive 2 Ultimate movies: {len(tracks)} tracks in {folder}")
@@ -563,7 +618,7 @@ def import_doa3(source, out, encoder=None):
         if label == f"Track {i + 1:02d}":  # an earlier import's placeholder
             label = default
         tracks.append((name, -1, -1, label))
-    import_movies(source, folder, DOA3_MOVIES, kept, tracks)
+    import_movies(source, folder, "", kept, tracks)
     write_tracks(folder, "Dead or Alive 3", tracks)
     level_album(folder, encoder)
     print(f"Dead or Alive 3: {len(tracks)} tracks in {folder}")
@@ -664,7 +719,7 @@ def import_doa4(source, out, ffmpeg, encoder=None):
                     "-c:a", "adpcm_adx", "-f", "adx", target], check=True, stderr=subprocess.DEVNULL)
             tracks.append((name, start, end, kept.get(name, group_name(cues))))
             print(f"  {name}: {tracks[-1][3]}", flush=True)
-    import_movies(source, folder, DOA4_MOVIES, kept, tracks)
+    import_movies(source, folder, "movie", kept, tracks)
     write_tracks(folder, "Dead or Alive 4", tracks)
     level_album(folder, encoder)
     print(f"Dead or Alive 4: {len(tracks)} tracks in {folder}")
