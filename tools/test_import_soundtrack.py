@@ -451,6 +451,23 @@ class XbeTests(unittest.TestCase):
             self.assertTrue(Path(out, "m_doa4_opening__v2_.adx").is_file())
             self.assertTrue(Path(out, f"m_mv_{code}.adx").is_file())
 
+    def test_movies_whose_names_sanitise_alike_keep_their_own_audio(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        with tempfile.TemporaryDirectory() as folder:
+            movies = Path(folder, "movie")
+            movies.mkdir()
+            (movies / "a b.sfd").write_bytes(movie_image(adx + b"x"))
+            (movies / "a_b.sfd").write_bytes(movie_image(adx + b"y"))
+            out = Path(folder, "out")
+            out.mkdir()
+            tracks = []
+            soundtrack.import_movies(soundtrack.Folder(folder), str(out), "movie", {}, tracks)
+            # safe_cue turns the space into _, so the second movie needs a name of its own.
+            self.assertEqual([t[0] for t in tracks], ["m_a_b.adx", "m_a_b_2.adx"])
+            self.assertEqual([t[3] for t in tracks], ["A b", "A B"])
+            self.assertEqual((out / "m_a_b.adx").read_bytes(), adx + b"x")
+            self.assertEqual((out / "m_a_b_2.adx").read_bytes(), adx + b"y")
+
 
 class BankTests(unittest.TestCase):
     XMA = 1 | (2 << 1) | (48000 << 4)  # XMA, stereo, 48 kHz

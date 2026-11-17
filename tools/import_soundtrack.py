@@ -428,7 +428,12 @@ def import_movies(source, folder, where, kept, tracks, seen=None):
         seen.add(audio)
         # Every name here goes into tracks.txt, which only takes [A-Za-z0-9_.-]: a movie file
         # named after the disc's own title must not abort the album after it was written.
-        name = "m_" + safe_cue(os.path.splitext(os.path.basename(file))[0].lower()) + ".adx"
+        # Two movie names can sanitise to one file ("a b" and "a_b" both give m_a_b.adx), so
+        # the later one takes a number rather than overwriting the earlier movie's music.
+        base = "m_" + safe_cue(os.path.splitext(os.path.basename(file))[0].lower())
+        name, repeat = base + ".adx", 2
+        while any(track[0] == name for track in tracks):
+            name, repeat = f"{base}_{repeat}.adx", repeat + 1
         with open(os.path.join(folder, name), "wb") as handle:
             handle.write(audio)
         tracks.append((name, -2, -2, kept.get(name, movie_name(file))))
