@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""UDP matchmaker for netplay rooms.
+"""UDP matchmaker for netplay rooms and Xbox Live.
 
 Lists open rooms, pairs a joiner with a host so both can punch through their
 routers, and relays a pair's packets when punching fails. One UDP port, no
 accounts, everything in memory. docs/matchmaking.md describes the packets.
+
+The same port serves the port's Xbox Live service (kinds 12 and up): accounts
+with a proof, session listings, friends, invites, mutes, feedback and stats.
+--store keeps those in one JSON file; without it they last as long as the
+process.
 """
 import argparse
 import asyncio
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
 import socket
 import struct
@@ -19,7 +25,7 @@ import time
 
 MAGIC = b"D2MM"
 VERSION = 2
-HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY, COOKIE = range(1, 11)
+HOST, HOSTED, LIST, ROOMS, JOIN, PEER, GONE, LEAVE, RELAY, COOKIE, ADDR6 = range(1, 12)
 TOKEN = 8  # a client's nonce and the server's cookie
 ASKED = 6 + 2 * TOKEN  # where a HOST, JOIN, LEAVE or RELAY body starts, after the nonce and cookie
 COOKIE_SECONDS = 60  # a cookie lasts this epoch and the next
@@ -37,20 +43,110 @@ RELAY_PER_SECOND = 250  # per direction: 60 frames a second, plus repeats while 
 RELAY_PER_ADDRESS = 2 * RELAY_PER_SECOND  # a second, so one address cannot relay through every pair it makes
 PAIRS_PER_ADDRESS = 16  # each lasts PAIR_SECONDS; without a cap one address adds 10 a second
 MAX_RELAY = 1200
+ADDR6_SECONDS = 20.0  # a client says ADDR6 with each HOST, JOIN and LIST
+ADDR6_PER_SECOND = 10  # per address
+
+# The Live kinds. Big endian, like the room packets.
+(LOGON, LOGGED, SESSION_PUT, SESSION_OK, SESSION_DEL, SEARCH, RESULT, FIND, CONNECT, LPEER, FRIENDS,
+ FRIEND, FRIEND_OP, DONE, PUSH, MUTES, MUTELIST, FEEDBACK, STAT_WRITE, STAT_READ, STATROW, LEADERS) = range(12, 34)
+LIVE_RELAY = 34  # either player of a Live pair: destination virtual address, then one guest datagram
+MAX_PACKET = 1200  # every Live packet, both ways, except a LIVE_RELAY's larger body
+XUID_TYPE = 0x0009  # the XUID's type field; the rest is the first six bytes of the proof's hash
+LIVE_SECONDS = 20.0  # LOGON is the heartbeat every 5 s; this long silent is offline
+CACHE_SECONDS = 60.0  # a repeated request gets its first answer again, for this long
+MAX_CACHE = 2048  # cached answers in all
+CACHE_PER_ADDRESS = 64  # and from one address, past which answers simply are not kept
+MET_SECONDS = 6 * 3600.0  # both players CONNECTing lets each write the other's stats for this long
+MAX_ACCOUNTS = 4096
+MAX_SESSIONS = 4096
+SESSIONS_PER_ACCOUNT = 4
+ACCOUNTS_PER_ADDRESS = 4  # new XUIDs a minute; each keeps a gamertag
+ACCOUNTS_PER_DAY = 16  # and a day, so one address takes 256 days to fill MAX_ACCOUNTS
+MAX_ATTRIBUTES = 0x2a0  # what XOnlineMatchSearchParse writes into a search record
+MAX_FILTERS = 512
+MAX_FRIENDS = 100  # RECOMP_LIVE_MAX_FRIENDS
+MAX_MUTES = 250  # RECOMP_LIVE_MAX_MUTES
+MAX_STAT_WRITE = 64  # RECOMP_LIVE_MAX_STAT_ATTRS; group 7 writes 61
+MAX_STATS = 64  # kept per account and board; group 7 reads back 62
+MAX_BOARDS = 32  # distinct boards an account's stats may name
+MAX_FEEDBACK_KINDS = 16  # distinct feedback types one target may receive
+MAX_RANKINGS = 256  # cached board rankings; the oldest makes room for a new board
+MAX_READ_STATS = 100  # xuids in one STAT_READ: a full friends list (RECOMP_LIVE_MAX_FRIENDS), 831 bytes
+MAX_LEADERS = 100  # RECOMP_LIVE_MAX_LEADER_ROWS
+MAX_RESULTS = 25  # RECOMP_LIVE_MAX_RESULTS
+INVITE_SECONDS = 600.0
+REQUEST_SECONDS = 7 * 24 * 3600.0  # an unanswered friend request lasts a week
+WALL_EPOCH = 1e9  # a wall clock time is past 2001; a store from before it held the monotonic clock
+LIVE_PER_SECOND = 100  # Live packets per address between sweeps; resends every 500 ms are 2
+LIVE_BYTES_PER_SECOND = 256 * 1024  # answer bytes per address between sweeps: three full 100-row group-7 reads
+STORE_SECONDS = 30.0  # at most this often is --store written
+DATAGRAM_MAGIC = b"D2GD"  # the game's datagram, as live_transport.c wraps it
+DATAGRAM_KINDS = (1, 2)  # a game datagram, or a punch the transports exchange
+DATAGRAM_HEAD = 11  # magic, version, 4-byte sender virtual address, 2-byte guest port
+LIVE_RELAY_DESTINATION = 4  # the virtual address a LIVE_RELAY body starts with
+HRESULT_OK = 0
+E_FAIL = 0x80004005
+E_INVALIDARG = 0x80070057
+E_ACCESSDENIED = 0x80070005
+FRIEND_ONLINE = 0x00000001
+FRIEND_PLAYING = 0x00000002
+FRIEND_JOINABLE = 0x00000010
+FRIEND_SENT_INVITE = 0x04000000
+FRIEND_RECEIVED_INVITE = 0x08000000
+FRIEND_INVITE_ACCEPTED = 0x10000000
+FRIEND_INVITE_REJECTED = 0x20000000
+FRIEND_SENT_REQUEST = 0x40000000
+FRIEND_RECEIVED_REQUEST = 0x80000000
+PRESENCE_SESSION = 0x10  # XONLINE_NOTIFICATION's in-a-session bit
 
 HOST_BODY = struct.Struct(">64sBBB32s6sH")  # digest, delay, open, name length, name, LAN endpoint, round trip
 JOIN_BODY = struct.Struct(">I64sB32s6s")  # room id, digest, name length, name, LAN endpoint
 ENTRY = struct.Struct(">IHBB32sH")  # room id, age in seconds, delay, name length, name, the host's round trip
 LAN_NETWORKS = [ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
 
+# Live bodies. Requests carry the nonce and cookie, answers only the nonce, so
+# every body below starts at ASKED or at ASKED - TOKEN.
+LOGON_BODY = struct.Struct(">IQ32s64sII8sB15s")  # request, XUID, proof, digest, title, presence, kid, tag length, tag
+LOGGED_BODY = struct.Struct(">IIIB15s")  # request, hresult, virtual address, tag length, tag
+SESSION_PUT_BODY = struct.Struct(">I8s4IH")  # request, kid, four slot counts, attribute length
+SESSION_OK_BODY = struct.Struct(">II8s16s")  # request, hresult, kid, key
+SESSION_DEL_BODY = struct.Struct(">I8s")
+SEARCH_BODY = struct.Struct(">IIH")  # request, procedure, filter length
+FIND_BODY = struct.Struct(">I8s")
+CONNECT_BODY = struct.Struct(">II")  # request, the other player's virtual address
+LPEER_BODY = struct.Struct(">I6s6s8sB")  # virtual address, public endpoint, LAN endpoint, pair token, relay
+RESULT_BODY = struct.Struct(">IIBB")  # request, hresult, index, total
+RESULT_ROW = struct.Struct(">8s16sQ16sI4IH")  # kid, key, host XUID, host gamertag, host address, slots, attributes
+FRIEND_BODY = struct.Struct(">IBBQ16sII8s")  # request, index, total, XUID, gamertag, flags, title, kid
+FRIENDS_BODY = struct.Struct(">I")  # request
+FRIEND_OP_BODY = struct.Struct(">IBQB8s")  # request, op, XUID, answer, kid
+DONE_BODY = struct.Struct(">II")  # request, hresult
+PUSH_BODY = struct.Struct(">BQ8s")  # type, XUID, kid
+MUTELIST_BODY = struct.Struct(">IIB")  # request, hresult, count
+MUTES_BODY = struct.Struct(">I")  # request
+FEEDBACK_BODY = struct.Struct(">IQI")  # request, XUID, type
+STAT_WRITE_BODY = struct.Struct(">IIQB")  # request, board, XUID, count
+STAT_ITEM = struct.Struct(">HBq")  # stat id, type, value
+STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
+STATROW_BODY = struct.Struct(">IIBBIQ16sIB")  # request, hresult, index, total, board total, XUID, gamertag, rank, count
+LEADERS_BODY = struct.Struct(">IIQIB")  # request, board, pivot XUID, first rank, count
+# One MUTELIST packet carries this many: 1,200 bytes less the header, nonce and count.
+MAX_MUTELIST = (MAX_PACKET - (ASKED - TOKEN) - MUTELIST_BODY.size) // 8
+
 
 def header(kind):
     return MAGIC + bytes((VERSION, kind))
 
 
+def is_v6(address):
+    return ":" in address[0]
+
+
 def endpoint(address):
-    """An IPv4 address and port as 6 bytes, in network order."""
-    return socket.inet_aton(address[0]) + struct.pack(">H", address[1])
+    """An IPv4 address and port as 6 bytes, or an IPv6 one as 18, in network order."""
+    host = address[0].partition("%")[0]
+    packed = socket.inet_pton(socket.AF_INET6, host) if is_v6(address) else socket.inet_aton(host)
+    return packed + struct.pack(">H", address[1])
 
 
 def lan_endpoint(lan):
@@ -63,14 +159,76 @@ def lan_endpoint(lan):
     return lan
 
 
-def peer(nonce, public, lan, name):
-    return header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0")
+def peer(nonce, public, lan, name, v6=None):
+    """v6, the other player's proven IPv6 endpoint, is appended only when both players have one."""
+    return (header(PEER) + nonce + endpoint(public) + lan + bytes((len(name),)) + name.ljust(NAME, b"\0") +
+            (endpoint(v6) if v6 else b""))
 
 
 def over(counts, address, cap):
     """Counts one more for the address since the last sweep; true once that passes the cap."""
     counts[address] = counts.get(address, 0) + 1
     return counts[address] > cap
+
+
+class Links(dict):
+    """(source XUID, target XUID) -> value, also found by either XUID without a scan."""
+
+    def __init__(self):
+        super().__init__()
+        self.of = {}  # XUID -> the keys that name it
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            for xuid in key:
+                self.of.setdefault(xuid, set()).add(key)
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        for xuid in key:
+            keys = self.of.get(xuid)
+            if keys is not None:
+                keys.discard(key)
+                if not keys:
+                    del self.of[xuid]
+
+    def pop(self, key, default=None):
+        if key not in self:
+            return default
+        value = self[key]
+        del self[key]
+        return value
+
+    def naming(self, xuid):
+        """The keys with xuid as source or target."""
+        return list(self.of.get(xuid, ()))
+
+    def sent_by(self, xuid):
+        return sum(1 for source, _ in self.of.get(xuid, ()) if source == xuid)
+
+
+def padded(text, size):
+    """ASCII text in a fixed field, zeros after it."""
+    return text[:size].ljust(size, b"\0")
+
+
+def printable(tag):
+    """A requested gamertag with everything but printable ASCII dropped, at most 15 bytes."""
+    return bytes(c for c in tag if 0x20 <= c <= 0x7e)[:15]
+
+
+def ina_bytes(ina):
+    return struct.unpack(">I", ina)[0]
+
+
+def xuid_of(proof):
+    """The XUID a LOGON's 32-byte proof must belong to."""
+    return (XUID_TYPE << 48) | int.from_bytes(hashlib.sha256(proof).digest()[:6], "big")
+
+
+def online(account, now):
+    return account.endpoint is not None and now - account.seen <= LIVE_SECONDS
 
 
 class Room:
@@ -85,20 +243,99 @@ class Pair:
         self.second, self.count = int(now), 0
 
 
+class Account:
+    """One logged-on XUID. proof is the hash of the proof the first logon gave."""
+
+    def __init__(self, xuid, proof, gamertag, title):
+        self.xuid, self.proof, self.gamertag, self.title = xuid, proof, gamertag, title
+        self.ina = bytes(4)
+        self.endpoint, self.nonce = None, bytes(TOKEN)
+        self.seen = 0.0
+        self.digest = bytes(DIGEST)
+        self.state, self.kid = 0, bytes(8)
+
+
+class LiveSession:
+    def __init__(self, kid, key, host, digest, slots, attributes, now):
+        self.kid, self.key, self.host, self.digest = kid, key, host, digest
+        self.slots, self.attributes = list(slots), bytes(attributes)
+        self.born = self.updated = now
+
+    @property
+    def open(self):
+        # The counts are XOnlineMatchSessionCreate's: public filled, public
+        # open, private filled, private open. Only an open slot is joinable.
+        return self.slots[1] > 0 or self.slots[3] > 0
+
+
+class Invite:
+    def __init__(self, kid, answer, now):
+        self.kid, self.answer, self.seen = kid, answer, now
+
+
+class LivePair:
+    """One CONNECT pairing, by XUID: its token, when it was last used and each side's packets this second."""
+
+    def __init__(self, now, token, opener=None):
+        self.token = token  # the same 8 random bytes to both players, which their punches carry
+        self.opener = opener  # the address whose CONNECT made the pair, which PAIRS_PER_ADDRESS counts
+        self.used, self.second, self.counts = now, int(now), {}
+        self.connected = set()  # the XUIDs that have CONNECTed; both means they met
+        self.met = None  # when the second of them connected, which allows writing each other's stats
+
+    def tick(self, xuid, now):
+        """Counts one packet from xuid in this second and returns the count."""
+        if int(now) != self.second:
+            self.second, self.counts = int(now), {}
+        self.counts[xuid] = self.counts.get(xuid, 0) + 1
+        return self.counts[xuid]
+
+
 class Matchmaker:
-    def __init__(self, random_id=lambda: int.from_bytes(os.urandom(4), "big"), relay_only=False):
+    def __init__(self, random_id=lambda: int.from_bytes(os.urandom(4), "big"), relay_only=False, store=None,
+                 random_bytes=os.urandom, secret=None, clock=time.monotonic, wall=time.time):
         self.rooms = {}  # by the host's public endpoint
         self.by_id = {}
         self.pairs = {}  # by endpoint, both ways
         self.claims = {}  # the room each joining address holds; one each, so one address cannot hide the list
         self.join_counts = {}  # JOINs per address since the last sweep
         self.relay_counts = {}  # RELAYs per address since the last sweep
+        self.addr6_counts = {}  # ADDR6s per address since the last sweep
+        self.v6 = {}  # a client's IPv6 endpoint by its nonce, proven by a cookie, and when it last said it
         self.room_counts, self.minute = {}, None  # rooms each address opened this minute
+        self.account_days, self.day = {}, None  # accounts each address registered today
+        self.answer_bytes = {}  # Live answer bytes per address since the last sweep
         self.random_id = random_id
         self.relay_only = relay_only  # players never learn each other's address
-        self.secret = os.urandom(32)  # cookies stop working across a restart; clients get new ones
+        self.secret = secret if secret is not None else os.urandom(32)  # cookie key; a test fixes it
+        self.clock, self.wall = clock, wall  # the loop clock the packets count in, and the one the store keeps
         self.swept = 0.0
         self.joins = self.relayed = self.relayed_bytes = self.over_cap = 0  # since the last status line
+        self.random_bytes = random_bytes
+        # Live, by XUID, virtual address, session id, (from, to), (board, XUID) and unordered XUID pairs.
+        self.accounts, self.by_ina, self.by_endpoint = {}, {}, {}
+        self.sessions = {}
+        self.friends, self.mutes = {}, {}
+        self.requests, self.invites = Links(), Links()  # by (source, target) XUIDs
+        self.stats, self.feedback = {}, {}
+        self.stats_by_board = {}  # board -> the XUIDs with a row on it, so a ranking reads only its board
+        self.boards_of = {}  # XUID -> the boards it has a row on, for MAX_BOARDS without a scan
+        self.feedback_kinds = {}  # target XUID -> its feedback types, for MAX_FEEDBACK_KINDS
+        self.live_pairs = {}  # CONNECT pairs, by frozenset of two XUIDs, and when last used
+        self.met = {}  # CONNECT pairs and when both first connected, which allows writing each other's stats
+        self.rankings = {}  # each board's sorted ranking and XUID -> rank, until the board is written
+        self.live_counts = {}  # Live packets per address since the last sweep
+        self.connect_counts = {}  # CONNECTs per address since the last sweep
+        self.account_counts = {}  # new accounts each address registered this minute
+        self.live_cache = {}  # (endpoint, nonce, request, kind) -> (answers, expires)
+        self.cache_keys = {}  # address -> its cached keys, oldest first, so one address cannot fill the cache
+        self.ina_next = 0
+        self.connects = self.pushes = self.registered = 0
+        self.store = store
+        self.dirty = False
+        self.stored = 0.0
+        if store:
+            self.load()
 
     def handle(self, data, sender, now):
         """Returns the (packet, endpoint) answers to one packet from sender."""
@@ -106,21 +343,24 @@ class Matchmaker:
             return []
         if now - self.swept >= 1.0:
             self.sweep(now)
+        self.maybe_save(now)
         kind, nonce, cookie, body = data[5], data[6:6 + TOKEN], data[6 + TOKEN:ASKED], data[ASKED:]
         if kind == LIST and len(data) == LIST_BYTES:
             return self.list(data[6 + TOKEN:6 + TOKEN + DIGEST], sender, nonce, now)
+        if is_v6(sender) and kind not in (LIST, ADDR6):
+            return []  # everything else is answered over IPv4, so a room's endpoint stays one
+        if kind == LIVE_RELAY:
+            return self.live_relay(nonce, cookie, body, data, sender, now)
+        if kind >= LOGON:
+            return self.live(kind, nonce, cookie, body, data, sender, now)
         sizes = {HOST: len(body) == HOST_BODY.size, JOIN: len(body) == JOIN_BODY.size, LEAVE: not body,
-                 RELAY: len(body) <= MAX_RELAY}
+                 RELAY: len(body) <= MAX_RELAY, ADDR6: not body and is_v6(sender)}
         if len(data) < ASKED or not sizes.get(kind):
             return []
         # A forged sender address never sees its cookie, so nothing it asks for is stored.
-        epoch = int(now // COOKIE_SECONDS)
-        fresh = self.cookie(sender, epoch)
-        refresh = [(header(COOKIE) + nonce + fresh, sender)]
-        if hmac.compare_digest(cookie, fresh):
-            refresh = []
-        elif not hmac.compare_digest(cookie, self.cookie(sender, epoch - 1)):
-            return refresh
+        refresh, fresh = self.check_cookie(sender, cookie, nonce, now)
+        if refresh is None:
+            return fresh
         if kind == HOST:
             return self.host(body, sender, nonce, now) + refresh
         if kind == JOIN:
@@ -128,7 +368,24 @@ class Matchmaker:
         if kind == LEAVE:
             self.remove(self.rooms.get(sender))
             return refresh
+        if kind == ADDR6:
+            # shortcut: counted per address, so one /64 can fill the table; cap by prefix if that matters.
+            # A full table still refreshes what it holds, so a flood of new nonces cannot expire everyone's.
+            if not over(self.addr6_counts, sender[0], ADDR6_PER_SECOND) and (nonce in self.v6 or len(self.v6) < 2 * MAX_ROOMS):
+                self.v6[nonce] = (sender, now)
+            return refresh
         return self.relay(body, sender, now) + refresh
+
+    def check_cookie(self, sender, cookie, nonce, now):
+        """(answers saying this minute's cookie, None) when the cookie is good, else (None, the answer to send)."""
+        epoch = int(now // COOKIE_SECONDS)
+        fresh = self.cookie(sender, epoch)
+        if hmac.compare_digest(cookie, fresh):
+            return [], None
+        refresh = [(header(COOKIE) + nonce + fresh, sender)]
+        if not hmac.compare_digest(cookie, self.cookie(sender, epoch - 1)):
+            return None, refresh
+        return refresh, None
 
     def cookie(self, sender, epoch):
         """The first bytes of an HMAC of the sender's endpoint and a minute's epoch, which only the server can make."""
@@ -192,8 +449,17 @@ class Matchmaker:
         # LAN endpoints only help two players behind one router; anyone else would learn a private address.
         # shortcut: carrier NAT can put two households on one public address; add a LAN probe if that matters.
         same_router = sender[0] == room.host[0]
-        return [(peer(room.nonce, sender, lan_endpoint(lan) if same_router else bytes(6), name[:length]), room.host),
-                (peer(nonce, room.host, room.lan if same_router else bytes(6), room.name), sender)]
+        # Both players need an IPv6 endpoint, or the one with it would send to a peer that never answers there.
+        theirs, mine = self.v6_of(nonce), self.v6_of(room.nonce)
+        both = theirs and mine
+        return [(peer(room.nonce, sender, lan_endpoint(lan) if same_router else bytes(6), name[:length],
+                      theirs if both else None), room.host),
+                (peer(nonce, room.host, room.lan if same_router else bytes(6), room.name, mine if both else None),
+                 sender)]
+
+    def v6_of(self, nonce):
+        known = self.v6.get(nonce)
+        return known[0] if known else None
 
     def relay(self, body, sender, now):
         pair = self.pairs.get(sender)
@@ -221,15 +487,47 @@ class Matchmaker:
         self.swept = now
         self.join_counts.clear()
         self.relay_counts.clear()
+        self.addr6_counts.clear()
+        for nonce in [nonce for nonce, (_, seen) in self.v6.items() if now - seen > ADDR6_SECONDS]:
+            del self.v6[nonce]
+        self.live_counts.clear()
+        self.answer_bytes.clear()
+        self.connect_counts.clear()
         if int(now // 60) != self.minute:
             self.minute = int(now // 60)
             self.room_counts.clear()
+            self.account_counts.clear()
+        if int(now // 86400) != self.day:
+            if self.day is not None:  # the first sweep keeps what came before it
+                self.account_days.clear()
+            self.day = int(now // 86400)
         for room in [room for room in self.rooms.values() if now - room.seen > ROOM_SECONDS]:
             self.remove(room)
         for address in [address for address, room in self.claims.items() if room.claimed_until <= now]:
             del self.claims[address]
         for key in [key for key, pair in self.pairs.items() if now - pair.used > PAIR_SECONDS]:
             del self.pairs[key]
+        for key in [key for key, pair in self.live_pairs.items() if now - pair.used > PAIR_SECONDS]:
+            del self.live_pairs[key]
+        for key in [key for key, when in self.met.items() if now - when > MET_SECONDS]:
+            del self.met[key]
+        # A session is only joinable while its host is online.
+        for kid in [kid for kid, session in self.sessions.items() if not online(session.host, now)]:
+            del self.sessions[kid]
+        expired = [key for key, when in self.requests.items() if now - when > REQUEST_SECONDS]
+        for key in expired:
+            del self.requests[key]
+        for key in [key for key, invite in self.invites.items() if now - invite.seen > INVITE_SECONDS]:
+            del self.invites[key]
+            expired.append(key)
+        self.dirty = self.dirty or bool(expired)  # the store drops them too
+        for key in [key for key, (_, expires) in self.live_cache.items() if expires <= now]:
+            del self.live_cache[key]
+            keys = self.cache_keys.get(key[0][0])
+            if keys is not None:
+                keys.pop(key, None)
+                if not keys:
+                    del self.cache_keys[key[0][0]]
 
     def status(self, now):
         """One log line of counts, without addresses; the join and relay counts restart after it."""
@@ -239,6 +537,813 @@ class Matchmaker:
                 f"({self.relayed_bytes // 1024} KiB), over the relay cap {self.over_cap}")
         self.joins = self.relayed = self.relayed_bytes = self.over_cap = 0
         return line
+
+    # Live. Answers start with the header and the receiver's
+    # nonce; a request that repeats, as a client resends until it hears, gets its
+    # first answer again instead of a second account, invite or feedback.
+
+    def live(self, kind, nonce, cookie, body, data, sender, now):
+        checks = {LOGON: live_logon_ok, SESSION_PUT: live_put_ok, SESSION_DEL: live_del_ok,
+                  SEARCH: live_search_ok, FIND: live_find_ok, CONNECT: live_connect_ok,
+                  FRIENDS: live_query_ok, FRIEND_OP: live_friend_op_ok, MUTES: live_query_ok,
+                  FEEDBACK: live_feedback_ok, STAT_WRITE: live_stat_write_ok, STAT_READ: live_stat_read_ok,
+                  LEADERS: live_leaders_ok}
+        if len(data) > MAX_PACKET or not checks.get(kind, lambda body: False)(body):
+            return []
+        refresh, refused = self.check_cookie(sender, cookie, nonce, now)
+        if refused is not None:
+            return refused
+        if over(self.live_counts, sender[0], LIVE_PER_SECOND):
+            self.over_cap += 1
+            return refresh
+        key = (sender, nonce, body[:4], kind)
+        cached = self.live_cache.get(key)
+        if cached is not None and cached[1] > now:
+            return self.budgeted(cached[0], sender) + refresh
+        answers = self.live_request(kind, body, nonce, sender, now)
+        # Nothing to repeat for an empty answer: a retry may yet succeed, so it is asked again.
+        # CONNECT is not cached either: it changes nothing twice, its answer must name the
+        # endpoints as they are now, and its repeats then meet the CONNECT cap.
+        if not answers or kind == CONNECT:
+            return self.budgeted(answers, sender) + refresh
+        keys = self.cache_keys.get(sender[0])
+        if key not in self.live_cache:
+            if keys is not None and len(keys) >= CACHE_PER_ADDRESS:
+                oldest = next(iter(keys))  # the address's oldest makes room, so its newest retries stay safe
+                del keys[oldest]
+                self.live_cache.pop(oldest, None)
+            elif len(self.live_cache) >= MAX_CACHE:
+                return self.budgeted(answers, sender) + refresh
+        self.cache_keys.setdefault(sender[0], {})[key] = None
+        self.live_cache[key] = (answers, now + CACHE_SECONDS)
+        return self.budgeted(answers, sender) + refresh
+
+    def budgeted(self, answers, sender):
+        """The answers, or none once they would take the address past its answer bytes this second.
+
+        A request is small and its answer may not be (100 rows of stats), so counting requests
+        alone lets one address pull megabytes a second out of the server."""
+        size = sum(len(packet) for packet, _ in answers)
+        spent = self.answer_bytes.get(sender[0], 0)
+        if spent + size > LIVE_BYTES_PER_SECOND:
+            self.over_cap += 1
+            return []
+        self.answer_bytes[sender[0]] = spent + size
+        return answers
+
+    def live_relay(self, nonce, cookie, body, data, sender, now):
+        """One Live pair's guest datagram, forwarded to the other player as a room RELAY."""
+        if len(body) < LIVE_RELAY_DESTINATION + DATAGRAM_HEAD or len(data) > ASKED + MAX_RELAY:
+            return []
+        refresh, refused = self.check_cookie(sender, cookie, nonce, now)
+        if refused is not None:
+            return refused
+        me = self.online_at(sender, now)
+        other = self.by_ina.get(body[:LIVE_RELAY_DESTINATION])
+        if me is None or other is None or other is me or not online(other, now):
+            return refresh
+        datagram = body[LIVE_RELAY_DESTINATION:]
+        pair = self.live_pairs.get(frozenset((me.xuid, other.xuid)))
+        if (pair is None or now - pair.used > PAIR_SECONDS or datagram[:4] != DATAGRAM_MAGIC or
+                datagram[4] not in DATAGRAM_KINDS):
+            return refresh
+        # As a room pair's relay: the pair's own cap is checked first, so its
+        # drops do not use up the address's share.
+        if pair.tick(me.xuid, now) > RELAY_PER_SECOND or over(self.relay_counts, sender[0], RELAY_PER_ADDRESS):
+            self.over_cap += 1
+            return refresh
+        pair.used = now
+        datagram = datagram[:5] + me.ina + datagram[9:]  # the sender, not whatever the client claimed
+        self.relayed += 1
+        self.relayed_bytes += 6 + TOKEN + len(datagram)
+        return [(header(RELAY) + other.nonce + datagram, other.endpoint)] + refresh
+
+    def live_request(self, kind, body, nonce, sender, now):
+        if kind == LOGON:
+            return self.live_logon(body, nonce, sender, now)
+        if kind == SESSION_PUT:
+            return self.live_session_put(body, nonce, sender, now)
+        if kind == SESSION_DEL:
+            return self.live_session_del(body, nonce, sender, now)
+        if kind == SEARCH:
+            return self.live_search(body, nonce, sender, now)
+        if kind == FIND:
+            return self.live_find(body, nonce, sender, now)
+        if kind == CONNECT:
+            return self.live_connect(body, nonce, sender, now)
+        if kind == FRIENDS:
+            return self.live_friends(body, nonce, sender, now)
+        if kind == FRIEND_OP:
+            return self.live_friend_op(body, nonce, sender, now)
+        if kind == MUTES:
+            return self.live_mutes(body, nonce, sender, now)
+        if kind == FEEDBACK:
+            return self.live_feedback(body, nonce, sender, now)
+        if kind == STAT_WRITE:
+            return self.live_stat_write(body, nonce, sender, now)
+        if kind == STAT_READ:
+            return self.live_stat_read(body, nonce, sender, now)
+        return self.live_leaders(body, nonce, sender, now)
+
+    def online_at(self, sender, now):
+        account = self.by_endpoint.get(sender)
+        return account if account is not None and online(account, now) else None
+
+    def next_ina(self):
+        """10.x.y.z, unique among the accounts, never 10.0.* or 10.255.*, and never a .0 host part."""
+        for _ in range(0xfe * 0x10000):
+            self.ina_next = self.ina_next % (0xfe * 0x10000) + 1
+            ina = bytes((10, (self.ina_next >> 16) & 0xff, (self.ina_next >> 8) & 0xff, self.ina_next & 0xff))
+            if (self.ina_next >> 16) & 0xff not in (0, 0xff) and self.ina_next & 0xff != 0 and ina not in self.by_ina:
+                return ina
+        return bytes(4)
+
+    def taken_tag(self, wanted, xuid):
+        """wanted, or wanted with a digit; past nine of those, with the XUID's own hex digits,
+        which no other account has, so every player who sends the default name gets one."""
+        taken = {other.gamertag.lower() for other in self.accounts.values() if other.xuid != xuid}
+        candidates = [wanted] + [wanted[:14] + bytes((digit,)) for digit in b"123456789"]
+        candidates += [wanted[:9] + b"%06X" % (xuid & 0xffffff), wanted[:3] + b"%012X" % (xuid & 0xffffffffffff)]
+        return next((candidate for candidate in candidates if candidate.lower() not in taken), None)
+
+    def evict_account(self, now):
+        """Makes room in a full table: the account offline longest, and everything that names it.
+
+        One with no stats or friends goes first, so throwaway accounts make room for each other."""
+        offline = [account for account in self.accounts.values() if not online(account, now)]
+        if not offline:
+            return False
+        account = min(offline, key=lambda account: (account.xuid in self.boards_of or
+                                                    bool(self.friends.get(account.xuid)), account.seen))
+        xuid = account.xuid
+        del self.accounts[xuid]
+        self.by_ina.pop(account.ina, None)
+        if self.by_endpoint.get(account.endpoint) is account:
+            del self.by_endpoint[account.endpoint]
+        self.friends.pop(xuid, None)
+        for others in self.friends.values():
+            others.discard(xuid)  # both directions, as a removal does
+        for key in self.requests.naming(xuid):
+            del self.requests[key]
+        for key in self.invites.naming(xuid):
+            del self.invites[key]
+        self.mutes.pop(xuid, None)
+        for mutes in self.mutes.values():
+            mutes.discard(xuid)
+        self.feedback_kinds.pop(xuid, None)
+        for key in [key for key in self.feedback if key[0] == xuid]:
+            del self.feedback[key]  # a feedback row has no sender, only this target
+        for board in self.boards_of.pop(xuid, ()):
+            self.stats.pop((board, xuid), None)
+            rows = self.stats_by_board.get(board)
+            if rows is not None:
+                rows.discard(xuid)
+                if not rows:
+                    del self.stats_by_board[board]
+            self.rankings.pop(board, None)
+        for key in [key for key in self.live_pairs if xuid in key]:
+            del self.live_pairs[key]
+        self.met = {key: when for key, when in self.met.items() if xuid not in key}
+        self.dirty = True
+        return True
+
+    def live_logon(self, body, nonce, sender, now):
+        req, xuid, proof, digest, title, state, kid, length, tag = LOGON_BODY.unpack(body)
+
+        def logged(hresult, ina=bytes(4), given=bytes(0)):
+            return [(header(LOGGED) + nonce +
+                     LOGGED_BODY.pack(req, hresult, ina_bytes(ina), len(given), padded(given, 15)), sender)]
+
+        if xuid == 0 or length > 15:
+            return logged(E_INVALIDARG)
+        if xuid != xuid_of(proof):
+            return logged(E_ACCESSDENIED)  # not the XUID of the proof it carries
+        wanted = printable(tag[:length]) or b"PLAYER"
+        proof = hashlib.sha256(proof).digest()
+        account = self.accounts.get(xuid)
+        if account is None:
+            # The minute's cap counts attempts, to slow a flood; the day's counts accounts made,
+            # so a refused attempt does not lock an address shared by real players out for the day.
+            if (over(self.account_counts, sender[0], ACCOUNTS_PER_ADDRESS) or
+                    self.account_days.get(sender[0], 0) >= ACCOUNTS_PER_DAY):
+                return logged(E_FAIL)
+            if len(self.accounts) >= MAX_ACCOUNTS and not self.evict_account(now):
+                return logged(E_FAIL)
+            given = self.taken_tag(wanted, xuid)  # a taken gamertag gets a digit
+            if given is None:
+                return logged(E_FAIL)
+            account = self.accounts[xuid] = Account(xuid, proof, given, title)
+            account.ina = self.next_ina()  # the game's XNADDR uses it for both ina and inaOnline
+            self.by_ina[account.ina] = account
+            self.account_days[sender[0]] = self.account_days.get(sender[0], 0) + 1
+            self.registered += 1
+            self.dirty = True
+        elif not hmac.compare_digest(account.proof, proof):
+            return logged(E_ACCESSDENIED)  # another proof for this XUID: the game shows a logon error
+        if account.endpoint is not None and self.by_endpoint.get(account.endpoint) is account:
+            del self.by_endpoint[account.endpoint]
+        account.endpoint, account.nonce, account.seen = sender, nonce, now
+        account.digest, account.title = digest, title
+        account.state, account.kid = state, kid
+        self.by_endpoint[sender] = account
+        return logged(HRESULT_OK, account.ina, account.gamertag)
+
+    def live_session_put(self, body, nonce, sender, now):
+        req, kid, s0, s1, s2, s3, length = SESSION_PUT_BODY.unpack_from(body)
+        attributes = body[SESSION_PUT_BODY.size:]
+        me = self.online_at(sender, now)
+
+        def ok(hresult, given=bytes(8), key=bytes(16)):
+            return [(header(SESSION_OK) + nonce + SESSION_OK_BODY.pack(req, hresult, given, key), sender)]
+
+        if me is None:
+            return ok(E_ACCESSDENIED)
+        if kid == bytes(8):
+            if (len(self.sessions) >= MAX_SESSIONS or
+                    sum(1 for session in self.sessions.values() if session.host is me) >= SESSIONS_PER_ACCOUNT):
+                return ok(E_FAIL)
+            while True:
+                kid = self.random_bytes(8)
+                if kid != bytes(8) and kid not in self.sessions:
+                    break
+            key = self.random_bytes(16)
+            session = self.sessions[kid] = LiveSession(kid, key, me, me.digest, (s0, s1, s2, s3), attributes, now)
+            return ok(HRESULT_OK, session.kid, session.key)
+        session = self.sessions.get(kid)
+        if session is None or session.host is not me:
+            return ok(E_INVALIDARG)
+        session.slots, session.attributes, session.updated = [s0, s1, s2, s3], bytes(attributes), now
+        return ok(HRESULT_OK, session.kid, session.key)
+
+    def live_session_del(self, body, nonce, sender, now):
+        req, kid = SESSION_DEL_BODY.unpack(body)
+        me = self.online_at(sender, now)
+        session = self.sessions.get(kid)
+        if me is None:
+            return self.done(req, E_ACCESSDENIED, sender, nonce)
+        if session is None or session.host is not me:
+            return self.done(req, E_INVALIDARG, sender, nonce)
+        del self.sessions[kid]
+        for key in [key for key in self.invites.naming(me.xuid) if self.invites[key].kid == kid]:
+            del self.invites[key]
+        return self.done(req, HRESULT_OK, sender, nonce)
+
+    def done(self, req, hresult, sender, nonce):
+        return [(header(DONE) + nonce + DONE_BODY.pack(req, hresult), sender)]
+
+    def result(self, req, hresult, sender, nonce, rows=()):
+        """One RESULT per row; a single one saying total 0 when there is none."""
+        rows = list(rows)[:MAX_RESULTS]
+        if not rows:
+            return [(header(RESULT) + nonce + RESULT_BODY.pack(req, hresult, 0, 0), sender)]
+        answers = []
+        for index, session in enumerate(rows):
+            attributes = session.attributes[:MAX_ATTRIBUTES]
+            body = RESULT_BODY.pack(req, hresult, index, len(rows))
+            body += RESULT_ROW.pack(session.kid, session.key, session.host.xuid,
+                                    padded(session.host.gamertag, 16), ina_bytes(session.host.ina), *session.slots,
+                                    len(attributes)) + attributes
+            answers.append((header(RESULT) + nonce + body, sender))
+        return answers
+
+    def live_search(self, body, nonce, sender, now):
+        req, procedure, length = SEARCH_BODY.unpack_from(body)
+        me = self.online_at(sender, now)
+        if me is None:
+            return self.result(req, E_ACCESSDENIED, sender, nonce)
+        rows = [session for session in self.sessions.values()
+                if session.digest == me.digest and session.open and session.host is not me]
+        rows.sort(key=lambda session: session.born, reverse=True)  # newest first, as the room list
+        return self.result(req, HRESULT_OK, sender, nonce, rows)
+
+    def live_find(self, body, nonce, sender, now):
+        req, kid = FIND_BODY.unpack(body)
+        me = self.online_at(sender, now)
+        session = self.sessions.get(kid)
+        if me is None:
+            return self.result(req, E_ACCESSDENIED, sender, nonce)
+        if session is None:
+            return self.result(req, E_INVALIDARG, sender, nonce)
+        return self.result(req, HRESULT_OK, sender, nonce, [session])
+
+    def hosts_session(self, account):
+        """True when the account hosts a Live session from SESSION_PUT that is still alive."""
+        return any(session.host is account for session in self.sessions.values())
+
+    def live_pairs_at(self, address):
+        """The Live pairs address opened; pairs others opened with its players do not count."""
+        return sum(1 for pair in self.live_pairs.values() if pair.opener == address)
+
+    def live_connect(self, body, nonce, sender, now):
+        req, ina = CONNECT_BODY.unpack(body)
+        me = self.online_at(sender, now)
+        other = self.by_ina.get(struct.pack(">I", ina))
+        if (me is None or other is None or other is me or not online(other, now) or other.digest != me.digest):
+            return []
+        if over(self.connect_counts, sender[0], JOINS_PER_SECOND):
+            return []
+        key = frozenset((me.xuid, other.xuid))
+        pair = self.live_pairs.get(key)
+        hosting = self.hosts_session(other)
+        # An address is the other player's to learn only when they host a Live
+        # session, or when they connected here first: a joiner may connect back.
+        if (pair is None or now - pair.used > PAIR_SECONDS) and not hosting:
+            return []
+        if key not in self.live_pairs and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
+            return []
+        if pair is None or now - pair.used > PAIR_SECONDS:
+            pair = self.live_pairs[key] = LivePair(now, self.random_bytes(8), sender[0])
+        if hosting:
+            pair.used = now  # a CONNECT to a player who still hosts keeps the pair; one-sided repeats do not
+        pair.connected.add(me.xuid)
+        if len(pair.connected) == 2 and pair.met is None:
+            pair.met = now  # the first time both connected, which a repeat must not push later
+        if pair.met is not None:
+            self.met[key] = pair.met  # fixed per pair, so a repeat cannot push it later, but a rematch can
+        self.connects += 1
+        relay = 1 if self.relay_only else 0
+        empty = ("0.0.0.0", 0)
+
+        def intro(target, peer_account):
+            # LOGON carries no LAN endpoint, so Live players behind one router
+            # punch through their public addresses; the field stays zero.
+            public = empty if relay else peer_account.endpoint
+            return (header(LPEER) + target.nonce + LPEER_BODY.pack(ina_bytes(peer_account.ina), endpoint(public),
+                                                                   bytes(6), pair.token, relay),
+                    target.endpoint)
+
+        answers = [intro(me, other)]
+        if other.endpoint != sender:
+            answers.append(intro(other, me))
+        return answers
+
+    def live_friends(self, body, nonce, sender, now):
+        req = FRIENDS_BODY.unpack(body)[0]
+        me = self.online_at(sender, now)
+        if me is None:
+            return self.friend_rows(req, sender, nonce, [])
+        rows = [self.friend_row(me, xuid, now) for xuid in self.related(me.xuid)]
+        return self.friend_rows(req, sender, nonce, rows)
+
+    def related(self, xuid):
+        """Accepted friends and pending requests, in one stable order."""
+        return sorted(self.friends.get(xuid, set()) |
+                      {other for key in self.requests.naming(xuid) for other in key if other != xuid})
+
+    def friend_rows(self, req, sender, nonce, rows):
+        rows = rows[:MAX_FRIENDS]
+        if not rows:
+            return [(header(FRIEND) + nonce + FRIEND_BODY.pack(req, 0, 0, 0, bytes(16), 0, 0, bytes(8)), sender)]
+        answers = []
+        for index, row in enumerate(rows):
+            answers.append((header(FRIEND) + nonce + FRIEND_BODY.pack(req, index, len(rows), *row), sender))
+        return answers
+
+    def friend_row(self, me, xuid, now):
+        other = self.accounts.get(xuid)
+        flags = 0
+        if other is not None:
+            if online(other, now):
+                flags |= FRIEND_ONLINE
+                if other.state & PRESENCE_SESSION:
+                    flags |= FRIEND_PLAYING
+                    session = self.sessions.get(other.kid)
+                    if session is not None and session.open:
+                        flags |= FRIEND_JOINABLE
+            if (me.xuid, xuid) in self.requests:
+                flags |= FRIEND_SENT_REQUEST
+            if (xuid, me.xuid) in self.requests:
+                flags |= FRIEND_RECEIVED_REQUEST
+            invite = self.invites.get((me.xuid, xuid))
+            if invite is not None and invite.answer is None:
+                flags |= FRIEND_SENT_INVITE
+            elif invite is not None:
+                flags |= FRIEND_INVITE_ACCEPTED if invite.answer == 1 else FRIEND_INVITE_REJECTED
+            invite = self.invites.get((xuid, me.xuid))
+            if invite is not None and invite.answer is None:
+                flags |= FRIEND_RECEIVED_INVITE
+        kid = other.kid if other is not None and other.state & PRESENCE_SESSION else bytes(8)
+        return (xuid, padded(other.gamertag if other is not None else b"", 16), flags,
+                other.title if other is not None else 0, kid)
+
+    def live_friend_op(self, body, nonce, sender, now):
+        req, op, xuid, answer, kid = FRIEND_OP_BODY.unpack(body)
+        me = self.online_at(sender, now)
+        if me is None:
+            return self.done(req, E_ACCESSDENIED, sender, nonce)
+        other = self.accounts.get(xuid)
+        if xuid == 0 or xuid == me.xuid or other is None:
+            return self.done(req, E_INVALIDARG, sender, nonce)
+        pushes = []
+        if op == 1:  # request
+            if self.are_friends(me.xuid, xuid):
+                return self.done(req, HRESULT_OK, sender, nonce)
+            if (xuid, me.xuid) in self.requests:
+                del self.requests[(xuid, me.xuid)]
+                self.add_friend(me.xuid, xuid)
+            else:
+                if self.requests.sent_by(me.xuid) >= MAX_FRIENDS:
+                    return self.done(req, E_FAIL, sender, nonce)
+                self.requests[(me.xuid, xuid)] = now
+            self.dirty = True
+            pushes = self.push(xuid, 1, me.xuid, bytes(8), now)
+        elif op == 2:  # answer a request
+            if (xuid, me.xuid) not in self.requests or answer > 2:
+                return self.done(req, E_INVALIDARG, sender, nonce)
+            del self.requests[(xuid, me.xuid)]
+            if answer == 1:
+                self.add_friend(me.xuid, xuid)
+            self.dirty = True
+            pushes = self.push(xuid, 1, me.xuid, bytes(8), now)
+        elif op == 3:  # remove
+            self.drop_friend(me.xuid, xuid)
+            self.requests.pop((me.xuid, xuid), None)
+            self.requests.pop((xuid, me.xuid), None)
+            self.invites.pop((me.xuid, xuid), None)
+            self.invites.pop((xuid, me.xuid), None)
+            self.dirty = True
+            pushes = self.push(xuid, 1, me.xuid, bytes(8), now)
+        elif op == 4:  # game invite
+            session = self.sessions.get(kid)
+            if session is None or session.host is not me:
+                return self.done(req, E_INVALIDARG, sender, nonce)
+            if self.invites.sent_by(me.xuid) > MAX_FRIENDS:
+                return self.done(req, E_FAIL, sender, nonce)
+            self.invites[(me.xuid, xuid)] = Invite(kid, None, now)
+            self.dirty = True
+            pushes = self.push(xuid, 2, me.xuid, kid, now)
+        elif op == 5:  # revoke an invite
+            invite = self.invites.get((me.xuid, xuid))
+            if invite is None or invite.answer is not None:
+                return self.done(req, E_INVALIDARG, sender, nonce)
+            del self.invites[(me.xuid, xuid)]
+            self.dirty = True
+            pushes = self.push(xuid, 1, me.xuid, bytes(8), now)
+        elif op == 6:  # answer an invite
+            invite = self.invites.get((xuid, me.xuid))
+            if invite is None or invite.answer is not None or answer > 2 or (kid != bytes(8) and kid != invite.kid):
+                return self.done(req, E_INVALIDARG, sender, nonce)
+            invite.answer, invite.seen = answer, now
+            self.dirty = True
+            pushes = self.push(xuid, 3, me.xuid, invite.kid, now)
+        else:
+            return self.done(req, E_INVALIDARG, sender, nonce)
+        return self.done(req, HRESULT_OK, sender, nonce) + pushes
+
+    def are_friends(self, first, second):
+        return second in self.friends.get(first, set())
+
+    def add_friend(self, first, second):
+        self.friends.setdefault(first, set()).add(second)
+        self.friends.setdefault(second, set()).add(first)
+
+    def drop_friend(self, first, second):
+        self.friends.get(first, set()).discard(second)
+        self.friends.get(second, set()).discard(first)
+
+    def push(self, xuid, kind, source, kid, now):
+        """An unsolicited PUSH to a player who is online, from another account."""
+        target = self.accounts.get(xuid)
+        if target is None or not online(target, now):
+            return []
+        self.pushes += 1
+        return [(header(PUSH) + target.nonce + PUSH_BODY.pack(kind, source, kid), target.endpoint)]
+
+    def live_mutes(self, body, nonce, sender, now):
+        req = MUTES_BODY.unpack(body)[0]
+        me = self.online_at(sender, now)
+        if me is None:
+            return [(header(MUTELIST) + nonce + MUTELIST_BODY.pack(req, E_ACCESSDENIED, 0), sender)]
+        mutes = sorted(self.mutes.get(me.xuid, set()))[:MAX_MUTELIST]
+        answer = header(MUTELIST) + nonce + MUTELIST_BODY.pack(req, HRESULT_OK, len(mutes))
+        return [(answer + b"".join(struct.pack(">Q", xuid) for xuid in mutes), sender)]
+
+    def live_feedback(self, body, nonce, sender, now):
+        req, xuid, kind = FEEDBACK_BODY.unpack(body)
+        if self.online_at(sender, now) is None:
+            return self.done(req, E_ACCESSDENIED, sender, nonce)
+        if xuid == 0 or xuid not in self.accounts:
+            return self.done(req, E_INVALIDARG, sender, nonce)
+        kinds = self.feedback_kinds.get(xuid, ())
+        if kind not in kinds and len(kinds) >= MAX_FEEDBACK_KINDS:
+            return self.done(req, E_INVALIDARG, sender, nonce)  # a new type past the target's cap
+        self.feedback_kinds.setdefault(xuid, set()).add(kind)
+        self.feedback[(xuid, kind)] = self.feedback.get((xuid, kind), 0) + 1  # counted, never stored
+        return self.done(req, HRESULT_OK, sender, nonce)
+
+    def live_stat_write(self, body, nonce, sender, now):
+        req, board, xuid, count = STAT_WRITE_BODY.unpack_from(body)
+        me = self.online_at(sender, now)
+        if me is None:
+            return self.done(req, E_ACCESSDENIED, sender, nonce)
+        target = self.accounts.get(xuid)
+        met = self.met.get(frozenset((me.xuid, xuid)))
+        if target is None or (xuid != me.xuid and (met is None or now - met > MET_SECONDS)):
+            return self.done(req, E_ACCESSDENIED, sender, nonce)  # one's own or a paired player's
+        stats = self.stats.get((board, xuid), {})
+        incoming = {}
+        for index in range(count):
+            stat_id, kind, value = STAT_ITEM.unpack_from(body, STAT_WRITE_BODY.size + index * STAT_ITEM.size)
+            if kind not in (1, 2, 3):
+                return self.done(req, E_INVALIDARG, sender, nonce)
+            incoming[stat_id] = (kind, value)
+        if len(set(stats) | set(incoming)) > MAX_STATS:
+            return self.done(req, E_FAIL, sender, nonce)
+        if (board, xuid) not in self.stats and len(self.boards_of.get(xuid, ())) >= MAX_BOARDS:
+            return self.done(req, E_INVALIDARG, sender, nonce)  # a new board past the account's cap
+        self.stats.setdefault((board, xuid), {}).update(incoming)
+        self.stats_by_board.setdefault(board, set()).add(xuid)
+        self.boards_of.setdefault(xuid, set()).add(board)
+        self.rankings.pop(board, None)
+        self.dirty = True
+        return self.done(req, HRESULT_OK, sender, nonce)
+
+    def board_ranking(self, board):
+        """(rank, XUID) from the highest value of the board's lowest stat id down, cached."""
+        return self.board_tally(board)[0]
+
+    def board_tally(self, board):
+        """The board's ranking and XUID to rank, cached until that board is written."""
+        cached = self.rankings.pop(board, None)
+        if cached is not None:
+            self.rankings[board] = cached  # most recently used last
+            return cached
+        rows = []
+        for xuid in self.stats_by_board.get(board, ()):
+            stats = self.stats.get((board, xuid))
+            if not stats or xuid not in self.accounts:
+                continue
+            kind, value = stats[min(stats)]
+            if kind == 3:  # the value is a double's bits
+                value = struct.unpack(">d", struct.pack(">q", value))[0]
+            rows.append((value, xuid))
+        rows.sort(key=lambda row: (-row[0], row[1]))
+        ranking = [(rank + 1, xuid) for rank, (_, xuid) in enumerate(rows)]
+        cached = (ranking, {xuid: rank for rank, xuid in ranking})
+        if len(self.rankings) >= MAX_RANKINGS:
+            del self.rankings[next(iter(self.rankings))]  # the least recently used
+        self.rankings[board] = cached
+        return cached
+
+    def board_total(self, board):
+        return len(self.board_ranking(board))
+
+    def stat_row(self, req, board, xuid, tally, index, total, hresult=HRESULT_OK):
+        """One row, one packet: 43 body bytes plus 11 per stat, 747 at most.
+
+        STAT_READ and LEADERS already answer one row per packet (index and
+        total track them), so a 61-stat group-7 row needs no split."""
+        ranking, ranks = tally
+        rank = ranks.get(xuid, 0)
+        stats = self.stats.get((board, xuid), {})
+        account = self.accounts.get(xuid)
+        items = sorted(stats.items())[:MAX_STATS]
+        body = STATROW_BODY.pack(req, hresult, index, total, len(ranking), xuid,
+                                 padded(account.gamertag if account is not None else b"", 16), rank, len(items))
+        for stat_id, (kind, value) in items:
+            body += STAT_ITEM.pack(stat_id, kind, value)
+        return body
+
+    def stat_rows(self, req, board, xuids, sender, nonce, hresult=HRESULT_OK):
+        tally = self.board_tally(board)
+        if not xuids:
+            return [(header(STATROW) + nonce + self.stat_row(req, board, 0, tally, 0, 0, hresult), sender)]
+        return [(header(STATROW) + nonce + self.stat_row(req, board, xuid, tally, index, len(xuids), hresult),
+                 sender) for index, xuid in enumerate(xuids)]
+
+    def live_stat_read(self, body, nonce, sender, now):
+        req, board, count = STAT_READ_BODY.unpack_from(body)
+        xuids = [struct.unpack_from(">Q", body, STAT_READ_BODY.size + index * 8)[0] for index in range(count)]
+        if self.online_at(sender, now) is None:
+            return self.stat_rows(req, board, [], sender, nonce, E_ACCESSDENIED)
+        return self.stat_rows(req, board, xuids, sender, nonce)
+
+    def live_leaders(self, body, nonce, sender, now):
+        req, board, pivot, first, count = LEADERS_BODY.unpack(body)
+        if self.online_at(sender, now) is None:
+            return self.stat_rows(req, board, [], sender, nonce, E_ACCESSDENIED)
+        ranking, ranks = self.board_tally(board)
+        start = ranks.get(pivot, 0) if pivot != 0 else 0
+        if start == 0:
+            start = max(first, 1)
+        rows = [xuid for _, xuid in ranking[start - 1:start - 1 + min(count, MAX_LEADERS)]]  # rank r is at r - 1
+        return self.stat_rows(req, board, rows, sender, nonce)
+
+    # --store: accounts and what outlives the process, in one JSON file.
+
+    def load(self):
+        try:
+            with open(self.store, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as error:
+            print(f"matchmaker: cannot read {self.store}: {error}", file=sys.stderr, flush=True)
+            return
+        if not isinstance(data, dict) or data.get("version") != 1:
+            print(f"matchmaker: {self.store} is not version 1", file=sys.stderr, flush=True)
+            return
+        loaded = self.clock()  # a store from before seen existed counts as seen now
+        wall = self.wall()
+        skipped = 0
+
+        def entries(name):
+            value = data.get(name, [])
+            return value if isinstance(value, list) else []
+
+        def heard(value):
+            """The loop clock's time from a store's wall clock one; an old store held monotonic seconds."""
+            try:
+                when = float(value)
+            except (TypeError, ValueError):
+                return loaded
+            if when < WALL_EPOCH:
+                return loaded
+            return loaded - max(0.0, wall - when)
+
+        def pair(entry):
+            if len(entry) != 2:
+                raise ValueError("not a pair")
+            return int(entry[0]), int(entry[1])
+
+        for entry in entries("accounts"):
+            try:
+                account = Account(int(entry["xuid"]), bytes.fromhex(entry["proof"])[:32],
+                                   printable(entry["gamertag"].encode("utf-8")) or b"PLAYER", int(entry["title"]))
+                account.seen = heard(entry.get("seen", loaded))
+            except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+                skipped += 1
+                continue
+            if account.xuid == 0 or account.xuid in self.accounts or len(account.proof) != 32:
+                continue
+            account.ina = self.next_ina()
+            self.accounts[account.xuid] = account
+            self.by_ina[account.ina] = account
+        for entry in entries("friends"):
+            try:
+                first, second = pair(entry)
+            except (KeyError, TypeError, ValueError, IndexError):
+                skipped += 1
+                continue
+            self.add_friend(first, second)
+        for entry in entries("requests"):
+            try:
+                source, target = int(entry[0]), int(entry[1])
+                when = heard(entry[2]) if len(entry) > 2 else loaded
+            except (KeyError, TypeError, ValueError, IndexError):
+                skipped += 1
+                continue
+            self.requests[(source, target)] = when
+        for entry in entries("invites"):
+            try:
+                invite = Invite(bytes.fromhex(entry["kid"]), entry["answer"],
+                                heard(entry["seen"]) if "seen" in entry else loaded)
+                from_xuid, to_xuid = int(entry["from"]), int(entry["to"])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                skipped += 1
+                continue
+            self.invites[(from_xuid, to_xuid)] = invite
+        for entry in entries("mutes"):
+            try:
+                owner, muted = pair(entry)
+            except (KeyError, TypeError, ValueError, IndexError):
+                skipped += 1
+                continue
+            self.mutes.setdefault(owner, set()).add(muted)
+        for entry in entries("stats"):
+            try:
+                stats = {(int(stat_id), int(kind), int(value)) for stat_id, kind, value in entry["stats"]}
+                board, xuid = int(entry["board"]), int(entry["xuid"])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                skipped += 1
+                continue
+            self.stats[(board, xuid)] = {stat_id: (kind, value) for stat_id, kind, value in stats}
+            self.stats_by_board.setdefault(board, set()).add(xuid)
+            self.boards_of.setdefault(xuid, set()).add(board)
+        if skipped:
+            print(f"matchmaker: skipped {skipped} malformed entries in {self.store}", file=sys.stderr, flush=True)
+
+    def document(self, now=None):
+        now = self.clock() if now is None else now
+        wall = self.wall()
+
+        def heard(seen):
+            """The wall clock's time for a time the loop clock gave."""
+            return wall - max(0.0, now - seen)
+
+        return {
+            "version": 1,
+            "accounts": [{"xuid": account.xuid, "proof": account.proof.hex(),
+                          "gamertag": account.gamertag.decode("ascii", "replace"), "title": account.title,
+                          "seen": heard(account.seen)}
+                         for account in self.accounts.values()],
+            "friends": sorted([first, second] for first, others in self.friends.items() for second in others
+                              if first < second),
+            "requests": sorted([source, target, heard(when)] for (source, target), when in self.requests.items()),
+            "invites": [{"kid": invite.kid.hex(), "from": source, "to": target, "answer": invite.answer,
+                         "seen": heard(invite.seen)}
+                        for (source, target), invite in sorted(self.invites.items())],
+            "mutes": sorted([owner, muted] for owner, mutes in self.mutes.items() for muted in mutes),
+            "stats": [{"board": board, "xuid": xuid,
+                       "stats": [[stat_id, kind, value] for stat_id, (kind, value) in sorted(stats.items())]}
+                      for (board, xuid), stats in sorted(self.stats.items())],
+        }
+
+    def maybe_save(self, now):
+        if self.store is None or not self.dirty or now - self.stored < STORE_SECONDS:
+            return
+        self.save(now)
+
+    def save(self, now=None):
+        """Writes the store beside itself and renames it, so a crash leaves the last good file."""
+        if self.store is None or not self.dirty:
+            return
+        try:
+            temporary = self.store + ".tmp"
+            with open(temporary, "w", encoding="utf-8", newline="\n") as file:
+                json.dump(self.document(now), file, sort_keys=True, separators=(",", ":"))
+                file.write("\n")
+            os.replace(temporary, self.store)
+        except OSError as error:
+            print(f"matchmaker: cannot write {self.store}: {error}", file=sys.stderr, flush=True)
+            return
+        self.dirty = False
+        if now is not None:
+            self.stored = now
+
+    def live_status(self, now):
+        """One log line of Live counts, without a name, XUID or address."""
+        self.sweep(now)
+        return (f"live: accounts {len(self.accounts)}, online {sum(1 for account in self.accounts.values() if online(account, now))}, "
+                f"sessions {len(self.sessions)}, connects {self.connects}, pushes {self.pushes}, "
+                f"friends {sum(len(others) for others in self.friends.values()) // 2}, "
+                f"requests {len(self.requests)}, invites {len(self.invites)}, "
+                f"mutes {sum(len(mutes) for mutes in self.mutes.values())}, "
+                f"stats {len(self.stats)}, feedback {sum(self.feedback.values())}")
+
+
+# Request sizes, before any state is read. A malformed packet gets no answer.
+def live_logon_ok(body):
+    return len(body) == LOGON_BODY.size and body[LOGON_BODY.size - 16] <= 15
+
+
+def live_put_ok(body):
+    if len(body) < SESSION_PUT_BODY.size:
+        return False
+    length = struct.unpack_from(">H", body, SESSION_PUT_BODY.size - 2)[0]
+    return length <= MAX_ATTRIBUTES and SESSION_PUT_BODY.size + length == len(body)
+
+
+def live_del_ok(body):
+    return len(body) == SESSION_DEL_BODY.size
+
+
+def live_search_ok(body):
+    if len(body) < SEARCH_BODY.size:
+        return False
+    length = struct.unpack_from(">H", body, SEARCH_BODY.size - 2)[0]
+    return length <= MAX_FILTERS and SEARCH_BODY.size + length == len(body)
+
+
+def live_find_ok(body):
+    return len(body) == FIND_BODY.size
+
+
+def live_connect_ok(body):
+    return len(body) == CONNECT_BODY.size
+
+
+def live_query_ok(body):
+    return len(body) == 4
+
+
+def live_friend_op_ok(body):
+    return len(body) == FRIEND_OP_BODY.size
+
+
+def live_feedback_ok(body):
+    return len(body) == FEEDBACK_BODY.size
+
+
+def live_stat_write_ok(body):
+    # A full write is 17 body bytes (request, board, XUID, count) plus 11 per
+    # stat: 721 at 64 stats, 743 with the header, nonce and cookie, inside the
+    # 1,200-byte packet the handle() check already enforces.
+    if len(body) < STAT_WRITE_BODY.size:
+        return False
+    count = body[STAT_WRITE_BODY.size - 1]
+    return count <= MAX_STAT_WRITE and STAT_WRITE_BODY.size + count * STAT_ITEM.size == len(body)
+
+
+def live_stat_read_ok(body):
+    if len(body) < STAT_READ_BODY.size:
+        return False
+    count = body[STAT_READ_BODY.size - 1]
+    return count <= MAX_READ_STATS and STAT_READ_BODY.size + count * 8 == len(body)
+
+
+def live_leaders_ok(body):
+    return len(body) == LEADERS_BODY.size and body[LEADERS_BODY.size - 1] <= MAX_LEADERS
 
 
 class Server(asyncio.DatagramProtocol):
@@ -251,24 +1356,40 @@ class Server(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, sender):
         for packet, target in self.matchmaker.handle(data, sender[:2], self.loop.time()):
-            self.transport.sendto(packet, target)
+            # An IPv6 answer goes to the sender's full 4-tuple; Windows' event loop rejects the short form.
+            self.transport.sendto(packet, sender if target == sender[:2] else target)
 
 
-async def serve(address, port, relay_only, status_seconds):
+async def serve(address, port, relay_only, status_seconds, address6="::", store=None):
     loop = asyncio.get_running_loop()
-    matchmaker = Matchmaker(relay_only=relay_only)
+    matchmaker = Matchmaker(relay_only=relay_only, store=store)
     await loop.create_datagram_endpoint(lambda: Server(matchmaker), local_addr=(address, port))
-    print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}", flush=True)
-    if status_seconds <= 0:
-        await asyncio.Event().wait()
-    while True:
-        await asyncio.sleep(status_seconds)
-        print(matchmaker.status(loop.time()), flush=True)
+    print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}"
+          f"{' storing ' + store if store else ''}", flush=True)
+    if address6:
+        # Its own socket, v6 only, so the IPv4 socket keeps its endpoints and a v4-only host still starts.
+        try:
+            six = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            six.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            six.bind((address6, port))
+            await loop.create_datagram_endpoint(lambda: Server(matchmaker), sock=six)
+            print(f"matchmaker: UDP [{address6}]:{port}", flush=True)
+        except OSError as error:
+            print(f"matchmaker: no IPv6 ({error})", flush=True)
+    try:
+        if status_seconds <= 0:
+            await asyncio.Event().wait()
+        while True:
+            await asyncio.sleep(status_seconds)
+            print(matchmaker.status(loop.time()), flush=True)
+            print(matchmaker.live_status(loop.time()), flush=True)
+    finally:
+        matchmaker.save(loop.time())
 
 
-def probe(host, port, timeout=3.0):
+def probe(host, port, timeout=3.0, family=socket.AF_INET):
     """Asks a matchmaker for its list; returns the answer's round trip in ms, or None without one."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ask:
+    with socket.socket(family, socket.SOCK_DGRAM) as ask:
         ask.settimeout(timeout)
         nonce = os.urandom(TOKEN)
         started = time.monotonic()
@@ -288,14 +1409,18 @@ def main():
     parser.add_argument("--port", type=int, default=47700)
     parser.add_argument("--relay-only", action="store_true", help="relay every pair, so no player learns another's address")
     parser.add_argument("--status", type=float, default=60.0, help="seconds between status lines, 0 for none")
+    parser.add_argument("--address6", default="::", help="IPv6 address to bind, empty for IPv4 only")
+    parser.add_argument("--store", metavar="PATH", help="keep Live accounts, friends and stats in this JSON file")
     parser.add_argument("--probe", metavar="HOST:PORT", help="check that a running matchmaker answers, then exit")
+    parser.add_argument("--ipv6", action="store_true", help="probe over IPv6; HOST may be an address, so use the last colon for the port")
     arguments = parser.parse_args()
     if arguments.probe:
-        host, _, port = arguments.probe.partition(":")
-        took = probe(host, int(port or 47700))
+        host, _, port = arguments.probe.rpartition(":") if arguments.ipv6 else arguments.probe.partition(":")
+        took = probe(host.strip("[]"), int(port or 47700), family=socket.AF_INET6 if arguments.ipv6 else socket.AF_INET)
         print(f"{arguments.probe}: " + (f"answered in {took:.0f} ms" if took is not None else "no answer"))
         sys.exit(0 if took is not None else 1)
-    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status))
+    asyncio.run(serve(arguments.address, arguments.port, arguments.relay_only, arguments.status,
+                      arguments.address6, arguments.store))
 
 
 if __name__ == "__main__":
