@@ -11,7 +11,9 @@ have only run in unit tests. Voice chat is not supported.
 
 Live is off unless the runner starts with `RECOMP_LIVE=1`. It is not offered
 when the runner hosts, joins or replays a room session from the command
-line. When Live is off, the Live pages report no account, as before.
+line. When Live is off, the Live pages report no account, as before. The
+start-up that reads `RECOMP_LIVE` and installs the backend comes with the Live
+fight wiring, so the switch does nothing yet.
 
 - **Matchmaker.** Live uses the matchmaker from NETPLAY SETTINGS, or the
   built-in one when that is empty. `RECOMP_LIVE_SERVER=host:port` (or just
