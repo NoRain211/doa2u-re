@@ -392,7 +392,7 @@ with everything that names it:
 friendships in both directions, pending requests and invites, stats rows,
 feedback, mutes, Live pairings and cached rankings. If every account is
 online, the new account is refused. Those caps are per address, so filling
-the table takes 256 addresses at the daily cap, or 1,024 minutes from one;
+the table takes 256 addresses at the daily cap, or 256 days from one;
 a flood that gets there costs the evicted players the data the file held for
 them. A repeated request id from the same
 socket and nonce gets its first answer again for 60 s, which is what makes a
@@ -426,8 +426,10 @@ times that allow writing another player's stats are not written. The file is
 written to a fresh temporary file beside it at most every 30 s and at exit,
 flushed and synced to the disk there, and renamed over `PATH`, so a crash
 leaves the last good file; a write that fails is reported on stderr and
-removes its temporary file, and the last good file stays. A missing file is
-no error; a damaged one is reported on stderr and left alone.
+removes its temporary file, and the last good file stays. On POSIX systems
+the new file is owner-only (`0600`), so a store the server did not create
+that way is narrowed on its next save. A missing file is no error; a damaged
+one is reported on stderr and left alone.
 
 ## In the game
 

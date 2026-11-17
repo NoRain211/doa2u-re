@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import stat
 import struct
 import sys
 import tempfile
@@ -1405,6 +1406,20 @@ class LiveTest(unittest.TestCase):
             self.assertEqual(json.loads(Path(path).read_text(encoding="utf-8"))["accounts"][0]["xuid"], A)
             self.assertTrue(os.path.isdir(path + ".tmp"))
             self.assertEqual(sorted(os.listdir(folder)), ["live.json", "live.json.tmp"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes")
+    def test_the_store_is_written_owner_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            self.server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.logon(now=1.0)
+            self.server.save(2.0)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            # A store made wider by an older server or by hand is narrowed by the next save.
+            os.chmod(path, 0o644)
+            self.server.dirty = True
+            self.server.save(3.0)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 
     def test_without_a_store_nothing_is_written(self):
         with tempfile.TemporaryDirectory() as folder:
