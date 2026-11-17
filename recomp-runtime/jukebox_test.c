@@ -82,6 +82,23 @@ static void test_names(const char *base)
     /* Complete: a second pass leaves every line where it was. */
     apply_names(&album, "album");
     CHECK(read_text(path, again, sizeof again) == strlen(text) && strcmp(text, again) == 0);
+
+    /* A line longer than PATH_SIZE stays one line: its tail that looks like an
+       entry renames nothing, and the line is kept whole. */
+    static char long_comment[1100];
+    memset(long_comment, 'x', 1023u);
+    long_comment[0] = '#';
+    snprintf(long_comment + 1023, sizeof long_comment - 1023u, "two.adx = Sneaky\n");
+    write_file(path, long_comment, strlen(long_comment));
+    apply_names(&album, "album");
+    CHECK(strcmp(tracks[1].name, "Two") == 0);
+    CHECK(read_text(path, again, sizeof again) > 0u && strstr(again, long_comment) != NULL);
+
+    /* Its last line without a newline is kept, and gains one. */
+    write_file(path, "# last", 6u);
+    apply_names(&album, "album");
+    (void)read_text(path, again, sizeof again);
+    CHECK(strcmp(again, "# last\nalbum = Player Title\n\none.adx = Renamed\ntwo.adx = Two\n") == 0);
 }
 
 /* tracks.txt may only name files beside it. */
@@ -472,6 +489,19 @@ static void test_assignments(const char *base)
         recomp_jukebox_confirm(ROW_TARGET);
         (void)read_text(path, text, sizeof text);
         CHECK(strstr(text, long_comment) != NULL);
+
+        /* A line of the player's longer than that buffer, and no assignment,
+           is kept whole too; a last line without a newline gets one. */
+        static char player_text[720], expected[720];
+        memset(player_text, 'y', 600u);
+        memcpy(player_text + 600, "\n# last, no newline", 19u);
+        write_file(path, player_text, 619u);
+        page.target = 0u;
+        recomp_jukebox_confirm(ROW_TARGET);
+        (void)read_text(path, text, sizeof text);
+        memset(expected, 'y', 600u);
+        memcpy(expected + 600, "\n# last, no newline\n", 20u);
+        CHECK(strstr(text, expected) != NULL);
 
         /* A target the reloaded file no longer names plays its own music. */
         remove(path);
