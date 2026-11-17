@@ -36,6 +36,7 @@
     "tools/matchmaker.py",
     "tools/matchmaker.service",
     "tools/test_matchmaker.py",
+    "tools/live_vectors.json",
     "tools/public_export.py",
     "tools/xbe_info.py",
     "tools/xboxrecomp",

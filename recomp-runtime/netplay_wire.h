@@ -83,4 +83,17 @@ int netplay_receive_from(RecompNetplay *net, uint8_t *packet, size_t capacity,
 bool netplay_from_peer(const RecompNetplay *net, const struct sockaddr_in *from);
 void netplay_relay_on(RecompNetplay *net, const char *why);
 
+/* A session that does not own the socket takes its route from its owner:
+   live_transport.c binds the one for a Live fight, whose packets must go to
+   the opponent over the same socket the matchmaker and the game use, and
+   whose receives come from that transport's rollback queue. With no route
+   set, netplay.c sends to and receives from its socket exactly as before. */
+typedef struct RecompNetplayRoute {
+    void (*send)(const RecompNetplay *net, const uint8_t *packet, size_t size);
+    int (*receive)(RecompNetplay *net, uint8_t *packet, size_t capacity, struct sockaddr_in *from);
+} RecompNetplayRoute;
+/* Binds one RecompNetplay's route, or clears it with NULL; false when the
+   table of routed sessions is full. */
+bool netplay_set_route(RecompNetplay *net, const RecompNetplayRoute *route);
+
 #endif

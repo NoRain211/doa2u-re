@@ -297,6 +297,41 @@ void netplay_send_raw(const RecompNetplay *net, uint32_t address, uint16_t port,
         (const struct sockaddr *)&peer, sizeof peer);
 }
 
+/* Sessions whose packets belong to another owner's socket: a Live fight's,
+   which live_transport.c routes to the opponent (see netplay_wire.h). */
+enum { ROUTED_SESSIONS = 4u };
+static struct {
+    RecompNetplay *net;
+    RecompNetplayRoute route;
+} routes[ROUTED_SESSIONS];
+
+static const RecompNetplayRoute *route_of(const RecompNetplay *net)
+{
+    for (unsigned i = 0u; i < ROUTED_SESSIONS; ++i)
+        if (routes[i].net == net) return &routes[i].route;
+    return NULL;
+}
+
+bool netplay_set_route(RecompNetplay *net, const RecompNetplayRoute *route)
+{
+    for (unsigned i = 0u; i < ROUTED_SESSIONS; ++i) {
+        if (routes[i].net != net) continue;
+        if (route == NULL)
+            routes[i].net = NULL;
+        else
+            routes[i].route = *route;
+        return true;
+    }
+    if (route == NULL) return true;
+    for (unsigned i = 0u; i < ROUTED_SESSIONS; ++i) {
+        if (routes[i].net != NULL) continue;
+        routes[i].net = net;
+        routes[i].route = *route;
+        return true;
+    }
+    return false;
+}
+
 /* Writes a packet's start and returns where its body goes. */
 static uint8_t *match_header(const RecompNetplay *net, uint8_t *out, uint8_t kind)
 {
@@ -314,6 +349,11 @@ static uint8_t *match_header(const RecompNetplay *net, uint8_t *out, uint8_t kin
 void netplay_send_to(const RecompNetplay *net, uint32_t address, uint16_t port,
     const uint8_t *packet, size_t size)
 {
+    const RecompNetplayRoute *route = route_of(net);
+    if (route != NULL) {
+        route->send(net, packet, size);
+        return;
+    }
     uint8_t wrapped[MATCH_ASKED + RECOMP_NETPLAY_MAX_PACKET];
     if (net->match.relay && address == net->peer_address && port == net->peer_port &&
         size <= RECOMP_NETPLAY_MAX_PACKET) {
@@ -441,6 +481,8 @@ static void match_answer(RecompNetplay *net, const uint8_t *packet, size_t size)
 int netplay_receive_from(RecompNetplay *net, uint8_t *packet, size_t capacity,
     struct sockaddr_in *from)
 {
+    const RecompNetplayRoute *route = route_of(net);
+    if (route != NULL) return route->receive(net, packet, capacity, from);
     uint8_t raw[MATCH_BODY + RECOMP_NETPLAY_MAX_PACKET + 1u];
     for (;;) {
         SocketLength from_size = sizeof *from;

@@ -380,6 +380,16 @@ add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_te
 add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
 target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+
+# Native Xbox Live's transport: the game's socket, the matchmaker and every
+# peer share one socket, and a bound rollback session rides the same route.
+add_executable(recomp_live_transport_test netplay.c netplay_room.c netplay_names.c rollback.c live_transport.c
+    live_transport_test.c)
+if(WIN32)
+    target_link_libraries(recomp_live_transport_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-live-transport COMMAND recomp_live_transport_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
