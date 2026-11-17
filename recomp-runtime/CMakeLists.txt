@@ -417,6 +417,12 @@ target_link_libraries(recomp_live_client_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-live-client COMMAND recomp_live_client_test
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/live_vectors.json")
 
+# WP4, rollback for Live fights: the stop bit, the fight-only hash ranges, the
+# player index and the fight hooks, over fake guest pages. netplay_session.cpp
+# and the game's own bodies are stubbed inside the test.
+add_executable(recomp_live_fight_test live_fight_rules.c live_fight.c game_state.c live_fight_test.c)
+add_test(NAME recomp-runtime-live-fight COMMAND recomp_live_fight_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
@@ -729,8 +735,9 @@ if(RECOMP_PROGRAM_DIR)
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        live_client.c live_identity.c live_bridge.cpp
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
-        host_diagnostics.cpp)
+        host_diagnostics.cpp live_fight.c live_fight_rules.c)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
     set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
@@ -815,4 +822,8 @@ if(RECOMP_PROGRAM_DIR)
         add_executable(recomp_launcher ../tools/launcher_sdl.cpp)
         recomp_use_sdl3(recomp_launcher)
     endif()
+
+    # Xbox Live: the guest XOnline/XNet API and the one socket it shares with
+    # the matchmaker and every peer (live_transport.c).
+    target_sources(recomp_runner_objects PRIVATE live_xapi.c live_backend.c live_backend_local.c live_transport.c)
 endif()

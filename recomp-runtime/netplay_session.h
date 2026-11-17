@@ -36,6 +36,19 @@ bool recomp_netplay_session_connect(const RecompNetplayLaunch &launch);
 // --replay <file>: false with a message for a file from another build.
 bool recomp_netplay_session_load_replay(const std::string &path);
 
+/* Live (docs/xbox-live.md): the game's own Xbox Live pages start each fight,
+   and live_fight.c asks for a rollback session at every match's round start
+   instead of connecting from the command line. The runner sets this once the
+   Live backend is on, before read_env and install; off, nothing changes.
+   live_fight.c is C, so both have C linkage (live_fight.h declares the
+   second one for it). */
+extern "C" {
+void recomp_netplay_session_set_live(bool on);
+/* RECOMP_LIVE=1 starts the Live client and sets Live mode; call once, after init. */
+void recomp_netplay_session_start_live();
+bool recomp_netplay_session_live();
+}
+
 /* Per boot. read_env takes RECOMP_ROLLBACK when no session is set (false
    when it is malformed); enabled says a session runs this boot. */
 bool recomp_netplay_session_read_env();

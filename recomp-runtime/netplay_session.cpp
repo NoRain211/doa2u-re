@@ -20,6 +20,14 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
+#include "live_client.h"
+
+// netplay_wire.h declares it but carries winsock; the Live pump runs on its clock.
+extern "C" std::uint64_t netplay_now_ms(void);
+#include "live_fight_rules.h"
+#include "live_session.h"
+#include "live_transport.h"
+#include "live_xapi.h"
 #include "netplay_guest.h"
 #include "program_manual.h"
 #include "stop_report.h"
@@ -49,8 +57,10 @@ static RecompNetplaySessionHost host;
    session frame RECOMP_ROLLBACK_FRAMES every pad is confirmed and guest RAM
    goes to RECOMP_ROLLBACK_DUMP. --netplay-host and --netplay-join start a
    lobby session from the first frame instead, and --replay plays one again.
+   Live (RollbackMode::Live) runs the same session over live_transport.c's
+   route, started by each match's round handshake (live_fight.c).
    Everything a session changes lives here, so ending one is one reset. */
-enum class RollbackMode { Off, Loopback, Udp, Replay };
+enum class RollbackMode { Off, Loopback, Udp, Replay, Live };
 enum : std::uint8_t {
     LobbyUnlockAll = 1u, LobbySkipIntro = 2u, LobbyVersus = 4u,
     LobbyWidescreen = 8u, LobbySurround = 16u, // the game's logic reads both, so both sides take the host's
@@ -81,6 +91,13 @@ struct RollbackRun {
     std::uint64_t checkHash = 0u;
     double slowestHashMs = 0.0;
     std::uint32_t flip = 0u; // RECOMP_ROLLBACK_FLIP: a test frame where this side alone changes guest RAM
+    // Live: the round handshake's start request, and what the game's lockstep stop and a
+    // vanished peer leave for the session's end.
+    bool livePending = false, liveStopPending = false, liveLockstepStopped = false, liveAbandon = false;
+    // Live: the last pads of a finished fight, repeated by the frame pump over
+    // the frames that follow instead of sleeping on the frame thread.
+    bool liveTail = false;
+    std::chrono::steady_clock::time_point liveTailUntil{};
     RecompRollbackSession session;
     RecompNetplay net;
     RecompInputGamepad pads[2]{}; // the running frame's pads by guest port
@@ -112,9 +129,18 @@ struct RollbackRun {
 };
 static RollbackRun rollback;
 
+/* A session over a peer: the UDP test modes and Live's transport. Both pace
+   frames, sync them and compare desync checks; Loopback and a replay do not. */
+static bool networked()
+{
+    return rollback.mode == RollbackMode::Udp || rollback.mode == RollbackMode::Live;
+}
+
 /* After a room session ends, the game boots offline and walks to the main
    menu's Versus entry behind the reopened room (recomp_game_walk_to_versus). */
 static bool backToVersus;
+// RECOMP_LIVE started the Live client; a room session that ends gives Live mode back.
+static bool liveOn;
 static RecompInputGamepad backPad;
 
 // A new pad nearly every frame, so repeating the last pad mispredicts.
@@ -148,7 +174,7 @@ static RecompInputGamepad localPad(std::uint32_t frame)
 static void receivePads()
 {
     RecompRollbackSession &s = rollback.session;
-    if (rollback.mode == RollbackMode::Udp) {
+    if (networked()) {
         recomp_netplay_receive(&rollback.net, &s);
         return;
     }
@@ -161,6 +187,9 @@ static void receivePads()
 
 static void endSession(const char *reason);
 static void compareChecks();
+/* A failed or answered session end: see "Session ends" below. */
+static bool failSession(RecompLiveEnd end);
+static void liveOpponentLeft();
 
 // The panel over the last frame while a session starts, stalls or ends.
 static struct {
@@ -214,6 +243,21 @@ static void showNotice(const char *title, std::string detail, const char *hint =
 static void stalled(std::chrono::steady_clock::time_point began)
 {
     using namespace std::chrono;
+    if (rollback.mode == RollbackMode::Live) {
+        // A goodbye from the other runner ends the fight here instead of at the timeout.
+        if (rollback.net.peer_left) {
+            liveOpponentLeft();
+            return;
+        }
+        /* Live: the game's own Live messages end a fight, so one side can leave it a frame or
+           two before the other and stop sending; outside a live round that ends this session gently. */
+        if (rollback.session.window == 0u && rollback.session.frame > 60u &&
+            steady_clock::now() - began > seconds(2)) {
+            std::fprintf(stderr, "recomp live: the other side's session ended at frame %u\n", rollback.session.frame);
+            rollback.liveAbandon = true;
+            return;
+        }
+    }
     if (rollback.net.peer_left) {
         std::fprintf(stderr, "recomp netplay: the other player left at frame %u\n", rollback.session.frame);
         showNotice("OPPONENT LEFT", "ENDING THE SESSION");
@@ -226,7 +270,10 @@ static void stalled(std::chrono::steady_clock::time_point began)
     const seconds grace(heard ? 15 : 120);
     // Contact heard during this wait starts its 15 s afresh.
     const auto waited = now - (heard ? std::max(began, rollback.contact) : began);
-    if (waited > grace) endSession("rollback:peer-timeout");
+    if (waited > grace) {
+        failSession(RECOMP_LIVE_END_TIMEOUT);
+        return;
+    }
     if (waited < seconds(1) || !noticeDue()) return;
     if (!rollback.interrupted && heard)
         std::fprintf(stderr, "recomp netplay: the other player went quiet at frame %u\n", rollback.session.frame);
@@ -248,6 +295,9 @@ static void resumed(std::chrono::steady_clock::time_point began)
    past 250 a second. */
 static void repeatPads(std::chrono::steady_clock::time_point &sent)
 {
+    // Live: the transport owns the route, so take its relay state before choosing a pace.
+    if (rollback.mode == RollbackMode::Live)
+        rollback.net.match.relay = recomp_live_transport_relay(rollback.net.peer_address);
     const auto now = std::chrono::steady_clock::now();
     if (now - sent < std::chrono::milliseconds(rollback.net.match.relay ? 16 : 4)) return;
     recomp_netplay_send(&rollback.net, &rollback.session, rollback.advantage);
@@ -260,7 +310,7 @@ static std::uint32_t awaitFrontier(bool last)
 {
     using Clock = std::chrono::steady_clock;
     RecompRollbackSession &s = rollback.session;
-    const bool udp = rollback.mode == RollbackMode::Udp;
+    const bool udp = networked();
     Clock::time_point sent{};
     const Clock::time_point began = Clock::now();
     // For measureHitch: when this side first saw its frame due, and first found it lacked the other's pads.
@@ -272,8 +322,15 @@ static std::uint32_t awaitFrontier(bool last)
     };
     for (;;) {
         receivePads();
+        // Live: the other runner said goodbye, so its fight is over and this one ends at once.
+        if (rollback.mode == RollbackMode::Live && rollback.net.peer_left) {
+            liveOpponentLeft();
+            return RECOMP_ROLLBACK_NONE;
+        }
         // A side stalled on the other may still hear the other's desync check.
         if (udp) compareChecks();
+        // Live: a desync hands the fight back to the game instead of stopping the runner.
+        if (rollback.liveAbandon) return RECOMP_ROLLBACK_NONE;
         // The local pad is read at the frame's start, so pacing adds no input lag.
         // Rewinds wait for it too, so one replay covers every pad that arrived.
         const Clock::time_point checked = Clock::now();
@@ -287,7 +344,12 @@ static std::uint32_t awaitFrontier(bool last)
         }
         if (started) {
             while (s.local_count <= s.frame + rollback.delay) {
-                const RecompInputGamepad pad = localPad(s.local_count);
+                RecompInputGamepad pad = localPad(s.local_count);
+                // Live: the game asked to stop its lockstep, so the request rides this side's next pad.
+                if (rollback.mode == RollbackMode::Live && rollback.liveStopPending) {
+                    pad.buttons = recomp_live_pad_add_stop(pad.buttons);
+                    rollback.liveStopPending = false;
+                }
                 recomp_rollback_add_local(&s, &pad);
             }
         }
@@ -304,6 +366,7 @@ static std::uint32_t awaitFrontier(bool last)
         repeatPads(sent);
         const Clock::time_point now = Clock::now();
         stalled(began);
+        if (rollback.liveAbandon) return RECOMP_ROLLBACK_NONE;
         // sleep_for can round up to the 15.6 ms Windows timer tick; this timer does not.
         Clock::time_point until = now + std::chrono::milliseconds(2);
         if (rollback.next_frame > now && rollback.next_frame < until) until = rollback.next_frame;
@@ -396,8 +459,14 @@ static void writeDump()
     if (!out) recomp_stop(4, "rollback:dump");
 }
 
+static void finishLiveSession();
+
 static void finishRollback()
 {
+    if (rollback.mode == RollbackMode::Live) {
+        finishLiveSession();
+        return;
+    }
     closeReplay();
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - rollback.started).count();
@@ -413,6 +482,173 @@ static void finishRollback()
         }
     }
     recomp_stop(0, "rollback:done");
+}
+
+/* Live: the fight is over and the game's own Live messages carry what follows
+   (results, win poses, the lobby). Nothing is recorded, and the runner keeps
+   running: the session's suppression of present, GPU work and audio goes, and
+   the transport is unbound so the game's own datagrams flow again. */
+static void finishLiveSession()
+{
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - rollback.started).count();
+    std::fprintf(stderr, "recomp live: frame %u reached after %u rollbacks "
+        "(%u frames run again, %u waited, %u saves) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, rollback.saves, seconds);
+    writeDump();
+    // The other side may still need this side's last pads to reach the stop frame.
+    // The frame pump repeats them from here (pumpLiveTail), so the frame thread is
+    // not held for half a second.
+    rollback.liveTail = true;
+    rollback.liveTailUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    rollback.active = false;
+    rollback.hidden = false;
+    rollback.stop = UINT32_MAX;
+    rollback.frontier = 0u;
+    rollback.checkFrame = 0u;
+    rollback.livePending = rollback.liveStopPending = rollback.liveLockstepStopped = rollback.liveAbandon = false;
+    rollback.pads[0] = rollback.pads[1] = RecompInputGamepad{};
+    recomp_live_transport_session_end();
+    recomp_d3d8_set_present_suppressed(false);
+    recomp_d3d8_set_gpu_work_suppressed(false);
+    recomp_dsound_buffer_set_output_suppressed(false);
+    std::fprintf(stderr, "recomp live: session over, the game's own Live code continues\n");
+}
+
+/* Live: the last pads finishLiveSession kept, repeated by the frame pump. The
+   transport's rollback route stays bound until the tail ends, so the peer hears
+   them (and this side's goodbye) without the frame thread sleeping. */
+static void pumpLiveTail()
+{
+    if (!rollback.liveTail) return;
+    recomp_netplay_receive(&rollback.net, &rollback.session);
+    recomp_netplay_send(&rollback.net, &rollback.session, 0);
+    if (std::chrono::steady_clock::now() < rollback.liveTailUntil) return;
+    rollback.liveTail = false;
+    recomp_live_transport_unbind_rollback();
+}
+
+/* Session ends: a desync, a peer timeout, a failed rewind or
+   the other player's goodbye. A Live fight hands the fight back to the game, whose own
+   lockstep and Live messages carry it from there, so the runner keeps running; every
+   other session stops as it always has. live_fight_rules.c owns that decision, so the
+   fight test pins it without the game; these supply what each end does. */
+static void tellOpponent(void *)
+{
+    // Over the bound rollback route, before finishLiveSession unbinds it.
+    recomp_netplay_send_goodbye(&rollback.net);
+}
+
+static void stopRunner(void *, const char *stop_id)
+{
+    endSession(stop_id);
+}
+
+static void handBackToGame(void *, const char *stop_id)
+{
+    std::fprintf(stderr, "recomp live: session ends (%s); the game's own Live code continues\n", stop_id);
+    // The next frame boundary restores the game's lockstep and unbinds the route.
+    rollback.liveAbandon = true;
+}
+
+/* Ends the session where it failed. True when a Live fight went back to the game, so
+   the caller returns without running another frame; otherwise the runner stopped (or a
+   room returns to its menu) and this never returns. */
+static bool failSession(RecompLiveEnd end)
+{
+    static const RecompLiveEndOps ops = {nullptr, tellOpponent, stopRunner, handBackToGame};
+    return recomp_live_end_session(rollback.mode == RollbackMode::Live, end, &ops);
+}
+
+/* Live: the other runner said goodbye over the session's route. */
+static void liveOpponentLeft()
+{
+    std::fprintf(stderr, "recomp live: the other player left at frame %u\n", rollback.session.frame);
+    showNotice("OPPONENT LEFT", "ENDING THE SESSION");
+    failSession(RECOMP_LIVE_END_PEER_LEFT);
+}
+
+/* A Live end was requested: finishes the session now and returns true, so the frame
+   handler leaves the fight to the game's own Live code. */
+static bool liveSessionEnded()
+{
+    if (!rollback.liveAbandon) return false;
+    rollback.liveAbandon = false;
+    finishLiveSession();
+    return true;
+}
+
+/* A Live fight's session starts at the frame boundary after the game's
+   round-start handshake returned (recomp_live_round_started). The transport's
+   route replaces a socket of our own, and both sides begin from the same
+   cleared pads. */
+static void resetNetplayCounters()
+{
+    RecompNetplay &net = rollback.net;
+    net.peer_seen = false;
+    net.peer_ack = net.peer_frame = 0u;
+    net.peer_advantage = 0;
+    std::memset(net.local_samples, 0, sizeof net.local_samples);
+    std::memset(net.peer_samples, 0, sizeof net.peer_samples);
+    net.local_count = net.peer_count = net.cooldown = 0u;
+    std::memset(net.pad_sent_ms, 0, sizeof net.pad_sent_ms);
+    net.pads_stamped = 0u;
+    net.rtt_ms = 0u;
+    net.rtt_known = false;
+    net.peer_left = false;
+    std::memset(net.check_frames, 0, sizeof net.check_frames);
+    std::memset(net.check_hashes, 0, sizeof net.check_hashes);
+    net.check_count = net.peer_check_frame = 0u;
+    net.peer_check_hash = 0u;
+    // net.match stays: the transport's route and its relay flag live there.
+}
+
+/* Both sides, at a session's start: the pad records still hold this side's
+   last pad before the session (the A that picked the rematch) and its edges,
+   and frame 0 would turn them into a press on one side only. Clear the ports'
+   and the session slots' records in g_pad_state (0xa94a70, 0x30 each: buttons,
+   held, pressed, released, analog and sticks below +0x24) and the four
+   players' copies in g_player_pads (0x87d260). FUN_000e9c90 fills each
+   fighter's 16 move slots as moves start, by the slot's type at 0x87d4a0:
+   type 1 a vector (0x87a948, 0x10 each) and a float (0x878310), type 3 two
+   vectors (0x877f00, 0x20 each) and a float (0x87ad80). The slots the last
+   match's unsynced end (win poses, results) left differ per side, so both
+   sides start clear. */
+static void clearSessionPads()
+{
+    for (const std::uint32_t slot : {0u, 1u, 5u, 6u})
+        std::memset(recomp_memory(0x00a94a70u + slot * 0x30u, 0x24u), 0, 0x24u);
+    for (std::uint32_t player = 0u; player < 4u; ++player)
+        std::memset(recomp_memory(0x0087d260u + player * 0x30u, 0x24u), 0, 0x24u);
+    std::memset(recomp_memory(0x0087a948u, 0x200u), 0, 0x200u);
+    std::memset(recomp_memory(0x00878310u, 0x80u), 0, 0x80u);
+    std::memset(recomp_memory(0x00877f00u, 0x400u), 0, 0x400u);
+    std::memset(recomp_memory(0x0087ad80u, 0x80u), 0, 0x80u);
+}
+
+static void startLiveSession(std::uint32_t swap)
+{
+    RecompRollbackSession &s = rollback.session;
+    rollback.livePending = false;
+    rollback.liveStopPending = false;
+    rollback.liveLockstepStopped = false;
+    rollback.liveAbandon = false;
+    // A later match counts its frames from 0 again, so the last session's packets must not
+    // reach it: drop what the route still holds, then start the counters fresh.
+    recomp_live_transport_session_begin();
+    RecompRollbackSession stale;
+    recomp_rollback_init(&stale, 0u);
+    for (int i = 0; i < 8; ++i) recomp_netplay_receive(&rollback.net, &stale);
+    resetNetplayCounters();
+    recomp_rollback_init(&s, rollback.delay);
+    s.window = 0u; // lockstep until the frontier opens it at frame 10
+    clearSessionPads();
+    if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
+    rollback.active = true;
+    rollback.started = std::chrono::steady_clock::now();
+    if (const char *flip = std::getenv("RECOMP_ROLLBACK_FLIP"); flip != nullptr)
+        rollback.flip = static_cast<std::uint32_t>(std::strtoul(flip, nullptr, 10));
+    std::fprintf(stderr, "recomp live: session starts at swap %u as player %u\n", swap, rollback.player);
 }
 
 /* Schedules each new frame on a 60 Hz grid. Display backpressure alone let the
@@ -499,7 +735,7 @@ static void setWindow(std::uint32_t window)
 static void confirmSaveFrame()
 {
     RecompRollbackSession &s = rollback.session;
-    if (!rollback.active || rollback.mode != RollbackMode::Udp || s.frame == 0u) return;
+    if (!rollback.active || !networked() || s.frame == 0u) return;
     const std::uint32_t running = s.frame - 1u;
     if (s.remote_count <= running)
         std::fprintf(stderr, "recomp netplay: save in frame %u waits for the other player's input\n", running);
@@ -509,6 +745,8 @@ static void confirmSaveFrame()
         recomp_netplay_receive(&rollback.net, &s);
         repeatPads(sent);
         stalled(began);
+        // Live: the other side's session is gone, so this save goes ahead unsynced.
+        if (rollback.liveAbandon) return;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     resumed(began);
@@ -517,6 +755,13 @@ static void confirmSaveFrame()
 
 static void sayGoodbye()
 {
+    if (rollback.mode == RollbackMode::Live) {
+        /* Live: a running session's route replaces a socket of our own, so only then is
+           there one to tell. The other runner ends its session at once instead of waiting
+           for its timeout, and lets the game handle the empty seat itself. */
+        if (rollback.active) recomp_netplay_send_goodbye(&rollback.net);
+        return;
+    }
     // Both sides of a scripted run stop at the same frame and need no goodbye.
     if (rollback.mode == RollbackMode::Udp && rollback.session.frame < rollback.stop)
         recomp_netplay_send_goodbye(&rollback.net);
@@ -531,7 +776,7 @@ constexpr std::uint32_t desyncCheckFrames = 30u;
 
 static bool isCheckFrame(std::uint32_t frame)
 {
-    return rollback.mode == RollbackMode::Udp && frame != 0u && frame % desyncCheckFrames == 0u;
+    return networked() && frame != 0u && frame % desyncCheckFrames == 0u;
 }
 
 static void hashCheckFrame()
@@ -540,6 +785,17 @@ static void hashCheckFrame()
     if (!isCheckFrame(frame)) return;
     const auto began = std::chrono::steady_clock::now();
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
+    if (rollback.mode == RollbackMode::Live) {
+        // A Live fight hashes only the fight: each side's Live layer, profile, HUD, draw
+        // state, cloth and stage effects differ by design (live_fight_rules.c).
+        const std::size_t count = recomp_live_hash_ignored(ignored, RECOMP_SNAPSHOT_HASH_RANGES);
+        if (count == 0u || !recomp_rollback_ring_hash(ignored, count, &rollback.checkHash))
+            recomp_stop(4, "rollback:hash");
+        rollback.checkFrame = frame;
+        rollback.slowestHashMs = std::max(rollback.slowestHashMs,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+        return;
+    }
     std::size_t count = recomp_synctest_ignored_ranges(ignored, RECOMP_SNAPSHOT_HASH_RANGES - 3u);
     if (count == SIZE_MAX) recomp_stop(4, "rollback:hash-ranges");
     /* draw_fight_name (netplay_guest.c) draws the local player's name in
@@ -603,9 +859,12 @@ static void compareChecks()
     writeDump();
     // The other side may not have this side's hash yet; it then finds the desync too.
     for (int i = 0; i < 3; ++i) recomp_netplay_send(&net, &rollback.session, rollback.advantage);
-    showNotice("DESYNC DETECTED", "ENDING THE SESSION");
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    endSession("rollback:desync");
+    // Live: the panel and its wait belong to a runner that is stopping; this one keeps running.
+    if (rollback.mode != RollbackMode::Live) {
+        showNotice("DESYNC DETECTED", "ENDING THE SESSION");
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    failSession(RECOMP_LIVE_END_DESYNC);
 }
 
 /* The corner display from NETPLAY SETTINGS: ping, or also the input delay,
@@ -645,17 +904,23 @@ static void onRollbackFrame(std::uint32_t swap)
 {
     RecompRollbackSession &s = rollback.session;
     if (!rollback.active) {
-        if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
-        recomp_rollback_init(&s, rollback.delay);
-        if (rollback.lobby) s.window = 0u;
-        if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
-        rollback.active = true;
-        rollback.started = std::chrono::steady_clock::now();
-        if (const char *flip = std::getenv("RECOMP_ROLLBACK_FLIP"); flip != nullptr)
-            rollback.flip = static_cast<std::uint32_t>(std::strtoul(flip, nullptr, 10));
-        std::fprintf(stderr, "recomp rollback: session starts at swap %u as player %u\n",
-            swap, rollback.player);
-        if (rollback.lobby && rollback.mode == RollbackMode::Udp) startReplay(swap);
+        if (rollback.mode == RollbackMode::Live) {
+            // A Live session starts at the frame boundary after the round handshake.
+            if (!rollback.livePending || recomp_fiber_adapter_model()->current_handle == 0u) return;
+            startLiveSession(swap);
+        } else {
+            if (swap < rollback.start || recomp_fiber_adapter_model()->current_handle == 0u) return;
+            recomp_rollback_init(&s, rollback.delay);
+            if (rollback.lobby) s.window = 0u;
+            if (!recomp_rollback_ring_init(RECOMP_ROLLBACK_WINDOW)) recomp_stop(4, "rollback:ring");
+            rollback.active = true;
+            rollback.started = std::chrono::steady_clock::now();
+            if (const char *flip = std::getenv("RECOMP_ROLLBACK_FLIP"); flip != nullptr)
+                rollback.flip = static_cast<std::uint32_t>(std::strtoul(flip, nullptr, 10));
+            std::fprintf(stderr, "recomp rollback: session starts at swap %u as player %u\n",
+                swap, rollback.player);
+            if (rollback.lobby && rollback.mode == RollbackMode::Udp) startReplay(swap);
+        }
     }
     recordReplay();
     bool saved = true;
@@ -668,21 +933,41 @@ static void onRollbackFrame(std::uint32_t swap)
             endSession("netplay:left-versus");
         }
         if (rollback.lobby) setWindow(recomp_game_round_live() ? RECOMP_ROLLBACK_WINDOW : 0u);
-        if (rollback.mode == RollbackMode::Udp && rollback.paced != s.frame) {
+        if (rollback.mode == RollbackMode::Live) {
+            // The fight holds still until lockstep batch 10 (game_mode_match_update), and a
+            // rematch saves meanwhile. The match ends where the game stops its lockstep, on the
+            // same frame on both sides; what follows (results, the return to the lobby) runs on
+            // the game's own Live messages, unsynced.
+            setWindow(recomp_live_window(recomp_game_round_live(), s.frame));
+            if (rollback.liveLockstepStopped && rollback.stop > s.frame) {
+                std::fprintf(stderr, "recomp live: lockstep stopped, session ends at frame %u\n", s.frame);
+                rollback.stop = s.frame;
+            }
+            rollback.liveLockstepStopped = false;
+            if (*recomp_memory(0x008a56d0u, 1u) != 5u && rollback.stop > s.frame) {
+                std::fprintf(stderr, "recomp live: fight left at session frame %u\n", s.frame);
+                rollback.stop = s.frame;
+            }
+        }
+        if (networked() && rollback.paced != s.frame) {
             scheduleFrame();
             rollback.paced = s.frame;
         }
         const auto entered = std::chrono::steady_clock::now();
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
-        if (rollback.mode == RollbackMode::Udp) measureHitch(entered);
+        if (networked()) measureHitch(entered);
+        // Live: the other side left or this session failed; hand the fight back, runner running.
+        if (liveSessionEnded()) return;
         if (target != RECOMP_ROLLBACK_NONE) {
             rollback.rerunFrom = std::chrono::steady_clock::now();
             rollback.rerunDepth = rollback.frontier - target;
             // The output pump must not play the buffers mid-rewind; the frames run again are muted anyway.
             recomp_dsound_buffer_set_output_suppressed(true);
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
-            if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost())
-                endSession("rollback:unrestorable");
+            if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost()) {
+                failSession(RECOMP_LIVE_END_REWIND);
+                if (liveSessionEnded()) return;
+            }
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
             const auto now = std::chrono::steady_clock::now();
@@ -694,16 +979,18 @@ static void onRollbackFrame(std::uint32_t swap)
             finishRollback();
             return;
         } else {
-            if (rollback.mode == RollbackMode::Udp) {
+            if (networked()) {
                 confirmCheck();
                 compareChecks();
+                // Live: a desync found at the newest frame ends the session here.
+                if (liveSessionEnded()) return;
             }
             if (rollback.flip != 0u && s.frame == rollback.flip) {
                 *recomp_memory(0x0087ae54u, 1u) ^= 1u; // fighter 1's life, which persists
                 std::fprintf(stderr, "recomp rollback: test flip of guest RAM at frame %u\n", s.frame);
             }
             saved = saveFrame();
-            if (rollback.mode == RollbackMode::Udp) {
+            if (networked()) {
                 rollback.advantage = static_cast<std::int32_t>(s.frame - rollback.net.peer_frame);
                 recomp_netplay_send(&rollback.net, &s, rollback.advantage);
                 const std::uint32_t wait = recomp_netplay_wait_frames(&rollback.net, rollback.advantage);
@@ -723,6 +1010,15 @@ static void onRollbackFrame(std::uint32_t swap)
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
     recomp_dsound_buffer_set_output_suppressed(rollback.hidden || rollback.landOnVersus);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
+    if (rollback.mode == RollbackMode::Live &&
+        recomp_live_pads_carry_stop(rollback.pads[0].buttons, rollback.pads[1].buttons)) {
+        // Either side's stop request rides a pad; mask it out of both and reset both locksteps
+        // at the start of this frame. The session then ends at the next frontier.
+        rollback.pads[0].buttons = recomp_live_pad_mask_stop(rollback.pads[0].buttons);
+        rollback.pads[1].buttons = recomp_live_pad_mask_stop(rollback.pads[1].buttons);
+        recomp_live_stop_lockstep();
+        rollback.liveLockstepStopped = true;
+    }
     driveToVersus(s.frame);
     if (s.frame > rollback.frontier) rollback.frontier = s.frame;
 }
@@ -1017,8 +1313,11 @@ static void endSession(const char *reason)
     if (!rollback.fromRoom) recomp_stop(4, "%s", reason);
     std::fprintf(stderr, "recomp netplay: session ended (%s); back to the room\n", reason);
     sayGoodbye();
+    rollback.liveTail = false;
+    recomp_live_transport_unbind_rollback();
     const RecompNetplay socket = rollback.net; // back to the room, so the router's path stays
     rollback = RollbackRun{};
+    if (liveOn) rollback.mode = RollbackMode::Live;
     recomp_kernel_widescreen = recomp_kernel_surround = -1; // the player's own settings offline
     recomp_save_session = nullptr;
     recomp_netplay_guest_set_fight_names(nullptr, nullptr, 0u);
@@ -1033,8 +1332,106 @@ void recomp_netplay_session_init(const RecompNetplaySessionHost &runner)
     host = runner;
 }
 
+void recomp_netplay_session_set_live(bool on)
+{
+    if (on) {
+        if (rollback.mode != RollbackMode::Off) {
+            std::fprintf(stderr, "recomp live: another session mode is set; Live stays off\n");
+            return;
+        }
+        rollback.mode = RollbackMode::Live;
+        return;
+    }
+    if (rollback.mode == RollbackMode::Live) rollback.mode = RollbackMode::Off;
+}
+
+/* RECOMP_LIVE=1: the game's own Xbox Live pages over the matchmaker, for the
+   whole run, so every boot runs as a session would (frame clock, synchronous
+   reads, no mods that change the fight). shortcut: an environment switch with
+   no menu row; add one wherever the player will choose Live. */
+void recomp_netplay_session_start_live()
+{
+    const char *on = std::getenv("RECOMP_LIVE");
+    if (on == nullptr || std::strcmp(on, "1") != 0) return;
+    const std::string storage = (host.disc / ".recomp-storage").string();
+    const RecompLiveBackend *backend = recomp_live_client_start(storage.c_str(), host.digest.c_str());
+    if (backend == nullptr) {
+        std::fprintf(stderr, "recomp live: could not start; Xbox Live stays offline\n");
+        return;
+    }
+    recomp_live_backend_set(backend);
+    recomp_netplay_session_set_live(true);
+    if (!recomp_netplay_session_live()) return;
+    liveOn = true;
+    std::atexit(recomp_live_client_stop);
+    std::fprintf(stderr, "recomp live: on\n");
+}
+
+bool recomp_netplay_session_live()
+{
+    return rollback.mode == RollbackMode::Live;
+}
+
+/* live_session.h: what live_transport.c and live_fight.c read. */
+bool recomp_live_rollback_active(void)
+{
+    return rollback.active;
+}
+
+bool recomp_live_rollback_hidden(void)
+{
+    return rollback.hidden;
+}
+
+std::uint32_t recomp_live_rollback_frame(void)
+{
+    return rollback.session.frame;
+}
+
+unsigned recomp_live_rollback_player(void)
+{
+    return rollback.player;
+}
+
+/* live_fight.c: the round-start handshake returned, so the session starts at the
+   next frame boundary. The player index comes from the two fighters' virtual
+   addresses, which both sides read the same way. */
+void recomp_live_round_started(std::uint32_t opponent_ina)
+{
+    if (rollback.mode != RollbackMode::Live) return;
+    if (rollback.active) {
+        std::fprintf(stderr, "recomp live: round start inside session frame %u\n", rollback.session.frame);
+        return;
+    }
+    if (opponent_ina == 0u) {
+        std::fprintf(stderr, "recomp live: the round start names no opponent\n");
+        return;
+    }
+    std::uint32_t local = 0u;
+    if (recomp_game_live_fight_pair(&local, nullptr)) rollback.player = recomp_live_player_index(local, opponent_ina);
+    else
+        std::fprintf(stderr, "recomp live: cannot tell the local fighter; player index stays %u\n", rollback.player);
+    rollback.liveTail = false; // a new round supersedes the last fight's tail
+    if (!recomp_live_transport_bind_rollback(opponent_ina, &rollback.net)) {
+        std::fprintf(stderr, "recomp live: no route to the opponent; the game keeps its own lockstep\n");
+        return;
+    }
+    resetNetplayCounters();
+    rollback.livePending = true;
+}
+
+/* live_fight.c: the game asked its lockstep to stop. The request rides this side's
+   next session pad; a frame run again drops it, since the match end runs in lockstep. */
+void recomp_live_request_stop(void)
+{
+    if (rollback.mode != RollbackMode::Live || !rollback.active || rollback.hidden) return;
+    rollback.liveStopPending = true;
+}
+
 bool recomp_netplay_session_read_env()
 {
+    // Live starts its sessions from the game's own pages, not from an env switch.
+    if (rollback.mode == RollbackMode::Live) return true;
     return rollback.lobby || readRollbackConfig();
 }
 
@@ -1062,7 +1459,7 @@ void recomp_netplay_session_install(bool synctest)
             rollback.networkDisplay = recomp_netplay_menu_display(storage);
             recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = drawSessionOverlay;
         }
-    } else if (!enabled && !synctest) {
+    } else if ((!enabled || rollback.mode == RollbackMode::Live) && !synctest) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         recomp_netplay_menu_install(storage, host.digest,
             [storage] { return recomp_netplay_own_profile_name(storage / "partition1"); });
@@ -1104,6 +1501,12 @@ void recomp_netplay_session_set_vibration(std::uint32_t port, std::uint16_t left
 
 void recomp_netplay_session_on_swap(std::uint32_t frame)
 {
+    pumpLiveTail();
+    if (liveOn) {
+        const std::uint64_t now = netplay_now_ms(); /* the clock the transport stamps its peers with */
+        recomp_live_transport_pump(now);
+        recomp_live_pump(now);
+    }
     if (backToVersus && recomp_game_walk_to_versus(frame, false, &backPad)) {
         backToVersus = false;
         recomp_dsound_buffer_set_output_suppressed(false);

@@ -111,6 +111,12 @@ RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
     return NULL;
 }
 
+RecompFunction recomp_live_fight_lookup(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
 RecompFunction recomp_fiber_lookup_manual(uint32_t address)
 {
     (void)address;

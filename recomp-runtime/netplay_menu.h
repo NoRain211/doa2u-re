@@ -34,4 +34,8 @@ void recomp_netplay_menu_return_to_room(const RecompNetplay &socket);
    player is not left calling and the matchmaker drops the listing at once. */
 void recomp_netplay_menu_exit();
 
+/* The matchmaker the menu uses when NETPLAY SETTINGS names none, as
+   "host:port". The Live client logs on to the same server. */
+bool recomp_netplay_default_matchmaker(std::string &server);
+
 #endif
