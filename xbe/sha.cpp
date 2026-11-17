@@ -136,7 +136,10 @@ std::string sha256Hex(const std::vector<std::uint8_t>& bytes)
 void sha256(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
 {
     const std::vector<std::uint8_t> raw = hashRaw(BCRYPT_SHA256_ALGORITHM, bytes, size);
-    if (raw.size() == 32u) std::memcpy(digest, raw.data(), 32u);
+    if (raw.size() != 32u) {
+        throw std::runtime_error("SHA-256 digest is not 32 bytes");
+    }
+    std::memcpy(digest, raw.data(), 32u);
 }
 #elif defined(__APPLE__)
 std::string sha1Hex(const std::vector<std::uint8_t>& bytes)
