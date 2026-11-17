@@ -258,7 +258,7 @@ static uint64_t digest;
 static char cache_root[PATH_SIZE];
 static struct { char key[PATH_SIZE]; uint64_t slot; } reserved[4];
 static unsigned reserved_count;
-static bool slots_enabled = true;
+static volatile bool slots_enabled = true; /* read on the guest's file path, like the slots */
 static RecompModSource **sources;
 static unsigned source_count;
 const RecompModSource *(*recomp_mod_entry_start)(const char *key, unsigned index, const RecompModSource *wanted);
@@ -328,9 +328,11 @@ static bool child_name(const char *folder, const char *name, char *out, size_t o
     bool any = false;
     for (struct dirent *entry; (entry = readdir(dir)) != NULL; ) {
         if (strcasecmp(entry->d_name, name) != 0) continue;
-        snprintf(found, sizeof found, "%s", entry->d_name);
+        const bool exact = strcmp(entry->d_name, name) == 0;
+        /* Several case variants: the lowest by byte order, whatever readdir's order. */
+        if (exact || !any || strcmp(entry->d_name, found) < 0) snprintf(found, sizeof found, "%s", entry->d_name);
         any = true;
-        if (strcmp(entry->d_name, name) == 0) break;
+        if (exact) break;
     }
     closedir(dir);
     if (any) snprintf(out, out_size, "%s", found);
