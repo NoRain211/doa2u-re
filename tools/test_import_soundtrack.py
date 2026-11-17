@@ -216,7 +216,7 @@ class ImportFailureTests(unittest.TestCase):
             with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso"]), \
                     mock.patch.object(soundtrack, "open_source", return_value=source), \
                     mock.patch.object(soundtrack, "detect", return_value="doa4"), \
-                    mock.patch.object(soundtrack, "fetch_ffmpeg", return_value=ffmpeg), \
+                    mock.patch.object(soundtrack, "find_ffmpeg", return_value=ffmpeg), \
                     mock.patch.object(soundtrack, "import_doa4", side_effect=error):
                 with self.assertRaises(SystemExit) as caught:
                     soundtrack.main()
