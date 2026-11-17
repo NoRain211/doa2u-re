@@ -13,7 +13,7 @@ import time
 import uuid
 
 from extract_iso import extract, run_logged, sha256
-from build_prerequisites import extract_xiso, llvm_mingw
+from build_prerequisites import extract_xiso, ffmpeg, llvm_mingw
 
 ROOT = Path(__file__).resolve().parents[1]
 LIFTER = ROOT / "tools/xboxrecomp"
@@ -304,6 +304,12 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                       " a new Python version may have no prebuilt Pillow yet.")
     # Fetch the compiler before the long lift, so a failed download stops early.
     compiler = llvm_mingw(ROOT) if windows and not lift_only else None
+    if windows and not lift_only:
+        # Only the DOA4 importers need it, so a failed download does not stop the build.
+        try:
+            ffmpeg(ROOT)
+        except (OSError, ValueError) as error:
+            print(f"{error} The DOA4 hit voices and soundtrack need an ffmpeg on PATH until a build fetches one.")
     import capstone
     xbe = selected_xbe()
     revision = lifter_revision()
@@ -363,7 +369,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                 f"-DRECOMP_PROGRAM_MANIFEST_SHA256={receipt['manifest_sha256']}",
                 f"-DRECOMP_PROGRAM_EBP_EXPECTED={receipt['ebp_count']}"], logs / "configure.log")
     # Linux builds the settings launcher beside the runner; SteamOS has no compiler.
-    targets = ["recomp_program_runner"] + (["recomp_launcher"] if sys.platform.startswith("linux") else [])
+    # recomp_adx_encode: tools/import_soundtrack.py encodes DOA4's music for the Jukebox with it.
+    targets = ["recomp_program_runner", "recomp_adx_encode"] + (["recomp_launcher"] if sys.platform.startswith("linux") else [])
     if windows:
         targets.append("recomp_program_runner_vulkan")
     # Generated chunks are large; outside Windows more jobs than this can exhaust memory.
@@ -376,6 +383,28 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     if iso is not None and not build_only:
         drop_owned_extraction()
+
+
+def soundtrack(args, warning):
+    """Run tools/import_soundtrack.py. Its albums are optional for playing, so a failure only warns."""
+    result = subprocess.call([sys.executable, str(ROOT / "tools" / "import_soundtrack.py"), *map(str, args)])
+    if result:
+        print(f"Could not finish the Jukebox soundtrack: import_soundtrack.py exited with {result}, {warning}")
+    return result
+
+
+def update_soundtrack():
+    """The Jukebox's DOA1U and DOA2U Movies albums: the disc's DOA1 music and its movies'
+    (tools/import_soundtrack.py). A full build's drop_owned_extraction deletes the extraction's
+    disc, leaving the play folder; a build-only run still has the extraction to read."""
+    disc = extracted_disc(ROOT / "private/imported-disc")
+    doa1 = ROOT / "jukebox" / "doa1u" / "tracks.txt"
+    movies = ROOT / "jukebox" / "doa2u-movies" / "tracks.txt"
+    if not (movies.is_file() and doa1.is_file()) and (disc / "DOA2" / "bgm.afs").is_file():
+        soundtrack([disc], "so the movies' music is missing; the game still plays.")
+    # Imported albums play as loud as DOA2U's own music (once per album; needs recomp_adx_encode).
+    if (ROOT / "jukebox").is_dir():
+        soundtrack(["--level"], "so imported albums keep their own loudness.")
 
 
 def main():
@@ -394,6 +423,9 @@ def main():
     except (OSError, ValueError, KeyError, ImportError, subprocess.CalledProcessError) as error:
         print(f"Build failed: {error}", file=sys.stderr)
         return 1
+    # A lift-only run builds no recomp_adx_encode, so its soundtrack steps would only half work.
+    if not args.lift_only:
+        update_soundtrack()
     if args.iso is not None:
         print("Build complete. " + ("Run DOA2U.exe to play." if sys.platform == "win32"
                                     else "Run ./launcher.sh to play."))
