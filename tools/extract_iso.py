@@ -26,6 +26,19 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def find_on_path(name):
+    """shutil.which over absolute PATH entries only, refusing a result in the working directory."""
+    # On Windows shutil.which prepends the working directory itself, and a relative PATH entry
+    # resolves against it, so a planted executable there would be found and run.
+    path = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(entry)]
+    found = shutil.which(name, path=os.pathsep.join(path))
+    if found is None:
+        return None
+    if os.path.normcase(os.path.dirname(os.path.abspath(found))) == os.path.normcase(os.path.abspath(os.curdir)):
+        return None
+    return found
+
+
 def private_pattern(home, user):
     """The player's home folder, or their user name as any folder, in either slash direction or case."""
     home = str(home).rstrip("\\/")
@@ -141,7 +154,8 @@ def extract(iso, output, tool):
         raise ValueError("Input must be an ISO file")
     check_path(iso)
     check_path(output)
-    executable = shutil.which(str(tool))
+    # A bare name is looked up on PATH; a path the user gave is taken as given.
+    executable = find_on_path(str(tool)) if os.path.basename(str(tool)) == str(tool) else shutil.which(str(tool))
     if not executable:
         raise ValueError("Install XboxDev extract-xiso or pass --extractor <executable>")
     executable = str(Path(executable).resolve())
