@@ -120,6 +120,21 @@ class PrerequisiteTests(unittest.TestCase):
             archive.writestr("ffmpeg-test/LICENSE", b"license")
         return data.getvalue()
 
+    def test_ffmpeg_is_never_the_bare_name_that_a_working_directory_could_supply(self):
+        with mock.patch.object(prerequisites.sys, "platform", "linux"), \
+                mock.patch.object(prerequisites.shutil, "which", return_value=None):
+            self.assertIsNone(prerequisites.find_ffmpeg(self.root))
+            with self.assertRaisesRegex(FileNotFoundError, "tools/ffmpeg.*PATH"):
+                prerequisites.ffmpeg(self.root)
+
+    def test_bundled_ffmpeg_comes_before_path(self):
+        bundled = self.root / prerequisites.FFMPEG / "ffmpeg.exe"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_bytes(b"ffmpeg")
+        with mock.patch.object(prerequisites.shutil, "which") as which:
+            self.assertEqual(prerequisites.find_ffmpeg(self.root), str(bundled))
+        which.assert_not_called()
+
     def test_ffmpeg_partial_folder_is_reported_before_download(self):
         (self.root / prerequisites.FFMPEG).mkdir(parents=True)
         with mock.patch.object(prerequisites.sys, "platform", "win32"):

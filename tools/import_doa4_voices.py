@@ -272,6 +272,8 @@ def main():
     parser.add_argument("--mapping", default=MANIFEST, help="the mapping file (default tools/doa4_voice_selections.json)")
     args = parser.parse_args()
     args.ffmpeg = args.ffmpeg or find_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    if args.ffmpeg is None:
+        raise FileNotFoundError("ffmpeg was not found: none is in tools/ffmpeg and none is on PATH.")
     entries = afs_entries(args.snd_afs)
     with open(args.snd_afs, "rb") as afs:
         if args.save_selections:
