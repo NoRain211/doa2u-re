@@ -7,6 +7,7 @@
 #include "live_client.h"
 #include "live_identity.h"
 #include "live_transport.h"
+#include "matchmaker_wire.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,10 +33,10 @@ static unsigned intro_count;
    server's cookie, keep it, and send it. The client leaves those 16 bytes zero. */
 void recomp_live_transport_send_server(const uint8_t *packet, size_t size)
 {
-    if (size < 22u || size > RECOMP_LIVE_PACKET_BYTES) return;
+    if (size < MATCH_ASKED || size > RECOMP_LIVE_PACKET_BYTES) return;
     memcpy(asked, packet, size);
-    memcpy(asked + 6u, test_nonce, 8u);
-    memcpy(asked + 14u, test_cookie, 8u);
+    memcpy(asked + MATCH_HEADER, test_nonce, sizeof test_nonce);
+    memcpy(asked + MATCH_BODY, test_cookie, sizeof test_cookie);
     asked_size = size;
     if (captured_count >= CAPTURED) return;
     memcpy(captured[captured_count], asked, size);
@@ -52,15 +53,16 @@ void recomp_live_transport_set_server_handler(RecompLiveServerHandler handler)
    again once with the new cookie), and the rest reach the Live client. */
 static void feed(const uint8_t *packet, size_t size)
 {
-    if (size < 22u || memcmp(packet, "D2MM", 4u) != 0 || packet[4] != 2u) return;
-    if (memcmp(packet + 6u, test_nonce, 8u) != 0) return;
-    if (packet[5] == 10u) { /* COOKIE */
-        if (size != 22u) return;
-        memcpy(test_cookie, packet + 14u, 8u);
+    if (size < MATCH_ASKED || packet[4] != MATCH_VERSION) return;
+    if (memcmp(packet, MATCH_MAGIC, sizeof MATCH_MAGIC) != 0) return;
+    if (memcmp(packet + MATCH_HEADER, test_nonce, sizeof test_nonce) != 0) return;
+    if (packet[5] == MATCH_COOKIE) {
+        if (size != MATCH_ASKED) return;
+        memcpy(test_cookie, packet + MATCH_BODY, sizeof test_cookie);
         if (asked_size == 0u) return;
         if (captured_count < CAPTURED) {
             memcpy(captured[captured_count], asked, asked_size);
-            memcpy(captured[captured_count] + 14u, test_cookie, 8u);
+            memcpy(captured[captured_count] + MATCH_BODY, test_cookie, sizeof test_cookie);
             captured_size[captured_count++] = asked_size;
         }
         asked_size = 0u; /* once */
@@ -101,6 +103,10 @@ void recomp_live_transport_forget(uint32_t virtual_ina)
 }
 
 /* --- the vectors --- */
+
+/* tools/live_vectors.json: one step per exchange the Python server generated,
+   which covers every kind the client sends or reads. */
+enum { VECTOR_STEPS = 26u };
 
 typedef struct Step {
     char call[24];
@@ -358,28 +364,31 @@ static bool done(RecompLiveRequest request)
 static uint32_t read32be(const uint8_t *in);
 
 /* The CONNECT request's header, nonce and cookie, which a LIVE_RELAY repeats. */
-static uint8_t connect_asked[22];
+static uint8_t connect_asked[MATCH_ASKED];
 
 /* A LIVE_RELAY and the RELAY it becomes, at the offsets live_transport.c uses:
-   the cookie ends at 22 (MATCH_ASKED), a relay's datagram starts at 14 (MATCH_BODY),
-   and the guest header is "D2GD", version, then the sender's ina and port, big-endian. */
+   the cookie ends at MATCH_ASKED, a relay's datagram starts at MATCH_BODY, and
+   the guest header is "D2GD", version, then the sender's ina and port,
+   big-endian. */
 static void checkRelayVector(const Step *step)
 {
     if (!strcmp(step->call, "live_relay")) {
         const uint8_t *packet = step->requests[0];
         check("live_relay is one request", step->request_count == 1u && step->answer_count == 0u &&
-            step->request_sizes[0] > 22u + 4u + 11u);
-        check("live_relay carries the client's header and cookie", packet[5] == 34u &&
-            memcmp(packet, connect_asked, 5u) == 0 && memcmp(packet + 6u, connect_asked + 6u, 16u) == 0);
-        check("live_relay names its destination", read32be(packet + 22u) == (uint32_t)step->destination);
-        check("live_relay carries a guest datagram", memcmp(packet + 26u, "D2GD", 4u) == 0 &&
+            step->request_sizes[0] > MATCH_ASKED + 4u + 11u);
+        check("live_relay carries the client's header and cookie", packet[5] == MATCH_LIVE_RELAY &&
+            memcmp(packet, connect_asked, 5u) == 0 &&
+            memcmp(packet + MATCH_HEADER, connect_asked + MATCH_HEADER, MATCH_ASKED - MATCH_HEADER) == 0);
+        check("live_relay names its destination", read32be(packet + MATCH_ASKED) == (uint32_t)step->destination);
+        check("live_relay carries a guest datagram", memcmp(packet + MATCH_ASKED + 4u, "D2GD", 4u) == 0 &&
             (packet[35] << 8 | packet[36]) == (int)step->port);
     } else {
         const uint8_t *packet = step->answers[0];
         check("the forward is one answer", step->answer_count == 1u && step->request_count == 0u &&
-            step->answer_sizes[0] > 14u + 11u);
-        check("the forward is a RELAY", memcmp(packet, "D2MM", 4u) == 0 && packet[4] == 2u && packet[5] == 9u);
-        check("the forward stamps the sender", memcmp(packet + 14u, "D2GD", 4u) == 0 &&
+            step->answer_sizes[0] > MATCH_BODY + 11u);
+        check("the forward is a RELAY", memcmp(packet, MATCH_MAGIC, sizeof MATCH_MAGIC) == 0 &&
+            packet[4] == MATCH_VERSION && packet[5] == MATCH_RELAY);
+        check("the forward stamps the sender", memcmp(packet + MATCH_BODY, "D2GD", 4u) == 0 &&
             read32be(packet + 19u) == (uint32_t)step->ina && (packet[23] << 8 | packet[24]) == (int)step->port);
     }
 }
@@ -461,7 +470,7 @@ static void runStep(Step *step, uint64_t now)
         uint8_t kid[8] = {0u};
         if (step->has_kid) memcpy(kid, step->kid, 8u);
         else if (step->answer_count != 0u && step->answer_sizes[0] >= 30u)
-            memcpy(kid, step->answers[0] + 22u, 8u); /* a SESSION_OK body: request, hresult, kid */
+            memcpy(kid, step->answers[0] + MATCH_BODY + 8u, 8u); /* a SESSION_OK body: request, hresult, kid */
         RecompLiveSessionId id;
         check("session id", backend->session_id(backend->self, request, &id) && memcmp(id.kid, kid, 8u) == 0);
     } else if (!strcmp(call, "search") || !strcmp(call, "find")) {
@@ -495,14 +504,6 @@ static void runStep(Step *step, uint64_t now)
 
 /* --- pushes, heartbeats and hostile answers --- */
 
-static void put32be(uint8_t *out, uint32_t value)
-{
-    out[0] = (uint8_t)(value >> 24);
-    out[1] = (uint8_t)(value >> 16);
-    out[2] = (uint8_t)(value >> 8);
-    out[3] = (uint8_t)value;
-}
-
 static uint32_t read32be(const uint8_t *in)
 {
     return (uint32_t)in[0] << 24 | (uint32_t)in[1] << 16 | (uint32_t)in[2] << 8 | in[3];
@@ -512,13 +513,13 @@ static uint32_t read32be(const uint8_t *in)
 static void feed_body(uint8_t kind, const uint8_t *body, size_t size)
 {
     uint8_t packet[RECOMP_LIVE_PACKET_BYTES];
-    if (14u + size > sizeof packet) return;
-    memcpy(packet, "D2MM", 4u);
-    packet[4] = 2u;
+    if (MATCH_BODY + size > sizeof packet) return;
+    memcpy(packet, MATCH_MAGIC, sizeof MATCH_MAGIC);
+    packet[4] = MATCH_VERSION;
     packet[5] = kind;
-    memcpy(packet + 6u, test_nonce, 8u);
-    if (size != 0u) memcpy(packet + 14u, body, size);
-    feed(packet, 14u + size);
+    memcpy(packet + MATCH_HEADER, test_nonce, sizeof test_nonce);
+    if (size != 0u) memcpy(packet + MATCH_BODY, body, size);
+    feed(packet, MATCH_BODY + size);
 }
 
 /* A push: type, the player it is about, and an invite's session id. */
@@ -549,11 +550,11 @@ static void checkPushSlots(const RecompLiveIdentity *identity)
         uint8_t body[17];
         push_body(body, 1u, 0x0009000000000010ull + push);
         captured_count = 0u;
-        feed_body(26u, body, sizeof body); /* PUSH */
+        feed_body(LIVE_PUSH, body, sizeof body); /* PUSH */
         if (captured_count != 1u) continue; /* the re-enumeration is on its way */
         uint8_t answer[46];
-        friend_empty_body(answer, read32be(captured[0] + 22u));
-        feed_body(23u, answer, sizeof answer); /* FRIEND, no rows: the slot is free again */
+        friend_empty_body(answer, read32be(captured[0] + MATCH_ASKED));
+        feed_body(LIVE_FRIEND, answer, sizeof answer); /* FRIEND, no rows: the slot is free again */
         ++answered;
         recomp_live_client_tick(1100u + push * 100u);
     }
@@ -577,15 +578,15 @@ static void checkHeartbeat(const RecompLiveIdentity *identity)
     check("the heartbeat test logs on", request != 0u && captured_count == 1u);
     uint8_t body[28];
     memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + 22u));
+    put32be(body, read32be(captured[0] + MATCH_ASKED));
     put32be(body + 8u, 0x0a010009u);
-    feed_body(13u, body, sizeof body); /* LOGGED */
+    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
     check("the logon answer names the player", done(request) && local_ina == 0x0a010009u);
     backend->release(backend->self, request);
     /* A heartbeat's LOGGED takes no request slot; a moved address is adopted. */
     put32be(body, 0x7fffffffu);
     put32be(body + 8u, 0x0a01000au);
-    feed_body(13u, body, sizeof body);
+    feed_body(LIVE_LOGGED, body, sizeof body);
     check("a heartbeat answer is adopted", local_ina == 0x0a01000au);
     const unsigned before = forget_calls;
     backend->logoff(backend->self);
@@ -605,7 +606,7 @@ static void checkStatTypes(const RecompLiveIdentity *identity)
     check("the stat test asks for a board", request != 0u && captured_count == 1u);
     uint8_t body[43u + 3u * 11u];
     memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + 22u));
+    put32be(body, read32be(captured[0] + MATCH_ASKED));
     body[9] = 1u;                     /* total rows */
     put32be(body + 10u, 1u);          /* board total */
     body[42] = 3u;                    /* stats */
@@ -615,7 +616,7 @@ static void checkStatTypes(const RecompLiveIdentity *identity)
         {0x00u, 0x03u, 2u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 9u},
     };
     memcpy(body + 43u, stats, sizeof stats);
-    feed_body(32u, body, sizeof body); /* STATROW */
+    feed_body(LIVE_STATROW, body, sizeof body); /* STATROW */
     static RecompLiveLeaderRow rows[RECOMP_LIVE_MAX_LEADER_ROWS];
     check("the stat test has its row", done(request) &&
         backend->stat_results(backend->self, request, rows, RECOMP_LIVE_MAX_LEADER_ROWS) == 1u);
@@ -642,9 +643,9 @@ static void checkGroupChildren(const RecompLiveIdentity *identity)
     check("a group sends one invite per friend", head != 0u && captured_count == 8u);
     for (unsigned i = 0u; i < captured_count; ++i) {
         uint8_t body[8];
-        put32be(body, read32be(captured[i] + 22u));
+        put32be(body, read32be(captured[i] + MATCH_ASKED));
         put32be(body + 4u, 0u);
-        feed_body(25u, body, sizeof body); /* DONE */
+        feed_body(LIVE_DONE, body, sizeof body); /* DONE */
     }
     check("the group settles", done(head));
     backend->release(backend->self, head);
@@ -739,17 +740,17 @@ static void checkPushAfterTimeout(const RecompLiveIdentity *identity)
     captured_count = 0u;
     uint8_t body[17];
     push_body(body, 1u, 0x0009000000000020ull);
-    feed_body(26u, body, sizeof body); /* PUSH: the client asks for the friend list */
-    check("a push asks for the friend list", captured_count == 1u && captured_kind(22u) == 1u);
+    feed_body(LIVE_PUSH, body, sizeof body); /* PUSH: the client asks for the friend list */
+    check("a push asks for the friend list", captured_count == 1u && captured_kind(LIVE_FRIENDS) == 1u);
     captured_count = 0u;
     recomp_live_client_tick(7000u); /* 5 s from the ask, and no answer came */
-    check("the unanswered ask stops", captured_kind(22u) == 0u);
+    check("the unanswered ask stops", captured_kind(LIVE_FRIENDS) == 0u);
     push_body(body, 1u, 0x0009000000000021ull);
-    feed_body(26u, body, sizeof body); /* PUSH */
-    check("a push after the timeout asks again", captured_count == 1u && captured_kind(22u) == 1u);
+    feed_body(LIVE_PUSH, body, sizeof body); /* PUSH */
+    check("a push after the timeout asks again", captured_count == 1u && captured_kind(LIVE_FRIENDS) == 1u);
     uint8_t answer[46];
-    friend_empty_body(answer, read32be(captured[0] + 22u));
-    feed_body(23u, answer, sizeof answer); /* FRIEND, no rows: the slot is free again */
+    friend_empty_body(answer, read32be(captured[0] + MATCH_ASKED));
+    feed_body(LIVE_FRIEND, answer, sizeof answer); /* FRIEND, no rows: the slot is free again */
     recomp_live_client_detach();
 }
 
@@ -766,70 +767,70 @@ static void checkConnectRetry(const RecompLiveIdentity *identity)
     const RecompLiveRequest logon = backend->logon(backend->self);
     uint8_t body[28];
     memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + 22u));
+    put32be(body, read32be(captured[0] + MATCH_ASKED));
     put32be(body + 8u, 0x0a010001u);
-    feed_body(13u, body, sizeof body); /* LOGGED */
+    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
     check("the connect test logs on", done(logon));
     backend->release(backend->self, logon);
 
     captured_count = 0u;
     backend->connect(backend->self, 0x0a010002u);
-    check("the first datagram asks for a pairing", captured_count == 1u && captured[0][5] == 20u &&
-        read32be(captured[0] + 22u) != 0u && read32be(captured[0] + 26u) == 0x0a010002u);
-    const uint32_t id = read32be(captured[0] + 22u);
+    check("the first datagram asks for a pairing", captured_count == 1u && captured[0][5] == LIVE_CONNECT &&
+        read32be(captured[0] + MATCH_ASKED) != 0u && read32be(captured[0] + MATCH_ASKED + 4u) == 0x0a010002u);
+    const uint32_t id = read32be(captured[0] + MATCH_ASKED);
     const size_t size = captured_size[0];
     captured_count = 0u;
     recomp_live_client_tick(1500u);
-    check("half a second does not repeat the connect", captured_kind(20u) == 0u);
+    check("half a second does not repeat the connect", captured_kind(LIVE_CONNECT) == 0u);
     recomp_live_client_tick(2000u);
-    check("a second repeats the connect with its id", captured_count == 1u && captured_kind(20u) == 1u &&
-        read32be(captured[0] + 22u) == id && captured_size[0] == size &&
-        memcmp(captured[0] + 6u, test_nonce, 8u) == 0);
+    check("a second repeats the connect with its id", captured_count == 1u && captured_kind(LIVE_CONNECT) == 1u &&
+        read32be(captured[0] + MATCH_ASKED) == id && captured_size[0] == size &&
+        memcmp(captured[0] + MATCH_HEADER, test_nonce, sizeof test_nonce) == 0);
 
     /* The pair's introduction does not end the asks: the other side's LPEER
        may be the one lost, and each repeat has the server send it again. */
     const unsigned intros = intro_count;
     memset(body, 0, sizeof body);
     put32be(body, 0x0a010002u);
-    feed_body(21u, body, 25u); /* LPEER */
+    feed_body(LIVE_LPEER, body, 25u); /* LPEER */
     check("the pair's LPEER reaches the transport",
         intro_count == intros + 1u && last_intro.virtual_ina == 0x0a010002u);
     captured_count = 0u;
     recomp_live_client_tick(4000u);
-    check("the LPEER alone does not end the connect", captured_kind(20u) == 1u &&
-        read32be(captured[0] + 22u) == id);
+    check("the LPEER alone does not end the connect", captured_kind(LIVE_CONNECT) == 1u &&
+        read32be(captured[0] + MATCH_ASKED) == id);
     /* Hearing the other player does. */
     heard_inas[0] = 0x0a010002u;
     captured_count = 0u;
     recomp_live_client_tick(5000u);
-    check("hearing the player ends the connect", captured_kind(20u) == 0u);
+    check("hearing the player ends the connect", captured_kind(LIVE_CONNECT) == 0u);
     /* The other side's own CONNECT sends this pairing's LPEER again: this side
        already asked, so answering would start a ping-pong of CONNECTs. */
     captured_count = 0u;
-    feed_body(21u, body, 25u);
-    check("a repeated LPEER does not connect back", captured_kind(20u) == 0u);
+    feed_body(LIVE_LPEER, body, 25u);
+    check("a repeated LPEER does not connect back", captured_kind(LIVE_CONNECT) == 0u);
 
     /* The joiner's LPEER reaches this side without a CONNECT of its own. */
     memset(body, 0, sizeof body);
     put32be(body, 0x0a010004u);
-    feed_body(21u, body, 25u); /* LPEER */
-    check("an unasked LPEER answers with a connect", captured_count == 1u && captured_kind(20u) == 1u &&
-        read32be(captured[0] + 26u) == 0x0a010004u && read32be(captured[0] + 22u) != id);
+    feed_body(LIVE_LPEER, body, 25u); /* LPEER */
+    check("an unasked LPEER answers with a connect", captured_count == 1u && captured_kind(LIVE_CONNECT) == 1u &&
+        read32be(captured[0] + MATCH_ASKED + 4u) == 0x0a010004u && read32be(captured[0] + MATCH_ASKED) != id);
     captured_count = 0u;
     recomp_live_client_tick(6100u);
-    check("and repeats it while it is unanswered", captured_kind(20u) == 1u);
-    feed_body(21u, body, 25u); /* the answer to this side's CONNECT: the same introduction */
+    check("and repeats it while it is unanswered", captured_kind(LIVE_CONNECT) == 1u);
+    feed_body(LIVE_LPEER, body, 25u); /* the answer to this side's CONNECT: the same introduction */
     heard_inas[1] = 0x0a010004u;
     captured_count = 0u;
     recomp_live_client_tick(8000u);
-    check("an answered host does not ask again", captured_kind(20u) == 0u);
+    check("an answered host does not ask again", captured_kind(LIVE_CONNECT) == 0u);
 
     /* The transport asks again when a player it sends to falls silent: a fresh
        request id, since the old answer may name a dead endpoint. */
     captured_count = 0u;
     backend->connect(backend->self, 0x0a010002u);
-    check("a silent player is asked for again", captured_count == 1u && captured_kind(20u) == 1u &&
-        read32be(captured[0] + 26u) == 0x0a010002u && read32be(captured[0] + 22u) != id);
+    check("a silent player is asked for again", captured_count == 1u && captured_kind(LIVE_CONNECT) == 1u &&
+        read32be(captured[0] + MATCH_ASKED + 4u) == 0x0a010002u && read32be(captured[0] + MATCH_ASKED) != id);
 
     /* A rematch: the old pairing lapsed and the joiner's CONNECT made a new
        one. The host answers that once, so the new pairing is two-sided too. */
@@ -837,12 +838,12 @@ static void checkConnectRetry(const RecompLiveIdentity *identity)
     put32be(body, 0x0a010004u);
     memset(body + 16u, 0x5a, 8u); /* a new pair token */
     captured_count = 0u;
-    feed_body(21u, body, 25u);
-    check("a new pairing with a known player connects back", captured_kind(20u) == 1u &&
-        read32be(captured[0] + 26u) == 0x0a010004u);
+    feed_body(LIVE_LPEER, body, 25u);
+    check("a new pairing with a known player connects back", captured_kind(LIVE_CONNECT) == 1u &&
+        read32be(captured[0] + MATCH_ASKED + 4u) == 0x0a010004u);
     captured_count = 0u;
-    feed_body(21u, body, 25u);
-    check("and the same pairing again does not", captured_kind(20u) == 0u);
+    feed_body(LIVE_LPEER, body, 25u);
+    check("and the same pairing again does not", captured_kind(LIVE_CONNECT) == 0u);
     memset(heard_inas, 0, sizeof heard_inas);
     recomp_live_client_detach();
 }
@@ -860,15 +861,15 @@ static void checkHeartbeatRefused(const RecompLiveIdentity *identity)
     const RecompLiveRequest request = backend->logon(backend->self);
     uint8_t body[28];
     memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + 22u));
+    put32be(body, read32be(captured[0] + MATCH_ASKED));
     put32be(body + 8u, 0x0a010009u);
-    feed_body(13u, body, sizeof body); /* LOGGED */
+    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
     check("the refused heartbeat test logs on", done(request) && local_ina == 0x0a010009u);
     backend->release(backend->self, request);
     const unsigned before = forget_calls;
     put32be(body, 0x7fffffffu); /* the heartbeat's own id: no slot to find */
     put32be(body + 4u, 0x80070005u); /* E_ACCESSDENIED */
-    feed_body(13u, body, sizeof body);
+    feed_body(LIVE_LOGGED, body, sizeof body);
     check("a refused heartbeat signs the account out",
         forget_calls == before + 1u && forget_ina == 0u && local_ina == 0u);
     recomp_live_client_detach();
@@ -885,27 +886,27 @@ static void checkCookie(const RecompLiveIdentity *identity)
     recomp_live_client_tick(1000u);
     captured_count = 0u;
     const RecompLiveRequest request = backend->logon(backend->self);
-    check("a first request carries no cookie", captured_count == 1u && captured[0][14] == 0u);
+    check("a first request carries no cookie", captured_count == 1u && captured[0][MATCH_BODY] == 0u);
     /* The transport wrote the nonce and kept the request; the client left both zero. */
-    check("the transport writes the nonce", memcmp(captured[0] + 6u, test_nonce, 8u) == 0);
-    uint8_t cookie[22];
-    memcpy(cookie, captured[0], 14u);
-    cookie[5] = 10u; /* the COOKIE answer */
-    for (unsigned i = 0u; i < 8u; ++i) cookie[14u + i] = (uint8_t)(0xa0u + i);
+    check("the transport writes the nonce", memcmp(captured[0] + MATCH_HEADER, test_nonce, sizeof test_nonce) == 0);
+    uint8_t cookie[MATCH_ASKED];
+    memcpy(cookie, captured[0], MATCH_BODY);
+    cookie[5] = MATCH_COOKIE; /* the COOKIE answer */
+    for (unsigned i = 0u; i < 8u; ++i) cookie[MATCH_BODY + i] = (uint8_t)(0xa0u + i);
     feed(cookie, sizeof cookie); /* the COOKIE answer, header and nonce and all */
     check("a cookie answer sends the ask again", captured_count == 2u &&
-        memcmp(captured[1] + 14u, cookie + 14u, 8u) == 0 &&
-        memcmp(captured[1] + 6u, test_nonce, 8u) == 0 &&
+        memcmp(captured[1] + MATCH_BODY, cookie + MATCH_BODY, sizeof test_cookie) == 0 &&
+        memcmp(captured[1] + MATCH_HEADER, test_nonce, sizeof test_nonce) == 0 &&
         captured_size[1] == captured_size[0]);
     feed(cookie, sizeof cookie);
     check("the cookie retry happens once", captured_count == 2u);
     /* An answer for another socket's nonce is not the server's. */
-    uint8_t forged[22];
-    memcpy(forged, captured[0], 14u);
-    forged[4] = 2u;
-    forged[5] = 25u; /* a DONE with request 0 */
-    forged[6] ^= 0xffu;
-    memset(forged + 14, 0, 8u);
+    uint8_t forged[MATCH_ASKED];
+    memcpy(forged, captured[0], MATCH_BODY);
+    forged[4] = MATCH_VERSION;
+    forged[5] = LIVE_DONE; /* a DONE with request 0 */
+    forged[MATCH_HEADER] ^= 0xffu;
+    memset(forged + MATCH_BODY, 0, 8u);
     feed(forged, sizeof forged);
     uint32_t hresult = 0u;
     check("a packet without this nonce is dropped",
@@ -1068,7 +1069,7 @@ int main(int argc, char **argv)
         runStep(&step, now);
         ++steps;
     }
-    check("every kind is in the vectors", steps == 26u);
+    check("every kind is in the vectors", steps == VECTOR_STEPS);
 
     checkRetriesAndTimeout(&mine);
     checkConnectRetry(&mine);

@@ -362,11 +362,6 @@ void recomp_netplay_send_goodbye(const RecompNetplay *net)
     for (int i = 0; i < 3; ++i) netplay_send_to(net, net->peer_address, net->peer_port, packet, sizeof packet);
 }
 
-static uint32_t get32be(const uint8_t *in)
-{
-    return (uint32_t)in[0] << 24 | (uint32_t)in[1] << 16 | (uint32_t)in[2] << 8 | in[3];
-}
-
 void netplay_relay_on(RecompNetplay *net, const char *why)
 {
     RecompNetplayMatch *m = &net->match;
