@@ -122,38 +122,197 @@ static void test_tracks(const char *base)
 static void test_target_names(void)
 {
     target_count = 2u;
-    targets[0] = (Target){"bgm_doa2_ks.adx", "Kasumi", 0, -1, -1};
-    targets[1] = (Target){"RMX_KS.ADX", "Kasumi (Remix)", 1, -1, -1};
-    CHECK(find_target("bgm_doa2_ks.adx") == 0);
-    CHECK(find_target("BGM_DOA2_KS.ADX") == 0);
-    CHECK(find_target("rmx_ks.adx") == 1);
+    memset(targets, 0, sizeof targets);
+    snprintf(targets[0].file, sizeof targets[0].file, "one.adx");
+    snprintf(targets[0].name, sizeof targets[0].name, "One");
+    snprintf(targets[1].file, sizeof targets[1].file, "two.adx");
+    snprintf(targets[1].name, sizeof targets[1].name, "Two (Remix)");
+    targets[1].entry = 1;
+    CHECK(find_target("one.adx") == 0);
+    CHECK(find_target("ONE.ADX") == 0);
+    CHECK(find_target("two.adx") == 1);
     CHECK(find_target("nope.adx") == -1);
     target_count = 0u;
 }
 
-/* A reserved bgm.afs, so assignments really land in a slot: a synthetic disc
-   with one named entry, "bgm_doa2_ks.adx", 4 bytes of 'a'. */
-enum { AFS_SIZE = 4096, AFS_ENTRY = 2048, AFS_ENTRY_SIZE = 4, AFS_NAMES = AFS_SIZE - 48 };
+/* Synthetic discs below write their own tables; nothing here is a retail name. */
+enum {
+    AFS_ENTRY = 0x800, AFS_ENTRY_SIZE = 0x800, AFS_NAMES_AT = 0x2000, ARCHIVE_SIZE = AFS_NAMES_AT + 48 * 8,
+    XBE_SIZE = 0x3000, XBE_HEADERS_AT = 0x200, XBE_DATA = 0x400,
+    XBE_TABLE_AT = 0x1000, XBE_LABELS_AT = 0x2000, XBE_NAMES_AT = 0x2800,
+    NAME_BYTES = 64, RATE = 22050, SECONDS = 22050,
+};
 
 static void put32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
-static void make_archive(const char *path)
+static void put_be32(uint8_t *p, uint32_t v)
 {
-    uint8_t afs[AFS_SIZE];
+    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
+}
+
+/* The 0x20-byte ADX header of an entry: one channel, RATE, a given length. */
+static void put_adx(uint8_t *entry, uint32_t samples)
+{
+    entry[0] = 0x80u; entry[1] = 0x00u; entry[2] = 0x20u;
+    entry[4] = 3u; entry[5] = 0x12u; entry[6] = 4u; entry[7] = 1u;
+    put_be32(entry + 8, RATE);
+    put_be32(entry + 12, samples);
+}
+
+/* A synthetic bgm.afs: an entry per name, an ADX of the given samples long. */
+static void make_archive(const char *path, const char *const names[], const uint32_t samples[], unsigned count)
+{
+    uint8_t afs[AFS_NAMES_AT + 48u * 8u];
     memset(afs, 0, sizeof afs);
     memcpy(afs, "AFS\0", 4u);
-    put32(afs + 4, 1u);
-    put32(afs + 8, AFS_ENTRY);
-    put32(afs + 12, AFS_ENTRY_SIZE);
-    memset(afs + AFS_ENTRY, 'a', AFS_ENTRY_SIZE);
-    put32(afs + 16, AFS_NAMES);
-    put32(afs + 20, 48u);
-    strcpy((char *)afs + AFS_NAMES, "bgm_doa2_ks.adx");
-    put32(afs + AFS_NAMES + 44u, AFS_ENTRY_SIZE);
+    put32(afs + 4, count);
+    for (unsigned i = 0u; i < count; ++i) {
+        put32(afs + 8u + 8u * i, AFS_ENTRY + AFS_ENTRY_SIZE * i);
+        put32(afs + 12u + 8u * i, AFS_ENTRY_SIZE);
+        memset(afs + AFS_ENTRY + AFS_ENTRY_SIZE * i, 'a', AFS_ENTRY_SIZE);
+        put_adx(afs + AFS_ENTRY + AFS_ENTRY_SIZE * i, samples[i]);
+        snprintf((char *)afs + AFS_NAMES_AT + 48u * i, 48u, "%s", names[i]);
+    }
+    put32(afs + 8u + 8u * count, AFS_NAMES_AT);
+    put32(afs + 12u + 8u * count, 48u * count);
     write_file(path, afs, sizeof afs);
+}
+
+/* A synthetic executable whose data section holds a music table at table_va:
+   DOA2.xbe's entries are label, unused, file, unused; Doa1.xbe's are a file
+   pointer each. */
+static void make_executable(const char *path, uint32_t table_va, bool labelled,
+    const char *const labels[], const char *const files[], unsigned count)
+{
+    uint8_t xbe[XBE_SIZE];
+    memset(xbe, 0, sizeof xbe);
+    const uint32_t base = table_va - XBE_TABLE_AT;
+    memcpy(xbe, "XBEH", 4u);
+    put32(xbe + 0x104, base);
+    put32(xbe + 0x11c, 2u);
+    put32(xbe + 0x120, base + XBE_HEADERS_AT);
+    put32(xbe + XBE_HEADERS_AT + 4u, base);
+    put32(xbe + XBE_HEADERS_AT + 8u, XBE_DATA);
+    put32(xbe + XBE_HEADERS_AT + 16u, XBE_DATA);
+    put32(xbe + XBE_HEADERS_AT + 60u, base + XBE_DATA);
+    put32(xbe + XBE_HEADERS_AT + 64u, sizeof xbe - XBE_DATA);
+    put32(xbe + XBE_HEADERS_AT + 68u, XBE_DATA);
+    put32(xbe + XBE_HEADERS_AT + 72u, sizeof xbe - XBE_DATA);
+    for (unsigned i = 0u; i < count; ++i) {
+        const uint32_t name = base + XBE_NAMES_AT + NAME_BYTES * i;
+        snprintf((char *)xbe + XBE_NAMES_AT + NAME_BYTES * i, NAME_BYTES, "%s", files[i]);
+        if (!labelled) {
+            put32(xbe + XBE_TABLE_AT + 4u * i, name);
+            continue;
+        }
+        put32(xbe + XBE_TABLE_AT + 16u * i, base + XBE_LABELS_AT + NAME_BYTES * i);
+        put32(xbe + XBE_TABLE_AT + 16u * i + 8u, name);
+        snprintf((char *)xbe + XBE_LABELS_AT + NAME_BYTES * i, NAME_BYTES, "%s", labels[i]);
+    }
+    write_file(path, xbe, sizeof xbe);
+}
+
+/* The music table gives the album its order and labels; its unused slot (a
+   one-sample placeholder) is left out, and a file it names twice is one
+   track named for both. */
+static void test_music_table(const char *base)
+{
+    static const char *const names[] = {"one.adx", "two.adx", "unused.adx"};
+    static const uint32_t samples[] = {SECONDS * 2u, SECONDS, 1u};
+    static const char *const labels[] = {"Remix_Ky", "End_Ky", "Hidden", "End_Other", "NameEntry"};
+    static const char *const files[] = {"one.adx", "two.adx", "unused.adx", "two.adx", "absent.adx"};
+    char disc[512], path[512], text[4096];
+    make_folder(base);
+    snprintf(disc, sizeof disc, "%s/table-disc", base);
+    make_folder(disc);
+    snprintf(path, sizeof path, "%s/DOA2", disc);
+    make_folder(path);
+    snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
+    make_archive(path, names, samples, 3u);
+    snprintf(path, sizeof path, "%s/DOA2.xbe", disc);
+    make_executable(path, DOA2U_MUSIC, true, labels, files, 5u);
+    snprintf(disc_root, sizeof disc_root, "%s", disc);
+    snprintf(jukebox_root, sizeof jukebox_root, "%s/jukebox", base);
+
+    Album album = {0};
+    load_doa2u(&album);
+    CHECK(album.count == 2u);
+    if (album.count == 2u) {
+        CHECK(strcmp(album.tracks[0].file, "one.adx") == 0);
+        CHECK(strcmp(album.tracks[0].name, "Ky (Remix)") == 0);
+        CHECK(album.tracks[0].offset == AFS_ENTRY && album.tracks[0].size == AFS_ENTRY_SIZE);
+        CHECK(strcmp(album.tracks[1].file, "two.adx") == 0);
+        CHECK(strcmp(album.tracks[1].name, "Ky's Ending / Other's Ending") == 0);
+        CHECK(album.tracks[1].offset == AFS_ENTRY + AFS_ENTRY_SIZE);
+    }
+    snprintf(path, sizeof path, "%s/doa2u/names.txt", jukebox_root);
+    (void)read_text(path, text, sizeof text);
+    CHECK(strstr(text, "one.adx = Ky (Remix)") != NULL);
+    CHECK(strstr(text, "two.adx = Ky's Ending / Other's Ending") != NULL);
+    free(album.tracks);
+
+    /* Without the executable the album is empty rather than made up. */
+    snprintf(path, sizeof path, "%s/DOA2.xbe", disc);
+    remove(path);
+    Album missing = {0};
+    load_doa2u(&missing);
+    CHECK(missing.count == 0u);
+    free(missing.tracks);
+}
+
+/* Doa1.xbe's music table lists 0x2e02f8's files in its order; the names are
+   the shared fighter codes, and a file that is not ADX is left out. */
+static void test_doa1u_table(const char *base)
+{
+    static const char *const files[] = {"aa_sng.adx", "bb_lose.adx", "cc_sng.adx"};
+    static const char *const missing[] = {"aa_sng.adx"};
+    char disc[512], path[512], sound[512], file[32], name[NAME_SIZE];
+    make_folder(base);
+    snprintf(disc, sizeof disc, "%s/doa1-disc", base);
+    make_folder(disc);
+    snprintf(sound, sizeof sound, "%s/DOA1", disc);
+    make_folder(sound);
+    snprintf(sound, sizeof sound, "%s/DOA1/Sound", disc);
+    make_folder(sound);
+    for (unsigned i = 0u; i < 2u; ++i) {
+        uint8_t adx[64] = {0};
+        put_adx(adx, SECONDS);
+        snprintf(path, sizeof path, "%s/%s", sound, files[i]);
+        write_file(path, adx, sizeof adx);
+    }
+    snprintf(path, sizeof path, "%s/%s", sound, files[2]);
+    write_file(path, "no", 2u);
+    snprintf(path, sizeof path, "%s/Doa1.xbe", disc);
+    make_executable(path, DOA1U_MUSIC, false, NULL, files, 3u);
+    snprintf(disc_root, sizeof disc_root, "%s", disc);
+    snprintf(jukebox_root, sizeof jukebox_root, "%s/jukebox", base);
+
+    Album album = {0};
+    load_doa1u(&album);
+    CHECK(album.count == 2u);
+    if (album.count == 2u) {
+        CHECK(strcmp(album.tracks[0].file, files[0]) == 0);
+        CHECK(strcmp(album.tracks[0].name, "Aa Sng") == 0);
+        CHECK(strcmp(album.tracks[1].file, files[1]) == 0);
+        CHECK(strcmp(album.tracks[1].name, "Bb Lose") == 0);
+    }
+    free(album.tracks);
+
+    /* The label follows the code the table's names use. */
+    snprintf(file, sizeof file, "%s_lose2.adx", DOA1U_CODES[0].code);
+    doa1u_label(file, name, sizeof name);
+    CHECK(strstr(name, "(Lose 2)") != NULL);
+
+    /* A table with no strings ends; the album is then empty. */
+    snprintf(path, sizeof path, "%s/Doa1.xbe", disc);
+    make_executable(path, DOA1U_MUSIC, false, NULL, missing, 0u);
+    Album empty = {0};
+    load_doa1u(&empty);
+    CHECK(empty.count == 0u);
+    free(empty.tracks);
 }
 
 static FILE *base_file;
@@ -190,7 +349,17 @@ static void test_assignments(const char *base)
     snprintf(path, sizeof path, "%s/DOA2", disc);
     make_folder(path);
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
-    make_archive(path);
+    {
+        static const char *const names[] = {"one.adx"};
+        static const uint32_t samples[] = {SECONDS};
+        make_archive(path, names, samples, 1u);
+    }
+    snprintf(path, sizeof path, "%s/DOA2.xbe", disc);
+    {
+        static const char *const labels[] = {"First Theme"};
+        static const char *const files[] = {"one.adx"};
+        make_executable(path, DOA2U_MUSIC, true, labels, files, 1u);
+    }
     snprintf(mods, sizeof mods, "%s/mods", base);
     make_folder(mods);
     snprintf(jukebox_root, sizeof jukebox_root, "%s/jukebox", base);
@@ -212,15 +381,20 @@ static void test_assignments(const char *base)
     recomp_jukebox_prepare(disc, private_dir);
     recomp_jukebox_install(false);
     CHECK(assigning);
+    CHECK(target_count == 1u);
+    if (target_count == 1u) {
+        CHECK(strcmp(targets[0].file, "one.adx") == 0);
+        CHECK(strcmp(targets[0].name, "First Theme") == 0);
+    }
 
-    const RecompModOverlay *overlay = recomp_mod_overlay(BGM, AFS_SIZE);
+    const RecompModOverlay *overlay = recomp_mod_overlay(BGM, ARCHIVE_SIZE);
     uint64_t at = 0u;
-    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, AFS_SIZE, 0u, &at));
+    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 0u, &at));
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
     base_file = fopen(path, "rb");
     CHECK(base_file != NULL);
     if (overlay == NULL || base_file == NULL) return;
-    CHECK(entry_byte(overlay, at) == 'a');
+    CHECK(entry_byte(overlay, at) == 0x80u);
 
     const int doa3 = find_album("DOA3");
     const int track = doa3 >= 0 ? find_track((unsigned)doa3, "track.adx") : -1;
@@ -236,7 +410,7 @@ static void test_assignments(const char *base)
         CHECK(entry_byte(overlay, at) == 'Q');
         snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
         (void)read_text(path, text, sizeof text);
-        CHECK(strstr(text, "bgm_doa2_ks.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(strstr(text, "one.adx\tDOA3\ttrack.adx") != NULL);
 
         /* The page reload keeps an assignment that still resolves. */
         recomp_jukebox_page_opened();
@@ -244,7 +418,7 @@ static void test_assignments(const char *base)
         CHECK(entry_byte(overlay, at) == 'Q');
 
         /* The saved names match in any case. */
-        static const char upper[] = "BGM_DOA2_KS.ADX\tdoa3\tTRACK.ADX\n";
+        static const char upper[] = "ONE.ADX\tdoa3\tTRACK.ADX\n";
         write_file(path, upper, sizeof upper - 1u);
         recomp_jukebox_page_opened();
         CHECK(targets[0].album == doa3 && targets[0].track == track);
@@ -262,7 +436,7 @@ static void test_assignments(const char *base)
         remove(path);
         recomp_jukebox_page_opened();
         CHECK(targets[0].album == -1 && targets[0].track == -1);
-        CHECK(entry_byte(overlay, at) == 'a');
+        CHECK(entry_byte(overlay, at) == 0x80u);
     }
     fclose(base_file);
     base_file = NULL;
@@ -310,6 +484,8 @@ int main(void)
     test_names(root);
     test_tracks(root);
     test_target_names();
+    test_music_table("jukebox-test-table");
+    test_doa1u_table("jukebox-test-doa1");
     test_assignments(root);
     return failures != 0u;
 }

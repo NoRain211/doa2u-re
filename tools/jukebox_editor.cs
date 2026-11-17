@@ -2,8 +2,9 @@
 // JukeboxEditor: names the Jukebox's tracks and picks which track plays for
 // each of the game's music (recomp-runtime/jukebox.c), with a preview player.
 //
-// It reads every album the game's Jukebox reads: DOA2U's music (DOA2\bgm.afs)
-// and Dead or Alive Ultimate's DOA1 music (DOA1\Sound) from the game's disc in
+// It reads every album the game's Jukebox reads: DOA2U's music (DOA2\bgm.afs, which the game
+// lists in jukebox\doa2u\names.txt when it starts) and Dead or Alive Ultimate's DOA1 music
+// (DOA1\Sound, listed in jukebox\doa1u\names.txt) from the game's disc in
 // private\play-disc (or private\imported-disc\disc), and each album that
 // tools\import_soundtrack.py put in jukebox\<album> (tracks.txt). Names go to
 // jukebox\<album>\names.txt ("file = name", jukebox\doa2u and jukebox\doa1u
@@ -117,46 +118,11 @@ static class Adx
 
 class JukeboxEditor : Form
 {
-    // DOA2U's music table (as jukebox.c's DOA2U_NAMES): the game's music the Jukebox can replace.
-    static readonly string[,] Doa2u = {
-        {"bgm_doa2_ks.adx", "Kasumi"}, {"bgm_doa2_ln.adx", "Leon"}, {"bgm_doa2_gn.adx", "Gen Fu"},
-        {"bgm_doa2_zk.adx", "Zack"}, {"bgm_doa2_tg.adx", "Tengu"}, {"bgm_doa2_le.adx", "Leifang"},
-        {"bgm_doa2_jn.adx", "Jann Lee"}, {"bgm_doa2_tn.adx", "Tina"}, {"bgm_doa2_ba.adx", "Bass"},
-        {"bgm_doa2_ry.adx", "Ryu Hayabusa"}, {"bgm_doa2_ay.adx", "Ayane"}, {"bgm_doa2_he.adx", "Helena"},
-        {"bgm_doa2_ei.adx", "Ein"}, {"bgm_doa2_by.adx", "Bayman"}, {"bgm_doa2_ko.adx", "Hitomi"},
-        {"bgm_doa2_sel.adx", "Character Select"}, {"bgm_doa2_staffroll.adx", "Staff Roll"},
-        {"bgm_doa2_name.adx", "Name Entry"}, {"bgm_doa2_trainning.adx", "Sparring"},
-        {"bgm_doa2_zk_end.adx", "Zack's Ending"}, {"bgm_doa2_he_end.adx", "Helena's Ending"},
-        {"bgm_doa2_jn_end.adx", "Jann Lee's Ending"}, {"bgm_doa2_tn_end.adx", "Tina's Ending"},
-        {"bgm_doa2_he_con.adx", "Helena (Story)"}, {"bgm_doa2_ei_con.adx", "Ein (Story)"},
-        {"bgm_doa2_ba_con.adx", "Bass (Story)"}, {"bgm_doa2_rplyend.adx", "Replay End"},
-        {"bgm_doa2_tagend.adx", "Tag Battle End"}, {"bgm_doa2_gn2.adx", "Gen Fu (DOA1)"},
-        {"bgm_doa2_le2.adx", "Leifang (DOA1)"}, {"doa12_e3_bgm.adx", "E3 Demo"},
-        {"rmx_ks.adx", "Kasumi (Remix)"}, {"rmx_ln.adx", "Leon (Remix)"}, {"rmx_gn.adx", "Gen Fu (Remix)"},
-        {"rmx_zk.adx", "Zack (Remix)"}, {"rmx_tg.adx", "Tengu (Remix)"}, {"rmx_le.adx", "Leifang (Remix)"},
-        {"rmx_jn.adx", "Jann Lee (Remix)"}, {"rmx_tn.adx", "Tina (Remix)"}, {"rmx_ba.adx", "Bass (Remix)"},
-        {"rmx_ry.adx", "Ryu Hayabusa (Remix)"}, {"rmx_ay.adx", "Ayane (Remix)"}, {"rmx_he.adx", "Helena (Remix)"},
-        {"rmx_ei.adx", "Ein (Remix)"}, {"rmx_by.adx", "Bayman (Remix)"}, {"rmx_ko.adx", "Hitomi (Remix)"},
-        {"bgm_doa2_online.adx", "Online"}, {"dreamon.adx", "Dream On"}, {"ups.adx", "UPS"},
-        {"tgs2004.adx", "TGS 2004"},
-    };
-    // Dead or Alive Ultimate's DOA1 music (as jukebox.c's DOA1U_NAMES).
-    static readonly string[,] Doa1u = {
-        {"ks_sng.adx", "Kasumi"}, {"lu_sng.adx", "Jann Lee"}, {"le_sng.adx", "Leifang"},
-        {"km_sng.adx", "Ryu Hayabusa"}, {"gy_sng.adx", "Bayman"}, {"fa_sng.adx", "Gen Fu"},
-        {"kl_sng.adx", "Zack"}, {"tn_sng.adx", "Tina"}, {"rd_sng.adx", "Raidou"},
-        {"sel_sng.adx", "Character Select"}, {"name_sng.adx", "Name Entry"}, {"cnt_sng.adx", "Continue"},
-        {"clr_sng.adx", "Clear"}, {"trng_sng.adx", "Training"},
-        {"kl_lose.adx", "Zack (Lose)"}, {"le_lose.adx", "Leifang (Lose)"}, {"km_lose.adx", "Ryu Hayabusa (Lose)"},
-        {"lu_lose.adx", "Jann Lee (Lose)"}, {"tn_lose.adx", "Tina (Lose)"}, {"gy_lose.adx", "Bayman (Lose)"},
-        {"fa_lose.adx", "Gen Fu (Lose)"}, {"ks_lose.adx", "Kasumi (Lose)"}, {"ks_lose2.adx", "Kasumi (Lose 2)"},
-        {"rd_lose.adx", "Raidou (Lose)"}, {"opmov_sng.adx", "Opening Movie"}, {"edmov_sng.adx", "Ending Movie"},
-        {"online_sng.adx", "Online"},
-    };
     const string Own = "The game's own music";
 
     readonly string root, jukebox, disc;
     readonly List<Album> albums = new List<Album>();
+    readonly List<Track> music = new List<Track>(); // the game's own music: what a row assigns
     readonly HashSet<string> editedSlots = new HashSet<string>();
     readonly Dictionary<string, string> assigned = new Dictionary<string, string>(); // music file -> "TAB\tfile"
     readonly ListBox albumList = new ListBox();
@@ -290,6 +256,7 @@ class JukeboxEditor : Form
     void LoadAlbums()
     {
         albums.Clear();
+        music.Clear();
         if (disc != null)
         {
             albums.Add(LoadDoa2u());
@@ -319,9 +286,13 @@ class JukeboxEditor : Form
 
     static uint Le32(byte[] b, int at) { return BitConverter.ToUInt32(b, at); }
 
+    // The game's music is bgm.afs's entries, in the order and with the names jukebox\doa2u\
+    // names.txt lists (the game writes it when it starts); before its first start the archive's
+    // own order and names stand in. The table's unused slots are a one-sample placeholder.
     Album LoadDoa2u()
     {
         var album = new Album { Tab = "DOA2U", Title = "Dead or Alive 2 Ultimate", Folder = "doa2u" };
+        var entries = new List<Track>();
         string path = Path.Combine(disc, "DOA2", "bgm.afs");
         try
         {
@@ -340,37 +311,103 @@ class JukeboxEditor : Form
                 file.Seek(namesAt, SeekOrigin.Begin);
                 byte[] names = reader.ReadBytes(48 * count);
                 if (names.Length != 48 * count) return album;
-                for (int n = 0; n < Doa2u.GetLength(0); ++n)
-                    for (int i = 0; i < count; ++i)
-                    {
-                        string entry = Encoding.ASCII.GetString(names, 48 * i, 32).TrimEnd('\0').ToLowerInvariant();
-                        if (entry != Doa2u[n, 0]) continue;
-                        uint offset = Le32(table, 8 * i), size = Le32(table, 8 * i + 4);
-                        if ((ulong)offset + size > (ulong)file.Length) continue;
-                        var track = new Track { File = Doa2u[n, 0], Name = Doa2u[n, 1], Path = path, Offset = offset, Size = size };
-                        track.Seconds = Seconds(track);
-                        album.Tracks.Add(track);
-                        break;
-                    }
+                for (int i = 0; i < count; ++i)
+                {
+                    uint offset = Le32(table, 8 * i), size = Le32(table, 8 * i + 4);
+                    if ((ulong)offset + size > (ulong)file.Length) continue;
+                    string name = Encoding.ASCII.GetString(names, 48 * i, 32).TrimEnd('\0');
+                    var track = new Track { File = name, Path = path, Offset = offset, Size = size };
+                    track.Seconds = Seconds(track);
+                    entries.Add(track);
+                }
             }
         }
-        catch (IOException) { album.Tracks.Clear(); }
-        catch (UnauthorizedAccessException) { album.Tracks.Clear(); }
+        catch (IOException) { entries.Clear(); }
+        catch (UnauthorizedAccessException) { entries.Clear(); }
+        var byFile = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (Track track in entries) if (!byFile.ContainsKey(track.File)) byFile[track.File] = track;
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string[] pair in ReadNameLines(Path.Combine(jukebox, "doa2u", "names.txt")))
+        {
+            Track track;
+            if (!byFile.TryGetValue(pair[0], out track) || track.Seconds < 1 || listed.Contains(track.File)) continue;
+            track.Name = pair[1];
+            listed.Add(track.File);
+            album.Tracks.Add(track);
+        }
+        foreach (Track track in entries)
+            if (!listed.Contains(track.File) && track.Seconds >= 1)
+            {
+                listed.Add(track.File);
+                track.Name = StemLabel(track.File);
+                album.Tracks.Add(track);
+            }
+        music.Clear();
+        music.AddRange(album.Tracks);
         return album;
     }
 
+    // Dead or Alive Ultimate's DOA1 music: DOA1\Sound, in the order jukebox\doa1u\names.txt lists.
     Album LoadDoa1u()
     {
         var album = new Album { Tab = "DOA1U", Title = "Dead or Alive Ultimate", Folder = "doa1u" };
-        for (int n = 0; n < Doa1u.GetLength(0); ++n)
+        var byFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
         {
-            string path = Path.Combine(disc, "DOA1", "Sound", Doa1u[n, 0]);
-            if (!File.Exists(path)) continue;
-            var track = new Track { File = Doa1u[n, 0], Name = Doa1u[n, 1], Path = path };
-            track.Seconds = Seconds(track);
-            album.Tracks.Add(track);
+            foreach (string path in Directory.GetFiles(Path.Combine(disc, "DOA1", "Sound")))
+                byFile[Path.GetFileName(path)] = path;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string[] pair in ReadNameLines(Path.Combine(jukebox, "doa1u", "names.txt")))
+        {
+            string path;
+            if (!byFile.TryGetValue(pair[0], out path) || !listed.Add(pair[0])) continue;
+            album.Tracks.Add(Doa1Track(path, pair[1]));
+        }
+        foreach (var pair in byFile.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (listed.Contains(pair.Key)) continue;
+            Track track = Doa1Track(pair.Value, StemLabel(pair.Key));
+            if (track.Seconds > 0) album.Tracks.Add(track);
         }
         return album;
+    }
+
+    static Track Doa1Track(string path, string name)
+    {
+        var track = new Track { File = Path.GetFileName(path), Name = name, Path = path };
+        track.Seconds = Seconds(track);
+        return track;
+    }
+
+    // "file = name" lines in the file's order; "album" names the album, not a track.
+    static List<string[]> ReadNameLines(string path)
+    {
+        var lines = new List<string[]>();
+        if (!File.Exists(path)) return lines;
+        foreach (string raw in File.ReadAllLines(path, Encoding.UTF8))
+        {
+            string line = raw.TrimStart('﻿');
+            if (line.StartsWith("#")) continue;
+            int equals = line.IndexOf('=');
+            if (equals < 0) continue;
+            string key = line.Substring(0, equals).Trim(), name = line.Substring(equals + 1).Trim();
+            if (key != "" && key != "album" && name != "") lines.Add(new[] { key, name });
+        }
+        return lines;
+    }
+
+    // A file's own words, for a track the game has not named yet.
+    static string StemLabel(string file)
+    {
+        string[] words = Path.GetFileNameWithoutExtension(file).Split(new[] { '_', '-', ' ' },
+            StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; ++i)
+            if (words[i].Length > 0)
+                words[i] = char.ToUpperInvariant(words[i][0]) + words[i].Substring(1);
+        return string.Join(" ", words);
     }
 
     Album LoadFolder(string folder)
@@ -523,17 +560,17 @@ class JukeboxEditor : Form
         slots.Rows.Clear();
         choice.Items.Clear();
         choice.Items.AddRange(items.ToArray());
-        for (int n = 0; n < Doa2u.GetLength(0); ++n)
+        foreach (Track track in music)
         {
             string pick;
             Choice value = items[0];
-            if (assigned.TryGetValue(Doa2u[n, 0], out pick))
+            if (assigned.TryGetValue(track.File, out pick))
             {
                 string[] part = pick.Split('\t');
                 value = items.FirstOrDefault(c => c.Track != null && c.Album.Tab == part[0] && c.Track.File == part[1]) ?? items[0];
             }
-            int row = slots.Rows.Add(Doa2u[n, 1], value);
-            slots.Rows[row].Tag = Doa2u[n, 0];
+            int row = slots.Rows.Add(track.Name, value);
+            slots.Rows[row].Tag = track.File;
         }
         if (keep >= 0 && keep < slots.Rows.Count) slots.FirstDisplayedScrollingRowIndex = keep;
         loading = false;

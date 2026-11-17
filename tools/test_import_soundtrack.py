@@ -102,6 +102,21 @@ def sound_bank_image(cues):
     return bytes(image)
 
 
+def xbe_image(blobs, base=0x40000000):
+    """An XBE whose data section holds blobs {offset in it: bytes}: a table's address
+    is base + 0x400 + offset."""
+    size = 0x400 + max(offset + len(blob) for offset, blob in blobs.items())
+    data = bytearray(size)
+    data[:4] = b"XBEH"
+    struct.pack_into("<I", data, 0x104, base)
+    struct.pack_into("<II", data, 0x11C, 2, base + 0x200)
+    struct.pack_into("<IIIII", data, 0x200, 0, base, 0x400, 0, 0x400)
+    struct.pack_into("<IIIII", data, 0x238, 0, base + 0x400, size - 0x400, 0x400, size - 0x400)
+    for offset, blob in blobs.items():
+        data[0x400 + offset:0x400 + offset + len(blob)] = blob
+    return bytes(data)
+
+
 class NameTests(unittest.TestCase):
     def test_doa4_names(self):
         self.assertEqual(soundtrack.doa4_name("bgm_aya"), "Ayane")
@@ -114,6 +129,17 @@ class NameTests(unittest.TestCase):
         self.assertEqual(soundtrack.group_name(["rmx_kas", "rmx_alp"]), "Kasumi / Alpha-152 (Remix)")
         self.assertEqual(soundtrack.group_name(["bgm_bas", "bgm_bas_doa2", "bgm_bas_doa3"]), "Bass")
         self.assertEqual(soundtrack.group_name(["bgm_select", "bgm_ups"]), "Character Select")
+
+    def test_doa1u_and_movie_names_come_from_their_codes(self):
+        code, name = next(iter(soundtrack.DOA1_CODES.items()))
+        self.assertEqual(soundtrack.doa1u_name(f"{code}_sng.adx"), name)
+        self.assertEqual(soundtrack.doa1u_name(f"{code}_lose.adx"), name + " (Lose)")
+        self.assertEqual(soundtrack.doa1u_name(f"{code}_lose2.adx"), name + " (Lose 2)")
+        self.assertEqual(soundtrack.doa1u_name("xyz_sng.adx"), "Xyz Sng")
+        code, name = next(iter(soundtrack.DOA3_CODES.items()))
+        self.assertEqual(soundtrack.movie_name(f"mv_{code}.sfd"), f"{name}'s Ending")
+        self.assertEqual(soundtrack.movie_name("op_movie.sfd"), "Op Movie")
+        self.assertEqual(soundtrack.movie_name("GAME_G4.sfd"), "Game G4")
 
 
 class ImportFailureTests(unittest.TestCase):
@@ -303,6 +329,103 @@ class DiscTests(unittest.TestCase):
                 self.assertEqual(soundtrack.main(), 0)
             doa2u.assert_called_once()
             doa3.assert_not_called()
+
+    def test_folders_and_images_list_their_movie_folders(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "disc.iso")
+            xdvdfs_image(path, {"bgm.afs": afs([adx]), "SOUND/one.xwb": b"x"})
+            disc = soundtrack.Xdvdfs(path)
+            try:
+                self.assertEqual(disc.list(""), ["bgm.afs"])
+                self.assertEqual(disc.list("SOUND"), ["one.xwb"])
+                self.assertEqual(disc.list("NOSUCH"), [])
+            finally:
+                disc.close()
+            Path(folder, "movie").mkdir()
+            Path(folder, "movie", "b.sfd").write_bytes(b"b")
+            Path(folder, "movie", "A.sfd").write_bytes(b"a")
+            Path(folder, "movie", "notes.txt").write_bytes(b"n")
+            here = soundtrack.Folder(folder)
+            self.assertEqual(here.list("movie"), ["A.sfd", "b.sfd", "notes.txt"])
+            self.assertEqual(here.list("nosuch"), [])
+
+
+def movie_image(payload):
+    """A Sofdec movie holding one MPEG audio stream: a pack header, the stream, an end code."""
+    pes = b"\0\0\1\xc0" + struct.pack(">H", 1 + len(payload)) + b"\x0f" + payload
+    return b"\0\0\1\xba\x21" + bytes(7) + pes + b"\0\0\1\xb9"
+
+
+class XbeTests(unittest.TestCase):
+    BASE = 0x40000000
+    # A base whose data section holds Doa1.xbe's music table at its own address.
+    DOA1_BASE = 0x2DFC00
+
+    def image(self, names, base=None, table=None):
+        """An XBE with a pointer table and a name per entry after it."""
+        base = self.BASE if base is None else base
+        table = base + 0x400 if table is None else table
+        entries, blobs, at = [], {table - (base + 0x400): b""}, 0x400
+        for name in names:
+            entries.append(base + 0x400 + at)
+            blobs[at] = name.encode() + b"\0"
+            at += 0x40
+        blobs[table - (base + 0x400)] = struct.pack(f"<{len(entries) + 1}I", *entries, 0)
+        return xbe_image(blobs, base)
+
+    def test_music_table_lists_its_files_in_order(self):
+        image = self.image(["aa_sng.adx", "bb_lose.adx"])
+        self.assertEqual(soundtrack.xbe_music(image, self.BASE + 0x400), ["aa_sng.adx", "bb_lose.adx"])
+        with self.assertRaises(ValueError):
+            soundtrack.xbe_music(image, 0x10)  # outside the executable
+
+    def test_doa1u_album_copies_the_executables_music(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        with tempfile.TemporaryDirectory() as folder:
+            sound = Path(folder, "DOA1", "Sound")
+            sound.mkdir(parents=True)
+            (sound / "aa_sng.adx").write_bytes(adx)
+            (sound / "bb_lose.adx").write_bytes(adx + b"x")
+            (sound / "zz_sng.adx").write_bytes(b"not an ADX")
+            image = self.image(["aa_sng.adx", "bb_lose.adx", "zz_sng.adx", "../escape.adx"],
+                               self.DOA1_BASE, soundtrack.DOA1_TABLE)
+            Path(folder, "Doa1.xbe").write_bytes(image)
+            out = os.path.join(folder, "out")
+            self.assertEqual(soundtrack.import_doa1u(soundtrack.Folder(folder), out), 2)
+            lines = Path(out, "doa1u", "tracks.txt").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0], "#title\tDead or Alive Ultimate")
+            self.assertEqual(lines[2], "aa_sng.adx\t-1\t-1\tAa Sng")
+            self.assertEqual(lines[3], "bb_lose.adx\t-1\t-1\tBb Lose")
+            self.assertEqual(Path(out, "doa1u", "aa_sng.adx").read_bytes(), adx)
+            self.assertFalse(Path(out, "doa1u", "zz_sng.adx").exists())
+
+    def test_doa1u_album_without_the_executable_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder, "out")
+            (out / "doa1u").mkdir(parents=True)
+            (out / "doa1u" / "tracks.txt").write_text("old", encoding="utf-8")
+            self.assertEqual(soundtrack.import_doa1u(soundtrack.Folder(folder), str(out)), 0)
+            self.assertEqual((out / "doa1u" / "tracks.txt").read_text(encoding="utf-8"), "old")
+
+    def test_movies_are_every_sfd_in_the_folder(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        code, fighter = next(iter(soundtrack.DOA3_CODES.items()))
+        ending = f"mv_{code}.sfd"
+        with tempfile.TemporaryDirectory() as folder:
+            movies = Path(folder, "movie")
+            movies.mkdir()
+            (movies / "late.sfd").write_bytes(movie_image(adx + b"x"))
+            (movies / ending).write_bytes(movie_image(adx))
+            (movies / "same.sfd").write_bytes(movie_image(adx))  # its audio is a repeat
+            (movies / "notes.txt").write_bytes(b"not a movie")
+            out = Path(folder, "out")
+            out.mkdir()
+            tracks = []
+            soundtrack.import_movies(soundtrack.Folder(folder), str(out), "movie", {}, tracks)
+            self.assertEqual([t[0] for t in tracks], ["m_late.adx", f"m_mv_{code}.adx"])
+            self.assertEqual([t[3] for t in tracks], ["Late", f"{fighter}'s Ending"])
+            self.assertTrue(Path(out, f"m_mv_{code}.adx").is_file())
 
 
 class BankTests(unittest.TestCase):

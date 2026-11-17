@@ -61,44 +61,148 @@ static Album albums[MAX_ALBUMS];
 static unsigned album_count;
 static char disc_root[PATH_SIZE], jukebox_root[PATH_SIZE];
 
-/* DOA2U's music table (0x6a0b2c: label, ?, file; 68 entries of 16 bytes) by
-   file, in its order, with the label made readable; files it lists twice
-   or as dummy.adx are left out. */
-static const struct { const char *file, *name; } DOA2U_NAMES[] = {
-    {"bgm_doa2_ks.adx", "Kasumi"}, {"bgm_doa2_ln.adx", "Leon"}, {"bgm_doa2_gn.adx", "Gen Fu"},
-    {"bgm_doa2_zk.adx", "Zack"}, {"bgm_doa2_tg.adx", "Tengu"}, {"bgm_doa2_le.adx", "Leifang"},
-    {"bgm_doa2_jn.adx", "Jann Lee"}, {"bgm_doa2_tn.adx", "Tina"}, {"bgm_doa2_ba.adx", "Bass"},
-    {"bgm_doa2_ry.adx", "Ryu Hayabusa"}, {"bgm_doa2_ay.adx", "Ayane"}, {"bgm_doa2_he.adx", "Helena"},
-    {"bgm_doa2_ei.adx", "Ein"}, {"bgm_doa2_by.adx", "Bayman"}, {"bgm_doa2_ko.adx", "Hitomi"},
-    {"bgm_doa2_sel.adx", "Character Select"}, {"bgm_doa2_staffroll.adx", "Staff Roll"},
-    {"bgm_doa2_name.adx", "Name Entry"}, {"bgm_doa2_trainning.adx", "Sparring"},
-    {"bgm_doa2_zk_end.adx", "Zack's Ending"}, {"bgm_doa2_he_end.adx", "Helena's Ending"},
-    {"bgm_doa2_jn_end.adx", "Jann Lee's Ending"}, {"bgm_doa2_tn_end.adx", "Tina's Ending"},
-    {"bgm_doa2_he_con.adx", "Helena (Story)"}, {"bgm_doa2_ei_con.adx", "Ein (Story)"},
-    {"bgm_doa2_ba_con.adx", "Bass (Story)"}, {"bgm_doa2_rplyend.adx", "Replay End"},
-    {"bgm_doa2_tagend.adx", "Tag Battle End"}, {"bgm_doa2_gn2.adx", "Gen Fu (DOA1)"},
-    {"bgm_doa2_le2.adx", "Leifang (DOA1)"}, {"doa12_e3_bgm.adx", "E3 Demo"},
-    {"rmx_ks.adx", "Kasumi (Remix)"}, {"rmx_ln.adx", "Leon (Remix)"}, {"rmx_gn.adx", "Gen Fu (Remix)"},
-    {"rmx_zk.adx", "Zack (Remix)"}, {"rmx_tg.adx", "Tengu (Remix)"}, {"rmx_le.adx", "Leifang (Remix)"},
-    {"rmx_jn.adx", "Jann Lee (Remix)"}, {"rmx_tn.adx", "Tina (Remix)"}, {"rmx_ba.adx", "Bass (Remix)"},
-    {"rmx_ry.adx", "Ryu Hayabusa (Remix)"}, {"rmx_ay.adx", "Ayane (Remix)"}, {"rmx_he.adx", "Helena (Remix)"},
-    {"rmx_ei.adx", "Ein (Remix)"}, {"rmx_by.adx", "Bayman (Remix)"}, {"rmx_ko.adx", "Hitomi (Remix)"},
-    {"bgm_doa2_online.adx", "Online"}, {"dreamon.adx", "Dream On"}, {"ups.adx", "UPS"},
-    {"tgs2004.adx", "TGS 2004"},
-};
-
-const char *recomp_jukebox_doa2u_name(const char *file)
-{
-    for (size_t i = 0u; i < sizeof DOA2U_NAMES / sizeof DOA2U_NAMES[0]; ++i) {
-        const char *a = DOA2U_NAMES[i].file, *b = file;
-        while (*a != '\0' && tolower((unsigned char)*b) == *a) { ++a; ++b; }
-        if (*a == '\0' && *b == '\0') return DOA2U_NAMES[i].name;
-    }
-    return NULL;
-}
-
 static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+/* ---- The executables ------------------------------------------------------ */
+
+/* An XBE's sections, so the tables in its data section can be read through
+   their virtual addresses: the game names its music there, not in bgm.afs. */
+typedef struct Xbe {
+    FILE *file;
+    uint32_t base;
+    struct { uint32_t at, size, file_at; } sections[32];
+    unsigned count;
+} Xbe;
+
+static bool xbe_open(Xbe *xbe, const char *path)
+{
+    memset(xbe, 0, sizeof *xbe);
+    uint8_t magic[4], head[8], directory[8];
+    xbe->file = fopen(path, "rb");
+    if (xbe->file == NULL) return false;
+    bool ok = fseek(xbe->file, 0, SEEK_SET) == 0 && fread(magic, 1u, sizeof magic, xbe->file) == sizeof magic &&
+        memcmp(magic, "XBEH", 4u) == 0 &&
+        fseek(xbe->file, 0x100, SEEK_SET) == 0 && fread(head, 1u, sizeof head, xbe->file) == sizeof head;
+    if (ok) xbe->base = le32(head + 4);
+    ok = ok && fseek(xbe->file, 0x11cu, SEEK_SET) == 0 && fread(directory, 1u, 8u, xbe->file) == 8u;
+    const uint32_t count = ok ? le32(directory) : 0u, at = ok ? le32(directory + 4) : 0u;
+    /* Each section: flags, virtual address, virtual size, file address, file size. */
+    ok = ok && at >= xbe->base && count > 0u && count <= sizeof xbe->sections / sizeof xbe->sections[0] &&
+        fseek(xbe->file, (long)(at - xbe->base), SEEK_SET) == 0;
+    for (uint32_t i = 0u; ok && i < count; ++i) {
+        uint8_t section[20];
+        ok = fread(section, 1u, sizeof section, xbe->file) == sizeof section &&
+            fseek(xbe->file, 56L - (long)sizeof section, SEEK_CUR) == 0;
+        if (!ok) break;
+        xbe->sections[i].at = le32(section + 4);
+        xbe->sections[i].size = le32(section + 16);
+        xbe->sections[i].file_at = le32(section + 12);
+        ++xbe->count;
+    }
+    if (!ok) { fclose(xbe->file); xbe->file = NULL; }
+    return ok;
+}
+
+static void xbe_close(Xbe *xbe)
+{
+    if (xbe->file != NULL) fclose(xbe->file);
+    xbe->file = NULL;
+}
+
+static bool xbe_at(const Xbe *xbe, uint32_t va, size_t size, long *at)
+{
+    for (unsigned i = 0u; i < xbe->count; ++i) {
+        const uint32_t start = xbe->sections[i].at;
+        if (va < start || (uint64_t)(va - start) + size > xbe->sections[i].size) continue;
+        *at = (long)(xbe->sections[i].file_at + (va - start));
+        return true;
+    }
+    return false;
+}
+
+static bool xbe_read(Xbe *xbe, uint32_t va, void *out, size_t size)
+{
+    long at;
+    return xbe_at(xbe, va, size, &at) && fseek(xbe->file, at, SEEK_SET) == 0 &&
+        fread(out, 1u, size, xbe->file) == size;
+}
+
+/* The string a table entry points at; false where the table ends (a 0 pointer). */
+static bool xbe_string(Xbe *xbe, uint32_t va, char *out, size_t size)
+{
+    if (va == 0u || size < 2u) return false;
+    for (unsigned i = 0u; i < xbe->count; ++i) {
+        const uint32_t start = xbe->sections[i].at;
+        if (va < start || va - start >= xbe->sections[i].size) continue;
+        const size_t left = xbe->sections[i].size - (va - start);
+        const size_t room = left < size ? left : size - 1u;
+        if (fseek(xbe->file, (long)(xbe->sections[i].file_at + (va - start)), SEEK_SET) != 0) return false;
+        const size_t got = fread(out, 1u, room, xbe->file);
+        if (memchr(out, '\0', got) == NULL) return false;
+        return true;
+    }
+    return false;
+}
+
+static void host_path(char *path)
+{
+#ifdef _WIN32
+    for (; *path != '\0'; ++path) if (*path == '/') *path = '\\';
+#else
+    (void)path;
+#endif
+}
+
+/* A name in the player's files and one in the game's table differ only by case. */
+static bool same_name(const char *a, const char *b)
+{
+    while (*a != '\0' && tolower((unsigned char)*a) == tolower((unsigned char)*b)) { ++a; ++b; }
+    return *a == '\0' && *b == '\0';
+}
+
+/* A file's own words, for a name no label covers. */
+static void stem_label(const char *file, char *out, size_t size)
+{
+    size_t w = 0u;
+    bool start = true;
+    for (const char *c = file; *c != '\0' && *c != '.' && w + 1u < size; ++c) {
+        if (*c == '_' || *c == '-' || *c == ' ') { start = true; out[w++] = ' '; continue; }
+        out[w++] = start ? (char)toupper((unsigned char)*c) : *c;
+        start = false;
+    }
+    out[w] = '\0';
+}
+
+/* The music table's own label, made readable: "End_X" is X's ending, "Remix_X"
+   a remix, "Con_X" its story track and "DOA1_X" the first game's; a capital
+   after a lower-case letter starts a word ("NameEntry"). */
+static void readable_label(const char *label, char *out, size_t size)
+{
+    static const struct { const char *code, *format; } PREFIX[] = {
+        {"End_", "%s's Ending"}, {"Remix_", "%s (Remix)"}, {"Con_", "%s (Story)"}, {"DOA1_", "%s (DOA1)"},
+    };
+    const char *rest = label, *format = "%s";
+    for (size_t i = 0u; i < sizeof PREFIX / sizeof PREFIX[0]; ++i) {
+        const size_t length = strlen(PREFIX[i].code);
+        if (strncmp(label, PREFIX[i].code, length) == 0) {
+            rest = label + length;
+            format = PREFIX[i].format;
+            break;
+        }
+    }
+    char words[NAME_SIZE];
+    size_t w = 0u;
+    for (const char *c = rest; *c != '\0' && w + 2u < sizeof words; ++c) {
+        if (c != rest && islower((unsigned char)c[-1]) &&
+            (isupper((unsigned char)*c) || isdigit((unsigned char)*c)))
+            words[w++] = ' ';
+        words[w++] = *c;
+    }
+    words[w] = '\0';
+    if (words[0] != '\0') snprintf(out, size, format, words);
+    else stem_label(label, out, size);
+}
 
 static bool add_track(Album *album, const Track *track)
 {
@@ -211,6 +315,38 @@ static void apply_names(Album *album, const char *folder)
     free(listed);
 }
 
+/* DOA2.xbe's music table (label, unused, file, unused: 16 bytes an entry, 0
+   ending it) names the music bgm.afs holds and gives each its label. A file
+   it names twice is one entry of the archive, labelled for both; its unused
+   slots point at a one-sample placeholder. */
+enum { MAX_MUSIC_ENTRIES = 256 };
+static const uint32_t DOA2U_MUSIC = 0x6a0b2cu;
+
+/* The archive entry whose 32-byte name is file, or -1. */
+static int archive_entry(const uint8_t *names, uint32_t count, const char *file)
+{
+    for (uint32_t i = 0u; i < count; ++i) {
+        const char *name = (const char *)names + 48u * i;
+        size_t n = 0u;
+        while (n < 32u && name[n] != '\0' && tolower((unsigned char)file[n]) == tolower((unsigned char)name[n])) ++n;
+        if (n < 32u && name[n] == '\0' && file[n] == '\0') return (int)i;
+    }
+    return -1;
+}
+
+/* Whether an archive entry holds a track: at least a second of ADX. */
+static bool archive_audio(FILE *file, const uint8_t *table, uint32_t entry)
+{
+    const uint32_t offset = le32(table + 8u * entry), size = le32(table + 8u * entry + 4u);
+    uint8_t head[0x14];
+    if (size < sizeof head || fseek(file, (long)offset, SEEK_SET) != 0 ||
+        fread(head, 1u, sizeof head, file) != sizeof head)
+        return false;
+    if (head[0] != 0x80u || head[1] != 0x00u) return false;
+    const uint32_t rate = be32(head + 8), samples = be32(head + 12);
+    return rate >= 1000u && samples >= rate;
+}
+
 static void load_doa2u(Album *album)
 {
     snprintf(album->tab, sizeof album->tab, "DOA2U");
@@ -218,9 +354,7 @@ static void load_doa2u(Album *album)
     album->missing = "Not on the disc";
     char path[PATH_SIZE];
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc_root);
-#ifdef _WIN32
-    for (char *p = path; *p != '\0'; ++p) if (*p == '/') *p = '\\';
-#endif
+    host_path(path);
     FILE *file = fopen(path, "rb");
     if (file == NULL) return;
     uint8_t head[8];
@@ -236,45 +370,87 @@ static void load_doa2u(Album *album)
             names = NULL;
         }
     }
-    fclose(file);
-    if (names != NULL) {
-        /* In the music table's order: the names' order, not the archive's. */
-        for (size_t n = 0u; n < sizeof DOA2U_NAMES / sizeof DOA2U_NAMES[0]; ++n)
-            for (uint32_t i = 0u; i < count; ++i) {
-                char entry[33] = {0};
-                memcpy(entry, names + 48u * i, 32u);
-                if (recomp_jukebox_doa2u_name(entry) != DOA2U_NAMES[n].name) continue;
-                Track track = {0};
-                snprintf(track.name, sizeof track.name, "%s", DOA2U_NAMES[n].name);
-                snprintf(track.file, sizeof track.file, "%s", DOA2U_NAMES[n].file);
-                snprintf(track.path, sizeof track.path, "%s", path);
-                track.offset = le32(table + 8u * i);
-                track.size = le32(table + 8u * i + 4u);
-                track.loop_start = track.loop_end = -1;
-                add_track(album, &track);
-                break;
+    char executable[PATH_SIZE];
+    snprintf(executable, sizeof executable, "%s/DOA2.xbe", disc_root);
+    host_path(executable);
+    Xbe xbe;
+    const bool listed = names != NULL && xbe_open(&xbe, executable);
+    if (!listed) album->missing = "No music list on the disc";
+    for (unsigned n = 0u; listed && n < MAX_MUSIC_ENTRIES; ++n) {
+        uint8_t entry[16];
+        if (!xbe_read(&xbe, DOA2U_MUSIC + 16u * n, entry, sizeof entry)) break;
+        char label[64], name[64];
+        if (!xbe_string(&xbe, le32(entry), label, sizeof label) ||
+            !xbe_string(&xbe, le32(entry + 8), name, sizeof name))
+            break;
+        const int at = archive_entry(names, count, name);
+        if (at < 0 || !archive_audio(file, table, (uint32_t)at)) continue;
+        char readable[NAME_SIZE];
+        readable_label(label, readable, sizeof readable);
+        unsigned t = 0u;
+        for (; t < album->count; ++t) if (same_name(album->tracks[t].file, name)) break;
+        if (t < album->count) {
+            Track *track = &album->tracks[t];
+            if (strstr(track->name, readable) == NULL &&
+                strlen(track->name) + strlen(readable) + 4u < sizeof track->name) {
+                strcat(track->name, " / ");
+                strcat(track->name, readable);
             }
+            continue;
+        }
+        Track track = {0};
+        snprintf(track.name, sizeof track.name, "%s", readable);
+        snprintf(track.file, sizeof track.file, "%.32s", (const char *)names + 48u * at);
+        snprintf(track.path, sizeof track.path, "%s", path);
+        track.offset = le32(table + 8u * at);
+        track.size = le32(table + 8u * at + 4u);
+        track.loop_start = track.loop_end = -1;
+        add_track(album, &track);
     }
+    if (listed) xbe_close(&xbe);
+    fclose(file);
     free(table);
     free(names);
     apply_names(album, "doa2u");
 }
 
 /* Dead or Alive Ultimate's own DOA1 (Doa1.xbe) on the same disc: loose ADX in
-   DOA1/Sound, in its music table's order (0x2d50a8 in Doa1.xbe). The codes are
-   DOA3's: gy is the slot Leon took in DOA2, Bayman's in DOA1. */
-static const struct { const char *file, *name; } DOA1U_NAMES[] = {
-    {"ks_sng.adx", "Kasumi"}, {"lu_sng.adx", "Jann Lee"}, {"le_sng.adx", "Leifang"},
-    {"km_sng.adx", "Ryu Hayabusa"}, {"gy_sng.adx", "Bayman"}, {"fa_sng.adx", "Gen Fu"},
-    {"kl_sng.adx", "Zack"}, {"tn_sng.adx", "Tina"}, {"rd_sng.adx", "Raidou"},
-    {"sel_sng.adx", "Character Select"}, {"name_sng.adx", "Name Entry"}, {"cnt_sng.adx", "Continue"},
-    {"clr_sng.adx", "Clear"}, {"trng_sng.adx", "Training"},
-    {"kl_lose.adx", "Zack (Lose)"}, {"le_lose.adx", "Leifang (Lose)"}, {"km_lose.adx", "Ryu Hayabusa (Lose)"},
-    {"lu_lose.adx", "Jann Lee (Lose)"}, {"tn_lose.adx", "Tina (Lose)"}, {"gy_lose.adx", "Bayman (Lose)"},
-    {"fa_lose.adx", "Gen Fu (Lose)"}, {"ks_lose.adx", "Kasumi (Lose)"}, {"ks_lose2.adx", "Kasumi (Lose 2)"},
-    {"rd_lose.adx", "Raidou (Lose)"}, {"opmov_sng.adx", "Opening Movie"}, {"edmov_sng.adx", "Ending Movie"},
-    {"online_sng.adx", "Online"},
+   DOA1/Sound, in its music table's order (a pointer per file, 0 ending it).
+   Its names use DOA3's fighter codes: gy is the slot Leon took in DOA2,
+   Bayman's in DOA1. */
+static const uint32_t DOA1U_MUSIC = 0x2e02f8u;
+static const struct { const char *code, *name; } DOA1U_CODES[] = {
+    {"ks", "Kasumi"}, {"lu", "Jann Lee"}, {"le", "Leifang"}, {"km", "Ryu Hayabusa"},
+    {"gy", "Bayman"}, {"fa", "Gen Fu"}, {"kl", "Zack"}, {"tn", "Tina"}, {"rd", "Raidou"},
 };
+static const struct { const char *code, *name; } DOA1U_LABELS[] = {
+    {"sel", "Character Select"}, {"name", "Name Entry"}, {"cnt", "Continue"}, {"clr", "Clear"},
+    {"trng", "Training"}, {"opmov", "Opening Movie"}, {"edmov", "Ending Movie"}, {"online", "Online"},
+};
+
+/* "ks_sng" is Kasumi's theme, "ks_lose" the one she loses to. */
+static void doa1u_label(const char *file, char *out, size_t size)
+{
+    char stem[64];
+    snprintf(stem, sizeof stem, "%s", file);
+    char *dot = strrchr(stem, '.');
+    if (dot != NULL) *dot = '\0';
+    char *kind = strchr(stem, '_');
+    if (kind != NULL) *kind++ = '\0';
+    const char *base = NULL;
+    for (size_t i = 0u; i < sizeof DOA1U_CODES / sizeof DOA1U_CODES[0]; ++i)
+        if (strcmp(DOA1U_CODES[i].code, stem) == 0) base = DOA1U_CODES[i].name;
+    for (size_t i = 0u; i < sizeof DOA1U_LABELS / sizeof DOA1U_LABELS[0]; ++i)
+        if (strcmp(DOA1U_LABELS[i].code, stem) == 0) base = DOA1U_LABELS[i].name;
+    const char *suffix = "";
+    if (kind != NULL && strcmp(kind, "sng") != 0) {
+        if (strcmp(kind, "lose") == 0) suffix = " (Lose)";
+        else if (strcmp(kind, "lose2") == 0) suffix = " (Lose 2)";
+        else suffix = NULL;
+    }
+    if (base == NULL || suffix == NULL) { stem_label(file, out, size); return; }
+    snprintf(out, size, "%s%s", base, suffix);
+}
 
 static bool folder_exists(const char *name);
 static void load_folder(Album *album, const char *folder, const char *tab);
@@ -299,14 +475,22 @@ static void load_doa1u(Album *album)
     snprintf(album->tab, sizeof album->tab, "DOA1U");
     snprintf(album->title, sizeof album->title, "Dead or Alive Ultimate");
     album->missing = "Not on the disc";
-    for (size_t n = 0u; n < sizeof DOA1U_NAMES / sizeof DOA1U_NAMES[0]; ++n) {
+    char executable[PATH_SIZE];
+    snprintf(executable, sizeof executable, "%s/Doa1.xbe", disc_root);
+    host_path(executable);
+    Xbe xbe;
+    if (!xbe_open(&xbe, executable)) return;
+    for (unsigned n = 0u; n < MAX_MUSIC_ENTRIES; ++n) {
+        uint8_t entry[4];
+        if (!xbe_read(&xbe, DOA1U_MUSIC + 4u * n, entry, sizeof entry)) break;
+        char file_name[64];
+        if (!xbe_string(&xbe, le32(entry), file_name, sizeof file_name)) break;
+        if (!bare_name(file_name)) continue;
         Track track = {0};
-        snprintf(track.name, sizeof track.name, "%s", DOA1U_NAMES[n].name);
-        snprintf(track.file, sizeof track.file, "%s", DOA1U_NAMES[n].file);
-        snprintf(track.path, sizeof track.path, "%s/DOA1/Sound/%s", disc_root, DOA1U_NAMES[n].file);
-#ifdef _WIN32
-        for (char *p = track.path; *p != '\0'; ++p) if (*p == '/') *p = '\\';
-#endif
+        doa1u_label(file_name, track.name, sizeof track.name);
+        snprintf(track.file, sizeof track.file, "%s", file_name);
+        snprintf(track.path, sizeof track.path, "%s/DOA1/Sound/%s", disc_root, file_name);
+        host_path(track.path);
         FILE *file = fopen(track.path, "rb");
         uint8_t head[2] = {0};
         const bool adx = file != NULL && fread(head, 1u, 2u, file) == 2u && head[0] == 0x80u && head[1] == 0u;
@@ -315,6 +499,7 @@ static void load_doa1u(Album *album)
         track.loop_start = track.loop_end = -1;
         add_track(album, &track);
     }
+    xbe_close(&xbe);
     apply_names(album, "doa1u");
 }
 
@@ -629,21 +814,14 @@ static void feed(void)
 
 /* What a player can give a track to: an entry of the game's music table. */
 typedef struct Target {
-    const char *file, *name;
+    char file[64], name[NAME_SIZE]; /* the album's, copied: its tracks reload */
     int entry;                  /* in bgm.afs; -1 without the mod loader's slots */
     int album, track;           /* assigned, or -1 */
 } Target;
 
-static Target targets[sizeof DOA2U_NAMES / sizeof DOA2U_NAMES[0]];
+static Target targets[MAX_MUSIC_ENTRIES];
 static unsigned target_count;
 static bool assigning;          /* bgm.afs has slots: assignments work */
-
-/* A name in the player's files and one in the game's table differ only by case. */
-static bool same_name(const char *a, const char *b)
-{
-    while (*a != '\0' && tolower((unsigned char)*a) == tolower((unsigned char)*b)) { ++a; ++b; }
-    return *a == '\0' && *b == '\0';
-}
 
 static int find_album(const char *tab)
 {
@@ -787,11 +965,18 @@ void recomp_jukebox_install(bool online)
     page.track = track;
     page.target = target;
     target_count = 0u;
-    for (size_t i = 0u; i < sizeof DOA2U_NAMES / sizeof DOA2U_NAMES[0]; ++i) {
-        targets[target_count] = (Target){DOA2U_NAMES[i].file, DOA2U_NAMES[i].name,
-            recomp_mod_entry_index(BGM, DOA2U_NAMES[i].file), -1, -1};
-        ++target_count;
+    /* The music table's entries are the album's own tracks: what can replace them. */
+    const Album *music = &albums[0];
+    for (unsigned t = 0u; t < music->count && target_count < MAX_MUSIC_ENTRIES; ++t) {
+        Target *target = &targets[target_count++];
+        snprintf(target->file, sizeof target->file, "%s", music->tracks[t].file);
+        snprintf(target->name, sizeof target->name, "%s", music->tracks[t].name);
+        target->entry = recomp_mod_entry_index(BGM, target->file);
+        target->album = target->track = -1;
     }
+    if (music->count > MAX_MUSIC_ENTRIES)
+        fprintf(stderr, "recomp jukebox: only the first %d of %u music can be assigned\n",
+            MAX_MUSIC_ENTRIES, music->count);
     recomp_mod_loader_enable_slots(!online);
     assigning = target_count > 0u && targets[0].entry >= 0;
     recomp_mod_entry_start = NULL;
