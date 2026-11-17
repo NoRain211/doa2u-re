@@ -59,6 +59,49 @@ def afs(entries):
     return head + bytes(2048 - len(head)) + body
 
 
+def wave_bank_image(waves, entry=0x40, bank=0x100, table=0x200, body=0x400, total=0x500):
+    """A big-endian XACT 2 wave bank: waves [(fmt, offset into the wave data, length)]."""
+    image = bytearray(total)
+    image[:4] = b"DNBW"
+    segments = ((bank, 0x80), (table, entry * len(waves)), (0, 0), (0, 0), (body, total - body))
+    for i, (offset, size) in enumerate(segments):
+        struct.pack_into(">II", image, 8 + 8 * i, offset, size)
+    struct.pack_into(">I", image, bank + 4, len(waves))
+    struct.pack_into(">I", image, bank + 0x48, entry)
+    for i, (fmt, offset, length) in enumerate(waves):
+        struct.pack_into(">4I", image, table + i * entry, 0, fmt, offset, length)
+    return bytes(image)
+
+
+def sound_bank_image(cues):
+    """A big-endian XACT 2 sound bank: cues [(name, wave)] for a simple sound or
+    [(name, [intro, loop])] for a complex one."""
+    image = bytearray(0x400)
+    image[:4] = b"KBDS"
+    struct.pack_into(">h", image, 0x09, len(cues))
+    struct.pack_into(">i", image, 0x1A, 0x40)  # the sounds' table
+    struct.pack_into(">i", image, 0x3A, 0x80)  # the names' table
+    sounds_at = 0x200
+    for i, (label, waves) in enumerate(cues):
+        name = 0x100 + 24 * i
+        image[name:name + len(label)] = label.encode()
+        struct.pack_into(">i", image, 0x40 + 5 * i + 1, sounds_at)
+        struct.pack_into(">i", image, 0x80 + 6 * i, name)
+        sound, sounds_at = sounds_at, sounds_at + 0x40
+        if isinstance(waves, int):
+            image[sound] = 0  # a simple sound: one wave, once
+            struct.pack_into(">h", image, sound + 9, waves)
+            continue
+        image[sound] = 1  # a complex sound: one track per wave
+        image[sound + 9] = len(waves)
+        for k, wave in enumerate(waves):
+            track = sound + 0x20 + 0x10 * k
+            struct.pack_into(">i", image, sound + 10 + 5 * k + 1, track)
+            image[track] = 1
+            struct.pack_into(">h", image, track + 8, wave)
+    return bytes(image)
+
+
 class NameTests(unittest.TestCase):
     def test_doa4_names(self):
         self.assertEqual(soundtrack.doa4_name("bgm_aya"), "Ayane")
@@ -121,6 +164,59 @@ class ImportFailureTests(unittest.TestCase):
             self.assertTrue(lines[2].startswith("01_bgm_x____evil_.adx\t"))
             self.assertEqual(run.call_count, 1)
 
+    def test_level_album_rejects_track_names_outside_the_album(self):
+        with tempfile.TemporaryDirectory() as base:
+            folder = os.path.join(base, "album")
+            os.makedirs(folder)
+            outside = Path(base, "outside.adx")
+            outside.write_bytes(b"outside")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                for name in ("../outside.adx", str(outside.resolve()), "sub/outside.adx", ".", ".."):
+                    Path(folder, "tracks.txt").write_text(
+                        f"#title\tAlbum\n{name}\t-1\t-1\tEscape\n", encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        soundtrack.level_album(folder, "encoder")
+            run.assert_not_called()
+            self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_only_a_missing_ffmpeg_is_reported_as_ffmpeg(self):
+        source = mock.Mock()
+        here = tempfile.gettempdir()
+        ffmpeg = os.path.join(here, "ffmpeg.exe")
+        encoder = os.path.join(here, "recomp_adx_encode.exe")
+        scratch = os.path.join(here, "album", "01.adx.level")
+
+        def message(error):
+            with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso"]), \
+                    mock.patch.object(soundtrack, "open_source", return_value=source), \
+                    mock.patch.object(soundtrack, "detect", return_value="doa4"), \
+                    mock.patch.object(soundtrack, "fetch_ffmpeg", return_value=ffmpeg), \
+                    mock.patch.object(soundtrack, "import_doa4", side_effect=error):
+                with self.assertRaises(SystemExit) as caught:
+                    soundtrack.main()
+            return str(caught.exception)
+
+        said = message(FileNotFoundError(2, "No such file", ffmpeg))
+        self.assertIn("ffmpeg was not found", said)
+        self.assertIn("--ffmpeg", said)
+        for path in (encoder, scratch):
+            said = message(FileNotFoundError(2, "No such file", path))
+            self.assertIn(path, said)
+            self.assertNotIn("ffmpeg", said)
+
+    def test_missing_encoder_when_levelling_reports_its_path(self):
+        with tempfile.TemporaryDirectory() as out:
+            os.makedirs(os.path.join(out, "doa3"))
+            Path(out, "doa3", "tracks.txt").write_text(
+                "#title\tAlbum\n01.adx\t-1\t-1\tOne\n", encoding="utf-8")
+            encoder = os.path.join(out, "recomp_adx_encode.exe")
+            with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "--level", "--out", out]), \
+                    mock.patch.object(soundtrack, "find_encoder", return_value=encoder):
+                with self.assertRaises(SystemExit) as caught:
+                    soundtrack.main()
+            self.assertIn(encoder, str(caught.exception))
+            self.assertNotIn("ffmpeg", str(caught.exception))
+
     def test_failed_manifest_replace_keeps_previous_file(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder, "tracks.txt")
@@ -177,6 +273,72 @@ class DiscTests(unittest.TestCase):
             self.assertEqual(soundtrack.detect(soundtrack.Folder(os.path.join(folder, "x"))), "doa2u")
             with self.assertRaises(ValueError):
                 soundtrack.Xdvdfs(os.path.join(folder, "x", "DOA2", "bgm.afs"))
+
+    def test_doa2u_bgm_afs_is_not_imported_as_doa3(self):
+        with tempfile.TemporaryDirectory() as folder:
+            doa2 = os.path.join(folder, "DOA2")
+            os.makedirs(doa2)
+            Path(doa2, "bgm.afs").write_bytes(b"AFS\0" + bytes(20))
+            Path(doa2, "voice.afs").write_bytes(b"AFS\0" + bytes(20))
+            # Bare DOA2/bgm.afs, or its folder, is DOA2U's music, not DOA3's album. So is the
+            # archive when DOA1/Sound sits beside it, one folder up.
+            for given in (os.path.join(doa2, "bgm.afs"), doa2):
+                source = soundtrack.open_source(given)
+                try:
+                    self.assertEqual(soundtrack.detect(source), "doa2u")
+                finally:
+                    source.close()
+            os.makedirs(os.path.join(folder, "extraction", "DOA1", "Sound"))
+            os.makedirs(os.path.join(folder, "extraction", "DOA2"))
+            Path(folder, "extraction", "DOA2", "bgm.afs").write_bytes(b"AFS\0" + bytes(20))
+            given = os.path.join(folder, "extraction", "DOA2", "bgm.afs")
+            source = soundtrack.open_source(given)
+            try:
+                self.assertEqual(soundtrack.detect(source), "doa2u")
+            finally:
+                source.close()
+            with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", given]), \
+                    mock.patch.object(soundtrack, "import_doa2u") as doa2u, \
+                    mock.patch.object(soundtrack, "import_doa3") as doa3:
+                self.assertEqual(soundtrack.main(), 0)
+            doa2u.assert_called_once()
+            doa3.assert_not_called()
+
+
+class BankTests(unittest.TestCase):
+    XMA = 1 | (2 << 1) | (48000 << 4)  # XMA, stereo, 48 kHz
+
+    def test_xact_banks_parse(self):
+        self.assertEqual(soundtrack.wave_bank(wave_bank_image([(self.XMA, 8, 16)])),
+                         [(0x400 + 8, 16, 2, 48000, 0)])
+        self.assertEqual(
+            soundtrack.cue_tracks(sound_bank_image([("bgm_one", 3), ("rmx_two", [1, 2])])),
+            [("bgm_one", 3, None), ("rmx_two", 1, 2)])
+
+    def test_corrupt_wave_bank_raises_value_error(self):
+        good = wave_bank_image([(self.XMA, 0, 16)])
+        self.assertRaises(ValueError, soundtrack.wave_bank, b"DNBW" + bytes(4))
+        for at in (8, 16, 40):  # the bank header, the wave table and the wave data
+            corrupt = bytearray(good)
+            struct.pack_into(">I", corrupt, at, 0xFFFF0)
+            self.assertRaises(ValueError, soundtrack.wave_bank, bytes(corrupt))
+        self.assertRaises(ValueError, soundtrack.wave_bank, wave_bank_image([(self.XMA, 0xFFF0, 16)]))
+        self.assertRaises(ValueError, soundtrack.wave_bank, wave_bank_image([(self.XMA, 0, 16)], entry=8))
+
+    def test_corrupt_sound_bank_raises_value_error(self):
+        self.assertRaises(ValueError, soundtrack.cue_tracks, b"KBDS" + bytes(8))
+        good = bytearray(sound_bank_image([("bgm", 1)]))
+        for at in (0x1A, 0x40 + 1, 0x80):  # the cue table, the cue's sound and its name
+            corrupt = bytearray(good)
+            struct.pack_into(">i", corrupt, at, 0xFFF0)
+            self.assertRaises(ValueError, soundtrack.cue_tracks, bytes(corrupt))
+        self.assertRaises(ValueError, soundtrack.cue_tracks, bytes(good[:0x10]))
+        negative = bytearray(good)
+        struct.pack_into(">h", negative, 0x09, -1)  # a negative cue count
+        self.assertRaises(ValueError, soundtrack.cue_tracks, bytes(negative))
+        corrupt = bytearray(sound_bank_image([("bgm", [1, 2])]))
+        corrupt[0x200 + 9] = 200  # more tracks than the bank holds
+        self.assertRaises(ValueError, soundtrack.cue_tracks, bytes(corrupt))
 
 
 if __name__ == "__main__":
