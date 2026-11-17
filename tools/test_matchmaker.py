@@ -11,12 +11,15 @@ JOINER_AT = ("198.51.100.9", 51234)
 BUILD = b"a" * mm.DIGEST
 OTHER_BUILD = b"b" * mm.DIGEST
 LAN = socket.inet_aton("192.168.1.20") + struct.pack(">H", 47701)
+HOST_AT6 = ("2001:db8::7", 40001)  # the same players over IPv6: one socket, one nonce, two endpoints
+JOINER_AT6 = ("2001:db8:1::9", 40002)
+NONCE_OF = {HOST_AT6: HOST_AT, JOINER_AT6: JOINER_AT}
 NO_TOKENS = bytes(2 * mm.TOKEN)  # MatchmakerTest.send fills in the sender's nonce and cookie
 
 
 def nonce(sender):
     """A stand-in for the random nonce of the client socket at sender."""
-    return mm.endpoint(sender) + b"\0\0"
+    return mm.endpoint(NONCE_OF.get(sender, sender)) + b"\0\0"
 
 
 def hosting(name=b"KASUMI", is_open=1, build=BUILD, lan=LAN, rtt=0):
@@ -29,6 +32,10 @@ def listing(build=BUILD, size=mm.LIST_BYTES):
 
 def joining(room_id, name=b"AYANE", build=BUILD, lan=LAN):
     return mm.header(mm.JOIN) + NO_TOKENS + mm.JOIN_BODY.pack(room_id, build, len(name), name, lan)
+
+
+def saying_v6():
+    return mm.header(mm.ADDR6) + NO_TOKENS
 
 
 def relaying(game=b"pads"):
@@ -118,6 +125,42 @@ class MatchmakerTest(unittest.TestCase):
         self.assertEqual(rooms(self.send(listing(), ("192.0.2.1", 1), 2.0)[0][0]), [])
         self.host(now=12.0)
         self.assertEqual(len(rooms(self.send(listing(), ("192.0.2.1", 1), 12.0)[0][0])), 1)
+
+    def test_two_players_with_ipv6_are_handed_each_others_endpoints_after_the_ipv4_ones(self):
+        self.send(saying_v6(), HOST_AT6, 0.0)
+        room_id, _ = self.host(now=0.1)
+        self.send(saying_v6(), JOINER_AT6, 0.2)
+        answers = dict((to, packet) for packet, to in self.send(joining(room_id), JOINER_AT, 1.0))
+        self.assertEqual(answers[HOST_AT][-18:], mm.endpoint(JOINER_AT6))
+        self.assertEqual(answers[JOINER_AT][-18:], mm.endpoint(HOST_AT6))
+        # The IPv4 part is as without IPv6.
+        self.assertEqual(answers[HOST_AT][6 + mm.TOKEN:12 + mm.TOKEN], mm.endpoint(JOINER_AT))
+
+    def test_one_player_without_ipv6_leaves_the_short_answer_for_both(self):
+        self.send(saying_v6(), HOST_AT6, 0.0)
+        room_id, _ = self.host(now=0.1)
+        for packet, _ in self.send(joining(room_id), JOINER_AT, 1.0):
+            self.assertEqual(len(packet), 6 + mm.TOKEN + 6 + 6 + 1 + mm.NAME)
+
+    def test_an_ipv6_endpoint_is_stored_only_with_a_cookie_and_expires(self):
+        self.send(saying_v6(), HOST_AT6, 0.0, cookie=bytes(mm.TOKEN))  # forged: nothing stored
+        self.assertEqual(self.server.v6, {})
+        self.send(saying_v6(), HOST_AT6, 0.0)
+        self.assertEqual(len(self.server.v6), 1)
+        self.send(listing(), JOINER_AT, mm.ADDR6_SECONDS + 5.0)
+        self.assertEqual(self.server.v6, {})
+
+    def test_a_full_ipv6_table_still_refreshes_what_it_holds(self):
+        self.send(saying_v6(), HOST_AT6, 0.0)
+        self.server.v6.update((bytes(2) + i.to_bytes(6, "big"), (JOINER_AT6, 0.0)) for i in range(2 * mm.MAX_ROOMS))
+        self.send(saying_v6(), HOST_AT6, 15.0)
+        self.assertEqual(self.server.v6[nonce(HOST_AT)][1], 15.0)
+
+    def test_ipv6_senders_may_only_list_and_say_their_address(self):
+        self.assertEqual(self.send(hosting(), HOST_AT6, 0.0), [])
+        self.assertEqual(self.server.rooms, {})
+        [(answer, to)] = self.send(listing(), JOINER_AT6, 0.0)
+        self.assertEqual((answer[5], to), (mm.ROOMS, JOINER_AT6))
 
     def test_join_refuses_a_missing_claimed_or_other_build_room(self):
         room_id, _ = self.host()

@@ -35,7 +35,7 @@ POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md",
     "win32_compat.c", "win32_compat_test.c", "fiber_switch_arm64.S", "fiber_switch_x86_64.S"))}
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
-                  "linux": POSIX_ONLY | {"tools/launcher_sdl.cpp", "tools/launcher-background.png"}}
+                  "linux": POSIX_ONLY | {"install_deps.sh", "tools/launcher_sdl.cpp", "tools/launcher-background.png"}}
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
 # and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")

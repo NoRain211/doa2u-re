@@ -1459,9 +1459,13 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
     const uint32_t points = draw->index_count;
     /* shortcut: unscaled sizes multiply by device+0x964, unverified here; bind them when a caller needs one. */
     if (*recomp_memory_u32(0x355438u) == 0u || *recomp_memory_u32(0x35543cu) == 0u ||
-        layout->pretransformed || layout->blend_weight_count != 0u || points > 16384u ||
-        !isfinite(point[0]) || !(point[1] >= 0.0f) || !(point[7] >= point[1]))
+        layout->pretransformed || layout->blend_weight_count != 0u || points > 16384u)
         recomp_stop(2, "d3d8:draw-points-unbound");
+    /* A MAX at or below zero, as sizes over a negative camera FOV give (issue
+       #197), clamps every sprite to nothing; a negative SIZE alone clamps to MIN. */
+    const float size_min = point[1], size_max = isfinite(point[7]) && point[7] > 0.0f ? fminf(point[7], 64.0f) : 0.0f;
+    if (size_max > 0.0f && !(point[7] >= size_min))
+        recomp_stop(2, "d3d8:draw-points-size:%g,%g,%g", point[0], size_min, point[7]);
     /* SELECTARG1 of TEXTURE or DIFFUSE, or their MODULATE. The presenter modulates both,
        so a texture-only channel whitens diffuse and a diffuse-only color whitens the texel. */
     const bool color_texture = stage[12] == 2u && stage[14] == 2u;
@@ -1543,7 +1547,7 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
         const float distance = sqrtf(eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2]);
         const float attenuation = point[4] + point[5] * distance + point[6] * distance * distance;
         float size = attenuation > 0.0f ? height * point[0] / sqrtf(attenuation) : point[7];
-        size = fminf(fmaxf(size, point[1]), fminf(point[7], 64.0f));
+        size = fmaxf(fminf(fmaxf(size, size_min), size_max), 0.0f);
         const float w = eye[0] * p[3] + eye[1] * p[7] + eye[2] * p[11] + p[15];
         const float dx = w > 0.0f && isfinite(size) ? size * w / (p[0] * width) : 0.0f;
         const float dy = w > 0.0f && isfinite(size) ? size * w / (p[5] * height) : 0.0f;
@@ -1827,7 +1831,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     const bool unlit_projected = !program && !points && draw->has_texture && projected_add_stages(device);
     if (!program && !points && !unlit_projected) attach_lighting(device, &layout, draw);
     if (points && (program || *recomp_memory_u32(device + PIXEL_HANDLE) != 0u)) {
-        recomp_stop(2, "d3d8:draw-points-unbound");
+        recomp_stop(2, "d3d8:draw-points-shader:program=%u", program);
     } else if (points) {
         point_sprites(device, &layout, draw);
     } else if (program && bump_shader(device) != 0u) {
