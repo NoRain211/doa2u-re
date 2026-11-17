@@ -145,6 +145,22 @@ static int test_bad_chunk(void)
     CHECK(recomp_wav_read(wav, sizeof wav, &frames, &channels, &rate, &start, &end) == NULL);
     putle32(wav + 16, 0xFFFFFFF6u);
     CHECK(recomp_wav_read(wav, sizeof wav, &frames, &channels, &rate, &start, &end) == NULL);
+    putle32(wav + 16, 0xFFFFFFFFu);
+    CHECK(recomp_wav_read(wav, sizeof wav, &frames, &channels, &rate, &start, &end) == NULL);
+
+    /* The odd 0xFFFFFFFF length plus its pad byte is 0x100000000, which a
+       32-bit advance wraps to 0; the walk must still stop, so the readable
+       fmt/data headers planted in the oversized chunk's body are never seen. */
+    uint8_t trap[12u + 8u + 8u + 16u + 8u + 2u];
+    memset(trap, 0, sizeof trap);
+    memcpy(trap, "RIFF", 4u); memcpy(trap + 8, "WAVE", 4u);
+    memcpy(trap + 12, "junk", 4u); putle32(trap + 16, 0xFFFFFFFFu);
+    memcpy(trap + 20, "fmt ", 4u); putle32(trap + 24, 16u);
+    trap[28] = 1u; trap[30] = 1u;
+    putle32(trap + 32, 44100u); putle32(trap + 36, 44100u);
+    trap[40] = 2u; trap[42] = 16u;
+    memcpy(trap + 44, "data", 4u); putle32(trap + 48, 2u); trap[52] = 0x10u;
+    CHECK(recomp_wav_read(trap, sizeof trap, &frames, &channels, &rate, &start, &end) == NULL);
     return 0;
 }
 
