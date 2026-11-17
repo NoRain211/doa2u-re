@@ -876,22 +876,81 @@ static bool apply(Target *target)
     return true;
 }
 
+/* Where a saved line's album and track are now; false while the album is
+   missing (one being imported again, say) or no longer holds that track. */
+static bool find_saved(const char *album, const char *track, int *a, int *t)
+{
+    *a = find_album(album);
+    *t = *a >= 0 ? find_track((unsigned)*a, track) : -1;
+    return *t >= 0;
+}
+
+/* The one line a save writes itself; the player's own comments stay. */
+static const char ASSIGNMENT_HEADER[] =
+    "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n";
+
+/* A save rewrites the assignments it holds and keeps every line it does not:
+   an album that is missing for now, a music entry this build does not list,
+   a track the game's table has yet to name, or a player's own comment.
+   Names.txt behaves the same. */
 static void save_assignments(void)
 {
-    char path[PATH_SIZE], temporary[PATH_SIZE + 64];
+    char path[PATH_SIZE], temporary[PATH_SIZE + 64], line[512];
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
+    char *kept = NULL;
+    size_t kept_size = 0u;
+    FILE *existing = fopen(path, "r");
+    if (existing != NULL) {
+        bool continuing = false; /* inside a line longer than the buffer: kept as it is */
+        while (fgets(line, sizeof line, existing) != NULL) {
+            const size_t length = strlen(line);
+            const bool ended = length > 0u && line[length - 1u] == '\n';
+            const bool part = continuing || (!ended && !feof(existing));
+            continuing = !ended;
+            /* Only the header is the save's: every other '#' line is the player's. */
+            if (!part && strncmp(line, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) continue;
+            char copy[sizeof line];
+            snprintf(copy, sizeof copy, "%s", line);
+            copy[strcspn(copy, "\r\n")] = '\0';
+            char *album = strchr(copy, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
+            bool ours = false;
+            if (!part && line[0] != '#' && track != NULL) {
+                *album++ = '\0';
+                *track++ = '\0';
+                const int i = find_target(copy);
+                int a, t;
+                ours = i >= 0 && (targets[i].album >= 0 || find_saved(album, track, &a, &t));
+            }
+            if (ours) continue;
+            char *grown = realloc(kept, kept_size + length + 2u);
+            if (grown == NULL) { /* Writing without them would drop them. */
+                fclose(existing);
+                free(kept);
+                return;
+            }
+            kept = grown;
+            memcpy(kept + kept_size, line, length);
+            kept_size += length;
+            if (!ended && feof(existing)) kept[kept_size++] = '\n';
+            kept[kept_size] = '\0';
+        }
+        fclose(existing);
+    }
     FILE *file = recomp_atomic_open(path, temporary, sizeof temporary);
     if (file == NULL) {
+        free(kept);
         fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
         return;
     }
-    fprintf(file, "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n");
-    for (unsigned i = 0u; i < target_count; ++i) {
+    bool written = fprintf(file, "%s", ASSIGNMENT_HEADER) > 0;
+    for (unsigned i = 0u; written && i < target_count; ++i) {
         if (targets[i].album < 0) continue;
-        fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
-            albums[targets[i].album].tracks[targets[i].track].file);
+        written = fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
+            albums[targets[i].album].tracks[targets[i].track].file) > 0;
     }
-    if (!recomp_atomic_commit(file, temporary, path, true))
+    if (written && kept_size > 0u) written = fwrite(kept, 1u, kept_size, file) == kept_size;
+    free(kept);
+    if (!recomp_atomic_commit(file, temporary, path, written))
         fprintf(stderr, "recomp jukebox: cannot save assignments; previous file kept\n");
 }
 
@@ -901,17 +960,20 @@ static void load_assignments(void)
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
     FILE *file = fopen(path, "r");
     if (file == NULL) return;
+    bool continuing = false;
     while (fgets(line, sizeof line, file) != NULL) {
+        const bool part = continuing;
+        continuing = strchr(line, '\n') == NULL && !feof(file);
         line[strcspn(line, "\r\n")] = '\0';
-        if (line[0] == '#') continue;
+        if (part || continuing || line[0] == '#') continue; /* longer than any assignment */
         char *album = strchr(line, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
         if (track == NULL) continue;
         *album++ = '\0';
         *track++ = '\0';
         const int i = find_target(line);
         if (i < 0) continue;
-        const int a = find_album(album), t = a >= 0 ? find_track((unsigned)a, track) : -1;
-        if (t < 0) {
+        int a, t;
+        if (!find_saved(album, track, &a, &t)) {
             fprintf(stderr, "recomp jukebox: %s's track %s/%s is gone\n", targets[i].name, album, track);
             continue;
         }

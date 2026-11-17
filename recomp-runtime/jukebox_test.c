@@ -341,7 +341,7 @@ static void test_assignments(const char *base)
 {
     static uint8_t huge_data[7000];
     static const char tracks[] = "track.adx\t-2\t-2\tTrack\nhuge.adx\t-2\t-2\tHuge\n";
-    char disc[512], mods[512], private_dir[512], path[512], text[512];
+    char disc[512], mods[512], private_dir[512], path[512], text[2048];
     memset(huge_data, 'Z', sizeof huge_data);
     make_folder(base);
     snprintf(disc, sizeof disc, "%s/disc", base);
@@ -350,15 +350,15 @@ static void test_assignments(const char *base)
     make_folder(path);
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
     {
-        static const char *const names[] = {"one.adx"};
-        static const uint32_t samples[] = {SECONDS};
-        make_archive(path, names, samples, 1u);
+        static const char *const names[] = {"one.adx", "two.adx"};
+        static const uint32_t samples[] = {SECONDS, SECONDS};
+        make_archive(path, names, samples, 2u);
     }
     snprintf(path, sizeof path, "%s/DOA2.xbe", disc);
     {
-        static const char *const labels[] = {"First Theme"};
-        static const char *const files[] = {"one.adx"};
-        make_executable(path, DOA2U_MUSIC, true, labels, files, 1u);
+        static const char *const labels[] = {"First Theme", "Second Theme"};
+        static const char *const files[] = {"one.adx", "two.adx"};
+        make_executable(path, DOA2U_MUSIC, true, labels, files, 2u);
     }
     snprintf(mods, sizeof mods, "%s/mods", base);
     make_folder(mods);
@@ -381,15 +381,18 @@ static void test_assignments(const char *base)
     recomp_jukebox_prepare(disc, private_dir);
     recomp_jukebox_install(false);
     CHECK(assigning);
-    CHECK(target_count == 1u);
-    if (target_count == 1u) {
+    CHECK(target_count == 2u);
+    if (target_count == 2u) {
         CHECK(strcmp(targets[0].file, "one.adx") == 0);
         CHECK(strcmp(targets[0].name, "First Theme") == 0);
+        CHECK(strcmp(targets[1].file, "two.adx") == 0);
+        CHECK(strcmp(targets[1].name, "Second Theme") == 0);
     }
 
     const RecompModOverlay *overlay = recomp_mod_overlay(BGM, ARCHIVE_SIZE);
-    uint64_t at = 0u;
-    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 0u, &at));
+    uint64_t at = 0u, second_at = 0u;
+    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 0u, &at) &&
+        recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 1u, &second_at));
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
     base_file = fopen(path, "rb");
     CHECK(base_file != NULL);
@@ -432,11 +435,51 @@ static void test_assignments(const char *base)
         CHECK(targets[0].album == doa3 && targets[0].track == track);
         CHECK(entry_byte(overlay, at) == 'Q');
 
+        /* A save keeps the lines it cannot place: an album that is missing for
+           now, a music entry this build does not list, and a player's comment. */
+        static const char held[] =
+            "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n"
+            "# A comment the player keeps.\n"
+            "one.adx\tDOA4\tkept.adx\nghost.adx\tDOA3\ttrack.adx\n";
+        write_file(path, held, sizeof held - 1u);
+        recomp_jukebox_page_opened();
+        CHECK(targets[0].album == -1 && targets[0].track == -1);
+        page.album = (unsigned)doa3;
+        page.track = (unsigned)track;
+        page.target = 1u;
+        recomp_jukebox_confirm(ROW_TARGET);
+        CHECK(targets[1].album == doa3 && targets[1].track == track);
+        CHECK(entry_byte(overlay, second_at) == 'Q');
+        (void)read_text(path, text, sizeof text);
+        CHECK(strstr(text, "two.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(strstr(text, "one.adx\tDOA4\tkept.adx") != NULL);
+        CHECK(strstr(text, "ghost.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(strstr(text, "# A comment the player keeps.") != NULL);
+        /* The save's own header is written once, not kept and written again. */
+        CHECK(count_text(text, "# The Jukebox's assignments:") == 1u);
+        CHECK(count_text(text, "one.adx") == 1u);
+
+        /* A comment longer than the reader's 512-byte buffer: its tail looks
+           like an assignment, but it stays one comment line and assigns nothing. */
+        static char long_comment[640];
+        memset(long_comment, 'x', 511u);
+        long_comment[0] = '#';
+        snprintf(long_comment + 511, sizeof long_comment - 511u, "two.adx\tDOA3\ttrack.adx\n");
+        write_file(path, long_comment, strlen(long_comment));
+        recomp_jukebox_page_opened();
+        CHECK(targets[1].album == -1 && targets[1].track == -1);
+        page.target = 0u;
+        recomp_jukebox_confirm(ROW_TARGET);
+        (void)read_text(path, text, sizeof text);
+        CHECK(strstr(text, long_comment) != NULL);
+
         /* A target the reloaded file no longer names plays its own music. */
         remove(path);
         recomp_jukebox_page_opened();
         CHECK(targets[0].album == -1 && targets[0].track == -1);
+        CHECK(targets[1].album == -1 && targets[1].track == -1);
         CHECK(entry_byte(overlay, at) == 0x80u);
+        CHECK(entry_byte(overlay, second_at) == 0x80u);
     }
     fclose(base_file);
     base_file = NULL;

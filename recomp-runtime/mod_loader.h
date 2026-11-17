@@ -70,8 +70,9 @@ bool recomp_mod_overlay_read(const RecompModOverlay *overlay, RecompModBaseRead 
    effect when the entry's first byte is next read: when its track starts. */
 typedef struct RecompModSource RecompModSource;
 void recomp_mod_loader_reserve(const char *key, uint64_t slot_size); /* NULL clears */
-/* Off (online): an archive reserved only for slots is served as the disc's own, so
-   two games with different albums read the same file. Files opened later follow. */
+/* Off (online): every entry plays its own track, and an archive reserved only
+   for slots is served as the disc's own, so two games with different albums read
+   the same bytes. Files opened later follow. */
 void recomp_mod_loader_enable_slots(bool enabled);
 /* A track to assign: part of a file (size 0: to its end); kept until shutdown. */
 const RecompModSource *recomp_mod_source(const char *path, uint64_t offset, uint64_t size);
@@ -92,7 +93,7 @@ bool recomp_mod_key(const char *disc_root, const char *host_path, char *key, siz
 
 /* Whether this open may change the file, so a mod must not stand in for it:
    overlays never apply to handles opened for writing. DELETE and the ACL, EA
-   and attribute rights write too, as do the supersede and overwrite
+   and attribute rights write too, as do the supersede, create and overwrite
    dispositions and the FILE_DELETE_ON_CLOSE option. The kernel passes FILE_OPEN
    for NtOpenFile. */
 bool recomp_mod_open_writes(uint32_t desired_access, uint32_t create_disposition, uint32_t create_options);

@@ -4,7 +4,7 @@
 
 # DOA2U Native PC Port
 
-**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source.**
+**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source. Now with rollback netplay.**
 
 [![Latest release](https://img.shields.io/github/v/release/NoRain211/doa2u-re?label=alpha)](https://github.com/NoRain211/doa2u-re/releases/latest)
 [![CI](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml/badge.svg)](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml)

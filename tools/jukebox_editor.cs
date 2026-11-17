@@ -410,6 +410,13 @@ class JukeboxEditor : Form
         return string.Join(" ", words);
     }
 
+    // tracks.txt names files in its own folder, as recomp-runtime/jukebox.c's bare_name reads
+    // it: a player can drop a shared album beside the game's, so the field is not a path out.
+    static bool BareName(string name)
+    {
+        return name != "" && name != "." && !name.Contains("..") && name.IndexOfAny(new[] { '/', '\\', ':' }) < 0;
+    }
+
     Album LoadFolder(string folder)
     {
         string list = Path.Combine(jukebox, folder, "tracks.txt");
@@ -422,7 +429,7 @@ class JukeboxEditor : Form
         {
             string[] field = line.Split('\t');
             if (field[0] == "#title" && field.Length > 1) { album.Title = field[1]; continue; }
-            if (line.StartsWith("#") || field.Length < 4 || field[0] == "") continue;
+            if (line.StartsWith("#") || field.Length < 4 || !BareName(field[0])) continue;
             var track = new Track { File = field[0], Name = field[3], Path = Path.Combine(jukebox, folder, field[0]) };
             track.Seconds = Seconds(track);
             album.Tracks.Add(track);
@@ -458,6 +465,20 @@ class JukeboxEditor : Form
             if (field.Length >= 3) result[field[0]] = field[1] + "\t" + field[2];
         }
         return result;
+    }
+
+    // The assignments file a save writes: its header, the assignments, then the
+    // player's own comments and lines that are not assignments, as the game's save keeps them.
+    static string AssignmentText(string path, Dictionary<string, string> latest)
+    {
+        const string header = "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.";
+        var lines = new StringBuilder(header + "\n");
+        foreach (var pair in latest.OrderBy(pair => pair.Key)) lines.Append(pair.Key + "\t" + pair.Value + "\n");
+        if (File.Exists(path))
+            foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                if (line != header && line.Trim().Length != 0 && (line.StartsWith("#") || line.Split('\t').Length < 3))
+                    lines.Append(line + "\n");
+        return lines.ToString();
     }
 
     static Dictionary<string, string> MergeAssignments(string path, Dictionary<string, string> picks, IEnumerable<string> edited)
@@ -649,6 +670,52 @@ class JukeboxEditor : Form
         return (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
     }
 
+    // A record's key: the text before its first "=", or null where it is not one.
+    static string RecordKey(string line)
+    {
+        int equals = line.IndexOf('=');
+        return equals < 0 ? null : line.Substring(0, equals).Trim();
+    }
+
+    // A save keeps every line the player has, as the game's apply_names does: the records it
+    // knows are rewritten and the ones the file lacks are added, so comments, keys for files
+    // it does not list and the album's own title all stay.
+    static void MergeNames(string path, Album album)
+    {
+        bool exists = File.Exists(path);
+        var lines = new List<string>();
+        bool titled = false;
+        var listed = new HashSet<string>();
+        if (exists)
+            foreach (string raw in File.ReadAllLines(path, Encoding.UTF8))
+            {
+                string line = raw.TrimStart('﻿');
+                string key = line.StartsWith("#") ? null : RecordKey(line);
+                if (key == "album")
+                {
+                    lines.Add("album = " + RecordText(album.Title));
+                    titled = true;
+                    continue;
+                }
+                Track track = key == null ? null : album.Tracks.Find(t => t.File == key);
+                if (track == null) { lines.Add(line); continue; }
+                lines.Add(track.File + " = " + RecordText(track.Name));
+                listed.Add(track.File);
+            }
+        if (!titled) lines.Add("album = " + RecordText(album.Title));
+        foreach (Track track in album.Tracks)
+            if (listed.Add(track.File)) lines.Add(track.File + " = " + RecordText(track.Name));
+        var text = new StringBuilder();
+        if (!exists)
+        {
+            text.Append("# The Jukebox's names for the " + album.Tab + " album's tracks.\n");
+            text.Append("# Change the text after \"=\" and save; the game reads this file when it starts.\n");
+            text.Append("# Leave the file name before \"=\" as it is.\n\n");
+        }
+        foreach (string line in lines) text.Append(line + "\n");
+        AtomicText(path, text.ToString());
+    }
+
     bool Save()
     {
         if (grid.IsCurrentCellInEditMode) grid.EndEdit();
@@ -662,17 +729,9 @@ class JukeboxEditor : Form
             {
                 string folder = Path.Combine(jukebox, album.Folder);
                 Directory.CreateDirectory(folder);
-                var text = new StringBuilder();
-                text.Append("# The Jukebox's names for the " + album.Tab + " album's tracks.\n");
-                text.Append("# Change the text after \"=\" and save; the game reads this file when it starts.\n");
-                text.Append("# Leave the file name before \"=\" as it is.\n\n");
-                text.Append("album = " + RecordText(album.Title) + "\n\n");
-                foreach (Track track in album.Tracks) text.Append(track.File + " = " + RecordText(track.Name) + "\n");
-                AtomicText(Path.Combine(folder, "names.txt"), text.ToString());
+                MergeNames(Path.Combine(folder, "names.txt"), album);
             }
-            var lines = new StringBuilder("# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n");
-            foreach (var pair in latest.OrderBy(pair => pair.Key)) lines.Append(pair.Key + "\t" + pair.Value + "\n");
-            AtomicText(assignmentPath, lines.ToString());
+            AtomicText(assignmentPath, AssignmentText(assignmentPath, latest));
             assigned.Clear();
             foreach (var pair in latest) assigned[pair.Key] = pair.Value;
             editedSlots.Clear();
