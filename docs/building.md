@@ -58,7 +58,8 @@ Then build from your Disc 2 ISO:
 Lifting takes several minutes. The generated program is checked against the
 same manifest hash as the Windows build, so a different lifter or input stops
 the build before it compiles. The ISO is extracted once into
-`private/imported-disc`, about 4.1 GB.
+`private/imported-disc`, about 4.1 GB, and moved to `private/play-disc`
+once the build succeeds.
 
 `./launcher.sh` opens the same menu as the Windows launcher: resolution, MSAA,
 SMAA and widescreen on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**
@@ -78,7 +79,9 @@ and Ubuntu, `libshaderc.so.1` from the `libshaderc1` package.
 
 Build in an x86-64 distribution with CMake, Ninja, a C++17 compiler, Git,
 Python 3.12 or newer with the `venv` module and SDL3's build dependencies.
-A fresh container has none of these. On Ubuntu 24.04 or Debian 13:
+A fresh container has none of these. `./install_deps.sh` installs them with
+apt, dnf or pacman (`--print` only shows the command). On Ubuntu 24.04 or
+Debian 13 the same packages are:
 
 ```bash
 sudo apt install build-essential cmake ninja-build git python3-venv \
@@ -94,22 +97,34 @@ glibc 2.34 or newer; on other systems, build `extract-xiso` as in the macOS
 section and pass it with `--extractor`. `build_game.sh` builds SDL3 when the
 distribution has none:
 
-```bash
-python3 -m venv private/venv
-private/venv/bin/pip install capstone==5.0.7
-./build_game.sh /path/to/disc2.iso
-```
-
-SteamOS has a read-only system and no compiler, so build inside a container
-such as an Ubuntu 24.04 `distrobox` that shares your home folder (Bazzite
-includes distrobox); the finished checkout then runs on SteamOS itself:
+Run these from inside the clone. `build_game.sh` sits at its top level, so
+`No such file or directory` means you are in the wrong folder (`ls` should list
+it). Quote the ISO path if it contains spaces:
 
 ```bash
-distrobox create --name doa2u --image ubuntu:24.04
-distrobox enter doa2u
+git clone --recurse-submodules https://github.com/NoRain211/doa2u-re.git
+cd doa2u-re
+./build_game.sh "/path/to/disc2.iso"
 ```
 
-Run the `apt install` above inside it. `./launcher.sh` opens a
+`build_game.sh` creates `private/venv` and installs Capstone there itself, and
+stops at once if CMake, Ninja, Git or a C++ compiler is missing.
+
+SteamOS has a read-only system and no compiler. On a Steam Deck, keep the
+checkout under your home folder, open Konsole in Desktop Mode and run:
+
+```bash
+./build_steamdeck.sh "/path/to/disc2.iso"
+```
+
+It installs distrobox into `~/.local` when it is missing, creates an Ubuntu
+24.04 container named `doa2u-build` that shares your home folder, runs
+`./install_deps.sh` there and then `./build_game.sh`. The ISO must be under
+your home folder too. The finished checkout runs on SteamOS itself. To do it
+by hand, create a container with `distrobox create --name doa2u --image
+ubuntu:24.04`, enter it and run `./install_deps.sh` and `./build_game.sh`.
+
+`./launcher.sh` opens a
 gamepad-friendly settings screen, then starts the game; `./run_game.sh`
 starts the game with the saved choices.
 
@@ -133,8 +148,9 @@ that shortcut.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
-- `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
-  stop after 60 seconds.
+- `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV, and the
+  reverb return beside it as `<file>.wet.wav`. It does not stop after
+  60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
 
 ## Runtime tests
