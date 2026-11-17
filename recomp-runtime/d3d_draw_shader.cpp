@@ -849,17 +849,24 @@ bool recomp_d3d_draw_constants(
    strips. At the guest's own size every pixel samples a texel's centre, but
    a larger target samples between texels at a piece's edges, and the
    filter mixes in whatever lies beside the piece on the sheet: a dark line
-   where two pieces meet. A pretransformed draw that stays inside the
-   texture (no wrapping) therefore samples only within its texcoords' box,
-   pulled in by half a texel; a piece one texel wide samples its centre.
-   Draws of many vertices and of wrapped textures are left alone; the D3D8
-   adapter sends text and other lists of separate pieces one piece at a time. */
+   where two pieces meet. A pretransformed draw under a clamp address mode
+   that stays inside the texture therefore samples only within its texcoords'
+   box, pulled in by half a texel; a piece narrower than a texel samples its
+   centre.
+   Draws of many vertices, and draws whose address modes wrap or mirror the
+   sample across the box, are left alone; the D3D8 adapter sends text and
+   other lists of separate pieces one piece at a time. */
 void recomp_d3d_draw_uv_clamp(const RecompD3dPresenterDrawCommand &draw, const RecompD3dVertexLayout &layout,
     bool texture_bound, float out[4])
 {
     out[0] = out[1] = 1.0f;
     out[2] = out[3] = 0.0f; /* off: max below min */
-    if (!layout.pretransformed || !texture_bound || !draw.has_texture || layout.texcoord_offset == RECOMP_D3D_FVF_ABSENT ||
+    /* D3DTADDRESS: 1 wraps, 2 mirrors, 3 clamps, 4 borders, 5 mirrors once;
+       0 is an unknown mode and wraps like the D3D8 default. */
+    const auto clamps = [](uint32_t mode) { return mode >= 3u && mode <= 5u; };
+    if (!layout.pretransformed || !texture_bound || !draw.has_texture ||
+        !clamps(draw.address_u) || !clamps(draw.address_v) ||
+        layout.texcoord_offset == RECOMP_D3D_FVF_ABSENT ||
         draw.vertex_bytes == nullptr || draw.vertex_count == 0u ||
         draw.texture.width == 0u || draw.texture.height == 0u || draw.texture.volume_depth != 0u ||
         draw.vertex_stride < layout.texcoord_offset + 8u)
