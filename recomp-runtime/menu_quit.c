@@ -463,7 +463,7 @@ static void menu_entry(void)
         RecompGameSprite word;
         if (!jukebox_label_made) jukebox_label_made = make_jukebox_label();
         /* Reloaded art: the same piece the label's palette was taken from. */
-        else if (recomp_game_sprite(JUKEBOX_PIECES[0].sprite, WORD_H, &word))
+        else if (recomp_game_sprite(PIECES[0].sprite, WORD_H, &word))
             recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, word.palette);
         kernel_return_caller_cleanup(jukebox_entry);
         return;
