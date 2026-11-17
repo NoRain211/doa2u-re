@@ -385,6 +385,28 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
         drop_owned_extraction()
 
 
+def soundtrack(args, warning):
+    """Run tools/import_soundtrack.py. Its albums are optional for playing, so a failure only warns."""
+    result = subprocess.call([sys.executable, str(ROOT / "tools" / "import_soundtrack.py"), *map(str, args)])
+    if result:
+        print(f"Could not finish the Jukebox soundtrack: import_soundtrack.py exited with {result}, {warning}")
+    return result
+
+
+def update_soundtrack():
+    """The Jukebox's DOA1U and DOA2U Movies albums: the disc's DOA1 music and its movies'
+    (tools/import_soundtrack.py). A full build's drop_owned_extraction deletes the extraction's
+    disc, leaving the play folder; a build-only run still has the extraction to read."""
+    disc = extracted_disc(ROOT / "private/imported-disc")
+    doa1 = ROOT / "jukebox" / "doa1u" / "tracks.txt"
+    movies = ROOT / "jukebox" / "doa2u-movies" / "tracks.txt"
+    if not (movies.is_file() and doa1.is_file()) and (disc / "DOA2" / "bgm.afs").is_file():
+        soundtrack([disc], "so the movies' music is missing; the game still plays.")
+    # Imported albums play as loud as DOA2U's own music (once per album; needs recomp_adx_encode).
+    if (ROOT / "jukebox").is_dir():
+        soundtrack(["--level"], "so imported albums keep their own loudness.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("iso", type=Path, nargs="?",
@@ -401,16 +423,9 @@ def main():
     except (OSError, ValueError, KeyError, ImportError, subprocess.CalledProcessError) as error:
         print(f"Build failed: {error}", file=sys.stderr)
         return 1
-    # The Jukebox's DOA1U and DOA2U Movies albums: the disc's DOA1 music and its movies' (tools/import_soundtrack.py).
-    movies = ROOT / "jukebox" / "doa2u-movies" / "tracks.txt"
-    disc = ROOT / "private" / "play-disc"
-    doa1 = ROOT / "jukebox" / "doa1u" / "tracks.txt"
-    if not (movies.is_file() and doa1.is_file()) and (disc / "DOA2" / "bgm.afs").is_file():
-        if subprocess.call([sys.executable, str(ROOT / "tools" / "import_soundtrack.py"), str(disc)]):
-            print("Could not add the movies' music to the Jukebox; the game still plays.")
-    # Imported albums play as loud as DOA2U's own music (once per album; needs recomp_adx_encode).
-    if (ROOT / "jukebox").is_dir():
-        subprocess.call([sys.executable, str(ROOT / "tools" / "import_soundtrack.py"), "--level"])
+    # A lift-only run builds no recomp_adx_encode, so its soundtrack steps would only half work.
+    if not args.lift_only:
+        update_soundtrack()
     if args.iso is not None:
         print("Build complete. " + ("Run DOA2U.exe to play." if sys.platform == "win32"
                                     else "Run ./launcher.sh to play."))
