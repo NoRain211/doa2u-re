@@ -122,6 +122,19 @@ keeps running.
   Offline only.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
+- **Mods.** Files in a `mods` folder beside the launcher replace the
+  game's files without touching the disc. Each folder in it is a mod that
+  mirrors the disc: `mods\<mod>\DOA2\doa2_op.sfd` replaces a whole file,
+  and a folder named after one of the game's archives replaces single
+  entries in it, by their name in the archive or their number:
+  `mods\<mod>\DOA2\bgm.afs\bgm_doa2_ay.adx` (or `10.adx`) replaces Ayane's
+  theme. An entry can be a plain WAV (8 to 32-bit PCM, mono or stereo, any
+  rate): it is encoded to ADX once and kept in `mods\.cache`, and loops
+  where its `smpl` chunk says or, if the track it replaces looped, over the
+  whole song. Mods load by folder name, or in the order `mods\order.txt`
+  lists them, and a later mod's file wins; a folder whose name starts with
+  `_` is off. The game's log (`private\play-logs`) lists every mod and file
+  it serves. Netplay only pairs players whose mods are the same.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
   shown, so it stays smooth at high resolutions; the Vulkan renderer also

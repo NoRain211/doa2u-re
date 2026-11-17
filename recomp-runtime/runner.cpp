@@ -9,6 +9,7 @@
 #include "free_camera_adapter.h"
 #include "combo_hud.h"
 #include "hit_voice.h"
+#include "mod_loader.h"
 #include "ko_replay.h"
 #include "cpu_costume.h"
 #include "unlock_profile.h"
@@ -192,6 +193,33 @@ static void installHitVoices(bool online)
     recomp_hit_voice_install(online, directory.c_str());
 }
 
+/* private/, beside launcher.json (RECOMP_LAUNCHER_SETTINGS), or "private". */
+static std::string privateFolder()
+{
+    const char *settings = std::getenv("RECOMP_LAUNCHER_SETTINGS");
+    if (settings == nullptr || *settings == '\0') return "private";
+    const std::string path = settings;
+    const std::size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+}
+
+/* Mods (mod_loader.h): RECOMP_MODS, or mods/ beside private/. Netplay pairs
+   only games with the same mods: their digest goes into the build's. */
+static std::string installMods(const std::string &discRoot)
+{
+    std::string digest = RECOMP_NETPLAY_BUILD;
+    std::string folder;
+    if (const char *mods = std::getenv("RECOMP_MODS"); mods != nullptr && *mods != '\0') folder = mods;
+    else folder = (std::filesystem::u8path(privateFolder()).parent_path() / "mods").u8string();
+    if (folder.empty() || !recomp_mod_loader_install(folder.c_str(), discRoot.c_str())) return digest;
+    if (recomp_mod_loader_count() == 0u) return digest;
+    char hex[17];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(recomp_mod_loader_digest()));
+    if (digest.size() >= 16u) digest.replace(digest.size() - 16u, 16u, hex);
+    else digest += hex;
+    return digest;
+}
+
 static void installPcSettings(bool online)
 {
     const char *path = std::getenv("RECOMP_LAUNCHER_SETTINGS");
@@ -283,7 +311,15 @@ static std::uint64_t afsEntryOffset(const char *path, const char *name)
     if (toc[header[1] * 2u] == 0u || toc[header[1] * 2u + 1u] < names.size() ||
         !file.seekg(toc[header[1] * 2u]) || !file.read(names.data(), names.size())) return 0u;
     for (std::uint32_t i = 0; i < header[1]; ++i)
-        if (std::strncmp(&names[i * 48u], name, 32u) == 0) return toc[i * 2u];
+        if (std::strncmp(&names[i * 48u], name, 32u) == 0) {
+            std::error_code error;
+            const auto size = std::filesystem::file_size(std::filesystem::u8path(path), error);
+            char key[1024];
+            std::uint64_t served;
+            if (!error && recomp_mod_key(recomp_disc_root_path, path, key, sizeof key) &&
+                recomp_mod_entry_offset(key, size, i, &served)) return served;
+            return toc[i * 2u];
+        }
     return 0u;
 }
 
@@ -623,7 +659,8 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
-    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
+    static const std::string netplayDigest = installMods(discRoot);
+    recomp_netplay_session_init({discPath, netplayDigest.c_str(), &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
     if ((launch.hostPort != 0u || !launch.join.empty()) && !recomp_netplay_session_connect(launch)) return 1;
     if (!replayPath.empty() && !recomp_netplay_session_load_replay(replayPath)) return 1;
     bootGuest();
