@@ -8,7 +8,12 @@
    keeps its own library and stays offline. */
 #include "runtime.h"
 
+#include <stdbool.h>
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* guest_address is an XOnline/XNet export thunk; NULL for every other address
    and while Live is off. Never blocks: a task starts a backend request that
@@ -17,6 +22,12 @@
    the lookup it resolved first, so a later change also needs
    recomp_program_lookup_reset(). */
 RecompFunction recomp_live_lookup(uint32_t guest_address);
+
+/* The guest called XOnlineLogon (true), or closed the logon task with
+   XOnlineTaskClose (false), which online_logoff does when the player leaves
+   DOA ONLINE. Called inside the guest call: the runner applies the switch at
+   the next frame boundary. NULL to ignore it. */
+extern void (*recomp_live_online_hook)(bool online);
 
 /* The guest winsock/XNet transport group (socket, bind, ioctlsocket,
    closesocket, shutdown, recvfrom, sendto, WSAGetLastError,
@@ -27,5 +38,9 @@ RecompFunction recomp_live_transport_lookup(uint32_t guest_address);
 /* Once per frame while Live is on: resend, time out, read pushed invites and
    presence, and finish calls the game does not poll (friend operations). */
 void recomp_live_pump(uint64_t now_ms);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -14,6 +14,7 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
+#include "hit_voice.h"
 #include "live_client.h"
 
 // netplay_wire.h declares it but carries winsock; the Live pump runs on its clock.
@@ -366,6 +367,7 @@ static void finishLiveSession()
     rollback.liveTailUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     rollback.active = false;
     rollback.hidden = false;
+    recomp_hit_voice_set_replaying(false);
     rollback.stop = UINT32_MAX;
     rollback.frontier = 0u;
     rollback.checkFrame = 0u;
@@ -779,6 +781,7 @@ static void onRollbackFrame(std::uint32_t swap)
     recomp_d3d8_set_present_suppressed(rollback.hidden);
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
     recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
+    recomp_hit_voice_set_replaying(rollback.hidden);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
     if (rollback.mode == RollbackMode::Live &&
         recomp_live_pads_carry_stop(rollback.pads[0].buttons, rollback.pads[1].buttons)) {
@@ -836,10 +839,9 @@ void recomp_netplay_session_set_live(bool on)
 
 /* Live starts unless RECOMP_LIVE=0, and never while a Loopback test session
    or a synctest runs: those own the frame clock, the saves and the runner's
-   exit, and a synctest's rewinds would resend Live traffic. The
-   game's own Xbox Live pages run over the matchmaker for the whole run, so
-   every boot runs as a session would (frame clock, synchronous reads, no mods
-   that change the fight). */
+   exit, and a synctest's rewinds would resend Live traffic. The run is
+   offline until the game logs on in DOA ONLINE; the runner then switches it
+   online (frame clock, synchronous reads, no mods that change the fight). */
 void recomp_netplay_session_start_live()
 {
     const char *on = std::getenv("RECOMP_LIVE");
@@ -943,7 +945,7 @@ void recomp_netplay_session_install(bool synctest)
         recomp_d3d_frame_boundary_hook = onRollbackFrame;
         recomp_kernel_profile_mutation_hook = confirmSaveFrame;
     }
-    recomp_dsound_buffer_set_frame_clock(enabled || synctest);
+    (void)synctest; // the runner's setOnlineMode sets the DirectSound frame clock
 }
 
 bool recomp_netplay_session_pad(std::uint32_t port, RecompInputGamepad *pad, bool *present)

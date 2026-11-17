@@ -10,9 +10,9 @@ the camera; press again to give it back. The controls are the DOA3 port's,
 without its swimsuit controls: no control uses **Back**, which the game acts
 on itself.
 
-Live and synctests turn it off: moving one game's camera or freezing its
-scene would desync the two games. Live is on by default, so the free camera
-works only in a run started with `RECOMP_LIVE=0`.
+A synctest, and a logon to DOA ONLINE, turn it off: moving one game's camera
+or freezing its scene would desync the two games. Leaving DOA ONLINE brings
+it back.
 
 While it flies, the pad and keyboard are the camera's, and the game reads a
 still controller, so it ignores what moves the camera. The game itself keeps

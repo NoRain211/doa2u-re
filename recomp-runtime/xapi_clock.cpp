@@ -29,6 +29,13 @@ std::atomic<uint64_t> frame_clock_frame{0};
    host time per vblank: 1 us reaches a 60 Hz deadline in a few thousand reads. */
 std::atomic<uint64_t> frame_clock_tick_ns{1000};
 std::atomic<unsigned long long> frame_clock_host_thread{0};
+/* The guest has read the real clock: enabling the frame clock later must
+   start it there, not at zero. A boot that enables it before the guest runs
+   starts at zero, as the console does. */
+std::atomic<bool> real_clock_used{false};
+/* Added to the counter-derived UTC while the frame clock runs, so the switch
+   from the host's wall clock keeps the guest's date continuous. 100 ns units. */
+std::atomic<uint64_t> frame_clock_utc_offset{0};
 
 unsigned long long host_thread_id(void)
 {
@@ -65,6 +72,22 @@ uint64_t frame_clock_displayed(void)
     if (offset > ahead) ahead = offset;
     return base + ahead;
 }
+
+/* The free-running host clock the guest reads while the frame clock is off. */
+uint64_t real_counter(void)
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count()) +
+        skipped_ns.load(std::memory_order_relaxed);
+}
+
+uint64_t host_utc_100ns(void)
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()) / 100u;
+}
 }
 
 bool (*recomp_xapi_fast_forward)(void) = nullptr;
@@ -77,10 +100,9 @@ uint64_t recomp_xapi_performance_counter(void)
             frame_clock_offset.fetch_add(tick, std::memory_order_relaxed);
         return frame_clock_displayed();
     }
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count()) +
-        skipped_ns.load(std::memory_order_relaxed);
+    if (!real_clock_used.load(std::memory_order_relaxed))
+        real_clock_used.store(true, std::memory_order_relaxed);
+    return real_counter();
 }
 
 bool recomp_xapi_frame_clock_enabled(void)
@@ -88,19 +110,53 @@ bool recomp_xapi_frame_clock_enabled(void)
     return frame_clock_enabled.load(std::memory_order_relaxed);
 }
 
+/* Enabling after the guest has read the real clock starts the frame clock
+   where that clock now is: resetting to zero would take guest time backwards.
+   A boot that enables it before the guest runs starts at zero, as it did.
+   The state is written before the flag, so a reader never sees a half switch. */
 void recomp_xapi_frame_clock_set_enabled(bool enabled)
 {
-    frame_clock_enabled.store(enabled, std::memory_order_relaxed);
-    if (enabled) recomp_xapi_frame_clock_reset();
+    if (enabled) {
+        if (frame_clock_enabled.load(std::memory_order_relaxed)) return;
+        const bool resume = real_clock_used.load(std::memory_order_relaxed);
+        const uint64_t now = resume ? real_counter() : 0u;
+        recomp_xapi_frame_clock_reset();
+        if (resume) {
+            frame_clock_base.store(now > frame_ns ? now - frame_ns : 0u, std::memory_order_relaxed);
+            frame_clock_utc_offset.store(host_utc_100ns() - now / 100u, std::memory_order_relaxed);
+            real_clock_used.store(true, std::memory_order_relaxed);
+        }
+        frame_clock_enabled.store(true, std::memory_order_relaxed);
+        return;
+    }
+    if (!frame_clock_enabled.load(std::memory_order_relaxed)) return;
+    /* The guest goes back to the real clock; it must continue from at least
+       the last frame time, which a wait may have moved past the host's. */
+    const uint64_t displayed = frame_clock_displayed();
+    const uint64_t real = real_counter();
+    // Wraps when guest time ran behind, as recomp_xapi_hold_time relies on.
+    skipped_ns.fetch_add(displayed - real, std::memory_order_relaxed);
+    frame_clock_enabled.store(false, std::memory_order_relaxed);
+    frame_clock_utc_offset.store(0u, std::memory_order_relaxed);
+}
+
+/* While the frame clock runs, the guest's UTC rides the counter; this keeps
+   it where the host's wall clock was when the clock started. */
+uint64_t recomp_xapi_frame_clock_utc_offset(void)
+{
+    return frame_clock_utc_offset.load(std::memory_order_relaxed);
 }
 
 void recomp_xapi_frame_clock_reset(void)
 {
+    /* Guest time starts over at zero, as on a boot: a later enable resets too. */
+    real_clock_used.store(false, std::memory_order_relaxed);
     frame_clock_base.store(0, std::memory_order_relaxed);
     frame_clock_offset.store(0, std::memory_order_relaxed);
     frame_clock_wait.store(0, std::memory_order_relaxed);
     frame_clock_frame.store(0, std::memory_order_relaxed);
     frame_clock_host_thread.store(0, std::memory_order_relaxed);
+    frame_clock_utc_offset.store(0, std::memory_order_relaxed);
 }
 
 void recomp_xapi_frame_clock_advance(void)

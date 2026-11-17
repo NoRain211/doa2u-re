@@ -25,6 +25,28 @@ keeps Live off.
   digest and profile name (the gamertag). Any player who joins a host, or
   CONNECTs to it, gets the host's IP address and port, as on the Xbox.
 
+## Online and offline
+
+The run switches itself at the player's logon. Booting starts offline: the
+game's offline pages play with the player's mods, a free-running clock and
+ordinary disc reads. The account page's `XOnlineLogon` (bound as
+`live_logon`) switches to online mode at the next presented frame. Leaving
+DOA ONLINE ends `online_logoff` (`0x2a4010`) with
+`XOnlineTaskClose(g_online_logon_task)`, whose binding `live_task_close`
+switches back; a failed logon the game then closes counts as leaving.
+
+Online, what the rollback fights need is on: guest time is locked to the
+frame, disc reads are synchronous and DirectSound buffers follow the same
+frame clock. The free camera, random CPU costumes and the Dynamic KO replay
+stay off, since they change one game's memory or timing. The combo HUD and
+the hit voices are not forced off: each player's PC SETTINGS row decides,
+online too, because neither writes guest memory the desync check hashes and
+the hit voices are host audio only. Leaving puts the rest back, honouring the
+player's settings.
+
+A Loopback (`RECOMP_ROLLBACK=loopback`) or synctest run stays online for the
+whole run.
+
 ## How it fits
 
 The game links Microsoft's XOnline and XNet libraries statically. The port
