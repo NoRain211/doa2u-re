@@ -16,8 +16,9 @@ music file itself:
   decoded and joined, then encoded as ADX with the loop in its header, by
   recomp_adx_encode from the game's build (the runtime's own encoder), or by
   ffmpeg before the game is built, with the loop in tracks.txt instead.
-  Needs an ffmpeg with the xma1 decoder: the build fetches one into
-  tools/ffmpeg on Windows; otherwise one on PATH, or given with --ffmpeg.
+  Needs an ffmpeg with the xma1 decoder: on Windows this fetches one into
+  tools/ffmpeg on first use when none is bundled or on PATH; otherwise give
+  one with --ffmpeg.
 
 Each disc's movies (opening, endings, logos) are Sofdec SFD files whose sound
 is ADX as well: every SFD in its movie folders is taken out of it and added as
@@ -41,7 +42,7 @@ import subprocess
 import sys
 import tempfile
 
-from build_prerequisites import find_ffmpeg
+from build_prerequisites import ffmpeg as fetch_ffmpeg, find_ffmpeg
 import xbe_info
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -676,6 +677,17 @@ def find_encoder(given):
     return None
 
 
+def resolve_ffmpeg(given=None):
+    """The ffmpeg with the xma1 decoder DOA4 needs, fetching it (Windows) when none is found."""
+    tool = given or find_ffmpeg(ROOT) or fetch_ffmpeg(ROOT)
+    check = run_tool([tool, "-hide_banner", "-decoders"], check=True,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    if not re.search(r"\bxma1\b", check.stdout):
+        raise ValueError("FFmpeg lacks the XMA decoder required by DOA4")
+    return tool
+
+
 def import_doa4(source, out, ffmpeg, encoder=None):
     bank_data = source.read("SOUND/bgm_stream.xwb")
     afs = source.read("snd.afs")
@@ -786,9 +798,7 @@ def main():
         if game == "doa3":
             import_doa3(source, args.out, find_encoder(args.adx_encoder))
         elif game == "doa4":
-            ffmpeg = args.ffmpeg or find_ffmpeg(ROOT)
-            if ffmpeg is None:
-                raise SystemExit(FFMPEG_MISSING)
+            ffmpeg = resolve_ffmpeg(args.ffmpeg)
             import_doa4(source, args.out, ffmpeg, find_encoder(args.adx_encoder))
         elif game == "doa2u":
             import_doa2u(source, args.out, find_encoder(args.adx_encoder))

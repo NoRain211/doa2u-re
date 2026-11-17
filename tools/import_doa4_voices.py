@@ -32,8 +32,7 @@ import subprocess
 import sys
 import tempfile
 
-from build_prerequisites import ffmpeg as fetch_ffmpeg
-from import_soundtrack import Folder, Xdvdfs, detect, open_source
+from import_soundtrack import Folder, Xdvdfs, detect, open_source, resolve_ffmpeg
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
 # the wave bank is the entry before it.
@@ -372,12 +371,7 @@ def main(argv=None):
         validate_banks(afs, entries)
         # Fetches the pinned ffmpeg (Windows) on first use, so no build is needed first; the
         # 115 MB download waits until the source itself is known to be a DOA4 disc.
-        args.ffmpeg = args.ffmpeg or fetch_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-        check = subprocess.run([args.ffmpeg, "-hide_banner", "-decoders"], check=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-        if not re.search(r"\bxma1\b", check.stdout):
-            raise ValueError("FFmpeg lacks the XMA decoder required by DOA4")
+        args.ffmpeg = resolve_ffmpeg(args.ffmpeg)
         if args.save_selections:
             save_selections(afs, entries, args.out, args.ffmpeg, args.mapping)
             return 0

@@ -217,6 +217,8 @@ class ImportFailureTests(unittest.TestCase):
                     mock.patch.object(soundtrack, "open_source", return_value=source), \
                     mock.patch.object(soundtrack, "detect", return_value="doa4"), \
                     mock.patch.object(soundtrack, "find_ffmpeg", return_value=ffmpeg), \
+                    mock.patch.object(soundtrack.subprocess, "run",
+                                       return_value=SimpleNamespace(stdout=" ... xma1 ... ")), \
                     mock.patch.object(soundtrack, "import_doa4", side_effect=error):
                 with self.assertRaises(SystemExit) as caught:
                     soundtrack.main()
@@ -230,17 +232,35 @@ class ImportFailureTests(unittest.TestCase):
             self.assertIn(path, said)
             self.assertNotIn("ffmpeg", said)
 
-    def test_missing_ffmpeg_is_reported_before_the_import(self):
+    def test_missing_ffmpeg_is_fetched_instead_of_failing_the_doa4_import(self):
+        source = mock.Mock()
+        fetched = os.path.join(tempfile.gettempdir(), "fetched-ffmpeg.exe")
+        with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso"]), \
+                mock.patch.object(soundtrack, "open_source", return_value=source), \
+                mock.patch.object(soundtrack, "detect", return_value="doa4"), \
+                mock.patch.object(soundtrack, "find_ffmpeg", return_value=None), \
+                mock.patch.object(soundtrack, "fetch_ffmpeg", return_value=fetched) as fetch, \
+                mock.patch.object(soundtrack.subprocess, "run",
+                                   return_value=SimpleNamespace(stdout=" ... xma1 ... ")), \
+                mock.patch.object(soundtrack, "import_doa4") as doa4:
+            self.assertEqual(soundtrack.main(), 0)
+        fetch.assert_called_once_with(soundtrack.ROOT)
+        doa4.assert_called_once()
+        self.assertEqual(doa4.call_args.args[2], fetched)
+
+    def test_a_failed_ffmpeg_fetch_is_reported_before_the_import(self):
         source = mock.Mock()
         with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso"]), \
                 mock.patch.object(soundtrack, "open_source", return_value=source), \
                 mock.patch.object(soundtrack, "detect", return_value="doa4"), \
                 mock.patch.object(soundtrack, "find_ffmpeg", return_value=None), \
+                mock.patch.object(soundtrack, "fetch_ffmpeg",
+                                   side_effect=FileNotFoundError(
+                                       "ffmpeg was not found: none is bundled in tools/ffmpeg and none is on PATH.")), \
                 mock.patch.object(soundtrack, "import_doa4") as doa4:
             with self.assertRaises(SystemExit) as caught:
                 soundtrack.main()
         self.assertIn("ffmpeg was not found", str(caught.exception))
-        self.assertIn("--ffmpeg", str(caught.exception))
         doa4.assert_not_called()
 
     def test_corrupt_afs_archive_raises_value_error(self):

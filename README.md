@@ -142,8 +142,8 @@ keeps running.
   launcher's **JUKEBOX** page, or drop the ISO on the launcher (a DOA3 or DOA4
   disc is imported; any other disc is used as the game's disc and built), or
   run `python tools/import_soundtrack.py <ISO or extracted folder>`. DOA3's
-  tracks are copied as they are; DOA4's are decoded with ffmpeg (the build
-  fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
+  tracks are copied as they are; DOA4's are decoded with ffmpeg (on Windows the
+  import fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
   `recomp_adx_encode` from the game's build, so build the game first. Albums
   go to a `jukebox` folder beside the launcher (`jukebox\<album>`), with the
   music of each disc's movies (opening, endings, logos) taken out of the SFD

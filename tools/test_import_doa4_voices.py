@@ -9,6 +9,7 @@ from unittest import mock
 from test_import_soundtrack import xdvdfs_image
 
 import import_doa4_voices as voices
+import import_soundtrack as soundtrack
 
 
 def wav(path, samples):
@@ -94,7 +95,7 @@ class ArchiveTests(unittest.TestCase):
             end = 8 + 8 * count
             with open(source, "wb") as file:
                 file.write(b"AFS\0" + struct.pack("<I", count) + struct.pack("<II", end, 0) * count)
-            with mock.patch.object(voices, "fetch_ffmpeg", return_value="unused"), \
+            with mock.patch.object(soundtrack, "fetch_ffmpeg", return_value="unused"), \
                     mock.patch.object(voices.subprocess, "run") as run:
                 with self.assertRaises((ValueError, struct.error)):
                     voices.main([source, "--out", out])
@@ -164,7 +165,7 @@ class BankTests(unittest.TestCase):
             count = max(voices.BANKS.values()) + 1
             with open(source, "wb") as file:
                 file.write(b"AFS\0" + struct.pack("<I", count) + struct.pack("<II", 0, 0) * count)
-            with mock.patch.object(voices, "fetch_ffmpeg",
+            with mock.patch.object(soundtrack, "fetch_ffmpeg",
                                    side_effect=AssertionError("ffmpeg was fetched before the disc was checked")), \
                     mock.patch.object(voices.subprocess, "run") as run:
                 with self.assertRaises(ValueError):
