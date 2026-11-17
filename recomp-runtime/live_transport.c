@@ -641,7 +641,14 @@ void recomp_live_transport_pump(uint64_t now_ms)
 
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port)
 {
+    /* The matchmaker handler and this player's virtual address are the
+       caller's settings, not socket state: a caller may register them before
+       it opens, so opening keeps them. */
+    const RecompLiveServerHandler handler = live.handler;
+    const uint32_t local_ina = live.local_ina;
     recomp_live_transport_close();
+    live.handler = handler;
+    live.local_ina = local_ina;
     if (!recomp_netplay_listen(&live.net, 0u)) return false;
     /* Without a server the peers still reach each other; the runner always
        has one, and the tests script it. */

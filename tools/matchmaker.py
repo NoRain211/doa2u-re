@@ -21,6 +21,7 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 import time
 
 MAGIC = b"D2MM"
@@ -169,6 +170,20 @@ def over(counts, address, cap):
     """Counts one more for the address since the last sweep; true once that passes the cap."""
     counts[address] = counts.get(address, 0) + 1
     return counts[address] > cap
+
+
+def sync_folder(folder):
+    """Makes a rename in folder durable; Windows cannot open a folder, so it never can there."""
+    try:
+        handle = os.open(folder, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        return
+    try:
+        os.fsync(handle)
+    except OSError:
+        pass
+    finally:
+        os.close(handle)
 
 
 class Links(dict):
@@ -1255,18 +1270,33 @@ class Matchmaker:
         self.save(now)
 
     def save(self, now=None):
-        """Writes the store beside itself and renames it, so a crash leaves the last good file."""
+        """Writes the store beside itself, syncs it and renames it, so a crash leaves the last good file."""
         if self.store is None or not self.dirty:
             return
+        folder = os.path.dirname(self.store) or "."
+        temporary = None
         try:
-            temporary = self.store + ".tmp"
-            with open(temporary, "w", encoding="utf-8", newline="\n") as file:
+            # A fresh name, created exclusively, so a leftover file or a symlink at
+            # a fixed .tmp is never written through.
+            handle, temporary = tempfile.mkstemp(prefix=os.path.basename(self.store) + ".", suffix=".tmp",
+                                                 dir=folder)
+            with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as file:
                 json.dump(self.document(now), file, sort_keys=True, separators=(",", ":"))
                 file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())  # the data must be on the disk before the name changes
             os.replace(temporary, self.store)
+            temporary = None
+            sync_folder(folder)
         except OSError as error:
             print(f"matchmaker: cannot write {self.store}: {error}", file=sys.stderr, flush=True)
             return
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)  # a failed write leaves the last good file and no temp
+                except OSError:
+                    pass
         self.dirty = False
         if now is not None:
             self.stored = now
