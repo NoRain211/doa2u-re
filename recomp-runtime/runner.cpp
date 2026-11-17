@@ -9,6 +9,7 @@
 #include "free_camera_adapter.h"
 #include "combo_hud.h"
 #include "hit_voice.h"
+#include "jukebox.h"
 #include "mod_loader.h"
 #include "ko_replay.h"
 #include "cpu_costume.h"
@@ -212,6 +213,9 @@ static std::string installMods(const std::string &discRoot)
     std::string folder;
     if (const char *mods = std::getenv("RECOMP_MODS"); mods != nullptr && *mods != '\0') folder = mods;
     else folder = (std::filesystem::u8path(privateFolder()).parent_path() / "mods").u8string();
+    /* The Jukebox's assignments need every bgm.afs entry roomy enough for its largest track. */
+    if (const std::uint64_t largest = recomp_jukebox_prepare(discRoot.c_str(), privateFolder().c_str()); largest != 0u)
+        recomp_mod_loader_reserve("doa2/bgm.afs", largest);
     if (folder.empty() || !recomp_mod_loader_install(folder.c_str(), discRoot.c_str())) return digest;
     if (recomp_mod_loader_count() == 0u) return digest;
     char hex[17];
@@ -418,6 +422,7 @@ static void onSwap(std::uint32_t frame)
 {
     recomp_ko_replay_frame(); // steers the replay before hit_voice listens to it
     recomp_hit_voice_frame();
+    recomp_jukebox_pump();
     recomp_unlock_profile_frame(recomp_netplay_session_unlock_all(unlockAll));
     if (storyFinale) applyStoryFinale();
     recomp_netplay_session_on_swap(frame);
@@ -723,6 +728,10 @@ static void bootGuest()
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
     installPcSettings(online);
+    /* The Jukebox plays over the game and changes its music: offline only. */
+    recomp_jukebox_install(online);
+    staffrollOffsets.clear();
+    recomp_menu_quit_set_jukebox(online ? nullptr : recomp_jukebox_request_page);
     recomp_menu_quit_install();
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;

@@ -32,6 +32,9 @@ enum {
     RECOMP_RUNNER_SPRITE_QUIT_LABEL = 2, /* the main menu's Quit Game label and pictures */
     RECOMP_RUNNER_SPRITE_QUIT_PICTURE = 3,
     RECOMP_RUNNER_SPRITE_QUIT_WIDE = 4,
+    RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL = 5, /* the main menu's Jukebox label and pictures */
+    RECOMP_RUNNER_SPRITE_JUKEBOX_PICTURE = 6,
+    RECOMP_RUNNER_SPRITE_JUKEBOX_WIDE = 7,
 };
 static inline uint32_t recomp_runner_sprite_id(unsigned slot)
 {
@@ -69,10 +72,13 @@ static inline uint32_t recomp_game_sprite_colour(const RecompGameSprite *sprite,
 typedef uint_least16_t recomp_utf16;
 
 /* Message numbers for 0x6a3e0, past every number the game uses. */
-enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_BUTTON_CONFIG = 0x7180, RECOMP_RUNNER_TEXT_QUIT = 0x7200 };
+enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_BUTTON_CONFIG = 0x7180, RECOMP_RUNNER_TEXT_QUIT = 0x7200,
+    RECOMP_RUNNER_TEXT_JUKEBOX = 0x7201, RECOMP_RUNNER_TEXT_JUKEBOX_HELP = 0x7202 };
 /* A message's text per game language (Japanese, English, French, German,
    Italian, Spanish), copied into guest memory. */
 void recomp_runner_text_set(uint32_t number, const recomp_utf16 *const text[6]);
+/* A message whose text, in every language, is a guest UTF-16 buffer its owner rewrites. */
+void recomp_runner_text_set_address(uint32_t number, uint32_t address);
 bool recomp_runner_text_lookup(uint32_t number, unsigned language, uint32_t *text);
 /* While to is not 0, the game's message from reads as message to. */
 void recomp_runner_text_redirect(uint32_t from, uint32_t to);
