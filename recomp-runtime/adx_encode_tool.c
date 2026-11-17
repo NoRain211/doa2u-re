@@ -13,6 +13,7 @@
 #include "adx_encoder.h"
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,18 @@ static unsigned char *read_file(const char *path, long *length)
     }
     fclose(in);
     return data;
+}
+
+/* A buffered write error (a full disk) only shows at close, so the file counts
+   as written only if it closes cleanly; a partial ADX is removed. */
+static int write_file(const char *path, const unsigned char *data, size_t size)
+{
+    FILE *out = fopen(path, "wb");
+    if (out == NULL) return 0;
+    bool ok = fwrite(data, 1u, size, out) == size;
+    if (fclose(out) != 0) ok = false;
+    if (!ok) remove(path);
+    return ok ? 1 : 0;
 }
 
 static int level(double target, const char *from, const char *to)
@@ -79,10 +92,9 @@ static int level(double target, const char *from, const char *to)
     size_t size = 0u;
     unsigned char *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &size);
     free(pcm);
-    FILE *out = adx != NULL ? fopen(to, "wb") : NULL;
-    if (out == NULL || fwrite(adx, 1u, size, out) != size) { fprintf(stderr, "%s: cannot write\n", to); return 1; }
-    fclose(out);
+    const bool written = adx != NULL && write_file(to, adx, size);
     free(adx);
+    if (!written) { fprintf(stderr, "%s: cannot write\n", to); return 1; }
     printf("%.1f dB -> %.1f dB (%+.1f dB)\n", rms, target, target - rms);
     return 0;
 }
@@ -117,9 +129,8 @@ int main(int argc, char **argv)
     size_t size = 0u;
     unsigned char *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &size);
     free(pcm);
-    FILE *out = adx != NULL ? fopen(argv[2], "wb") : NULL;
-    if (out == NULL || fwrite(adx, 1u, size, out) != size) { fprintf(stderr, "%s: cannot write\n", argv[2]); return 1; }
-    fclose(out);
+    const bool written = adx != NULL && write_file(argv[2], adx, size);
     free(adx);
+    if (!written) { fprintf(stderr, "%s: cannot write\n", argv[2]); return 1; }
     return 0;
 }
