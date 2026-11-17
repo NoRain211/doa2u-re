@@ -650,6 +650,12 @@ static void startLiveSession(std::uint32_t swap)
     rollback.hitchFrom = rollback.heldBack = rollback.rerunFrames = 0u;
     rollback.peerWaitMs = rollback.longestWaitMs = rollback.slowestFrameMs = rollback.rerunMs = 0.0;
     rollback.lateMs = rollback.blockedMs = 0.0;
+    // A check hashed but never confirmed and the last frame's wait belong to the last match:
+    // this one confirms only its own checks and paces only its own frames. The end of a
+    // session clears these too, so whichever side of the gap the match starts from agrees.
+    rollback.checkFrame = 0u;
+    rollback.checkHash = 0u;
+    rollback.wait = 0u;
     // A later match counts its frames from 0 again, so the last session's packets must not
     // reach it: drop what the route still holds, then start the counters fresh.
     recomp_live_transport_session_begin();
