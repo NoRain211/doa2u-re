@@ -255,6 +255,11 @@ add_test(NAME recomp-runtime-movie-color COMMAND recomp_movie_color_test)
 
 add_executable(recomp_adx_decoder_test adx_decoder.c adx_decoder_test.c)
 add_test(NAME recomp-runtime-adx-decoder COMMAND recomp_adx_decoder_test)
+add_executable(recomp_adx_encoder_test adx_encoder.c adx_decoder.c adx_encoder_test.c)
+add_test(NAME recomp-runtime-adx-encoder COMMAND recomp_adx_encoder_test)
+if(NOT MSVC)
+    target_link_libraries(recomp_adx_encoder_test PRIVATE m)
+endif()
 
 # The ADX encoder that turns a mod's WAV, and DOA4's music for
 # tools/import_soundtrack.py, into the game's ADX.
@@ -532,7 +537,7 @@ endif()
         runtime.c stop_report.c guest_heap.c guest_snapshot.c xapi_clock.cpp native_fiber.c
         fiber_model.c fiber_adapter.c
         kernel_config.c kernel_crypto.c kernel_debug.c kernel_device.c
-        kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c adx_encoder.c adx_decoder.c
+        kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c adx_encoder.c
         kernel_ordinals.c kernel_rtl.c kernel_startup.c kernel_thread.c kernel_video.c
         device_model.c apu_model.c ohci_model.c directory_model.c symbolic_link_model.c
         save_transaction.cpp)
