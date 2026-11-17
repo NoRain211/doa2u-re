@@ -51,7 +51,6 @@ extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
    before its Present, in this order. Each owner sets only its own slot. */
 enum {
     RECOMP_D3D_OVERLAY_PERF,    /* the runner's frame rate readout */
-    RECOMP_D3D_OVERLAY_NETPLAY, /* the netplay menu or session screens */
     RECOMP_D3D_OVERLAY_HOOKS,
 };
 extern void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);

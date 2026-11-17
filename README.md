@@ -4,7 +4,7 @@
 
 # DOA2U Native PC Port
 
-**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source. Now with rollback netplay.**
+**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source. Now with Xbox Live over rollback netcode.**
 
 [![Latest release](https://img.shields.io/github/v/release/NoRain211/doa2u-re?label=alpha)](https://github.com/NoRain211/doa2u-re/releases/latest)
 [![CI](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml/badge.svg)](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml)
@@ -159,8 +159,7 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
-| Xbox Live menus | Off by default: report no account, and **Yes** quits to the desktop in place of the Dashboard. With `RECOMP_LIVE=1` they run on the matchmaker, with rollback fights; test build ([Xbox Live](docs/xbox-live.md)) |
-| Online Versus | Rollback netplay from the Versus menu; test build |
+| Xbox Live menus | On by default: the game's own Live pages run on the matchmaker, with rollback fights; `RECOMP_LIVE=0` turns it off, and the pages then report no account, where **Yes** quits to the desktop in place of the Dashboard. Test build ([Xbox Live](docs/xbox-live.md)) |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
@@ -329,9 +328,9 @@ it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
 launcher's **16:10**, **21:9** (the primary monitor's own shape on a 21:9
 display, else 64:27) and
-**32:9** choices set it. Online sessions and replays use the host's 4:3 or
-16:9 mode, fitted with black bars, as both sides must compute the same
-frames. Above 480p the Direct3D 11 window fills the screen borderless in
+**32:9** choices set it. A Live fight hashes only the fight, so each player
+keeps their own shape there; the presenter fits the game's 4:3 or 16:9
+picture into the window. Above 480p the Direct3D 11 window fills the screen borderless in
 any shape, with black bars around a picture of another shape; the SDL_GPU
 window is resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the

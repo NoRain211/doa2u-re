@@ -14,7 +14,6 @@
 #include "input_adapter.h"
 #include "kernel_abi.h"
 #include "mwply_adapter.h"
-#include "netplay_guest.h"
 #include "live_fight.h"
 #include "live_xapi.h"
 #include "xapi_time_adapter.h"
@@ -226,8 +225,6 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (guest_address == 0x000d92c0u) return skip_startup_legal;
     if (recomp_skip_intro && guest_address == 0x000d9300u) return skip_startup_logo;
     if (recomp_skip_intro && guest_address == 0x00069180u) return movie_scene_tick;
-    RecompFunction netplay = recomp_netplay_guest_lookup_manual(guest_address);
-    if (netplay != NULL) return netplay;
     if (guest_address == 0x002bab9du) return launch_new_image;
     if (guest_address == 0x00336dfeu) return crt_fmod_intrinsic;
     if (guest_address == 0x002bd531u) return host_kernel_init_segment;

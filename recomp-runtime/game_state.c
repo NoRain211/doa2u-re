@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "game_state.h"
 
-#include "input_pulse_source.h"
 #include "runtime.h"
 
 #include <string.h>
@@ -16,25 +15,6 @@ bool recomp_game_round_live(void)
         if ((int16_t)(life[0] | life[1] << 8) <= 0) return false;
     }
     return true;
-}
-
-bool recomp_game_walk_to_versus(uint32_t frame, bool select, RecompInputGamepad *pad)
-{
-    const uint8_t state = *recomp_memory(0x008a56d0u, 1u), scene = *recomp_memory(0x00df5dd8u, 1u),
-                  target = *recomp_memory(0x00df5ddau, 1u), mode = *recomp_memory(0x00df57b4u, 1u);
-    if (state == 4u && (select ? scene == 3u : scene == 0u && mode == 5u)) return true;
-    const RecompInputGamepad none = {0};
-    *pad = none;
-    if (frame % 16u != 0u || (state == 4u && target != 0u && target != 0xffu)) return false;
-    if (state != 4u) pad->buttons = RECOMP_INPUT_BUTTON_START;
-    else if (scene == 0u && mode != 5u) pad->buttons = 8u; /* d-pad right */
-    else pad->analog_buttons[RECOMP_INPUT_ANALOG_A] = RECOMP_INPUT_ANALOG_PRESSED;
-    return false;
-}
-
-bool recomp_game_at_main_menu(void)
-{
-    return *recomp_memory(0x008a56d0u, 1u) == 4u && *recomp_memory(0x00df5dd8u, 1u) == 0u;
 }
 
 /* One session player's record (0xf0a5a0, 8 x 0x30): XUID at +0, the peer's

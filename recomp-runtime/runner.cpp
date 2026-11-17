@@ -20,7 +20,6 @@
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
-#include "netplay_menu.h"
 #include "rebind.h"
 #include "netplay_session.h"
 #include "perf_overlay.h"
@@ -33,7 +32,6 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
-#include "native_fiber.h"
 #include "overlay_text.h"
 #include "program_manual.h"
 #include "quit_prompt.h"
@@ -96,8 +94,7 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
     }
 }
 
-// A host pad goes through the quit prompt, then Rebind, then the netplay menu.
-// The open prompt owns the pads, so the room cannot inject its A behind it.
+// A host pad goes through the quit prompt, then Rebind.
 static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
 {
     quitPrompt(port, sampled ? gamepad : nullptr);
@@ -107,7 +104,6 @@ static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool 
     }
     if (recomp_quit_prompt_open()) return;
     recomp_rebind_filter(port, gamepad);
-    recomp_netplay_menu_filter(port, gamepad);
 }
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
@@ -128,7 +124,7 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         startHeld = start;
     }
     filterHostPad(0u, gamepad, sampled);
-    return recomp_netplay_session_back_pad(gamepad) || sampled;
+    return sampled;
 }
 
 /* Offer every costume and character without saving them (unlock_profile.c):
@@ -380,9 +376,9 @@ static void onSwap(std::uint32_t frame)
 {
     recomp_ko_replay_frame(); // steers the replay before hit_voice listens to it
     recomp_hit_voice_frame();
-    recomp_unlock_profile_frame(recomp_netplay_session_unlock_all(unlockAll));
+    recomp_unlock_profile_frame(unlockAll);
     if (storyFinale) applyStoryFinale();
-    recomp_netplay_session_on_swap(frame);
+    recomp_netplay_session_on_swap();
     if (!cardPending) return;
     cardPending = false;
     showCard();
@@ -430,29 +426,11 @@ static bool loadImage()
 
 static void bootGuest();
 
-static VOID WINAPI rebootGuest(void *)
-{
-    recomp_reset_runtime_modules();
-    if (!loadImage()) recomp_stop(2, "runner:reboot-image");
-    bootGuest();
-}
-
-static void reboot()
-{
-    recomp_input_host_stop_vibration();
-    // The guest's stacks are never resumed; the new fiber frees them.
-    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
-    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
-    recomp_native_fiber_switch(fiber);
-}
-
 int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
     recomp_d3d_frame_breakdown = recomp_kernel_thread_times;
     std::string xbePath, discRoot, expectStop, milestoneLog;
-    std::string replayPath;
-    RecompNetplayLaunch launch;
     recomp_rebind_load(); // before the first pad sample
     recomp_input_pulse_source_init(&inputPulses, recomp_input_host_sample, 0u);
     for (int i = 1; i < argc; ++i) {
@@ -472,28 +450,6 @@ int main(int argc, char **argv)
         }
         if (argument == "--skip-intro") {
             recomp_skip_intro = true;
-            continue;
-        }
-        if ((argument == "--netplay-host" || argument == "--netplay-delay") && i + 1 < argc) {
-            const std::string value = argv[++i];
-            std::uint32_t number = 0u;
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
-            const bool host = argument == "--netplay-host";
-            if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() ||
-                (host ? number == 0u || number > 65535u : number > RECOMP_ROLLBACK_WINDOW)) {
-                std::cerr << "recomp runner: --netplay-host needs a UDP port and --netplay-delay at most "
-                          << RECOMP_ROLLBACK_WINDOW << " frames\n";
-                return 64;
-            }
-            (host ? launch.hostPort : launch.delay) = number;
-            continue;
-        }
-        if (argument == "--netplay-join" && i + 1 < argc) {
-            launch.join = argv[++i];
-            continue;
-        }
-        if (argument == "--replay" && i + 1 < argc) {
-            replayPath = argv[++i];
             continue;
         }
         if (argument == "--input-start-pulse-at" && i + 1 < argc) {
@@ -578,8 +534,7 @@ int main(int argc, char **argv)
                 " [--input-buttons-pulse-at <poll> <decimal-mask>]"
                 " [--input-analog-pulse-at <poll> <button-index>]"
                 " [--input-analog-pulse-every <first-poll> <period> <last-poll> <button-index>]"
-                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]"
-                " [--netplay-host <port> [--netplay-delay <frames>] | --netplay-join <host>:<port> | --replay <file>]\n";
+                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]\n";
             return 64;
         }
         const std::string value = argv[++i];
@@ -590,10 +545,6 @@ int main(int argc, char **argv)
     }
     if (xbePath.empty()) {
         std::cerr << "recomp runner: --xbe is required\n";
-        return 64;
-    }
-    if ((launch.hostPort != 0u) + !launch.join.empty() + !replayPath.empty() > 1) {
-        std::cerr << "recomp runner: --netplay-host, --netplay-join and --replay cannot be combined\n";
         return 64;
     }
     recomp_stop_configure(expectStop.empty() ? nullptr : expectStop.c_str(),
@@ -623,18 +574,13 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
-    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
-    if (launch.hostPort == 0u && launch.join.empty() && replayPath.empty()) recomp_netplay_session_start_live();
-    if ((launch.hostPort != 0u || !launch.join.empty()) && !recomp_netplay_session_connect(launch)) return 1;
-    if (!replayPath.empty() && !recomp_netplay_session_load_replay(replayPath)) return 1;
+    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam});
+    recomp_netplay_session_start_live();
     bootGuest();
 }
 
 static void bootGuest()
 {
-    static bool booted;
-    const bool first = !booted;
-    booted = true;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         std::exit(2);
@@ -644,13 +590,11 @@ static void bootGuest()
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!recomp_netplay_session_read_env()) {
-        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
-                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
-                  << " frames, and the UDP port must open\n";
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with decimal frame counts and "
+                  << "a lag of at most " << RECOMP_ROLLBACK_WINDOW << " frames\n";
         std::exit(1);
     }
     const bool rollbackEnabled = recomp_netplay_session_enabled();
-    // Each boot sets every hook, so nothing from a session that ended carries over.
     recomp_d3d_frame_boundary_hook = nullptr;
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
@@ -686,31 +630,29 @@ static void bootGuest()
     recomp_runner_assets_reset();
     installPcSettings(online);
     recomp_menu_quit_install();
-    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
+    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(recomp_netplay_session_set_vibration);
-    if (first) {
 #ifdef _WIN32
-        /* Guest frame waits that lost a 15.6 ms scheduler tick dropped frames on
-           a power-managed handheld (issue #69): ask for a 1 ms tick, keep Windows
-           from throttling the process, and run the game thread above normal. */
-        timeBeginPeriod(1u);
-        PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-            PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0u};
-        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
-        // Separate call: Windows 10 rejects the Windows 11 timer flag.
-        throttling.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
-        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    /* Guest frame waits that lost a 15.6 ms scheduler tick dropped frames on
+       a power-managed handheld (issue #69): ask for a 1 ms tick, keep Windows
+       from throttling the process, and run the game thread above normal. */
+    timeBeginPeriod(1u);
+    PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0u};
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
+    // Separate call: Windows 10 rejects the Windows 11 timer flag.
+    throttling.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
-        std::atexit(recomp_netplay_session_exit);
-        std::atexit(recomp_input_host_stop_vibration);
-        std::atexit(recomp_d3d8_shutdown);
-        std::atexit(recomp_dsound_api_shutdown);
-        recomp_watchdog_start();
-    }
+    std::atexit(recomp_netplay_session_exit);
+    std::atexit(recomp_input_host_stop_vibration);
+    std::atexit(recomp_d3d8_shutdown);
+    std::atexit(recomp_dsound_api_shutdown);
+    recomp_watchdog_start();
     recomp_runtime.registers.esp = XBOX_STARTUP_STACK_TOP;
     std::fprintf(stderr, "recomp runner: entry=0x%08x image_end=0x%08x native-d3d8-dsound\n",
         xbe->metadata.selectedEntryPoint,

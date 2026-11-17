@@ -3,7 +3,7 @@
 #define DOA2U_RECOMP_LIVE_IDENTITY_H
 
 /* The Xbox Live account this install logs on with: a 32-byte
-   secret kept beside the netplay settings, the XUID the matchmaker knows it
+   secret kept in the play folder's storage, the XUID the matchmaker knows it
    by, and the proof it sends with every LOGON. The same secret always gives
    the same account, so friends and stats survive a restart. */
 #include <stdbool.h>

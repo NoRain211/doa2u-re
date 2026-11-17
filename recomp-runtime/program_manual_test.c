@@ -105,12 +105,6 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     return NULL;
 }
 
-RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
-{
-    (void)address;
-    return NULL;
-}
-
 RecompFunction recomp_live_fight_lookup(uint32_t address)
 {
     (void)address;

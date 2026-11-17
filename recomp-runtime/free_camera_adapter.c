@@ -106,7 +106,7 @@ static const double MAX_STEP_SECONDS = 0.1;
 static struct {
     int enabled;              /* -1 until RECOMP_FREE_CAMERA is read */
     bool installed;           /* recomp_free_camera_install ran this boot */
-    bool online;              /* this boot plays an online session, a synctest or a replay */
+    bool online;              /* this run has Live or a synctest */
     bool active, started;
     bool toggle_held, freeze_held, overlay_held, cycle_held, reset_held, aim_held, step_held, shot_held;
     bool r3_held;             /* the right stick's click, last sample */
@@ -168,7 +168,7 @@ static void set_hooks(bool on)
 bool recomp_free_camera_install(bool online)
 {
     /* The camera and the freeze change one game's memory or timing only, so
-       an online session would desync; a reboot into one drops them. */
+       a Live fight or a synctest would desync. */
     state.online = online;
     state.installed = true;
     if (!enabled()) return false;

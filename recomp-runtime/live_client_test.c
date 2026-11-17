@@ -784,7 +784,11 @@ static void checkConnectRetry(const RecompLiveIdentity *identity)
     feed_body(21u, body, 25u);
     check("and the same pairing again does not", captured_kind(20u) == 0u);
     memset(heard_inas, 0, sizeof heard_inas);
+    captured_count = 0u;
     recomp_live_client_detach();
+    static const uint8_t no_kid[8] = {0u};
+    check("detaching logs off with a zero session id", captured_count == 1u && captured[0][5] == 16u &&
+        memcmp(captured[0] + 26u, no_kid, 8u) == 0);
 }
 
 /* A heartbeat's error answer signs the account out, as a refused logon leaves

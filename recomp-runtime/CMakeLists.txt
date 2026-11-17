@@ -199,8 +199,6 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
-add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
-add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
 
 # WP1 Guest Xbox Live API: the guest's XOnline/XNet thunks over
 # RecompLiveBackend (live_backend.h), plus the in-memory backend for tests.
@@ -380,27 +378,18 @@ add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
 add_test(NAME recomp-runtime-synctest COMMAND recomp_synctest_test)
 add_executable(recomp_rollback_test rollback.c rollback_test.c)
 add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
-add_executable(recomp_replay_test replay.c replay_test.c)
-add_test(NAME recomp-runtime-replay COMMAND recomp_replay_test)
-add_executable(recomp_netplay_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_test.c)
+add_executable(recomp_netplay_test netplay.c netplay_names.c rollback.c netplay_test.c)
 if(WIN32)
     target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
 endif()
 add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
-add_executable(recomp_netplay_lobby_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_lobby_test.cpp)
-if(WIN32)
-    target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
-endif()
-add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
-add_executable(recomp_netplay_settings_test netplay_settings.cpp netplay_settings_test.cpp)
-add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_test)
 add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
 target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
 
 # Native Xbox Live's transport: the game's socket, the matchmaker and every
 # peer share one socket, and a bound rollback session rides the same route.
-add_executable(recomp_live_transport_test netplay.c netplay_room.c netplay_names.c rollback.c live_transport.c
+add_executable(recomp_live_transport_test netplay.c rollback.c live_transport.c
     live_transport_test.c)
 if(WIN32)
     target_link_libraries(recomp_live_transport_test PRIVATE ws2_32)
@@ -706,23 +695,13 @@ if(RECOMP_PROGRAM_DIR)
     else()
         message(STATUS "Reused the fail-loud stubs for this authenticated program")
     endif()
-    # The netplay host forwards its UDP port through the router with UPnP.
-    set(UPNPC_BUILD_SHARED OFF CACHE INTERNAL "")
-    set(UPNPC_BUILD_TESTS OFF CACHE INTERNAL "")
-    set(UPNPC_BUILD_SAMPLE OFF CACHE INTERNAL "")
-    set(UPNPC_NO_INSTALL ON CACHE INTERNAL "")
-    FetchContent_Declare(miniupnpc
-        URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_2_3_3.tar.gz
-        URL_HASH SHA256=8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222
-        SOURCE_SUBDIR miniupnpc)
-    FetchContent_MakeAvailable(miniupnpc)
     # The generated chunks are most of the build. As an object library with no
     # target dependencies they compile while the runtime libraries do; inside the
     # runner, the Makefile generator would start them only after every library.
     add_library(recomp_program_objects OBJECT "${_missing_source}" ${_program_sources})
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
-    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c netplay_guest.c
+    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
@@ -730,11 +709,11 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c adx_decoder.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c
+        synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c rebind.cpp cpu_costume.c combo_hud.c
+        hit_voice.c ko_replay.c
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c
-        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         live_client.c live_identity.c live_bridge.cpp
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp live_fight.c live_fight_rules.c)
@@ -785,7 +764,7 @@ if(RECOMP_PROGRAM_DIR)
         # The lifter writes conditions as if ((a == b)); clang would warn on every one.
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
-    set(_runner_libraries recomp_kernel recomp_xbe recomp_audio recomp_portable_math libminiupnpc-static)
+    set(_runner_libraries recomp_kernel recomp_xbe recomp_audio recomp_portable_math)
     if(WIN32)
         list(APPEND _runner_libraries dbghelp user32 winmm ws2_32)
     endif()

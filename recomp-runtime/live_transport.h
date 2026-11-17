@@ -29,6 +29,8 @@ typedef struct RecompLivePeerIntro {
     uint8_t token[8];          /* the pair's token, which both sides' punches carry */
 } RecompLivePeerIntro;
 
+/* Keeps the server; the socket opens and the server resolves on the first
+   request (recomp_live_transport_send_server). False for a bad server. */
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port);
 void recomp_live_transport_close(void);
 /* Reads every queued packet and demuxes it; resends punches. Called once per

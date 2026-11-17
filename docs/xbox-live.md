@@ -9,18 +9,21 @@ have only run in unit tests. Voice chat is not supported.
 
 ## Turning it on
 
-Live is off unless the runner starts with `RECOMP_LIVE=1`. It is not offered
-when the runner hosts, joins or replays a room session from the command
-line. When Live is off, the Live pages report no account, as before.
+Live is on unless the runner starts with `RECOMP_LIVE=0`. Off, the Live pages
+report no account, as before. A Loopback test session (`RECOMP_ROLLBACK=loopback`)
+keeps Live off.
 
-- **Matchmaker.** Live uses the matchmaker from NETPLAY SETTINGS, or the
-  built-in one when that is empty. `RECOMP_LIVE_SERVER=host:port` (or just
-  `host`) overrides it.
-- **Identity.** The first logon writes a random 32-byte secret to
+- **Matchmaker.** Live uses the built-in matchmaker.
+  `RECOMP_LIVE_SERVER=host:port` (or just `host`) overrides it.
+- **Identity.** The first start writes a random 32-byte secret to
   `.recomp-storage/live-identity.bin`. The account's XUID and the proof the
   matchmaker checks both come from it, so copying the file moves the account
   and losing it loses the account. `RECOMP_LIVE_IDENTITY=<file>` uses
   another file, which is how two runners on one machine get two accounts.
+- **What the server sees.** Nothing goes out until the game's first Live
+  request. A logon sends the player's IP address and port, XUID, build
+  digest and profile name (the gamertag). Any player who joins a host, or
+  CONNECTs to it, gets the host's IP address and port, as on the Xbox.
 
 ## How it fits
 
@@ -67,9 +70,15 @@ frame after it returns, in `RollbackMode::Live`
 lockstep for the rest of the match. The game's lockstep stop rides a pad
 bit so both sides end the session on the same frame. The desync check
 hashes fight state only, since the Live pages around the fight differ per
-side. A desync, a timeout or a failed rewind ends the session without
+side. It also leaves out what each player's own widescreen and 5.1 choices
+shape inside the fight block (the camera's framing, field of view and
+matrices, which the 16:9 camera sets differently, and the music track), so
+players with different settings can fight each other. A desync, a timeout or a failed rewind ends the session without
 stopping the runner; the other player gets a goodbye and the game announces
-that a player left. See [rollback netcode](rollback-netcode.md) for how the
+that a player left. A fight waits 15 s for a silent opponent before it ends.
+A save the game writes mid-fight waits for the other player's input; if
+that input proves a frame before the save mispredicted, the runner stops
+(`rollback:save-mispredicted`), since the save cannot be taken back. See [rollback netcode](rollback-netcode.md) for how the
 game's own lockstep works.
 
 ## Limits
@@ -77,7 +86,6 @@ game's own lockstep works.
 - No voice: the voice engine's stream creation fails and the game carries on.
 - QoS reports a fixed 50 ms round trip, which gives the game's shipped
   lockstep delay; a measured one needs a backend call.
-- The Versus menu's room still exists next to Live and is due to go.
 - Stat writes for an opponent are not tied to a played match: the client
   CONNECTs back to anyone the matchmaker introduces, so whoever CONNECTs to a
   host may write that host's stats for six hours. Each player writes their own
@@ -95,5 +103,5 @@ each with its own saves:
 
     python tools/matchmaker.py --address 127.0.0.1 --port 47790 --store live-store.json
 
-Start each runner with `RECOMP_LIVE=1`,
-`RECOMP_LIVE_SERVER=127.0.0.1:47790` and its own `RECOMP_LIVE_IDENTITY`.
+Start each runner with `RECOMP_LIVE_SERVER=127.0.0.1:47790` and its own
+`RECOMP_LIVE_IDENTITY`; Live is on by default.

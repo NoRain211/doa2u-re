@@ -176,9 +176,9 @@ backdrops) keep filling it. A 3D draw into a viewport narrower than the
 target, such as the character select portrait in its panel, moves toward
 the center with that panel and keeps its size, since its projection already
 has the screen's shape; its scissor fits the same way, and program draws
-shift their viewport offset in c59. The projections live in guest RAM, which netplay
-sessions hash and replays must recompute exactly, so both keep 16:9: the
-session or replay sets `recomp_kernel_widescreen` from the host's flags.
+shift their viewport offset in c59. The projections live in guest RAM,
+outside the ranges a Live fight's desync check hashes, so each player keeps
+their own shape.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability
@@ -912,7 +912,7 @@ last Lock, and at least 100 ms past the game thread's last pump; a longer
 stall goes quiet instead of replaying the ring's last lap as an echo. One-shot
 buffers play on. Only the game thread sets voice
 routing. A pump gap over 100 ms still drops its span while the cursor advances.
-Netplay, replays and SyncTest run play cursors on the frame-locked guest
+Netplay and SyncTest run play cursors on the frame-locked guest
 clock, which falls behind real time when frames run slow and jumps when the
 game waits. Host output there keeps its own place per buffer on the real
 clock, outside the rollback state: a one-shot plays on to its end, a ring
