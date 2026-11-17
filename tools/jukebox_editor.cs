@@ -238,7 +238,7 @@ class JukeboxEditor : Form
         SetUpGrid(slots);
         slots.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "The game's music", Width = 220, ReadOnly = true });
         var choice = new DataGridViewComboBoxColumn { HeaderText = "Plays", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox };
+            FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox, ValueType = typeof(Choice) };
         slots.Columns.Add(choice);
         slots.CellValueChanged += SlotEdited;
         slots.CurrentCellDirtyStateChanged += delegate { if (slots.IsCurrentCellDirty) slots.CommitEdit(DataGridViewDataErrorContexts.Commit); };
@@ -501,27 +501,36 @@ class JukeboxEditor : Form
         BuildSlots();
     }
 
-    string TrackLabel(Album album, Track track) { return album.Tab + "  ·  " + track.Name; }
+    static string TrackLabel(Album album, Track track) { return album.Tab + "  ·  " + track.Name; }
+
+    // A row's choice holds the track itself: two tracks can share a display name, and the
+    // combo's text must not decide which track a row is assigned.
+    class Choice
+    {
+        public readonly Album Album;
+        public readonly Track Track; // null: the game's own music
+        public Choice(Album album, Track track) { Album = album; Track = track; }
+        public override string ToString() { return Track == null ? Own : TrackLabel(Album, Track); }
+    }
 
     void BuildSlots()
     {
         loading = true;
         var choice = (DataGridViewComboBoxColumn)slots.Columns[1];
-        var items = new List<string> { Own };
-        foreach (Album album in albums) foreach (Track track in album.Tracks) items.Add(TrackLabel(album, track));
+        var items = new List<Choice> { new Choice(null, null) };
+        foreach (Album album in albums) foreach (Track track in album.Tracks) items.Add(new Choice(album, track));
         int keep = slots.FirstDisplayedScrollingRowIndex;
         slots.Rows.Clear();
         choice.Items.Clear();
         choice.Items.AddRange(items.ToArray());
         for (int n = 0; n < Doa2u.GetLength(0); ++n)
         {
-            string value = Own, pick;
+            string pick;
+            Choice value = items[0];
             if (assigned.TryGetValue(Doa2u[n, 0], out pick))
             {
                 string[] part = pick.Split('\t');
-                Album album = albums.FirstOrDefault(a => a.Tab == part[0]);
-                Track track = album != null ? album.Tracks.FirstOrDefault(t => t.File == part[1]) : null;
-                if (track != null) value = TrackLabel(album, track);
+                value = items.FirstOrDefault(c => c.Track != null && c.Album.Tab == part[0] && c.Track.File == part[1]) ?? items[0];
             }
             int row = slots.Rows.Add(Doa2u[n, 1], value);
             slots.Rows[row].Tag = Doa2u[n, 0];
@@ -533,12 +542,11 @@ class JukeboxEditor : Form
     void SlotEdited(object sender, DataGridViewCellEventArgs e)
     {
         if (loading || e.RowIndex < 0 || e.ColumnIndex != 1) return;
-        string music = (string)slots.Rows[e.RowIndex].Tag, value = Convert.ToString(slots.Rows[e.RowIndex].Cells[1].Value);
+        string music = (string)slots.Rows[e.RowIndex].Tag;
+        var choice = slots.Rows[e.RowIndex].Cells[1].Value as Choice;
         editedSlots.Add(music);
-        assigned.Remove(music);
-        foreach (Album album in albums)
-            foreach (Track track in album.Tracks)
-                if (TrackLabel(album, track) == value) assigned[music] = album.Tab + "\t" + track.File;
+        if (choice == null || choice.Track == null) assigned.Remove(music);
+        else assigned[music] = choice.Album.Tab + "\t" + choice.Track.File;
         dirty = true;
     }
 
@@ -596,6 +604,14 @@ class JukeboxEditor : Form
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
+    // A name or title becomes a names.txt record's text. import_soundtrack.py's record_text
+    // also spaces out tabs and line breaks: a break would start or split a record, while a
+    // later "=" stays in the value because readers split at the first one.
+    static string RecordText(string text)
+    {
+        return (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+    }
+
     bool Save()
     {
         if (grid.IsCurrentCellInEditMode) grid.EndEdit();
@@ -613,8 +629,8 @@ class JukeboxEditor : Form
                 text.Append("# The Jukebox's names for the " + album.Tab + " album's tracks.\n");
                 text.Append("# Change the text after \"=\" and save; the game reads this file when it starts.\n");
                 text.Append("# Leave the file name before \"=\" as it is.\n\n");
-                text.Append("album = " + album.Title + "\n\n");
-                foreach (Track track in album.Tracks) text.Append(track.File + " = " + track.Name + "\n");
+                text.Append("album = " + RecordText(album.Title) + "\n\n");
+                foreach (Track track in album.Tracks) text.Append(track.File + " = " + RecordText(track.Name) + "\n");
                 AtomicText(Path.Combine(folder, "names.txt"), text.ToString());
             }
             var lines = new StringBuilder("# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n");
