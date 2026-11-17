@@ -661,6 +661,38 @@ static void checkGroupChildren(const RecompLiveIdentity *identity)
     recomp_live_client_detach();
 }
 
+/* A group invite is all or nothing: when the table cannot hold every friend,
+   it sends nothing rather than inviting the ones that fit as if all had gone. */
+static void checkInviteNeedsEverySlot(const RecompLiveIdentity *identity)
+{
+    static RecompLiveIdentity copy;
+    copy = *identity;
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    check("attach for the short-table invite test", backend != NULL);
+    recomp_live_client_tick(1000u);
+    /* Ten mutes hold ten of the sixteen slots, so six are free. */
+    RecompLiveRequest held[10];
+    unsigned held_count = 0u;
+    for (unsigned i = 0u; i < 10u; ++i) {
+        held[i] = backend->mutelist(backend->self);
+        if (held[i] != 0u) ++held_count;
+    }
+    check("ten asks hold ten slots", held_count == 10u);
+    const uint8_t kid[8] = {1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u};
+    const uint64_t xuids[8] = {0x0009000000000201ull, 0x0009000000000202ull, 0x0009000000000203ull,
+        0x0009000000000204ull, 0x0009000000000205ull, 0x0009000000000206ull, 0x0009000000000207ull,
+        0x0009000000000208ull};
+    captured_count = 0u;
+    const RecompLiveRequest refused = backend->game_invite(backend->self, kid, xuids, 8u);
+    check("a group larger than the free slots sends nothing", refused == 0u && captured_count == 0u);
+    captured_count = 0u;
+    const RecompLiveRequest fits = backend->game_invite(backend->self, kid, xuids, 6u);
+    check("a group that fits still sends every invite", fits != 0u && captured_count == 6u);
+    backend->release(backend->self, fits);
+    for (unsigned i = 0u; i < held_count; ++i) backend->release(backend->self, held[i]);
+    recomp_live_client_detach();
+}
+
 /* --- retries, timeouts, cookies and the identity file --- */
 
 static void checkRetriesAndTimeout(const RecompLiveIdentity *identity)
@@ -692,6 +724,33 @@ static unsigned captured_kind(uint8_t kind)
     for (unsigned i = 0u; i < captured_count; ++i)
         if (captured[i][5] == kind) ++count;
     return count;
+}
+
+/* A push's friend ask that never gets an answer must free the flag its timeout
+   ends it with: the next push asks again instead of believing an enumeration
+   is still on its way. */
+static void checkPushAfterTimeout(const RecompLiveIdentity *identity)
+{
+    static RecompLiveIdentity copy;
+    copy = *identity;
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    check("attach for the timed-out push test", backend != NULL);
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    uint8_t body[17];
+    push_body(body, 1u, 0x0009000000000020ull);
+    feed_body(26u, body, sizeof body); /* PUSH: the client asks for the friend list */
+    check("a push asks for the friend list", captured_count == 1u && captured_kind(22u) == 1u);
+    captured_count = 0u;
+    recomp_live_client_tick(7000u); /* 5 s from the ask, and no answer came */
+    check("the unanswered ask stops", captured_kind(22u) == 0u);
+    push_body(body, 1u, 0x0009000000000021ull);
+    feed_body(26u, body, sizeof body); /* PUSH */
+    check("a push after the timeout asks again", captured_count == 1u && captured_kind(22u) == 1u);
+    uint8_t answer[46];
+    friend_empty_body(answer, read32be(captured[0] + 22u));
+    feed_body(23u, answer, sizeof answer); /* FRIEND, no rows: the slot is free again */
+    recomp_live_client_detach();
 }
 
 /* A CONNECT repeats with its first request id until the pair's LPEER arrives,
@@ -1016,9 +1075,11 @@ int main(int argc, char **argv)
     checkHeartbeatRefused(&mine);
     checkCookie(&mine);
     checkPushSlots(&mine);
+    checkPushAfterTimeout(&mine);
     checkHeartbeat(&mine);
     checkStatTypes(&mine);
     checkGroupChildren(&mine);
+    checkInviteNeedsEverySlot(&mine);
     checkIdentityFile();
     checkLocalBackend();
 
