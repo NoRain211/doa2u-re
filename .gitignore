@@ -1,9 +1,9 @@
 # Private inputs and generated game output
 private/**
+!private/README.md
 # Players' mods (README: Mods) hold their own and the game's content.
 /mods/
 /jukebox/
-!private/README.md
 orig/
 dump/
 dumps/

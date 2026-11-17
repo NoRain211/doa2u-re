@@ -43,6 +43,7 @@
     "tools/test_matchmaker.py",
     "tools/public_export.py",
     "tools/xbe_info.py",
+    "tools/test_xbe_info.py",
     "tools/xboxrecomp",
     "xbe/**",
     "tools/build_game.py",
