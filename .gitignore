@@ -1,7 +1,7 @@
 # Private inputs and generated game output
 private/**
-/jukebox/
 !private/README.md
+/jukebox/
 orig/
 dump/
 dumps/
