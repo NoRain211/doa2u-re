@@ -74,6 +74,7 @@ constexpr char kDrawShaderPrologue[] =
     "    float4 projected_slots;\n"
     "    float4 table_fog;\n"
     "    float4 table_fog_color;\n"
+    "    float4 uv_clamp;\n"
     "}\n"
     "Texture2D guest_texture : register(t0);\n"
     "Texture3D guest_volume : register(t3);\n"
@@ -81,7 +82,9 @@ constexpr char kDrawShaderPrologue[] =
     "Texture2D alpha_mask : register(t1);\n"
     "SamplerState mask_sampler : register(s1);\n"
     "Texture2D bump_map : register(t2);\n"
-    "SamplerState bump_sampler : register(s2);\n";
+    "SamplerState bump_sampler : register(s2);\n"
+    /* A 2D draw samples only inside its own piece of the texture sheet. */
+    "float2 clamp_uv(float2 uv) { return uv_clamp.z >= uv_clamp.x ? clamp(uv, uv_clamp.xy, uv_clamp.zw) : uv; }\n";
 
 /* Builds the draw shader for one decoded vertex layout. Only the components
    the layout actually carries appear in VSIn, so the input layout and the
@@ -196,7 +199,7 @@ int buildDrawShaderSource(
         "    } else if (draw_flags.x > 0.5f) {\n"
         "        float4 sampled = reflection_stage2_flags.z > 0.5f\n"
         "            ? guest_volume.Sample(guest_sampler, float3(input.texcoord, input.volume_coord))\n"
-        "            : guest_texture.Sample(guest_sampler, input.texcoord * texture_flags.xy);\n"
+        "            : guest_texture.Sample(guest_sampler, clamp_uv(input.texcoord * texture_flags.xy));\n"
         "        if (filter_flags.w > 0.5f && sampled.a == 0.0f) discard;\n"
         "        if (lighting_flags.y > 0.5f) sampled.rgb = 1.0f;\n"
         "        shaded %s sampled;\n"
@@ -838,5 +841,58 @@ bool recomp_d3d_draw_constants(
         style[3] = sub_viewport ? -2.0f / draw.viewport[3]
             : -2.0f * target.scale_y / viewport.Height;
     }
+    recomp_d3d_draw_uv_clamp(draw, layout, texture_bound, constants_out + kRecompD3dDrawUvClamp);
     return true;
+}
+
+/* 2D art is cut from texture sheets: a button's caps and middle, a panel's
+   strips. At the guest's own size every pixel samples a texel's centre, but
+   a larger target samples between texels at a piece's edges, and the
+   filter mixes in whatever lies beside the piece on the sheet: a dark line
+   where two pieces meet. A pretransformed draw that stays inside the
+   texture (no wrapping) therefore samples only within its texcoords' box,
+   pulled in by half a texel; a piece one texel wide samples its centre.
+   Draws of many vertices and of wrapped textures are left alone; the D3D8
+   adapter sends text and other lists of separate pieces one piece at a time. */
+void recomp_d3d_draw_uv_clamp(const RecompD3dPresenterDrawCommand &draw, const RecompD3dVertexLayout &layout,
+    bool texture_bound, float out[4])
+{
+    out[0] = out[1] = 1.0f;
+    out[2] = out[3] = 0.0f; /* off: max below min */
+    if (!layout.pretransformed || !texture_bound || !draw.has_texture || layout.texcoord_offset == RECOMP_D3D_FVF_ABSENT ||
+        draw.vertex_bytes == nullptr || draw.vertex_count == 0u ||
+        draw.texture.width == 0u || draw.texture.height == 0u || draw.texture.volume_depth != 0u ||
+        layout.stride < layout.texcoord_offset + 8u)
+        return;
+    const float scale_u = draw.texture.linear ? 1.0f / draw.texture.width : 1.0f;
+    const float scale_v = draw.texture.linear ? 1.0f / draw.texture.height : 1.0f;
+    /* The vertices the draw's indices use (d3d8_draw_adapter.c sends a list of
+       separate pieces one piece at a time); a draw of more than 64 is not one piece. */
+    const auto *index = static_cast<const uint16_t *>(draw.index_bytes);
+    const uint32_t used = index != nullptr && draw.index_count != 0u ? draw.index_count : draw.vertex_count;
+    if (used > 64u) return;
+    float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+    const auto *bytes = static_cast<const uint8_t *>(draw.vertex_bytes);
+    for (uint32_t i = 0; i < used; ++i) {
+        const uint32_t v = index != nullptr && draw.index_count != 0u ? index[i] : i;
+        if (v >= draw.vertex_count) return;
+        float uv[2];
+        std::memcpy(uv, bytes + static_cast<size_t>(v) * layout.stride + layout.texcoord_offset, sizeof uv);
+        uv[0] *= scale_u;
+        uv[1] *= scale_v;
+        for (unsigned axis = 0; axis < 2; ++axis) {
+            if (!std::isfinite(uv[axis])) return;
+            lo[axis] = std::min(lo[axis], uv[axis]);
+            hi[axis] = std::max(hi[axis], uv[axis]);
+        }
+    }
+    const float slack = 1e-4f;
+    if (lo[0] < -slack || lo[1] < -slack || hi[0] > 1.0f + slack || hi[1] > 1.0f + slack) return;
+    const float half[2] = {0.5f / draw.texture.width, 0.5f / draw.texture.height};
+    for (unsigned axis = 0; axis < 2; ++axis) {
+        float a = lo[axis] + half[axis], b = hi[axis] - half[axis];
+        if (a > b) a = b = 0.5f * (lo[axis] + hi[axis]);
+        out[axis] = a;
+        out[axis + 2] = b;
+    }
 }
