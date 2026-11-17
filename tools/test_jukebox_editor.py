@@ -78,6 +78,24 @@ static class EditorChecks
         Check(merged["one"] == "DOA4\tedited.adx" && merged["two"] == "DOA4\tgame.adx" && !merged.ContainsKey("three"));
         Check((string)Call("RecordText", "one\r\ntwo\tthree = four") == "one  two three = four");
 
+        // A save keeps the player's own lines and only rewrites the records it knows.
+        string names = Path.GetFullPath("names.txt");
+        Call("AtomicText", names, "# keep me\nalbum = Old Title\none.adx = Player One\nmystery = whatever\n");
+        var named = new Album { Tab = "DOA3", Title = "Titles", Folder = "doa3" };
+        named.Tracks.Add(new Track { File = "one.adx", Name = "One" });
+        named.Tracks.Add(new Track { File = "two.adx", Name = "Two" });
+        Call("MergeNames", names, named);
+        string mergedNames = File.ReadAllText(names);
+        Check(mergedNames.Contains("# keep me") && mergedNames.Contains("mystery = whatever"));
+        Check(mergedNames.Contains("album = Titles"));
+        Check(mergedNames.Contains("one.adx = One") && mergedNames.Contains("two.adx = Two"));
+        Call("MergeNames", names, named);
+        Check(File.ReadAllText(names) == mergedNames);
+        Directory.CreateDirectory("fresh");
+        string fresh = Path.GetFullPath("fresh/names.txt");
+        Call("MergeNames", fresh, named);
+        Check(File.ReadAllText(fresh).Contains("album = Titles") && File.ReadAllText(fresh).Contains("two.adx = Two"));
+
         // Two tracks can share a name: the chosen row keeps its track, not the last matching text.
         var picker = (JukeboxEditor)FormatterServices.GetUninitializedObject(typeof(JukeboxEditor));
         var shared = new Album { Tab = "DOA4", Title = "Dead or Alive 4", Folder = "doa4" };
@@ -144,6 +162,14 @@ static class EditorChecks
         Check(loaded.Tracks[0].File == "second.adx" && loaded.Tracks[0].Name == "Player Name");
         Check(loaded.Tracks[1].File == "first.adx" && loaded.Tracks[1].Name == "First");
         Check(((List<Track>)Get(editor, "music")).Count == 2);
+
+        // tracks.txt names files beside itself only, as the game's own reader holds.
+        Directory.CreateDirectory("jukebox/bad");
+        File.WriteAllText("jukebox/bad/tracks.txt",
+            "#title\tBad\nok.adx\t-2\t-2\tOk\n../out.adx\t-2\t-2\tOut\n..\\out.adx\t-2\t-2\tUp\nsub/out.adx\t-2\t-2\tSub\nC:\\abs.adx\t-2\t-2\tAbs\n\t-2\t-2\tEmpty\n",
+            new UTF8Encoding(false));
+        var bad = (Album)Run(editor, "LoadFolder", "bad");
+        Check(bad != null && bad.Title == "Bad" && bad.Tracks.Count == 1 && bad.Tracks[0].File == "ok.adx");
         Console.WriteLine("Editor persistence and archive checks passed");
     }
 }

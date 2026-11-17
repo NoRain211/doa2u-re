@@ -350,15 +350,15 @@ static void test_assignments(const char *base)
     make_folder(path);
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
     {
-        static const char *const names[] = {"one.adx"};
-        static const uint32_t samples[] = {SECONDS};
-        make_archive(path, names, samples, 1u);
+        static const char *const names[] = {"one.adx", "two.adx"};
+        static const uint32_t samples[] = {SECONDS, SECONDS};
+        make_archive(path, names, samples, 2u);
     }
     snprintf(path, sizeof path, "%s/DOA2.xbe", disc);
     {
-        static const char *const labels[] = {"First Theme"};
-        static const char *const files[] = {"one.adx"};
-        make_executable(path, DOA2U_MUSIC, true, labels, files, 1u);
+        static const char *const labels[] = {"First Theme", "Second Theme"};
+        static const char *const files[] = {"one.adx", "two.adx"};
+        make_executable(path, DOA2U_MUSIC, true, labels, files, 2u);
     }
     snprintf(mods, sizeof mods, "%s/mods", base);
     make_folder(mods);
@@ -381,15 +381,18 @@ static void test_assignments(const char *base)
     recomp_jukebox_prepare(disc, private_dir);
     recomp_jukebox_install(false);
     CHECK(assigning);
-    CHECK(target_count == 1u);
-    if (target_count == 1u) {
+    CHECK(target_count == 2u);
+    if (target_count == 2u) {
         CHECK(strcmp(targets[0].file, "one.adx") == 0);
         CHECK(strcmp(targets[0].name, "First Theme") == 0);
+        CHECK(strcmp(targets[1].file, "two.adx") == 0);
+        CHECK(strcmp(targets[1].name, "Second Theme") == 0);
     }
 
     const RecompModOverlay *overlay = recomp_mod_overlay(BGM, ARCHIVE_SIZE);
-    uint64_t at = 0u;
-    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 0u, &at));
+    uint64_t at = 0u, second_at = 0u;
+    CHECK(overlay != NULL && recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 0u, &at) &&
+        recomp_mod_entry_offset(BGM, ARCHIVE_SIZE, 1u, &second_at));
     snprintf(path, sizeof path, "%s/DOA2/bgm.afs", disc);
     base_file = fopen(path, "rb");
     CHECK(base_file != NULL);
@@ -432,11 +435,31 @@ static void test_assignments(const char *base)
         CHECK(targets[0].album == doa3 && targets[0].track == track);
         CHECK(entry_byte(overlay, at) == 'Q');
 
+        /* A save keeps the lines it cannot place: an album that is missing for
+           now, and a music entry this build does not list. */
+        static const char held[] = "one.adx\tDOA4\tkept.adx\nghost.adx\tDOA3\ttrack.adx\n";
+        write_file(path, held, sizeof held - 1u);
+        recomp_jukebox_page_opened();
+        CHECK(targets[0].album == -1 && targets[0].track == -1);
+        page.album = (unsigned)doa3;
+        page.track = (unsigned)track;
+        page.target = 1u;
+        recomp_jukebox_confirm(ROW_TARGET);
+        CHECK(targets[1].album == doa3 && targets[1].track == track);
+        CHECK(entry_byte(overlay, second_at) == 'Q');
+        (void)read_text(path, text, sizeof text);
+        CHECK(strstr(text, "two.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(strstr(text, "one.adx\tDOA4\tkept.adx") != NULL);
+        CHECK(strstr(text, "ghost.adx\tDOA3\ttrack.adx") != NULL);
+        CHECK(count_text(text, "one.adx") == 1u);
+
         /* A target the reloaded file no longer names plays its own music. */
         remove(path);
         recomp_jukebox_page_opened();
         CHECK(targets[0].album == -1 && targets[0].track == -1);
+        CHECK(targets[1].album == -1 && targets[1].track == -1);
         CHECK(entry_byte(overlay, at) == 0x80u);
+        CHECK(entry_byte(overlay, second_at) == 0x80u);
     }
     fclose(base_file);
     base_file = NULL;
