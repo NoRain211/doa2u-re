@@ -25,8 +25,9 @@
 #include <unistd.h>
 #endif
 
-/* The runtime's SHA-256 (xbe/sha.cpp) as a raw digest. */
-void doaxbv_sha256_digest(const uint8_t *bytes, size_t size, uint8_t digest[32]);
+/* The runtime's SHA-256 (xbe/sha.cpp) as a raw digest; false when the host
+   could not make one, which is reported here rather than thrown into C. */
+bool doaxbv_sha256_digest(const uint8_t *bytes, size_t size, uint8_t digest[32]);
 
 static const char identity_file[] = "live-identity.bin";
 static const char proof_prefix[] = "doa2u-live";
@@ -100,23 +101,30 @@ static bool write_secret(const char *path, const uint8_t secret[RECOMP_LIVE_IDEN
     return true;
 }
 
-void recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
+bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
     RecompLiveIdentity *identity)
 {
     uint8_t digest[32], material[sizeof proof_prefix - 1u + RECOMP_LIVE_IDENTITY_SECRET_BYTES];
     memcpy(identity->secret, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
     memcpy(material, proof_prefix, sizeof proof_prefix - 1u);
     memcpy(material + sizeof proof_prefix - 1u, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
-    doaxbv_sha256_digest(material, sizeof material, identity->proof);
     /* The XUID is derived from the proof the server checks, not from the
        secret, and only the first six bytes of SHA-256(proof) reach it, so the
        proof itself is not published: the type in the high 16 bits, then those
        bytes as a big-endian 48-bit number. A server can reject a LOGON whose
        XUID does not match its proof. */
-    doaxbv_sha256_digest(identity->proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES, digest);
+    if (!doaxbv_sha256_digest(material, sizeof material, identity->proof) ||
+        !doaxbv_sha256_digest(identity->proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES, digest)) {
+        /* Without a digest there is no account to publish: an empty identity
+           makes the load fail instead of sending proof the server cannot
+           check. */
+        memset(identity, 0, sizeof *identity);
+        return false;
+    }
     identity->xuid = (uint64_t)RECOMP_LIVE_XUID_TYPE << 48 |
         (uint64_t)digest[0] << 40 | (uint64_t)digest[1] << 32 | (uint64_t)digest[2] << 24 |
         (uint64_t)digest[3] << 16 | (uint64_t)digest[4] << 8 | digest[5];
+    return true;
 }
 
 bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity)
@@ -145,6 +153,6 @@ bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity
            opened (permissions, a sharing lock) keeps its account. */
         return false;
     }
-    recomp_live_identity_from_secret(secret, identity);
+    if (!recomp_live_identity_from_secret(secret, identity)) return false;
     return identity->xuid != 0u;
 }

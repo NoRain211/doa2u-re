@@ -48,9 +48,9 @@ int main()
         const std::string sha1 = doaxbv::sha1Hex(bytes), sha256 = doaxbv::sha256Hex(bytes);
         std::uint8_t digest[32], plain[32];
         doaxbv::sha256(bytes.data(), bytes.size(), digest);
-        doaxbv_sha256_digest(bytes.data(), bytes.size(), plain);
+        const bool hashed = doaxbv_sha256_digest(bytes.data(), bytes.size(), plain);
         if (sha1 != c.sha1 || sha256 != c.sha256 ||
-            doaxbv::sha1Hex(bytes.data(), bytes.size()) != c.sha1 ||
+            doaxbv::sha1Hex(bytes.data(), bytes.size()) != c.sha1 || !hashed ||
             !digestMatches(c.sha256, digest) || !digestMatches(c.sha256, plain)) {
             std::fprintf(stderr, "sha mismatch for %zu bytes: %s %s\n",
                 c.length, sha1.c_str(), sha256.c_str());
