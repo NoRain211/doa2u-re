@@ -19,6 +19,54 @@ def wav(path, samples):
             b"data" + struct.pack("<I", len(data)) + data)
 
 
+def make_wave_bank(clips):
+    """A big-endian XACT 2 wave bank holding one XMA wave per (channels, rate, bytes)."""
+    data = bytearray(0x200 + sum(length for _, _, length in clips))
+    data[0:4] = b"DNBW"
+    struct.pack_into(">II", data, 8, 0, 0x100)                        # bank header
+    struct.pack_into(">II", data, 16, 0x100, 16 * len(clips))         # wave records
+    struct.pack_into(">II", data, 24, 0, 0)
+    struct.pack_into(">II", data, 32, 0, 0)
+    struct.pack_into(">II", data, 40, 0x200, len(data) - 0x200)       # wave data
+    struct.pack_into(">I", data, 4, len(clips))
+    struct.pack_into(">I", data, 0x48, 16)
+    at = 0
+    for i, (channels, rate, length) in enumerate(clips):
+        fmt = 1 | (channels << 1) | (rate << 4)
+        struct.pack_into(">4I", data, 0x100 + 16 * i, 0, fmt, at, length)
+        at += length
+    return bytes(data)
+
+
+def make_sound_bank(cues):
+    """A big-endian XACT 2 sound bank holding one simple cue per (name, wave)."""
+    simple, names = 0x40, 0x40 + 5 * len(cues)
+    sounds = names + 6 * len(cues)
+    labels = sounds + 16 * len(cues)
+    text = bytearray()
+    data = bytearray(labels)
+    data[0:4] = b"KBDS"
+    struct.pack_into(">h", data, 0x09, len(cues))
+    struct.pack_into(">i", data, 0x1A, simple)
+    struct.pack_into(">i", data, 0x3A, names)
+    for i, (name, wave) in enumerate(cues):
+        struct.pack_into(">i", data, simple + 5 * i + 1, sounds + 16 * i)
+        struct.pack_into(">i", data, names + 6 * i, labels + len(text))
+        text += name.encode("ascii") + b"\0"
+        # Its flag byte stays 0: a simple sound, with the wave at +9.
+        struct.pack_into(">h", data, sounds + 16 * i + 9, wave)
+    return bytes(data + text)
+
+
+def voice_entries(wave_bank, sound_bank):
+    """An AFS entry table whose zac bank entries point at the two banks, read as one archive."""
+    data = wave_bank + sound_bank
+    entries = [(0, 0)] * (max(voices.BANKS.values()) + 1)
+    entries[voices.BANKS["zac"] - 1] = (0, len(wave_bank))
+    entries[voices.BANKS["zac"]] = (len(wave_bank), len(sound_bank))
+    return voices.ArchiveView(io.BytesIO(data), 0, len(data)), entries
+
+
 class ArchiveTests(unittest.TestCase):
     def test_archive_view_is_bounded_even_when_the_disc_has_following_files(self):
         view = voices.ArchiveView(io.BytesIO(b"xxvoice-tail"), 2, 5)
@@ -52,6 +100,68 @@ class ArchiveTests(unittest.TestCase):
                     voices.main([source, "--out", out])
             self.assertFalse(os.path.exists(out))
             run.assert_not_called()
+
+
+class BankTests(unittest.TestCase):
+    def test_cue_names_that_could_leave_the_output_folder_are_rejected(self):
+        for name in ("../../escape", "a/b", "a\\b", "..", "x..y", "", "sp ace", "\x01no"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    voices.cue_waves(make_sound_bank([(name, 0)]))
+
+    def test_safe_cue_names_map_to_their_wave(self):
+        self.assertEqual(voices.cue_waves(make_sound_bank([("zac_068_down_03a", 3), ("zac_071_down_03d", 5)])),
+                         {"zac_068_down_03a": 3, "zac_071_down_03d": 5})
+
+    def test_a_poisoned_cue_name_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as root:
+            wave = make_wave_bank([(1, 48000, 4)])
+            afs, entries = voice_entries(wave, make_sound_bank([("../../escaped", 0)]))
+            out = os.path.join(root, "out")
+            with mock.patch.object(voices.subprocess, "run") as run:
+                with self.assertRaises(ValueError):
+                    voices.decode_bank(afs, entries, "zac", out, "ffmpeg")
+            run.assert_not_called()
+            self.assertFalse(os.path.exists(out))
+            self.assertEqual(os.listdir(root), [])
+
+    def test_a_valid_bank_still_parses(self):
+        self.assertEqual(voices.wave_bank(make_wave_bank([(1, 48000, 4), (2, 48000, 8)])),
+                         [(0x200, 4, 1, 48000), (0x204, 8, 2, 48000)])
+        afs, entries = voice_entries(make_wave_bank([(1, 48000, 4)]), make_sound_bank([("zac_068_down", 0)]))
+        with tempfile.TemporaryDirectory() as out, mock.patch.object(voices.subprocess, "run") as run:
+            files = voices.decode_bank(afs, entries, "zac", out, "ffmpeg")
+        self.assertEqual(files, {0: "zac_000_068_down.wav"})
+        run.assert_called_once()
+
+    def test_a_malformed_wave_table_is_reported_not_looped_or_indexed(self):
+        bank = make_wave_bank([(1, 48000, 4)])
+        for header, count, size in ((0, 8, 0), (0, 1000, 16), (0xFFFFFFFF, 1, 16)):
+            with self.subTest(header=header, count=count, size=size):
+                data = bytearray(bank)
+                struct.pack_into(">II", data, 8, header, 0x100)
+                struct.pack_into(">I", data, 4, count)
+                struct.pack_into(">I", data, 0x48, size)
+                with self.assertRaises(ValueError):
+                    voices.wave_bank(bytes(data))
+
+    def test_a_short_entry_table_is_reported_not_indexed(self):
+        with self.assertRaises(ValueError):
+            voices.validate_banks(voices.ArchiveView(io.BytesIO(b""), 0, 0), [])
+
+    def test_the_source_is_checked_before_ffmpeg_is_fetched(self):
+        with tempfile.TemporaryDirectory() as root:
+            source, out = os.path.join(root, "snd.afs"), os.path.join(root, "output")
+            count = max(voices.BANKS.values()) + 1
+            with open(source, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<I", count) + struct.pack("<II", 0, 0) * count)
+            with mock.patch.object(voices, "fetch_ffmpeg",
+                                   side_effect=AssertionError("ffmpeg was fetched before the disc was checked")), \
+                    mock.patch.object(voices.subprocess, "run") as run:
+                with self.assertRaises(ValueError):
+                    voices.main([source, "--out", out])
+            run.assert_not_called()
+            self.assertFalse(os.path.exists(out))
 
 
 class MappingTests(unittest.TestCase):
