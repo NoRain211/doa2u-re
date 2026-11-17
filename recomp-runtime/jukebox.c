@@ -648,14 +648,19 @@ static double now_ms(void)
     return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
 }
 
-static void stop(void)
+/* Ends the track but leaves the game's sound as it is. */
+static void release(void)
 {
-    if (player.playing) {
-        recomp_audio_output_reset_voice(RECOMP_AUDIO_OUTPUT_JUKEBOX_SLOT);
-        recomp_dsound_buffer_set_output_muted(false);
-    }
+    if (player.playing) recomp_audio_output_reset_voice(RECOMP_AUDIO_OUTPUT_JUKEBOX_SLOT);
     free(player.data);
     memset(&player, 0, sizeof player);
+}
+
+static void stop(void)
+{
+    const bool was_playing = player.playing;
+    release();
+    if (was_playing) recomp_dsound_buffer_set_output_muted(false);
 }
 
 static bool load(const Track *track)
@@ -700,9 +705,13 @@ static bool load(const Track *track)
 
 static void play(unsigned album, unsigned track)
 {
-    stop();
-    if (album >= album_count || track >= albums[album].count) return;
-    if (!load(&albums[album].tracks[track])) return;
+    /* The game stays muted while the next track loads, so it never plays in between. */
+    const bool was_playing = player.playing;
+    release();
+    if (album >= album_count || track >= albums[album].count || !load(&albums[album].tracks[track])) {
+        if (was_playing) recomp_dsound_buffer_set_output_muted(false);
+        return;
+    }
     player.playing = true;
     player.album = album;
     player.track = track;
