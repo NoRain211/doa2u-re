@@ -110,8 +110,8 @@ static bool add_track(Album *album, const Track *track)
 }
 
 /* names.txt beside an album's tracks: "file = name" lines a player edits to
-   rename tracks, and "album = title". Written with every track the album has
-   whenever it lacks one, so each track is always listed there. */
+   rename tracks, and "album = title". A rewrite keeps every line the player
+   already has and adds the ones for tracks it lacks, so each track is listed. */
 static char *trim(char *text)
 {
     while (*text == ' ' || *text == '\t') ++text;
@@ -123,17 +123,31 @@ static char *trim(char *text)
 static void apply_names(Album *album, const char *folder)
 {
     if (album->count == 0u) return;
-    char path[PATH_SIZE], line[PATH_SIZE];
+    char path[PATH_SIZE], line[PATH_SIZE], temporary[PATH_SIZE + 64];
     snprintf(path, sizeof path, "%s/%s", jukebox_root, folder);
     make_folder(jukebox_root);
     make_folder(path);
     snprintf(path, sizeof path, "%s/%s/names.txt", jukebox_root, folder);
     bool *listed = calloc(album->count, sizeof *listed);
     if (listed == NULL) return;
+    /* Every line the player has stays as it is; only the missing ones are added. */
+    char *kept = NULL;
+    size_t kept_size = 0u;
     bool titled = false;
     FILE *file = fopen(path, "r");
     if (file != NULL) {
         while (fgets(line, sizeof line, file) != NULL) {
+            const size_t length = strlen(line);
+            char *grown = realloc(kept, kept_size + length + 1u);
+            if (grown == NULL) { /* Rewriting without all the lines would drop them. */
+                fclose(file);
+                free(kept);
+                free(listed);
+                return;
+            }
+            kept = grown;
+            memcpy(kept + kept_size, line, length + 1u);
+            kept_size += length;
             line[strcspn(line, "\r\n")] = '\0';
             char *text = line;
             if ((unsigned char)text[0] == 0xefu && (unsigned char)text[1] == 0xbbu && (unsigned char)text[2] == 0xbfu) text += 3;
@@ -158,14 +172,43 @@ static void apply_names(Album *album, const char *folder)
     }
     bool complete = titled;
     for (unsigned t = 0u; t < album->count; ++t) complete = complete && listed[t];
+    if (complete) {
+        free(kept);
+        free(listed);
+        return;
+    }
+    if (kept_size > 0u && kept[kept_size - 1u] != '\n') {
+        char *grown = realloc(kept, kept_size + 2u);
+        if (grown == NULL) {
+            free(kept);
+            free(listed);
+            return;
+        }
+        kept = grown;
+        kept[kept_size++] = '\n';
+        kept[kept_size] = '\0';
+    }
+    file = recomp_atomic_open(path, temporary, sizeof temporary);
+    if (file == NULL) {
+        fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
+        free(kept);
+        free(listed);
+        return;
+    }
+    bool written = true;
+    if (kept_size == 0u)
+        written = fprintf(file, "# The Jukebox's names for the %s album's tracks.\n"
+                      "# Change the text after \"=\" and save; the game reads this file when it starts.\n"
+                      "# Leave the file name before \"=\" as it is.\n\n", album->tab) > 0;
+    else
+        written = fwrite(kept, 1u, kept_size, file) == kept_size;
+    if (!titled) written = written && fprintf(file, "album = %s\n\n", album->title) > 0;
+    for (unsigned t = 0u; t < album->count; ++t)
+        if (!listed[t]) written = written && fprintf(file, "%s = %s\n", album->tracks[t].file, album->tracks[t].name) > 0;
+    if (!recomp_atomic_commit(file, temporary, path, written))
+        fprintf(stderr, "recomp jukebox: cannot save %s; previous file kept\n", path);
+    free(kept);
     free(listed);
-    if (complete || (file = fopen(path, "w")) == NULL) return;
-    fprintf(file, "# The Jukebox's names for the %s album's tracks.\n"
-                  "# Change the text after \"=\" and save; the game reads this file when it starts.\n"
-                  "# Leave the file name before \"=\" as it is.\n\n", album->tab);
-    fprintf(file, "album = %s\n\n", album->title);
-    for (unsigned t = 0u; t < album->count; ++t) fprintf(file, "%s = %s\n", album->tracks[t].file, album->tracks[t].name);
-    fclose(file);
 }
 
 static void load_doa2u(Album *album)
@@ -236,6 +279,15 @@ static const struct { const char *file, *name; } DOA1U_NAMES[] = {
 static bool folder_exists(const char *name);
 static void load_folder(Album *album, const char *folder, const char *tab);
 
+/* tracks.txt names files in its own folder: not a path out of it. */
+static bool bare_name(const char *name)
+{
+    if (name[0] == '\0' || strstr(name, "..") != NULL) return false;
+    for (const char *c = name; *c != '\0'; ++c)
+        if (*c == '/' || *c == '\\' || *c == ':') return false;
+    return true;
+}
+
 static void load_doa1u(Album *album)
 {
     /* The build copies them into jukebox\doa1u, levelled with DOA2U's music; the disc's otherwise. */
@@ -289,6 +341,10 @@ static void load_folder(Album *album, const char *folder, const char *tab)
             continue;
         }
         if (field[0][0] == '#' || field[0][0] == '\0' || field[3] == NULL) continue;
+        if (!bare_name(field[0])) {
+            fprintf(stderr, "recomp jukebox: %s: %s is not a file name in its folder\n", folder, field[0]);
+            continue;
+        }
         Track track = {0};
         snprintf(track.name, sizeof track.name, "%s", field[3]);
         snprintf(track.file, sizeof track.file, "%s", field[0]);
@@ -582,20 +638,36 @@ static Target targets[sizeof DOA2U_NAMES / sizeof DOA2U_NAMES[0]];
 static unsigned target_count;
 static bool assigning;          /* bgm.afs has slots: assignments work */
 
+/* A name in the player's files and one in the game's table differ only by case. */
+static bool same_name(const char *a, const char *b)
+{
+    while (*a != '\0' && tolower((unsigned char)*a) == tolower((unsigned char)*b)) { ++a; ++b; }
+    return *a == '\0' && *b == '\0';
+}
+
 static int find_album(const char *tab)
 {
     for (unsigned a = 0u; a < album_count; ++a)
-        if (strcmp(albums[a].tab, tab) == 0) return (int)a;
+        if (same_name(albums[a].tab, tab)) return (int)a;
     return -1;
 }
 
 static int find_track(unsigned album, const char *file)
 {
     for (unsigned t = 0u; t < albums[album].count; ++t)
-        if (strcmp(albums[album].tracks[t].file, file) == 0) return (int)t;
+        if (same_name(albums[album].tracks[t].file, file)) return (int)t;
     return -1;
 }
 
+static int find_target(const char *file)
+{
+    for (unsigned i = 0u; i < target_count; ++i)
+        if (same_name(targets[i].file, file)) return (int)i;
+    return -1;
+}
+
+/* Gives the target's assignment to its slot; false, the slot back on its own
+   track, when it does not fit. The target itself is the caller's to change. */
 static bool apply(Target *target)
 {
     if (target->entry < 0) return false;
@@ -605,14 +677,12 @@ static bool apply(Target *target)
         source = recomp_mod_source(track->path, track->offset, track->size);
         if (source == NULL) {
             fprintf(stderr, "recomp jukebox: cannot read %s for %s\n", track->name, target->name);
-            target->album = target->track = -1;
             recomp_mod_assign(BGM, (unsigned)target->entry, NULL);
             return false;
         }
     }
     if (!recomp_mod_assign(BGM, (unsigned)target->entry, source)) {
         fprintf(stderr, "recomp jukebox: that track does not fit %s's slot\n", target->name);
-        target->album = target->track = -1;
         recomp_mod_assign(BGM, (unsigned)target->entry, NULL);
         return false;
     }
@@ -651,18 +721,19 @@ static void load_assignments(void)
         if (track == NULL) continue;
         *album++ = '\0';
         *track++ = '\0';
-        for (unsigned i = 0u; i < target_count; ++i) {
-            if (strcmp(targets[i].file, line) != 0) continue;
-            const int a = find_album(album), t = a >= 0 ? find_track((unsigned)a, track) : -1;
-            if (t < 0) {
-                fprintf(stderr, "recomp jukebox: %s's track %s/%s is gone\n", targets[i].name, album, track);
-                break;
-            }
-            targets[i].album = a;
-            targets[i].track = t;
-            if (apply(&targets[i]))
-                fprintf(stderr, "recomp jukebox: %s plays %s / %s\n", targets[i].name, album, albums[a].tracks[t].name);
+        const int i = find_target(line);
+        if (i < 0) continue;
+        const int a = find_album(album), t = a >= 0 ? find_track((unsigned)a, track) : -1;
+        if (t < 0) {
+            fprintf(stderr, "recomp jukebox: %s's track %s/%s is gone\n", targets[i].name, album, track);
+            continue;
         }
+        targets[i].album = a;
+        targets[i].track = t;
+        if (apply(&targets[i]))
+            fprintf(stderr, "recomp jukebox: %s plays %s / %s\n", targets[i].name, album, albums[a].tracks[t].name);
+        else
+            targets[i].album = targets[i].track = -1;
     }
     fclose(file);
 }
@@ -743,12 +814,27 @@ bool recomp_jukebox_take_request(void)
     return requested;
 }
 
+static void restore_slots(const bool *was_assigned)
+{
+    for (unsigned i = 0u; i < target_count; ++i)
+        if (was_assigned[i] && targets[i].album < 0 && targets[i].entry >= 0)
+            recomp_mod_assign(BGM, (unsigned)targets[i].entry, NULL);
+}
+
 void recomp_jukebox_page_opened(void)
 {
     stop(); /* Album indexes can change while the library is reloaded. */
     load_library(); /* an album imported since shows */
-    for (unsigned i = 0u; i < target_count; ++i) targets[i].album = targets[i].track = -1;
-    if (assigning) load_assignments();
+    bool was_assigned[sizeof targets / sizeof targets[0]];
+    for (unsigned i = 0u; i < target_count; ++i) {
+        was_assigned[i] = targets[i].album >= 0;
+        targets[i].album = targets[i].track = -1;
+    }
+    if (assigning) {
+        load_assignments();
+        /* A target the file no longer names plays its own music again. */
+        restore_slots(was_assigned);
+    }
     if (page.album >= album_count) page.album = 0u;
     if (page.track >= albums[page.album].count) page.track = 0u;
     if (page.target >= target_count) page.target = 0u;
@@ -818,21 +904,28 @@ void recomp_jukebox_confirm(unsigned row)
         if (player.playing && player.album == page.album && player.track == page.track) stop();
         else play(page.album, page.track);
         break;
-    case ROW_TARGET:
+    case ROW_TARGET: {
         if (!assigning || album->count == 0u || page.target >= target_count) {
             snprintf(page.note, sizeof page.note, "Tracks cannot be assigned here.");
             break;
         }
-        targets[page.target].album = (int)page.album;
-        targets[page.target].track = (int)page.track;
-        if (apply(&targets[page.target])) {
+        Target *target = &targets[page.target];
+        const int previous_album = target->album, previous_track = target->track;
+        target->album = (int)page.album;
+        target->track = (int)page.track;
+        if (apply(target)) {
             save_assignments();
-            snprintf(page.note, sizeof page.note, "%s's music is now %s: %s.", targets[page.target].name, album->tab,
+            snprintf(page.note, sizeof page.note, "%s's music is now %s: %s.", target->name, album->tab,
                 album->tracks[page.track].name);
         } else {
+            /* A track that does not fit leaves the one that worked playing. */
+            target->album = previous_album;
+            target->track = previous_track;
+            if (previous_album >= 0) apply(target);
             snprintf(page.note, sizeof page.note, "That track does not fit; restart the game to make room.");
         }
         break;
+    }
     case ROW_ASSIGNED:
         if (page.target < target_count && targets[page.target].album >= 0) {
             targets[page.target].album = targets[page.target].track = -1;
