@@ -33,14 +33,15 @@ typedef struct RecompLiveIdentity {
 
 /* Reads <storage>/live-identity.bin, or the file RECOMP_LIVE_IDENTITY names,
    and makes a random secret there on first use. False when the file is
-   damaged, cannot be written, or no secret can be made. */
+   damaged, cannot be written, or no secret or digest can be made. */
 bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity);
 
 /* The XUID and proof a secret gives: SHA-256("doa2u-live" || secret) is the
    proof (plain SHA-256, not HMAC), and the XUID is 0x0009 over the first six
    bytes of SHA-256(proof) as a big-endian 48-bit number, so the matchmaker can
-   check one against the other without the proof carrying its own XUID bits. */
-void recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
+   check one against the other without the proof carrying its own XUID bits.
+   False leaves the identity empty when no digest could be made. */
+bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
     RecompLiveIdentity *identity);
 
 #ifdef __cplusplus
