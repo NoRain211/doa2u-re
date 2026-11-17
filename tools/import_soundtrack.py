@@ -207,9 +207,13 @@ def detect(source):
 # ---- AFS archives -------------------------------------------------------------
 
 def afs_table(data):
-    if data[:3] != b"AFS":
+    if not data or data[:3] != b"AFS":
         raise ValueError("not an AFS archive")
+    if len(data) < 8:
+        raise ValueError("truncated AFS archive header")
     count = struct.unpack_from("<I", data, 4)[0]
+    if len(data) < 8 + 8 * count:
+        raise ValueError(f"AFS archive lists {count} files but is only {len(data)} bytes")
     return [struct.unpack_from("<II", data, 8 + 8 * i) for i in range(count)]
 
 
@@ -422,7 +426,9 @@ def import_movies(source, folder, where, kept, tracks, seen=None):
         if audio is None or audio in seen:
             continue
         seen.add(audio)
-        name = "m_" + os.path.splitext(file)[0].lower() + ".adx"
+        # Every name here goes into tracks.txt, which only takes [A-Za-z0-9_.-]: a movie file
+        # named after the disc's own title must not abort the album after it was written.
+        name = "m_" + safe_cue(os.path.splitext(os.path.basename(file))[0].lower()) + ".adx"
         with open(os.path.join(folder, name), "wb") as handle:
             handle.write(audio)
         tracks.append((name, -2, -2, kept.get(name, movie_name(file))))
@@ -726,13 +732,16 @@ def import_doa4(source, out, ffmpeg, encoder=None):
     return len(tracks)
 
 
+FFMPEG_MISSING = "ffmpeg was not found. Install one with the xma1 decoder, or pass --ffmpeg."
+
+
 def missing_message(error, ffmpeg):
     """A FileNotFoundError's message: ffmpeg only when ffmpeg is what is missing, else its path."""
     path = error.filename or ""
     if not path:
         return str(error)
     if ffmpeg and os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(ffmpeg)):
-        return "ffmpeg was not found. Install one with the xma1 decoder, or pass --ffmpeg."
+        return FFMPEG_MISSING
     return f"{path} was not found."
 
 
@@ -773,6 +782,8 @@ def main():
             import_doa3(source, args.out, find_encoder(args.adx_encoder))
         elif game == "doa4":
             ffmpeg = args.ffmpeg or find_ffmpeg(ROOT)
+            if ffmpeg is None:
+                raise SystemExit(FFMPEG_MISSING)
             import_doa4(source, args.out, ffmpeg, find_encoder(args.adx_encoder))
         elif game == "doa2u":
             import_doa2u(source, args.out, find_encoder(args.adx_encoder))
@@ -780,6 +791,8 @@ def main():
             raise SystemExit("Not a Dead or Alive 3 or Dead or Alive 4 disc.")
     except FileNotFoundError as error:
         raise SystemExit(missing_message(error, ffmpeg))
+    except ValueError as error:  # a corrupt archive or bank is the disc's problem, not a crash
+        raise SystemExit(str(error))
     finally:
         source.close()
     return 0
