@@ -202,6 +202,23 @@ add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
 add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
 add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
 
+# WP1 Guest Xbox Live API: the guest's XOnline/XNet thunks over
+# RecompLiveBackend (live_backend.h), plus the in-memory backend for tests.
+# The transport work package adds live_transport.c and the real
+# recomp_live_transport_lookup; live_xapi.c carries a fallback until then.
+add_executable(recomp_live_xapi_test live_xapi.c live_backend.c live_backend_local.c
+    live_xapi_test.c)
+add_test(NAME recomp-runtime-live-xapi COMMAND recomp_live_xapi_test)
+if(WIN32)
+    # XNetRandom asks BCryptGenRandom for OS entropy, as live_identity.c does.
+    target_link_libraries(recomp_live_xapi_test PRIVATE bcrypt)
+    target_link_libraries(recomp_manual_test PRIVATE bcrypt)
+endif()
+# program_manual.c binds the Live guest API first, so the unbound-lookup test
+# links the same sources; its stub for the kernel host's pool allocator lives in
+# program_manual_test.c.
+target_sources(recomp_manual_test PRIVATE live_xapi.c live_backend.c live_backend_local.c)
+
 add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
 add_test(NAME recomp-runtime-d3d8-adapter COMMAND recomp_d3d8_adapter_test)

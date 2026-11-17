@@ -159,7 +159,7 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
-| Xbox Live menus | Report no account; **Yes** quits to the desktop in place of the Dashboard |
+| Xbox Live menus | Off by default: report no account, and **Yes** quits to the desktop in place of the Dashboard. With `RECOMP_LIVE=1` they run on the matchmaker, with rollback fights; test build ([Xbox Live](docs/xbox-live.md)) |
 | Online Versus | Rollback netplay from the Versus menu; test build |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |

@@ -15,6 +15,7 @@
 #include "kernel_abi.h"
 #include "mwply_adapter.h"
 #include "netplay_guest.h"
+#include "live_xapi.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
 #include "stop_report.h"
@@ -213,6 +214,10 @@ static void launch_new_image(void)
 
 RecompFunction recomp_lookup_manual(uint32_t guest_address)
 {
+    /* Xbox Live at the XOnline/XNet boundary, first: with a backend installed
+       this replaces the guest's library; with none it returns NULL (offline). */
+    RecompFunction live = recomp_live_lookup(guest_address);
+    if (live != NULL) return live;
     RecompFunction stage = recomp_stage_select_lookup_manual(guest_address);
     if (stage != NULL) return stage;
     if (guest_address == 0x000d92c0u) return skip_startup_legal;
