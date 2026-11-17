@@ -47,7 +47,9 @@ ask the user to save the program (Ctrl+S) after naming.
 2. Never commit an XBE, generated game C, retail bytes, extracted assets or
    filenames, saves, BIOS data, private paths, or local run evidence.
 3. Keep all private inputs and output under `private/`; only its README is
-   tracked. New public files must be included in `public-export.json`.
+   tracked. The one exception is the players' `jukebox/` folder beside the
+   launcher, which stays gitignored. New public files must be included in
+   `public-export.json`.
 4. Report observed behavior; forced state remains a hypothesis.
 5. Keep the ISO in its original location and extract it only once. After a
    build, `private/play-disc` holds the disc; `private/imported-disc` keeps
