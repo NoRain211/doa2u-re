@@ -10,7 +10,8 @@ import sys
 
 
 def load(data):
-    """(base, [(virtual address, bytes on the disc, file offset, name)]) of an XBE's sections."""
+    """(base, [(virtual address, virtual size, bytes on the disc, file offset, name)]) of an
+    XBE's sections. An uninitialised section is larger than its bytes on the disc."""
     base, = struct.unpack_from("<I", data, 0x104)
     count, address = struct.unpack_from("<II", data, 0x11C)
     sections = []
@@ -22,15 +23,17 @@ def load(data):
             at = name_at - base
             end = data.find(b"\0", at)
             name = data[at:end].decode("latin-1") if end >= 0 else ""
-        sections.append((virtual, min(size, on_disc), offset, name))
+        sections.append((virtual, size, min(size, on_disc), offset, name))
     return base, sections
 
 
 def at(sections, address):
-    """(file offset, bytes to the end of its section) of a virtual address, or None."""
-    for start, size, offset, _name in sections:
+    """(file offset, bytes on the disc to the end of its section) of a virtual address
+    that has bytes on the disc, or None."""
+    for start, size, on_disc, offset, _name in sections:
         if start <= address < start + size:
-            return offset + address - start, start + size - address
+            available = min(size, on_disc) - (address - start)
+            return (offset + address - start, available) if available > 0 else None
     return None
 
 
@@ -59,10 +62,10 @@ def main():
     base, sections = load(data)
     count, address = struct.unpack_from("<II", data, 0x160)
     for i in range(count):
-        name, _major, _minor, _flags, version = struct.unpack_from(
+        name, _major, _minor, build, _flags = struct.unpack_from(
             "<8sHHHH", data, address - base + 16 * i)
-        print(name.rstrip(b"\0").decode("ascii", "replace"), version)
-    for virtual, size, _offset, name in sections:
+        print(name.rstrip(b"\0").decode("ascii", "replace"), build)
+    for virtual, size, _on_disc, _offset, name in sections:
         print("section", name, hex(virtual), size)
     print("sha256", hashlib.sha256(data).hexdigest())
 

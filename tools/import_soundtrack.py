@@ -564,7 +564,11 @@ LEVEL_DB = -17.0
 
 def level_album(folder, encoder):
     """Brings each track of an album to LEVEL_DB with recomp_adx_encode --level, once: tracks.txt
-    then says #level. Without the encoder (build the game first) it leaves them as they are."""
+    then says #level. Without the encoder (build the game first) it leaves them as they are.
+    Every track is levelled into a scratch file beside it first, and only a run where they all
+    succeeded replaces the tracks: a failure leaves the album exactly as it was, so a rerun levels
+    the same input rather than levelling the tracks that worked a second time. Returns how many
+    tracks it levelled successfully."""
     path = os.path.join(folder, "tracks.txt")
     try:
         with open(path, encoding="utf-8") as file:
@@ -577,28 +581,36 @@ def level_album(folder, encoder):
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
         return 0
-    count = failed = 0
-    for line in lines:
-        parts = line.split("\t")
-        if line.startswith("#") or len(parts) < 4:
-            continue
-        track = os.path.join(folder, track_name(parts[0]))
-        scratch = track + ".level"
-        result = run_tool([encoder, "--level", str(LEVEL_DB), track, scratch], capture_output=True, text=True)
-        if result.returncode != 0:
-            failed += 1
-            print(f"  {parts[0]}: not levelled ({result.stderr.strip()})")
-            if os.path.exists(scratch):
-                os.remove(scratch)
-            continue
-        os.replace(scratch, track)
-        count += 1
-        print(f"  {parts[0]}: {result.stdout.strip()}", flush=True)
-    if failed == 0:
+    levelled, failed = [], False
+    try:
+        for line in lines:
+            parts = line.split("\t")
+            if line.startswith("#") or len(parts) < 4:
+                continue
+            track = os.path.join(folder, track_name(parts[0]))
+            scratch = track + ".level"
+            result = run_tool([encoder, "--level", str(LEVEL_DB), track, scratch], capture_output=True, text=True)
+            if result.returncode != 0:
+                failed = True
+                print(f"  {parts[0]}: not levelled ({result.stderr.strip()})")
+                if os.path.exists(scratch):
+                    os.remove(scratch)
+                continue
+            levelled.append((scratch, track))
+            print(f"  {parts[0]}: {result.stdout.strip()}", flush=True)
+        if failed:
+            print(f"{os.path.basename(folder)}: not every track was levelled; the album is as it was.")
+            return len(levelled)
+        for scratch, track in levelled:
+            os.replace(scratch, track)
         at = 1 if lines and lines[0].startswith("#title") else 0
         lines.insert(at, mark)
         atomic_text(path, "\n".join(lines) + "\n")
-    return count
+        return len(levelled)
+    finally:
+        for scratch, _track in levelled:
+            if os.path.exists(scratch):
+                os.remove(scratch)
 
 
 # bgm.afs's tracks in its order: the game's music table (0x2d4918 in the Japanese
