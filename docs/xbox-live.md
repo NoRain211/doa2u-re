@@ -1,12 +1,12 @@
 # Xbox Live
 
-Status: with the Live fight wiring in place, the game's own Xbox Live pages
-run on the PC port against the project's matchmaker, and Live fights run on
-the rollback netcode. Two scripted runners on one machine have logged on,
-found each other with Quick Match, met in the game's lobby and played three
-Team Battle matches without a desync. Friends, invites, rankings and two
-machines across the internet have only run in unit tests. Voice chat is not
-supported.
+Status: the game's XOnline and XNet entry points are bound to the Live adapter
+(`recomp-runtime/live_xapi.c`), and the identity, matchmaker client and
+transport behind it are unit-tested. The runner start-up that installs a Live
+backend comes with the Live fight wiring, so none of this runs in a runner
+yet: the game's Live pages still report no account, and friends, invites,
+rankings and two machines across the internet have only run in unit tests.
+Voice chat is not supported.
 
 ## Turning it on
 
@@ -62,8 +62,9 @@ replaces them at the API boundary, like the D3D8 and DirectSound adapters:
 
 ## Fights
 
-`recomp-runtime/live_fight.c` hooks the game's Live fight. The game's
-first-round start (`battle_online_round_start`) runs as on the Xbox,
+The Live fight wiring that the start-up above brings adds
+`recomp-runtime/live_fight.c` to the game's Live fight. The game's
+first-round start (`battle_online_round_start`) then runs as on the Xbox,
 including its ready handshake. The rollback session starts on the first
 frame after it returns, in `RollbackMode::Live`
 (`recomp-runtime/netplay_session.cpp`), and replaces the game's delay-based
@@ -89,9 +90,10 @@ game's own lockstep works.
 ## Testing
 
 The Live unit tests are the ctest entries `recomp-runtime-live-xapi`,
-`-live-transport`, `-live-client` and `-live-fight`, and
+`-live-transport`, `-live-identity` and `-live-client`, and
 `tools/test_matchmaker.py`. The client test and the
-Python test share the byte transcript in `tools/live_vectors.json`.
+Python test share the byte transcript in `tools/live_vectors.json`. The Live
+fight wiring brings a fight test of its own.
 
 Once the Live fight wiring lands, two runners on one machine need a local
 matchmaker and two play folders, each with its own saves:
