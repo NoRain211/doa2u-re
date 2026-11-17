@@ -16,7 +16,7 @@ static const uint8_t MATCH_MAGIC[4] = {'D', '2', 'M', 'M'};
 enum {
     MATCH_VERSION = 2u,
     MATCH_HOST = 1u, MATCH_HOSTED, MATCH_LIST, MATCH_ROOMS, MATCH_JOIN, MATCH_PEER, MATCH_GONE, MATCH_LEAVE,
-    MATCH_RELAY, MATCH_COOKIE,
+    MATCH_RELAY, MATCH_COOKIE, MATCH_ADDR6,
     MATCH_LIVE_RELAY = 34u, /* the Live client asks for one addressee */
     MATCH_HEADER = 6u,
     MATCH_BODY = MATCH_HEADER + RECOMP_NETPLAY_TOKEN_BYTES, /* after the nonce */
