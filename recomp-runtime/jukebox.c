@@ -213,6 +213,82 @@ static bool add_track(Album *album, const Track *track)
     return true;
 }
 
+/* A file read for a rewrite: every line of it, whole however long the line is,
+   and the ones the rewrite keeps as the player wrote them. A file that could
+   not be read or kept whole is no longer intact, and is left as it is rather
+   than rewritten without the lines it holds. */
+typedef struct Lines {
+    FILE *file;
+    char *text;                 /* the line being read, and its length */
+    size_t size, room;
+    char *kept;                 /* the lines the rewrite keeps, as they were */
+    size_t kept_size, kept_at;  /* ... and how many it held before the last */
+    bool intact;
+} Lines;
+
+static void lines_open(Lines *lines, const char *path)
+{
+    memset(lines, 0, sizeof *lines);
+    lines->file = fopen(path, "r");
+    lines->intact = true;
+}
+
+/* The next line into text, however long it is; false at the end of the file,
+   which it then closes so the rewrite can replace the file. */
+static bool lines_next(Lines *lines)
+{
+    if (lines->file == NULL) return false;
+    lines->size = 0u;
+    for (int c = getc(lines->file); c != EOF; c = getc(lines->file)) {
+        if (lines->size + 1u >= lines->room) {
+            const size_t room = lines->room != 0u ? 2u * lines->room : PATH_SIZE;
+            char *grown = realloc(lines->text, room);
+            if (grown == NULL) { lines->intact = false; return false; }
+            lines->text = grown;
+            lines->room = room;
+        }
+        lines->text[lines->size++] = (char)c;
+        if (c == '\n') break;
+    }
+    if (lines->size == 0u) {
+        fclose(lines->file);
+        lines->file = NULL;
+        return false;
+    }
+    lines->text[lines->size] = '\0';
+    return true;
+}
+
+/* Keeps the line as the player's, the file's last given the newline it lacks;
+   false when memory runs out, which leaves the file alone. */
+static bool lines_keep(Lines *lines)
+{
+    char *grown = realloc(lines->kept, lines->kept_size + lines->size + 2u);
+    if (grown == NULL) { lines->intact = false; return false; }
+    lines->kept = grown;
+    lines->kept_at = lines->kept_size;
+    memcpy(lines->kept + lines->kept_size, lines->text, lines->size);
+    lines->kept_size += lines->size;
+    if (lines->text[lines->size - 1u] != '\n') lines->kept[lines->kept_size++] = '\n';
+    lines->kept[lines->kept_size] = '\0';
+    return true;
+}
+
+/* Takes the last line back: it is the file's own, not the player's. */
+static void lines_drop(Lines *lines)
+{
+    lines->kept_size = lines->kept_at;
+    lines->kept[lines->kept_size] = '\0';
+}
+
+static void lines_close(Lines *lines)
+{
+    if (lines->file != NULL) fclose(lines->file);
+    free(lines->text);
+    free(lines->kept);
+    memset(lines, 0, sizeof *lines);
+}
+
 /* names.txt beside an album's tracks: "file = name" lines a player edits to
    rename tracks, and "album = title". A rewrite keeps every line the player
    already has and adds the ones for tracks it lacks, so each track is listed. */
@@ -227,7 +303,7 @@ static char *trim(char *text)
 static void apply_names(Album *album, const char *folder)
 {
     if (album->count == 0u) return;
-    char path[PATH_SIZE], line[PATH_SIZE], temporary[PATH_SIZE + 64];
+    char path[PATH_SIZE], temporary[PATH_SIZE + 64];
     snprintf(path, sizeof path, "%s/%s", jukebox_root, folder);
     make_folder(jukebox_root);
     make_folder(path);
@@ -235,83 +311,48 @@ static void apply_names(Album *album, const char *folder)
     bool *listed = calloc(album->count, sizeof *listed);
     if (listed == NULL) return;
     /* Every line the player has stays as it is; only the missing ones are added. */
-    char *kept = NULL;
-    size_t kept_size = 0u;
+    Lines lines;
+    lines_open(&lines, path);
     bool titled = false;
-    FILE *file = fopen(path, "r");
-    if (file != NULL) {
-        while (fgets(line, sizeof line, file) != NULL) {
-            const size_t length = strlen(line);
-            char *grown = realloc(kept, kept_size + length + 1u);
-            if (grown == NULL) { /* Rewriting without all the lines would drop them. */
-                fclose(file);
-                free(kept);
-                free(listed);
-                return;
-            }
-            kept = grown;
-            memcpy(kept + kept_size, line, length + 1u);
-            kept_size += length;
-            line[strcspn(line, "\r\n")] = '\0';
-            char *text = line;
-            if ((unsigned char)text[0] == 0xefu && (unsigned char)text[1] == 0xbbu && (unsigned char)text[2] == 0xbfu) text += 3;
-            if (text[0] == '#') continue;
-            char *equals = strchr(text, '=');
-            if (equals == NULL) continue;
-            *equals = '\0';
-            const char *key = trim(text), *name = trim(equals + 1);
-            if (*name == '\0') continue;
-            if (strcmp(key, "album") == 0) {
-                snprintf(album->title, sizeof album->title, "%s", name);
-                titled = true;
-                continue;
-            }
-            for (unsigned t = 0u; t < album->count; ++t)
-                if (strcmp(album->tracks[t].file, key) == 0) {
-                    snprintf(album->tracks[t].name, sizeof album->tracks[t].name, "%s", name);
-                    listed[t] = true;
-                }
+    while (lines_next(&lines) && lines_keep(&lines)) {
+        char *text = lines.text;
+        text[strcspn(text, "\r\n")] = '\0';
+        if ((unsigned char)text[0] == 0xefu && (unsigned char)text[1] == 0xbbu && (unsigned char)text[2] == 0xbfu) text += 3;
+        if (text[0] == '#') continue;
+        char *equals = strchr(text, '=');
+        if (equals == NULL) continue;
+        *equals = '\0';
+        const char *key = trim(text), *name = trim(equals + 1);
+        if (*name == '\0') continue;
+        if (strcmp(key, "album") == 0) {
+            snprintf(album->title, sizeof album->title, "%s", name);
+            titled = true;
+            continue;
         }
-        fclose(file);
+        for (unsigned t = 0u; t < album->count; ++t)
+            if (strcmp(album->tracks[t].file, key) == 0) {
+                snprintf(album->tracks[t].name, sizeof album->tracks[t].name, "%s", name);
+                listed[t] = true;
+            }
     }
     bool complete = titled;
     for (unsigned t = 0u; t < album->count; ++t) complete = complete && listed[t];
-    if (complete) {
-        free(kept);
-        free(listed);
-        return;
-    }
-    if (kept_size > 0u && kept[kept_size - 1u] != '\n') {
-        char *grown = realloc(kept, kept_size + 2u);
-        if (grown == NULL) {
-            free(kept);
-            free(listed);
-            return;
-        }
-        kept = grown;
-        kept[kept_size++] = '\n';
-        kept[kept_size] = '\0';
-    }
-    file = recomp_atomic_open(path, temporary, sizeof temporary);
-    if (file == NULL) {
-        fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
-        free(kept);
-        free(listed);
-        return;
-    }
-    bool written = true;
-    if (kept_size == 0u)
-        written = fprintf(file, "# The Jukebox's names for the %s album's tracks.\n"
+    const bool rewrite = lines.intact && !complete; /* a file not read whole would lose lines */
+    FILE *file = rewrite ? recomp_atomic_open(path, temporary, sizeof temporary) : NULL;
+    if (rewrite && file == NULL) fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
+    if (file != NULL) {
+        bool written = lines.kept_size == 0u
+            ? fprintf(file, "# The Jukebox's names for the %s album's tracks.\n"
                       "# Change the text after \"=\" and save; the game reads this file when it starts.\n"
-                      "# Leave the file name before \"=\" as it is.\n\n", album->tab) > 0;
-    else
-        written = fwrite(kept, 1u, kept_size, file) == kept_size;
-    if (!titled) written = written && fprintf(file, "album = %s\n\n", album->title) > 0;
-    for (unsigned t = 0u; t < album->count; ++t)
-        if (!listed[t]) written = written && fprintf(file, "%s = %s\n", album->tracks[t].file, album->tracks[t].name) > 0;
-    if (!recomp_atomic_commit(file, temporary, path, written))
-        fprintf(stderr, "recomp jukebox: cannot save %s; previous file kept\n", path);
-    free(kept);
+                      "# Leave the file name before \"=\" as it is.\n\n", album->tab) > 0
+            : fwrite(lines.kept, 1u, lines.kept_size, file) == lines.kept_size;
+        if (!titled) written = written && fprintf(file, "album = %s\n\n", album->title) > 0;
+        for (unsigned t = 0u; t < album->count; ++t)
+            if (!listed[t]) written = written && fprintf(file, "%s = %s\n", album->tracks[t].file, album->tracks[t].name) > 0;
+        if (!recomp_atomic_commit(file, temporary, path, written))
+            fprintf(stderr, "recomp jukebox: cannot save %s; previous file kept\n", path);
+    }
+    lines_close(&lines);
     free(listed);
 }
 
@@ -895,82 +936,53 @@ static const char ASSIGNMENT_HEADER[] =
    Names.txt behaves the same. */
 static void save_assignments(void)
 {
-    char path[PATH_SIZE], temporary[PATH_SIZE + 64], line[512];
+    char path[PATH_SIZE], temporary[PATH_SIZE + 64];
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
-    char *kept = NULL;
-    size_t kept_size = 0u;
-    FILE *existing = fopen(path, "r");
-    if (existing != NULL) {
-        bool continuing = false; /* inside a line longer than the buffer: kept as it is */
-        while (fgets(line, sizeof line, existing) != NULL) {
-            const size_t length = strlen(line);
-            const bool ended = length > 0u && line[length - 1u] == '\n';
-            const bool part = continuing || (!ended && !feof(existing));
-            continuing = !ended;
-            /* Only the header is the save's: every other '#' line is the player's. */
-            if (!part && strncmp(line, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) continue;
-            char copy[sizeof line];
-            snprintf(copy, sizeof copy, "%s", line);
-            copy[strcspn(copy, "\r\n")] = '\0';
-            char *album = strchr(copy, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
-            bool ours = false;
-            if (!part && line[0] != '#' && track != NULL) {
-                *album++ = '\0';
-                *track++ = '\0';
-                const int i = find_target(copy);
-                int a, t;
-                ours = i >= 0 && (targets[i].album >= 0 || find_saved(album, track, &a, &t));
-            }
-            if (ours) continue;
-            char *grown = realloc(kept, kept_size + length + 2u);
-            if (grown == NULL) { /* Writing without them would drop them. */
-                fclose(existing);
-                free(kept);
-                return;
-            }
-            kept = grown;
-            memcpy(kept + kept_size, line, length);
-            kept_size += length;
-            if (!ended && feof(existing)) kept[kept_size++] = '\n';
-            kept[kept_size] = '\0';
+    Lines lines;
+    lines_open(&lines, path);
+    while (lines_next(&lines) && lines_keep(&lines)) {
+        /* Only the header is the save's: every other '#' line is the player's. */
+        if (strncmp(lines.text, ASSIGNMENT_HEADER, sizeof ASSIGNMENT_HEADER - 1u) == 0) { lines_drop(&lines); continue; }
+        char *album = strchr(lines.text, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
+        if (lines.text[0] == '#' || track == NULL) continue;
+        *album++ = '\0';
+        *track++ = '\0';
+        track[strcspn(track, "\r\n")] = '\0';
+        const int i = find_target(lines.text);
+        int a, t;
+        /* An assignment this build places: the save writes that one again itself. */
+        if (i >= 0 && (targets[i].album >= 0 || find_saved(album, track, &a, &t))) lines_drop(&lines);
+    }
+    FILE *file = lines.intact ? recomp_atomic_open(path, temporary, sizeof temporary) : NULL;
+    if (lines.intact && file == NULL) fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
+    if (file != NULL) {
+        bool written = fprintf(file, "%s", ASSIGNMENT_HEADER) > 0;
+        for (unsigned i = 0u; written && i < target_count; ++i) {
+            if (targets[i].album < 0) continue;
+            written = fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
+                albums[targets[i].album].tracks[targets[i].track].file) > 0;
         }
-        fclose(existing);
+        if (written && lines.kept_size > 0u) written = fwrite(lines.kept, 1u, lines.kept_size, file) == lines.kept_size;
+        if (!recomp_atomic_commit(file, temporary, path, written))
+            fprintf(stderr, "recomp jukebox: cannot save assignments; previous file kept\n");
     }
-    FILE *file = recomp_atomic_open(path, temporary, sizeof temporary);
-    if (file == NULL) {
-        free(kept);
-        fprintf(stderr, "recomp jukebox: cannot write %s\n", path);
-        return;
-    }
-    bool written = fprintf(file, "%s", ASSIGNMENT_HEADER) > 0;
-    for (unsigned i = 0u; written && i < target_count; ++i) {
-        if (targets[i].album < 0) continue;
-        written = fprintf(file, "%s\t%s\t%s\n", targets[i].file, albums[targets[i].album].tab,
-            albums[targets[i].album].tracks[targets[i].track].file) > 0;
-    }
-    if (written && kept_size > 0u) written = fwrite(kept, 1u, kept_size, file) == kept_size;
-    free(kept);
-    if (!recomp_atomic_commit(file, temporary, path, written))
-        fprintf(stderr, "recomp jukebox: cannot save assignments; previous file kept\n");
+    lines_close(&lines);
 }
 
 static void load_assignments(void)
 {
-    char path[PATH_SIZE], line[512];
+    char path[PATH_SIZE];
     snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
-    FILE *file = fopen(path, "r");
-    if (file == NULL) return;
-    bool continuing = false;
-    while (fgets(line, sizeof line, file) != NULL) {
-        const bool part = continuing;
-        continuing = strchr(line, '\n') == NULL && !feof(file);
-        line[strcspn(line, "\r\n")] = '\0';
-        if (part || continuing || line[0] == '#') continue; /* longer than any assignment */
-        char *album = strchr(line, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
+    Lines lines;
+    lines_open(&lines, path);
+    while (lines_next(&lines)) {
+        if (lines.text[0] == '#') continue;
+        char *album = strchr(lines.text, '\t'), *track = album != NULL ? strchr(album + 1, '\t') : NULL;
         if (track == NULL) continue;
         *album++ = '\0';
         *track++ = '\0';
-        const int i = find_target(line);
+        track[strcspn(track, "\r\n")] = '\0';
+        const int i = find_target(lines.text);
         if (i < 0) continue;
         int a, t;
         if (!find_saved(album, track, &a, &t)) {
@@ -984,7 +996,7 @@ static void load_assignments(void)
         else
             targets[i].album = targets[i].track = -1;
     }
-    fclose(file);
+    lines_close(&lines);
 }
 
 /* ---- The page -------------------------------------------------------------- */
