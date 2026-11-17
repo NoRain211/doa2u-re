@@ -296,12 +296,8 @@ static uint32_t slot_index(const LiveRequestState *slot)
     return (uint32_t)(slot - live.requests);
 }
 
-static void fail_request(LiveRequestState *slot, uint32_t hresult)
-{
-    slot->status = RECOMP_LIVE_FAILED;
-    slot->hresult = hresult;
-}
-
+/* Every terminal transition of a request ends here, so the flag a push's friend
+   ask set is freed whichever way it ends: an answer, a refusal or a timeout. */
 static void finish_request(LiveRequestState *slot, uint32_t hresult)
 {
     slot->status = hresult == 0u ? RECOMP_LIVE_DONE : RECOMP_LIVE_FAILED;
@@ -418,7 +414,7 @@ static void settle_group(uint32_t head_index)
         finish_request(head, 0u);
         return;
     }
-    fail_request(head, hresult != 0u ? hresult : LIVE_HRESULT_FAIL);
+    finish_request(head, hresult != 0u ? hresult : LIVE_HRESULT_FAIL);
 }
 
 static bool mark_row(LiveRequestState *slot, uint32_t index)
@@ -723,7 +719,7 @@ static uint32_t refused_request(uint8_t kind, uint32_t hresult)
 {
     uint32_t id;
     LiveRequestState *slot = new_request(kind, &id);
-    if (slot != NULL) fail_request(slot, hresult);
+    if (slot != NULL) finish_request(slot, hresult);
     return id;
 }
 
@@ -1165,6 +1161,12 @@ static RecompLiveRequest client_invite_group(void *self, uint8_t op, const uint8
     if (kid == NULL || xuids == NULL || count == 0u)
         return refused_request(LIVE_FRIEND_OP, LIVE_HRESULT_INVALIDARG);
     if (count > LIVE_GROUP_CHILDREN) return refused_request(LIVE_FRIEND_OP, LIVE_HRESULT_INVALIDARG);
+    /* The invite is all or nothing: with a slot short, the friends that fit
+       would be invited while the game is told the whole group went. */
+    uint32_t free_slots = 0u;
+    for (uint32_t i = 0u; i < LIVE_REQUEST_SLOTS; ++i)
+        if (live.requests[i].id == 0u) ++free_slots;
+    if (free_slots < count) return 0u;
     LiveRequestState *head = NULL;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t id = build_friend_op(packet, sizeof packet, op, xuids[i], 0u, kid, 0u);
@@ -1344,7 +1346,7 @@ void recomp_live_client_tick(uint64_t now_ms)
                 slot->own_hresult = LIVE_HRESULT_TIMEOUT;
                 settle_group(i);
             } else {
-                fail_request(slot, LIVE_HRESULT_TIMEOUT);
+                finish_request(slot, LIVE_HRESULT_TIMEOUT);
             }
             if (slot->head != 0u) settle_group(slot->head - 1u);
             drop_owned(slot);
