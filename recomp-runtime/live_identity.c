@@ -50,20 +50,32 @@ static bool random_secret(uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES])
 #endif
 }
 
+/* Creates a new file only, readable by the player alone: the secret is the
+   whole account, and a name already taken, by a file or by a symlink, belongs
+   to somebody else and is never written through. */
+static int create_exclusive(const char *path)
+{
+#ifdef _WIN32
+    return _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+#else
+    return open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+#endif
+}
+
 static bool write_secret(const char *path, const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES])
 {
     char temporary[1024];
     const int needed = snprintf(temporary, sizeof temporary, "%s.tmp", path);
     if (needed < 0 || (size_t)needed >= sizeof temporary) return false;
-    /* The secret is the whole account, so only the player may read it, and the
-       name must be new: a file or symlink already there belongs to somebody
-       else and is never written through. */
-#ifdef _WIN32
-    const int fd = _open(temporary, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-        _S_IREAD | _S_IWRITE);
-#else
-    const int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-#endif
+    int fd = create_exclusive(temporary);
+    if (fd < 0 && errno == EEXIST) {
+        /* A run killed between its create and its rename leaves this name
+           behind. Removing it drops the name itself, so a planted symlink goes
+           and its target stays, and the create is exclusive again: one
+           interrupted save cannot keep Live unavailable for good. */
+        remove(temporary);
+        fd = create_exclusive(temporary);
+    }
     if (fd < 0) return false;
 #ifdef _WIN32
     FILE *file = _fdopen(fd, "wb");

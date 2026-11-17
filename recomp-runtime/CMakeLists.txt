@@ -390,6 +390,15 @@ if(WIN32)
 endif()
 add_test(NAME recomp-runtime-live-transport COMMAND recomp_live_transport_test)
 
+# The Live identity: the secret file, the proof and XUID it gives, and a name
+# left in the storage folder by an interrupted run.
+add_executable(recomp_live_identity_test live_identity.c live_identity_test.c ../xbe/sha.cpp)
+target_include_directories(recomp_live_identity_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../xbe")
+if(WIN32)
+    target_link_libraries(recomp_live_identity_test PRIVATE bcrypt)
+endif()
+add_test(NAME recomp-runtime-live-identity COMMAND recomp_live_identity_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
