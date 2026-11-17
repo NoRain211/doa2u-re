@@ -71,7 +71,7 @@ bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent)
         mine[fighters] = (user != 0u && xuid == user) || *recomp_memory(member + SESSION_PLAYER_LOCAL, 1u) != 0u;
         ++fighters;
     }
-    if (fighters != FIGHTER_SLOTS || mine[0] == mine[1]) return false;
+    if (fighters != FIGHTER_SLOTS || mine[0] == mine[1] || address[0] == address[1]) return false;
     const unsigned own = mine[0] ? 0u : 1u;
     if (local != NULL) *local = address[own];
     if (opponent != NULL) *opponent = address[1u - own];

@@ -36,8 +36,9 @@ bool recomp_game_at_main_menu(void);
    with sin_addr at +0x18, and the local member is the one whose XUID is the
    logged-on user's (g_online_users 0xf1cba8, +0) or that is marked at +0x2c.
    Writes their virtual addresses (network order) to local and opponent when
-   not NULL. False when the table does not name two fighters or cannot tell
-   the local one; the caller then keeps the game's own lockstep. */
+   not NULL. False when the table does not name two fighters, cannot tell the
+   local one, or gives both the same address (neither side could order the two
+   players); the caller then keeps the game's own lockstep. */
 bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent);
 
 #ifdef __cplusplus

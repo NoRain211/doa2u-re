@@ -427,6 +427,13 @@ static void test_fight_pair(void)
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
     set_slots(0u, 0u);
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
+
+    /* Two fighters at one address cannot be ordered into two players: both
+       sides would pick the same index and swap the pads. */
+    set_slots(RECORD_A, RECORD_B);
+    set_member(RECORD_A, me, mine_ina, true);
+    set_member(RECORD_B, other, mine_ina, false);
+    CHECK(!recomp_game_live_fight_pair(&local, &opponent));
 }
 
 static void test_round_start(void)
