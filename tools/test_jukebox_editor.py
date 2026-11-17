@@ -23,11 +23,24 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Windows.Forms;
 static class EditorChecks
 {
     static object Call(string name, params object[] args)
     {
         return typeof(JukeboxEditor).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, args);
+    }
+    static object Run(JukeboxEditor editor, string name, params object[] args)
+    {
+        return typeof(JukeboxEditor).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, args);
+    }
+    static object Get(object target, string name)
+    {
+        return typeof(JukeboxEditor).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(target);
+    }
+    static void Set(object target, string name, object value)
+    {
+        typeof(JukeboxEditor).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).SetValue(target, value);
     }
     static void Check(bool ok) { if (!ok) throw new Exception("Editor regression failed"); }
     static void Main()
@@ -37,6 +50,33 @@ static class EditorChecks
         var picks = new Dictionary<string, string> { {"one", "DOA4\tedited.adx"}, {"two", "DOA3\tstale.adx"} };
         var merged = (Dictionary<string, string>)Call("MergeAssignments", path, picks, new[] {"one", "three"});
         Check(merged["one"] == "DOA4\tedited.adx" && merged["two"] == "DOA4\tgame.adx" && !merged.ContainsKey("three"));
+        Check((string)Call("RecordText", "one\r\ntwo\tthree = four") == "one  two three = four");
+
+        // Two tracks can share a name: the chosen row keeps its track, not the last matching text.
+        var picker = (JukeboxEditor)FormatterServices.GetUninitializedObject(typeof(JukeboxEditor));
+        var shared = new Album { Tab = "DOA4", Title = "Dead or Alive 4", Folder = "doa4" };
+        shared.Tracks.Add(new Track { File = "a.adx", Name = "Same" });
+        shared.Tracks.Add(new Track { File = "b.adx", Name = "Same" });
+        Set(picker, "albums", new List<Album> { shared });
+        Set(picker, "assigned", new Dictionary<string, string>());
+        Set(picker, "editedSlots", new HashSet<string>());
+        var slots = new DataGridView();
+        slots.Columns.Add(new DataGridViewTextBoxColumn());
+        Type choice = typeof(JukeboxEditor).GetNestedType("Choice", BindingFlags.NonPublic);
+        slots.Columns.Add(new DataGridViewComboBoxColumn { ValueType = choice });
+        Set(picker, "slots", slots);
+        Run(picker, "BuildSlots");
+        object chosen = null;
+        foreach (object item in ((DataGridViewComboBoxColumn)slots.Columns[1]).Items)
+        {
+            var track = (Track)choice.GetField("Track").GetValue(item);
+            if (track != null && track.File == "a.adx") chosen = item;
+        }
+        Check(chosen != null && Convert.ToString(chosen) == (string)Call("TrackLabel", shared, shared.Tracks[0]));
+        slots.Rows[0].Cells[1].Value = chosen;
+        Run(picker, "SlotEdited", null, new DataGridViewCellEventArgs(1, 0));
+        Check(((Dictionary<string, string>)Get(picker, "assigned"))["bgm_doa2_ks.adx"] == "DOA4\ta.adx");
+
         using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             bool failed = false;
