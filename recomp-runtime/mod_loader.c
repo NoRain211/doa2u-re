@@ -21,6 +21,7 @@
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <strings.h>
 #include <unistd.h>
 #endif
 
@@ -315,14 +316,58 @@ typedef struct Walk {
     char relative[PATH_SIZE]; /* its key */
 } Walk;
 
+/* The name a folder stores for one of a key's parts: that name if it is
+   there, else the one that differs only in case, as the kernel finds guest
+   paths on a case-sensitive host. */
+#ifndef _WIN32
+static bool child_name(const char *folder, const char *name, char *out, size_t out_size)
+{
+    DIR *dir = opendir(folder);
+    if (dir == NULL) return false;
+    char found[256] = {0};
+    bool any = false;
+    for (struct dirent *entry; (entry = readdir(dir)) != NULL; ) {
+        if (strcasecmp(entry->d_name, name) != 0) continue;
+        snprintf(found, sizeof found, "%s", entry->d_name);
+        any = true;
+        if (strcmp(entry->d_name, name) == 0) break;
+    }
+    closedir(dir);
+    if (any) snprintf(out, out_size, "%s", found);
+    return any;
+}
+#endif
+
+/* The host path a key names under the disc root, in the case the disc stores
+   it: keys are lower case, while POSIX hosts are case-sensitive. */
+static bool disc_path(const char *disc_root, const char *key, char *out, size_t out_size)
+{
+#ifdef _WIN32
+    join(out, out_size, disc_root, key);
+    for (char *p = out; *p != '\0'; ++p) if (*p == '/') *p = '\\';
+    return true;
+#else
+    snprintf(out, out_size, "%s", disc_root);
+    for (const char *at = key; *at != '\0'; ) {
+        const char *slash = strchr(at, '/');
+        const size_t length = slash != NULL ? (size_t)(slash - at) : strlen(at);
+        char name[256], stored[256], next[PATH_SIZE];
+        if (length == 0u || length >= sizeof name) return false;
+        memcpy(name, at, length);
+        name[length] = '\0';
+        if (!child_name(out, name, stored, sizeof stored)) return false;
+        join(next, sizeof next, out, stored);
+        snprintf(out, out_size, "%s", next);
+        at = slash != NULL ? slash + 1 : at + length;
+    }
+    return true;
+#endif
+}
+
 static bool disc_has_file(const char *disc_root, const char *key)
 {
     char path[PATH_SIZE];
-    join(path, sizeof path, disc_root, key);
-#ifdef _WIN32
-    for (char *p = path; *p != '\0'; ++p) if (*p == '/') *p = '\\';
-#endif
-    return is_file(path, NULL, NULL);
+    return disc_path(disc_root, key, path, sizeof path) && is_file(path, NULL, NULL);
 }
 
 static void walk_entry(void *context, const char *name, bool directory);
@@ -513,10 +558,7 @@ static int by_offset(const void *a, const void *b)
 static void build_archive(const char *disc_root, const char *key)
 {
     char path[PATH_SIZE];
-    join(path, sizeof path, disc_root, key);
-#ifdef _WIN32
-    for (char *p = path; *p != '\0'; ++p) if (*p == '/') *p = '\\';
-#endif
+    if (!disc_path(disc_root, key, path, sizeof path)) return;
     HostFile base;
     if (!host_open(&base, path)) return;
     uint8_t head[8];
@@ -659,18 +701,23 @@ fail:
     host_close(&base);
 }
 
-/* What a file adds to the digest: its key, size and first and last 4 KB. */
+/* What a file adds to the digest: its key, size and every byte of it, so mod
+   sets that differ anywhere pair apart. */
 static uint64_t digest_file(uint64_t hash, const char *key, const char *entry, const HostFile *file)
 {
-    uint8_t sample[4096];
-    uint32_t got = 0u;
+    uint8_t buffer[32768];
     hash = fnv(hash, key, strlen(key));
     hash = fnv(hash, entry, strlen(entry));
     hash = fnv(hash, &file->size, sizeof file->size);
-    if (host_read(file, 0u, sample, sizeof sample, &got)) hash = fnv(hash, sample, got);
-    if (file->size > sizeof sample && host_read(file, file->size - sizeof sample, sample, sizeof sample, &got))
-        hash = fnv(hash, sample, got);
-    return hash;
+    uint64_t at = 0u;
+    while (at < file->size) {
+        uint32_t got = 0u;
+        if (!host_read(file, at, buffer, sizeof buffer, &got) || got == 0u) break;
+        hash = fnv(hash, buffer, got);
+        at += got;
+    }
+    const bool whole = at == file->size;
+    return fnv(hash, &whole, sizeof whole);
 }
 
 bool recomp_mod_loader_install(const char *mods_root, const char *disc_root)
@@ -735,6 +782,11 @@ bool recomp_mod_loader_install(const char *mods_root, const char *disc_root)
             const uint64_t slot = reserved_slot(overlays[i]->key);
             digest = fnv(digest, &slot, sizeof slot);
         }
+        /* The rebuilt table of contents says which entry each mod file landed
+           in and where the game reads it. */
+        if (overlays[i]->replaced != 0u && overlays[i]->count != 0u &&
+            overlays[i]->pieces[0].kind == PIECE_BYTES)
+            digest = fnv(digest, overlays[i]->header, (size_t)overlays[i]->pieces[0].length);
         for (unsigned p = 0u; p < overlays[i]->count; ++p)
             if (overlays[i]->pieces[p].kind == PIECE_FILE)
                 digest = digest_file(digest, overlays[i]->key, "entry", overlays[i]->pieces[p].file);
@@ -856,15 +908,17 @@ bool recomp_mod_overlay_read(const RecompModOverlay *o, RecompModBaseRead base, 
         case PIECE_SLOT: {
             Slot *slot = &o->slots[piece->source];
             if (at == 0u) {
-                /* A track starting: what plays now, or this once (the hook's choice). */
-                const RecompModSource *next = slot->wanted;
-                if (recomp_mod_entry_start != NULL) {
+                /* A track starting: what plays now, or this once (the hook's
+                   choice). Slots off (online) play the entry's own track, so
+                   two games read the same bytes whatever their albums are. */
+                const RecompModSource *next = slots_enabled ? slot->wanted : slot->original;
+                if (slots_enabled && recomp_mod_entry_start != NULL) {
                     const RecompModSource *once = recomp_mod_entry_start(o->key, (unsigned)piece->source, next);
                     if (once != NULL && once->size <= piece->length) next = once;
                 }
                 slot->playing = next;
             }
-            const RecompModSource *source = slot->playing;
+            const RecompModSource *source = slots_enabled ? slot->playing : slot->original;
             uint32_t part = at < source->size ? (uint32_t)(source->size - at < want ? source->size - at : want) : 0u;
             got = 0u;
             if (part != 0u && !(source->file != NULL
@@ -888,10 +942,11 @@ bool recomp_mod_open_writes(uint32_t desired_access, uint32_t create_disposition
     const uint32_t writes = 0x40000000u | 0x10000000u | 0x00000002u | 0x00000004u |
         0x00000010u | 0x00000100u | 0x00010000u | 0x00040000u | 0x00080000u;
     if ((desired_access & writes) != 0u) return true;
-    /* FILE_SUPERSEDE, OVERWRITE, OVERWRITE_IF and FILE_DELETE_ON_CLOSE replace
-       or remove an existing file; CREATE and OPEN_IF leave one untouched. */
-    return create_disposition == 0u || create_disposition == 4u || create_disposition == 5u ||
-        (create_options & 0x04000000u) != 0u;
+    /* FILE_SUPERSEDE, FILE_CREATE, OVERWRITE, OVERWRITE_IF and FILE_DELETE_ON_CLOSE
+       create, replace or remove a file; FILE_OPEN and FILE_OPEN_IF leave one
+       untouched. */
+    return create_disposition == 0u || create_disposition == 2u || create_disposition == 4u ||
+        create_disposition == 5u || (create_options & 0x04000000u) != 0u;
 }
 
 bool recomp_mod_key(const char *disc_root, const char *host_path, char *key, size_t key_size)

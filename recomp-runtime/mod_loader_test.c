@@ -149,6 +149,64 @@ static const RecompModSource *on_start(const char *key, unsigned index, const Re
     return index == 2u ? once_source : NULL;
 }
 
+/* A disc extracted with its own upper-case names still finds its archives: keys
+   are lower case and a POSIX host is case-sensitive. */
+static void test_archive_case(const char *root)
+{
+    char disc[512], mods[512], path[512], archive[512];
+    snprintf(disc, sizeof disc, "%s/case-disc", root);
+    snprintf(mods, sizeof mods, "%s/case-mods", root);
+    make_dir(disc);
+    snprintf(path, sizeof path, "%s/DOA2", disc); make_dir(path);
+    snprintf(archive, sizeof archive, "%s/DOA2/BGM.AFS", disc); make_archive(archive);
+    make_dir(mods);
+    snprintf(path, sizeof path, "%s/x", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/x/doa2", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/x/doa2/bgm.afs", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/x/doa2/bgm.afs/aaa.adx", mods); write_file(path, "AAAAA", 5u);
+
+    CHECK(recomp_mod_loader_install(mods, disc));
+    CHECK(recomp_mod_loader_count() == 1u);
+    const RecompModOverlay *overlay = recomp_mod_overlay("doa2/bgm.afs", 4u * 2048u + 2048u);
+    CHECK(overlay != NULL);
+    if (overlay == NULL) { recomp_mod_loader_shutdown(); return; }
+    uint64_t offset = 0u;
+    CHECK(recomp_mod_entry_offset("doa2/bgm.afs", 4u * 2048u + 2048u, 0u, &offset));
+    base_file = fopen(archive, "rb");
+    uint8_t probe[8] = {0};
+    uint32_t got = 0u;
+    CHECK(recomp_mod_overlay_read(overlay, base_read, NULL, offset, probe, 5u, &got) && memcmp(probe, "AAAAA", 5u) == 0);
+    fclose(base_file);
+    recomp_mod_loader_shutdown();
+}
+
+/* Two mod sets that put the same file in different entries read different
+   archives, so their digests differ and netplay does not pair them. */
+static void test_digest_entries(const char *root)
+{
+    static const char *const entries[2] = {"1.adx", "2.bin"};
+    char disc[512], mods[512], path[512];
+    uint64_t digests[2] = {0u, 0u};
+    snprintf(disc, sizeof disc, "%s/digest-disc", root);
+    make_dir(disc);
+    snprintf(path, sizeof path, "%s/doa2", disc); make_dir(path);
+    snprintf(path, sizeof path, "%s/doa2/bgm.afs", disc); make_archive(path);
+    for (unsigned i = 0u; i < 2u; ++i) {
+        snprintf(mods, sizeof mods, "%s/digest-mods-%u", root, i);
+        make_dir(mods);
+        snprintf(path, sizeof path, "%s/x", mods); make_dir(path);
+        snprintf(path, sizeof path, "%s/x/doa2", mods); make_dir(path);
+        snprintf(path, sizeof path, "%s/x/doa2/bgm.afs", mods); make_dir(path);
+        snprintf(path, sizeof path, "%s/x/doa2/bgm.afs/%s", mods, entries[i]);
+        write_file(path, "ZZZZ", 4u);
+        CHECK(recomp_mod_loader_install(mods, disc));
+        digests[i] = recomp_mod_loader_digest();
+        CHECK(digests[i] != 0u);
+        recomp_mod_loader_shutdown();
+    }
+    CHECK(digests[0] != digests[1]);
+}
+
 static void read_all(const RecompModOverlay *overlay, uint8_t *data, uint64_t size)
 {
     for (uint64_t at = 0u; at < size;) {
@@ -214,6 +272,87 @@ static void test_reserved_slots(const char *root)
     recomp_mod_loader_reserve(NULL, 0u);
 }
 
+/* The digest covers every byte: a mod whose middle changed, at the same size
+   with both ends untouched, is a different mod set. */
+static void test_digest_interior(const char *root)
+{
+    static uint8_t data[20000];
+    char disc[512], mods[512], path[512];
+    snprintf(disc, sizeof disc, "%s/interior-disc", root);
+    make_dir(disc);
+    snprintf(path, sizeof path, "%s/doa2", disc); make_dir(path);
+    snprintf(path, sizeof path, "%s/doa2/movie.sfd", disc); write_file(path, "original", 8u);
+    snprintf(mods, sizeof mods, "%s/interior-mods", root);
+    make_dir(mods);
+    snprintf(path, sizeof path, "%s/x", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/x/doa2", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/x/doa2/movie.sfd", mods);
+    memset(data, 'a', sizeof data);
+    write_file(path, data, sizeof data);
+    CHECK(recomp_mod_loader_install(mods, disc));
+    const uint64_t first = recomp_mod_loader_digest();
+    recomp_mod_loader_shutdown();
+    data[sizeof data / 2u] = 'b';
+    write_file(path, data, sizeof data);
+    CHECK(recomp_mod_loader_install(mods, disc));
+    const uint64_t second = recomp_mod_loader_digest();
+    CHECK(first != 0u && second != 0u && first != second);
+    recomp_mod_loader_shutdown();
+}
+
+/* Online, a reserved archive that mods also change plays each entry's own
+   track: a Jukebox assignment cannot make two games read different bytes. */
+static void test_reserved_slots_online(const char *root)
+{
+    char disc[512], mods[512], path[512], archive[512], track[512];
+    snprintf(disc, sizeof disc, "%s/disc3", root);
+    snprintf(mods, sizeof mods, "%s/mods3", root);
+    make_dir(disc);
+    snprintf(path, sizeof path, "%s/doa2", disc); make_dir(path);
+    snprintf(archive, sizeof archive, "%s/doa2/bgm.afs", disc); make_archive(archive);
+    make_dir(mods);
+    snprintf(path, sizeof path, "%s/m", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/m/doa2", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/m/doa2/bgm.afs", mods); make_dir(path);
+    snprintf(path, sizeof path, "%s/m/doa2/bgm.afs/bbb.adx", mods); write_file(path, "MMMMMMMMMM", 10u);
+    snprintf(track, sizeof track, "%s/track3.adx", root);
+    write_file(track, "QQQQQQ", 6u);
+
+    recomp_mod_loader_reserve("doa2/bgm.afs", 5000u);
+    CHECK(recomp_mod_loader_install(mods, disc));
+    CHECK(recomp_mod_loader_count() == 1u && recomp_mod_loader_digest() != 0u);
+    const RecompModOverlay *overlay = recomp_mod_overlay("doa2/bgm.afs", 4u * 2048u + 2048u);
+    CHECK(overlay != NULL);
+    if (overlay == NULL) { recomp_mod_loader_shutdown(); recomp_mod_loader_reserve(NULL, 0u); return; }
+    base_file = fopen(archive, "rb");
+    uint64_t offset = 0u;
+    uint8_t probe[16] = {0};
+    uint32_t got = 0u;
+    const RecompModSource *q = recomp_mod_source(track, 0u, 0u);
+    CHECK(recomp_mod_entry_offset("doa2/bgm.afs", 10240u, 1u, &offset));
+    CHECK(q != NULL && recomp_mod_assign("doa2/bgm.afs", 1u, q));
+    /* Offline the assignment plays from the entry's next start. */
+    CHECK(recomp_mod_overlay_read(overlay, base_read, NULL, offset, probe, 8u, &got) &&
+        memcmp(probe, "QQQQQQ\0\0", 8u) == 0);
+    /* Online it does not, while the mod's own entry still does, and the hook
+       that could pick a track once is not called. */
+    recomp_mod_loader_enable_slots(false);
+    starts = 0u;
+    once_source = q;
+    recomp_mod_entry_start = on_start;
+    memset(probe, 0, sizeof probe);
+    CHECK(recomp_mod_overlay_read(overlay, base_read, NULL, offset, probe, 16u, &got) &&
+        memcmp(probe, "MMMMMMMMMM\0\0\0\0\0\0", 16u) == 0);
+    CHECK(starts == 0u);
+    CHECK(recomp_mod_overlay_read(overlay, base_read, NULL, offset + 4u, probe, 8u, &got) &&
+        memcmp(probe, "MMMMMM\0\0", 8u) == 0);
+    recomp_mod_entry_start = NULL;
+    recomp_mod_loader_enable_slots(true);
+    fclose(base_file);
+    recomp_mod_loader_shutdown();
+    recomp_mod_loader_reserve(NULL, 0u);
+}
+
 static void test_keys(void)
 {
     char key[256];
@@ -240,10 +379,11 @@ static void test_open_writes(void)
     CHECK(recomp_mod_open_writes(0x80000000u | 0x00010000u /* DELETE */, 1u, 0u));
     CHECK(recomp_mod_open_writes(0x00040000u /* WRITE_DAC */, 1u, 0u));
     CHECK(recomp_mod_open_writes(0x00080000u /* WRITE_OWNER */, 1u, 0u));
-    /* Supersede, overwrite and overwrite-if replace the file, as does delete
-       on close; open, create and open-if leave an existing file alone. */
+    /* Supersede, create, overwrite and overwrite-if make a file at the path,
+       as does delete on close; open and open-if leave an existing file alone. */
     for (uint32_t disposition = 0u; disposition <= 5u; ++disposition)
-        CHECK(recomp_mod_open_writes(0x80000000u, disposition, 0u) == (disposition == 0u || disposition >= 4u));
+        CHECK(recomp_mod_open_writes(0x80000000u, disposition, 0u) ==
+            (disposition == 0u || disposition == 2u || disposition >= 4u));
     CHECK(recomp_mod_open_writes(0x80000000u, 1u, 0x04000000u /* FILE_DELETE_ON_CLOSE */));
 }
 
@@ -421,7 +561,11 @@ int main(void)
     test_keys();
     test_open_writes();
     test_archive_overlay(root);
+    test_archive_case(root);
+    test_digest_entries(root);
+    test_digest_interior(root);
     test_reserved_slots(root);
+    test_reserved_slots_online(root);
     test_adx_round_trip();
     test_wav();
     test_atomic_file(root);
