@@ -738,6 +738,7 @@ static void row_count_alias(void) { row_count(sub_0011AD10); }
 /* Options starts: whatever the Jukebox left behind is over. */
 static void options_init(void)
 {
+    if (jukebox_mode) recomp_jukebox_page_closed(); /* releases its mute */
     jukebox_mode = jukebox_from_menu = false;
     sub_0011AFD0();
 }
