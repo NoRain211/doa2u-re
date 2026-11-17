@@ -5,7 +5,11 @@
 /* The Xbox Live account this install logs on with: a 32-byte
    secret kept beside the netplay settings, the XUID the matchmaker knows it
    by, and the proof it sends with every LOGON. The same secret always gives
-   the same account, so friends and stats survive a restart. */
+   the same account, so friends and stats survive a restart.
+   The proof is a static bearer credential, so whoever observes one LOGON can
+   send it again as this player; the transport does not encrypt it and the
+   matchmaker asks for no per-logon value. A server-issued challenge in the
+   proof's material is a known follow-up, not something this file does. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,7 +21,7 @@ extern "C" {
 enum {
     RECOMP_LIVE_IDENTITY_SECRET_BYTES = 32,
     RECOMP_LIVE_IDENTITY_PROOF_BYTES = 32,
-    /* The high 16 bits of an Xbox Live XUID; the low 48 come from the secret. */
+    /* The high 16 bits of an Xbox Live XUID; the low 48 come from SHA-256(proof). */
     RECOMP_LIVE_XUID_TYPE = 0x0009u,
 };
 
@@ -33,8 +37,9 @@ typedef struct RecompLiveIdentity {
 bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity);
 
 /* The XUID and proof a secret gives: SHA-256("doa2u-live" || secret) is the
-   proof, and the XUID is 0x0009 | the proof's first six bytes as a big-endian
-   48-bit number, so the matchmaker can check one against the other. */
+   proof (plain SHA-256, not HMAC), and the XUID is 0x0009 over the first six
+   bytes of SHA-256(proof) as a big-endian 48-bit number, so the matchmaker can
+   check one against the other without the proof carrying its own XUID bits. */
 void recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
     RecompLiveIdentity *identity);
 
