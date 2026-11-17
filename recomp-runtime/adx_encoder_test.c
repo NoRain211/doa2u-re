@@ -150,7 +150,9 @@ static int test_bad_chunk(void)
 
     /* The odd 0xFFFFFFFF length plus its pad byte is 0x100000000, which a
        32-bit advance wraps to 0; the walk must still stop, so the readable
-       fmt/data headers planted in the oversized chunk's body are never seen. */
+       fmt/data headers planted in the oversized chunk's body are never seen.
+       Only a 32-bit size_t build can tell this apart from the old advance: with
+       64 bits the old advance already ran past the buffer and stopped too. */
     uint8_t trap[12u + 8u + 8u + 16u + 8u + 2u];
     memset(trap, 0, sizeof trap);
     memcpy(trap, "RIFF", 4u); memcpy(trap + 8, "WAVE", 4u);
