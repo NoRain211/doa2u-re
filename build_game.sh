@@ -5,11 +5,32 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="python3"
-if [[ -f "${SCRIPT_DIR}/private/venv/bin/python3" ]]; then
-    PYTHON="${SCRIPT_DIR}/private/venv/bin/python3"
+VENV="${SCRIPT_DIR}/private/venv"
+if [[ -f "${VENV}/bin/python3" ]]; then
+    PYTHON="${VENV}/bin/python3"
 fi
 if ! "${PYTHON}" -c "import sys; sys.exit(sys.version_info < (3, 12))" 2>/dev/null; then
     echo "Python 3.12 or newer is required; see docs/building.md." >&2
     exit 1
+fi
+# Debian and Ubuntu refuse a global pip install, so the build keeps its own packages.
+if [[ "${PYTHON}" == "python3" ]]; then
+    if ! "${PYTHON}" -m venv "${VENV}"; then
+        rm -rf "${VENV}"
+        echo "Could not create ${VENV}. On Debian or Ubuntu: sudo apt install python3-venv" >&2
+        exit 1
+    fi
+    PYTHON="${VENV}/bin/python3"
+fi
+# Check now rather than after the disc import; --lift-only builds nothing.
+if [[ " $* " != *" --lift-only "* ]]; then
+    missing=()
+    for tool in cmake ninja git c++; do
+        command -v "${tool}" >/dev/null || missing+=("${tool}")
+    done
+    if (( ${#missing[@]} )); then
+        echo "Missing build tools: ${missing[*]}. On Linux run ./install_deps.sh; on macOS see docs/building.md." >&2
+        exit 1
+    fi
 fi
 exec "${PYTHON}" "${SCRIPT_DIR}/tools/build_game.py" "$@"

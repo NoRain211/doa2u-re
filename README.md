@@ -4,7 +4,7 @@
 
 # DOA2U Native PC Port
 
-**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source.**
+**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source. Now with rollback netplay.**
 
 [![Latest release](https://img.shields.io/github/v/release/NoRain211/doa2u-re?label=alpha)](https://github.com/NoRain211/doa2u-re/releases/latest)
 [![CI](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml/badge.svg)](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml)
@@ -272,6 +272,8 @@ The importer extracts the disc once into `private/imported-disc` with XboxDev
 in the release ZIP), selects the game executable by its SHA-256 and leaves
 the ISO unchanged. Only that hash is published, in `tools/build_game.py`.
 A different ISO is staged first and replaces that extraction and receipt only if it verifies; a wrong disc keeps the previous import.
+After a successful build the disc moves to `private/play-disc` and the
+extraction keeps only its receipt, so the install holds one copy of the disc.
 After a runtime change, `python tools/build_game.py --build-only` reuses the
 authenticated lift; `--lift-only` generates without building. Generated C,
 receipts and logs stay in `private/`.

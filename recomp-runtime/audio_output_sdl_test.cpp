@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -122,6 +123,7 @@ int main()
     CHECK(recomp_audio_output_enabled() != 0);
     const float front_dry[] = {1.0f, 0.0f, 0.0f, 1.0f};
     const float no_wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    CHECK(recomp_audio_output_set_reverb(&hall));  // its return is captured beside the dry mix
     CHECK(recomp_audio_output_set_voice_routing(4, 2, front_dry, no_wet));
     std::vector<float> level(4800 * 2, 0.5f);  // 100 ms of DC
     const uint32_t level_bytes = static_cast<uint32_t>(level.size() * sizeof(float));
@@ -150,6 +152,13 @@ int main()
     }
     std::fclose(wav);
     unlink(capture);
+    const std::string wet_capture = std::string(capture) + ".wet.wav";
+    FILE *wet = std::fopen(wet_capture.c_str(), "rb");
+    CHECK(wet != nullptr);
+    std::fseek(wet, 0, SEEK_END);
+    CHECK(std::ftell(wet) > 44);
+    std::fclose(wet);
+    unlink(wet_capture.c_str());
     CHECK(largest > 0.0f && largest < 0.01f);
 
     // The ramp eases linearly over its quantum however the chunks split it,
