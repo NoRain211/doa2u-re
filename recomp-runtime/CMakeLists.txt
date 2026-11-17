@@ -256,6 +256,19 @@ add_test(NAME recomp-runtime-movie-color COMMAND recomp_movie_color_test)
 add_executable(recomp_adx_decoder_test adx_decoder.c adx_decoder_test.c)
 add_test(NAME recomp-runtime-adx-decoder COMMAND recomp_adx_decoder_test)
 
+# Mods (mod_loader.c) and the ADX encoder that turns their WAVs, and DOA4's
+# music for tools/import_soundtrack.py, into the game's ADX.
+add_executable(recomp_mod_loader_test mod_loader.c adx_encoder.c adx_decoder.c mod_loader_test.c)
+add_test(NAME recomp-runtime-mod-loader COMMAND recomp_mod_loader_test)
+add_executable(recomp_jukebox_test jukebox_test.c mod_loader.c adx_encoder.c adx_decoder.c)
+add_test(NAME recomp-runtime-jukebox COMMAND recomp_jukebox_test)
+add_executable(recomp_adx_encode adx_encode_tool.c adx_encoder.c adx_decoder.c)
+if(NOT MSVC)
+    target_link_libraries(recomp_mod_loader_test PRIVATE m)
+    target_link_libraries(recomp_jukebox_test PRIVATE m)
+    target_link_libraries(recomp_adx_encode PRIVATE m)
+endif()
+
 add_executable(recomp_sfd_format_test sfd_format.c sfd_format_test.c)
 add_test(NAME recomp-runtime-sfd-format COMMAND recomp_sfd_format_test)
 
@@ -525,7 +538,7 @@ endif()
         runtime.c stop_report.c guest_heap.c guest_snapshot.c xapi_clock.cpp native_fiber.c
         fiber_model.c fiber_adapter.c
         kernel_config.c kernel_crypto.c kernel_debug.c kernel_device.c
-        kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c
+        kernel_dispatch.c kernel_file.c kernel_interrupt.c kernel_memory.c mod_loader.c adx_encoder.c adx_decoder.c
         kernel_ordinals.c kernel_rtl.c kernel_startup.c kernel_thread.c kernel_video.c
         device_model.c apu_model.c ohci_model.c directory_model.c symbolic_link_model.c
         save_transaction.cpp)
@@ -534,6 +547,7 @@ endif()
         target_link_libraries(recomp_kernel PUBLIC bcrypt)
     else()
         target_sources(recomp_kernel PRIVATE win32_compat.c ${RECOMP_FIBER_ASM})
+        target_link_libraries(recomp_kernel PUBLIC m)
     endif()
     add_executable(recomp_kernel_test kernel_test.c kernel_device_test.c kernel_crypto_test.c
         kernel_file_test.c kernel_memory_test.c kernel_rtl_test.c kernel_thread_test.c kernel_video_test.c
@@ -690,7 +704,7 @@ if(RECOMP_PROGRAM_DIR)
         synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
         netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c
         unlock_profile.c pc_settings.c button_config.c
-        pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c
+        pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c jukebox.c
         netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
         host_diagnostics.cpp)

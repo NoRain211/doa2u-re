@@ -2,6 +2,7 @@
 #include "pc_settings.h"
 #include "button_config.h"
 #include "input_host_win32.h"
+#include "jukebox.h"
 #include "runner_assets.h"
 #include "xbox_memory_layout.h"
 #include <stdio.h>
@@ -68,6 +69,8 @@ static uint32_t bars[16], bar_count, preview_count, help_page, help_cursor, help
 static uint32_t labels[16], values[16], label_count, value_count, cursor_marks;
 
 void sub_0011CFC0(void) { ++original_update; ret(1u); }
+static unsigned options_inits;
+void sub_0011AFD0(void) { ++options_inits; ret(0u); }
 void sub_0011AC90(void) { ret(4u); }
 void sub_0011AD10(void) { ret(4u); }
 void sub_0011B8D0(void)
@@ -214,6 +217,22 @@ void sub_00096720(void)
     ret(1u);
 }
 void recomp_stop(int code, const char *format, ...) { fprintf(stderr, "stop %d: %s\n", code, format); abort(); }
+
+/* ---- The Jukebox, faked ----------------------------------------------------- */
+static bool jb_requested;
+static unsigned jb_opened, jb_closed, jb_choice[RECOMP_JUKEBOX_ROWS], jb_confirmed = 99u;
+void recomp_jukebox_request_page(void) { jb_requested = true; }
+bool recomp_jukebox_take_request(void) { const bool r = jb_requested; jb_requested = false; return r; }
+void recomp_jukebox_page_opened(void) { ++jb_opened; }
+void recomp_jukebox_page_closed(void) { ++jb_closed; }
+const char *recomp_jukebox_label(unsigned row) { static const char *const l[5] = {"ALBUM", "TRACK", "PLAY MODE", "ASSIGN TO", "ASSIGNED"}; return l[row]; }
+unsigned recomp_jukebox_choices(unsigned row) { return row == 1u ? 46u : 3u; }
+unsigned recomp_jukebox_choice(unsigned row) { return jb_choice[row]; }
+void recomp_jukebox_choose(unsigned row, unsigned choice) { jb_choice[row] = choice; }
+void recomp_jukebox_confirm(unsigned row) { jb_confirmed = row; }
+static const char *jb_track = "Ayane";
+const char *recomp_jukebox_value(unsigned row) { return row == 1u ? jb_track : "DOA4"; }
+const char *recomp_jukebox_help(unsigned row) { (void)row; return "Help"; }
 
 /* ---- Host ---------------------------------------------------------------------- */
 static unsigned changed_setting = 99u, changed_choice = 99u, closed;
@@ -577,6 +596,59 @@ int main(void)
     hook(0x00095a70u, &context, 1u);
     expect("relabel", invalidated == 4u);
     expect("unhooked", recomp_pc_settings_lookup_manual(0x0011c590u) == NULL);
+
+    /* The Jukebox: the main menu asks, the next update opens page 19 as it. */
+    language = 1u;
+    wr16(DEPTH, 0u); wr16(PAGE, 0u);
+    recomp_jukebox_request_page();
+    hook(0x0011cfc0u, none, 2u);
+    expect("jukebox opens", jb_opened == 1u && rd16(DEPTH) == 1u && rd16(PAGE) == 19u && rd16(CURSORS + 2u) == 0u);
+    const uint32_t page19 = 19u;
+    expect("jukebox rows", hook(0x0011ac90u, &page19, 1u) == RECOMP_JUKEBOX_ROWS);
+    hook(draw, &context, 1u);
+    expect("jukebox labels", label_count == RECOMP_JUKEBOX_ROWS && ascii(labels[0]) == 'A' && ascii(labels[3]) == 'A' &&
+        rd16(labels[2] + 2u) == 'L');
+    expect("jukebox values", value_count == RECOMP_JUKEBOX_ROWS && ascii(values[1]) == 'A' && rd16(values[1] + 10u) == 0u &&
+        ascii(values[0]) == 'D');
+    jb_track = "Caf\xc3\xa9 \xe6\x97\xa5\xf0\x9f\x8e\xb5";
+    hook(draw, &context, 1u);
+    expect("UTF-8 names become UTF-16", rd16(values[1] + 6u) == 0xe9u &&
+        rd16(values[1] + 10u) == 0x65e5u && rd16(values[1] + 12u) == 0xd83cu && rd16(values[1] + 14u) == 0xdfb5u);
+    jb_track = "bad\xc0x";
+    hook(draw, &context, 1u);
+    expect("invalid UTF-8 is replaced", rd16(values[1] + 6u) == '?' && rd16(values[1] + 8u) == 'x');
+    jb_track = "Ayane";
+    /* The top list stays hidden beside it. */
+    drawn_count = 0u;
+    hook(0x00095a70u, &context, 1u);
+    expect("no top list", drawn_count == 0u);
+    /* Down to Track, right steps it, A plays. */
+    nav_delta = 1; step_delta = 1;
+    hook(0x0011cfc0u, none, 2u);
+    nav_delta = 0; step_delta = 0;
+    expect("track stepped", rd16(CURSORS + 2u) == 1u && jb_choice[1] == 1u);
+    confirm_pressed = 1u;
+    hook(0x0011cfc0u, none, 2u);
+    confirm_pressed = 0u;
+    expect("track confirmed", jb_confirmed == 1u);
+    const uint32_t help_args[3] = {19u, 1u, 0u};
+    hook(0x00091560u, help_args, 3u);
+    expect("jukebox help", help_page == 0u && ascii(help_text) == 'H');
+    /* Back leaves Options for the main menu, as the top list's back does. */
+    const unsigned left_before = left_options;
+    back_pressed = 1u;
+    hook(0x0011cfc0u, none, 2u);
+    back_pressed = 0u;
+    expect("jukebox back", jb_closed == 1u && left_options == left_before + 1u && rd16(DEPTH) == 0u && rd16(PAGE) == 0u);
+    /* While Options fades out the top list neither draws nor takes input. */
+    const unsigned leaving = left_options;
+    back_pressed = 1u;
+    hook(0x0011cfc0u, none, 2u);
+    back_pressed = 0u;
+    expect("no options list while leaving", left_options == leaving);
+    hook(0x0011afd0u, none, 0u);
+    expect("options init clears jukebox", options_inits == 1u);
+    expect("pc page again", hook(0x0011ac90u, &page19, 1u) == 6u); /* the Page row and a view of five */
     return fails == 0 ? 0 : 1;
 }
 

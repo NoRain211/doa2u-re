@@ -15,7 +15,7 @@ own disc; folders that already hold clips are kept. Your own picks go in
 (medium), _HIT_LV3_ (heavy) and <name>_KO_NN.wav; --save-selections writes
 them back into the mapping. A fighter without selections stays silent.
 Nothing it writes into private/ may be committed; the mapping holds no audio. Needs an ffmpeg with the xma1 decoder
-(any ordinary build) on PATH or given with --ffmpeg.
+(any ordinary build): the one the build fetches into tools/ffmpeg on Windows, else on PATH or given with --ffmpeg.
 
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs --save-selections
@@ -30,6 +30,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+
+from build_prerequisites import find_ffmpeg
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
 # the wave bank is the entry before it.
@@ -262,13 +264,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("snd_afs", help="snd.afs from your extracted DOA4 disc")
     parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "private", "doa4-voice-all"))
-    parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--ffmpeg", help="ffmpeg with the xma1 decoder (default: the build's tools/ffmpeg, else PATH)")
     parser.add_argument("--no-selections", action="store_true", help="decode only; don't build selections from the mapping")
     parser.add_argument("--replace-selections", action="store_true", help="rebuild selections folders that already have clips")
     parser.add_argument("--save-selections", action="store_true",
         help="write the mapping from your selections folders instead of decoding")
     parser.add_argument("--mapping", default=MANIFEST, help="the mapping file (default tools/doa4_voice_selections.json)")
     args = parser.parse_args()
+    args.ffmpeg = args.ffmpeg or find_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     entries = afs_entries(args.snd_afs)
     with open(args.snd_afs, "rb") as afs:
         if args.save_selections:

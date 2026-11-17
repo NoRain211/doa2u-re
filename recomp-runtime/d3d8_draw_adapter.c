@@ -1616,6 +1616,47 @@ static bool projected_add_stages(uint32_t device)
 }
 
 static uint32_t draw_submitted;
+
+/* 2D art at a larger size: the presenter keeps a draw's samples inside its
+   texcoords' box (d3d_draw_shader.cpp), which only works when the draw is one
+   piece. A screen-space triangle list of separate pieces (a string's letters,
+   a banner's tiles: "Counter Hit") is sent piece by piece, each a run of
+   triangles sharing vertices, so each piece samples only its own art. */
+static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_art)
+{
+    const RecompD3dPresenterDrawCommand *draw = &command->data.draw;
+    const uint32_t triangles = draw->index_count / 3u;
+    if (!screen_art || draw->primitive_type != 5u || !draw->has_texture || draw->index_bytes == NULL ||
+        triangles < 2u || triangles > 512u || draw->index_count != triangles * 3u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    const uint16_t *index = draw->index_bytes;
+    static uint32_t tags[65536], generation;
+    uint32_t pieces = 0u;
+    uint32_t starts[513];
+    for (uint32_t t = 0u; t < triangles; ++t) {
+        bool shared = t != 0u && (tags[index[t * 3u]] == generation ||
+            tags[index[t * 3u + 1u]] == generation || tags[index[t * 3u + 2u]] == generation);
+        if (!shared) {
+            starts[pieces++] = t;
+            if (++generation == 0u) { memset(tags, 0, sizeof tags); ++generation; }
+        }
+        for (uint32_t b = 0u; b < 3u; ++b) tags[index[t * 3u + b]] = generation;
+    }
+    if (pieces < 2u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    starts[pieces] = triangles;
+    RecompD3dPresenterCommand piece = *command;
+    for (uint32_t p = 0u; p < pieces; ++p) {
+        piece.data.draw.index_bytes = index + starts[p] * 3u;
+        piece.data.draw.index_count = (starts[p + 1u] - starts[p]) * 3u;
+        piece.data.draw.triangle_count = starts[p + 1u] - starts[p];
+        recomp_d3d8_submit(&piece);
+    }
+}
 /* Shared identity indices for non-indexed draws (count is at most 65536). */
 static uint16_t draw_indices[65536u];
 
@@ -1859,7 +1900,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
        tasks does not change. */
     if (!(layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u &&
             recomp_scene_freeze_overlay_hidden()))
-        recomp_d3d8_submit(&command);
+        submit_pieces(&command, layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u);
     ++draw_submitted;
 }
 

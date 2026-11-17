@@ -1,5 +1,8 @@
 # Private inputs and generated game output
 private/**
+# Players' mods (README: Mods) hold their own and the game's content.
+/mods/
+/jukebox/
 !private/README.md
 orig/
 dump/
@@ -15,6 +18,7 @@ recomp_dispatch.c
 recomp_funcs.h
 tools/artifacts/
 tools/llvm-mingw/
+tools/ffmpeg/
 tools/disasm/output/
 
 # Game and console artifacts
@@ -71,3 +75,4 @@ Thumbs.db
 /Launcher.exe
 /DOA2U.exe
 /VoiceEditor.exe
+/JukeboxEditor.exe
