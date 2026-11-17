@@ -906,8 +906,8 @@ class LauncherForm : Form
         DetectDiscAsync(path, delegate(string game)
         {
             if (game == "doa3" || game == "doa4") StartImport(path);
-            else if (game == "doa2u") UseDisc(path);
-            else notice = "Could not identify this disc. Your Disc 2 choice was kept.";
+            // Unknown (no Python, or detection failed) keeps the old behaviour: build it.
+            else UseDisc(path);
         });
         Activate();
         Invalidate();

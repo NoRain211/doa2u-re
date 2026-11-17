@@ -103,7 +103,6 @@ static bool in_update, label_made;
 static bool asking;              /* the quit prompt is open for Quit Game */
 
 static void (*jukebox_request)(void); /* NULL: no Jukebox entry */
-static void (*menu_probe)(void);      /* a developer's probe, in the menu's context */
 static uint32_t jukebox_entry;
 static int jukebox_position = -1;
 static bool jukebox_label_made;
@@ -438,11 +437,6 @@ void recomp_menu_quit_set_jukebox(void (*request)(void))
     jukebox_request = request;
 }
 
-void recomp_menu_quit_set_probe(void (*probe)(void))
-{
-    menu_probe = probe;
-}
-
 /* ---- The carousel --------------------------------------------------- */
 
 static void menu_build(void)
@@ -465,11 +459,11 @@ static int clamped(uint32_t position)
 
 static void menu_entry(void)
 {
-    if (menu_probe != NULL) menu_probe();
     if (jukebox_position >= 0 && clamped(kernel_arg(1u)) == jukebox_position) {
         RecompGameSprite word;
         if (!jukebox_label_made) jukebox_label_made = make_jukebox_label();
-        else if (recomp_game_sprite(PIECES[0].sprite, WORD_H, &word)) /* reloaded art */
+        /* Reloaded art: the same piece the label's palette was taken from. */
+        else if (recomp_game_sprite(PIECES[0].sprite, WORD_H, &word))
             recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, word.palette);
         kernel_return_caller_cleanup(jukebox_entry);
         return;

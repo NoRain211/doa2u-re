@@ -20,8 +20,6 @@ extern "C" {
 /* Before install: the Jukebox's entry, before Quit Game, enters Options
    after calling request. NULL (the default) leaves it out. */
 void recomp_menu_quit_set_jukebox(void (*request)(void));
-/* Called in the main menu's context each frame it lists entries (a developer's probe). */
-void recomp_menu_quit_set_probe(void (*probe)(void));
 void recomp_menu_quit_install(void);
 RecompFunction recomp_menu_quit_lookup_manual(uint32_t guest_address);
 

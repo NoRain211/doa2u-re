@@ -12,9 +12,9 @@ extern "C" {
 /* The Jukebox plays DOA2U's music from its disc and the albums
    tools/import_soundtrack.py imports from the player's own DOA3 and DOA4
    (<private>/jukebox/<album>/tracks.txt), and assigns any of them to the
-   game's own music: each entry of the music table (0x6a0b2c), which the game
-   plays by file name from DOA2/bgm.afs. The mod loader serves bgm.afs with
-   every entry in a slot big enough for any track (mod_loader.h), so an
+   game's own music: each entry of the music table DOA2.xbe holds, which the
+   game plays by file name from DOA2/bgm.afs. The mod loader serves bgm.afs
+   with every entry in a slot big enough for any track (mod_loader.h), so an
    assignment is a new source for that slot from the track's next start.
    Assignments are kept in <private>/jukebox/assignments.txt.
 
@@ -48,9 +48,6 @@ const char *recomp_jukebox_help(unsigned row);
 
 /* Once a frame: feeds the output. */
 void recomp_jukebox_pump(void);
-
-/* For tests: a DOA2U music file's name in the Jukebox, or NULL to leave it out. */
-const char *recomp_jukebox_doa2u_name(const char *file);
 
 #ifdef __cplusplus
 }

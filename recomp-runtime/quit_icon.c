@@ -16,6 +16,9 @@ typedef struct Point { float x, y; } Point;
 
 #define OUTLINE 51.0f
 
+/* tops and bottoms in draw_shapes; every list is asserted against it. */
+enum { MAX_SHAPES = 16 };
+
 enum { SHAPE_POLYGON, SHAPE_CIRCLE };
 typedef struct Shape {
     int kind;
@@ -38,6 +41,7 @@ static const Shape SHAPES[] = {
     /* The arrow leaving through the doorway. */
     {SHAPE_POLYGON, {{54, 55}, {90, 55}, {90, 40}, {118, 66}, {90, 92}, {90, 77}, {54, 77}}, 7, 0, 3.0f, 252, 150},
 };
+_Static_assert(sizeof SHAPES / sizeof SHAPES[0] <= MAX_SHAPES, "the picture's shapes exceed MAX_SHAPES");
 
 static float segment_distance(Point p, Point a, Point b)
 {
@@ -101,15 +105,15 @@ static const Shape JUKEBOX_SHAPES[] = {
     {SHAPE_POLYGON, {{106, 18}, {117, 27}, {123, 42}, {120, 55}, {114, 41}, {106, 36}}, 6, 0, 3.0f, 252, 170},
     {SHAPE_CIRCLE, {{93, 100}}, 0, 13.0f, 3.0f, 252, 150},
 };
+_Static_assert(sizeof JUKEBOX_SHAPES / sizeof JUKEBOX_SHAPES[0] <= MAX_SHAPES, "the Jukebox's shapes exceed MAX_SHAPES");
 
 static void draw_shapes(const Shape *list, int shapes, float squeeze,
     uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
 {
-    enum { N = QUIT_ICON_SIZE, SS = 4, MAX_SHAPES = 16 };
+    enum { N = QUIT_ICON_SIZE, SS = 4 };
     const float FIT = 0.88f; /* the design's margin, as the other pictures leave */
     static float shape_alpha[N * N], shape_grey[N * N];
     float tops[MAX_SHAPES], bottoms[MAX_SHAPES];
-    if (shapes > MAX_SHAPES) shapes = MAX_SHAPES;
     for (int i = 0; i < shapes; ++i) shape_span(&list[i], &tops[i], &bottoms[i]);
     if (!(squeeze > 0.0f)) squeeze = 1.0f;
     for (int y = 0; y < N; ++y)
