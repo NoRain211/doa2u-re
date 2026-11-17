@@ -10,6 +10,7 @@ from test_import_soundtrack import xdvdfs_image
 
 import import_doa4_voices as voices
 import import_soundtrack as soundtrack
+from test_xact import sound_bank_image
 
 
 def wav(path, samples):
@@ -37,26 +38,6 @@ def make_wave_bank(clips):
         struct.pack_into(">4I", data, 0x100 + 16 * i, 0, fmt, at, length)
         at += length
     return bytes(data)
-
-
-def make_sound_bank(cues):
-    """A big-endian XACT 2 sound bank holding one simple cue per (name, wave)."""
-    simple, names = 0x40, 0x40 + 5 * len(cues)
-    sounds = names + 6 * len(cues)
-    labels = sounds + 16 * len(cues)
-    text = bytearray()
-    data = bytearray(labels)
-    data[0:4] = b"KBDS"
-    struct.pack_into(">h", data, 0x09, len(cues))
-    struct.pack_into(">i", data, 0x1A, simple)
-    struct.pack_into(">i", data, 0x3A, names)
-    for i, (name, wave) in enumerate(cues):
-        struct.pack_into(">i", data, simple + 5 * i + 1, sounds + 16 * i)
-        struct.pack_into(">i", data, names + 6 * i, labels + len(text))
-        text += name.encode("ascii") + b"\0"
-        # Its flag byte stays 0: a simple sound, with the wave at +9.
-        struct.pack_into(">h", data, sounds + 16 * i + 9, wave)
-    return bytes(data + text)
 
 
 def voice_entries(wave_bank, sound_bank):
@@ -88,6 +69,12 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(archive.read(), b"")
             self.assertEqual(os.listdir(root), ["doa4.iso"])
 
+    def test_a_bad_entry_table_is_reported_before_any_bank_is_read(self):
+        for image in (b"nope", b"AFS\0" + struct.pack("<I", 1) + struct.pack("<II", 2048, 8)):
+            with self.subTest(image=image):
+                with self.assertRaises(ValueError):
+                    voices.read_afs_entries(voices.ArchiveView(io.BytesIO(image), 0, len(image)))
+
     def test_invalid_banks_create_no_output_and_never_run_the_decoder(self):
         with tempfile.TemporaryDirectory() as root:
             source, out = os.path.join(root, "snd.afs"), os.path.join(root, "output")
@@ -97,36 +84,17 @@ class ArchiveTests(unittest.TestCase):
                 file.write(b"AFS\0" + struct.pack("<I", count) + struct.pack("<II", end, 0) * count)
             with mock.patch.object(soundtrack, "fetch_ffmpeg", return_value="unused"), \
                     mock.patch.object(voices.subprocess, "run") as run:
-                with self.assertRaises((ValueError, struct.error)):
+                with self.assertRaises(ValueError):
                     voices.main([source, "--out", out])
             self.assertFalse(os.path.exists(out))
             run.assert_not_called()
 
 
 class BankTests(unittest.TestCase):
-    def test_cue_names_that_could_leave_the_output_folder_are_rejected(self):
-        for name in ("../../escape", "a/b", "a\\b", "..", "x..y", "", "sp ace", "\x01no"):
-            with self.subTest(name=name):
-                with self.assertRaises(ValueError):
-                    voices.cue_waves(make_sound_bank([(name, 0)]))
-
-    def test_cue_offsets_outside_the_bank_are_rejected(self):
-        bank = make_sound_bank([("zac_068_down", 0)])
-        for field, value in ((0x40 + 1, len(bank) + 10), (0x40 + 1, -4), (0x40 + 5, -1)):
-            with self.subTest(field=field, value=value):
-                broken = bytearray(bank)
-                struct.pack_into(">i", broken, field, value)
-                with self.assertRaises(ValueError):
-                    voices.cue_waves(bytes(broken))
-
-    def test_safe_cue_names_map_to_their_wave(self):
-        self.assertEqual(voices.cue_waves(make_sound_bank([("zac_068_down_03a", 3), ("zac_071_down_03d", 5)])),
-                         {"zac_068_down_03a": 3, "zac_071_down_03d": 5})
-
     def test_a_poisoned_cue_name_writes_nothing(self):
         with tempfile.TemporaryDirectory() as root:
             wave = make_wave_bank([(1, 48000, 4)])
-            afs, entries = voice_entries(wave, make_sound_bank([("../../escaped", 0)]))
+            afs, entries = voice_entries(wave, sound_bank_image([("../../escaped", 0)]))
             out = os.path.join(root, "out")
             with mock.patch.object(voices.subprocess, "run") as run:
                 with self.assertRaises(ValueError):
@@ -135,25 +103,12 @@ class BankTests(unittest.TestCase):
             self.assertFalse(os.path.exists(out))
             self.assertEqual(os.listdir(root), [])
 
-    def test_a_valid_bank_still_parses(self):
-        self.assertEqual(voices.wave_bank(make_wave_bank([(1, 48000, 4), (2, 48000, 8)])),
-                         [(0x200, 4, 1, 48000), (0x204, 8, 2, 48000)])
-        afs, entries = voice_entries(make_wave_bank([(1, 48000, 4)]), make_sound_bank([("zac_068_down", 0)]))
+    def test_a_valid_bank_is_decoded(self):
+        afs, entries = voice_entries(make_wave_bank([(1, 48000, 4)]), sound_bank_image([("zac_068_down", 0)]))
         with tempfile.TemporaryDirectory() as out, mock.patch.object(voices.subprocess, "run") as run:
             files = voices.decode_bank(afs, entries, "zac", out, "ffmpeg")
         self.assertEqual(files, {0: "zac_000_068_down.wav"})
         run.assert_called_once()
-
-    def test_a_malformed_wave_table_is_reported_not_looped_or_indexed(self):
-        bank = make_wave_bank([(1, 48000, 4)])
-        for header, count, size in ((0, 8, 0), (0, 1000, 16), (0xFFFFFFFF, 1, 16)):
-            with self.subTest(header=header, count=count, size=size):
-                data = bytearray(bank)
-                struct.pack_into(">II", data, 8, header, 0x100)
-                struct.pack_into(">I", data, 4, count)
-                struct.pack_into(">I", data, 0x48, size)
-                with self.assertRaises(ValueError):
-                    voices.wave_bank(bytes(data))
 
     def test_a_short_entry_table_is_reported_not_indexed(self):
         with self.assertRaises(ValueError):
@@ -212,6 +167,18 @@ class MappingTests(unittest.TestCase):
             self.assertEqual(voices.pcm_of(os.path.join(chosen, "ayane_KO_02.wav")), struct.pack("<2h", 4, 5))
             self.assertEqual(voices.read_tuning(os.path.join(chosen, "voice.ini")), {"gap_ms": "700"})
             self.assertEqual(voices.selection_files(os.path.join(out, "zac", "selections")), ["mine_KO_01.wav"])
+
+
+class CueTests(unittest.TestCase):
+    def test_only_simple_cues_map_to_waves(self):
+        bank = sound_bank_image([("left_hit", 3), ("theme", [1, 2]), ("right_hit", 9)])
+        self.assertEqual(voices.cue_waves(bank), {"left_hit": 3, "right_hit": 9})
+
+    def test_cue_names_that_could_leave_the_output_folder_are_rejected(self):
+        for name in ("../../escape", "a/b", "a\\b", "..", "x..y", "", "sp ace", "\x01no"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    voices.cue_waves(sound_bank_image([(name, 0)]))
 
 
 if __name__ == "__main__":

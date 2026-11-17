@@ -33,6 +33,7 @@ import sys
 import tempfile
 
 from import_soundtrack import Folder, Xdvdfs, detect, open_source, resolve_ffmpeg
+from xact import afs_table, cue_tracks, wave_bank, xma1_riff
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
 # the wave bank is the entry before it.
@@ -104,23 +105,25 @@ def open_archive(path):
 
 
 def read_afs_entries(file):
+    """(offset, length) per entry of a streaming AFS archive, from its header and table."""
     file.seek(0)
     head = file.read(8)
-    if len(head) != 8 or head[:4] != b"AFS\0":
+    if len(head) != 8:
         raise ValueError("not an AFS voice archive")
     count = struct.unpack_from("<I", head, 4)[0]
-    if count <= max(BANKS.values()) or count > 65536 or 8 + 8 * count > file.size:
+    # The table alone is enough to reject a wrong file; refuse an absurd count rather
+    # than read most of the disc first.
+    if count > 65536 or 8 + 8 * count > file.size:
         raise ValueError("unsupported voice archive table")
-    table = file.read(8 * count)
-    entries = [struct.unpack_from("<II", table, 8 * i) for i in range(count)]
+    entries = afs_table(head + file.read(8 * count))
     if any(offset + length > file.size for offset, length in entries):
         raise ValueError("voice archive entry extends beyond the archive")
     return entries
 
 
-def afs_entries(path):
-    with open_archive(path) as file:
-        return read_afs_entries(file)
+def cue_waves(data):
+    """Cue name -> wave index for a big-endian XACT 2 sound bank's simple cues."""
+    return {cue_label(cue): wave for cue, wave, _loop, complex_sound in cue_tracks(data) if not complex_sound}
 
 
 def validate_banks(afs, entries):
@@ -131,64 +134,14 @@ def validate_banks(afs, entries):
         afs.seek(entries[index - 1][0])
         data = afs.read(entries[index - 1][1])
         waves = wave_bank(data)
-        if not waves or any(offset + length > len(data) or length == 0 or
-                            channels not in (1, 2) or rate == 0 for offset, length, channels, rate in waves):
+        if not waves or any(length == 0 or channels not in (1, 2) or rate == 0
+                            for _offset, length, channels, rate, _samples in waves):
             raise ValueError(f"{prefix}: invalid wave bank")
         afs.seek(entries[index][0])
         cues = cue_waves(afs.read(entries[index][1]))
         if not cues or not any(cue.startswith(prefix + "_") for cue in cues) or \
                 any(wave < 0 or wave >= len(waves) for wave in cues.values()):
             raise ValueError(f"{prefix}: this is not the expected DOA4 fighter sound bank")
-
-
-def wave_bank(data):
-    """(offset, length, channels, rate) per wave of a big-endian XACT 2 bank."""
-    if data[:4] != b"DNBW" or len(data) < 8 + 8 * 5:
-        raise ValueError("not a big-endian wave bank")
-    segments = [struct.unpack_from(">II", data, 8 + 8 * i) for i in range(5)]
-    bank = segments[0][0]
-    if bank + 0x4C > len(data):
-        raise ValueError("wave bank header extends beyond the bank")
-    count = struct.unpack_from(">I", data, bank + 4)[0]
-    size = struct.unpack_from(">I", data, bank + 0x48)[0]
-    # A zero record size or a table past the bank would read one record forever or raise
-    # struct.error; report the malformed bank instead.
-    if count == 0 or size < 16 or segments[1][0] + count * size > len(data):
-        raise ValueError("invalid wave bank table")
-    waves = []
-    for i in range(count):
-        _, fmt, offset, length = struct.unpack_from(">4I", data, segments[1][0] + i * size)
-        if fmt & 1 == 0:
-            raise ValueError(f"wave {i} is not XMA")
-        waves.append((segments[4][0] + offset, length, (fmt >> 1) & 7, (fmt >> 4) & 0x7FFFF))
-    return waves
-
-
-def cue_waves(data):
-    """Cue name -> wave index for a big-endian XACT 2 sound bank's simple cues."""
-    if data[:4] != b"KBDS":
-        raise ValueError("not a big-endian sound bank")
-    s16 = lambda at: struct.unpack_from(">h", data, at)[0]
-    s32 = lambda at: struct.unpack_from(">i", data, at)[0]
-    cues, simple, names = s16(0x09), s32(0x1A), s32(0x3A)
-    out = {}
-    for i in range(cues):
-        sound, name = s32(simple + 5 * i + 1), s32(names + 6 * i)
-        # A negative offset would index from the end; past the end, IndexError escapes the handler.
-        if not (0 <= sound < len(data) and 0 <= name < len(data)):
-            raise ValueError(f"cue {i} points outside the sound bank")
-        label = data[name:data.index(b"\0", name)].decode("ascii")
-        label = cue_label(label)
-        if data[sound] & 1 == 0:  # a simple sound: one wave
-            out[label] = s16(sound + 9)
-    return out
-
-
-def xma1_riff(raw, channels, rate):
-    fmt = struct.pack("<HHHHHBB", 0x165, 16, 0x10D6, 0, 1, 0, 2)
-    fmt += struct.pack("<IIIIBBH", rate * channels // 2, rate, 0, 0, 0, channels, 4 if channels == 1 else 3)
-    body = b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(raw)) + raw
-    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
 
 
 def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
@@ -208,7 +161,7 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
     os.makedirs(out_folder, exist_ok=True)
     files = {}
     with tempfile.TemporaryDirectory(prefix=".decode-", dir=out_folder) as scratch:
-        for n, (offset, length, channels, rate) in enumerate(waves):
+        for n, (offset, length, channels, rate, _samples) in enumerate(waves):
             if only is not None and n not in only:
                 continue
             labels = sorted(names.get(n, []))
@@ -394,5 +347,5 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (OSError, ValueError, struct.error, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise SystemExit(f"Voice import failed: {error}") from error
