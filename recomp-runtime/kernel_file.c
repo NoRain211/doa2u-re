@@ -489,10 +489,11 @@ static uint32_t session_attributes(uint32_t host)
 
 /* ---- Mods (mod_loader.h) ---------------------------------------------- */
 
+/* Access rights alone: a create or replace reaches register_file_handle only
+   on a writable save path, never a disc key. */
 static bool mod_write_access(uint32_t desired_access)
 {
-    /* GENERIC_WRITE, GENERIC_ALL, FILE_WRITE_DATA, FILE_APPEND_DATA */
-    return (desired_access & (0x40000000u | 0x10000000u | 0x2u | 0x4u)) != 0u;
+    return recomp_mod_open_writes(desired_access, 1u /* FILE_OPEN */, 0u);
 }
 
 static bool mod_key_of(const char *host_path, char *key, size_t key_size)
@@ -536,10 +537,13 @@ static uint64_t mod_listed_size(const char *directory, const char *name, uint64_
 
 /* A mod's whole file in place of a disc file (or the Z: cache's copy of
    one) opened for reading. */
-static void mod_redirect(char *host_path, size_t host_path_size, uint32_t desired_access)
+static void mod_redirect(
+    char *host_path, size_t host_path_size, uint32_t desired_access,
+    uint32_t create_disposition, uint32_t create_options)
 {
     char key[MAX_PATH_LEN];
-    if (mod_write_access(desired_access) || !mod_key_of(host_path, key, sizeof key)) return;
+    if (recomp_mod_open_writes(desired_access, create_disposition, create_options) ||
+        !mod_key_of(host_path, key, sizeof key)) return;
     const char *replacement = recomp_mod_replacement(key);
     if (replacement == NULL || strlen(replacement) >= host_path_size) return;
     fprintf(stderr, "recomp mods: %s from %s\n", key, replacement);
@@ -1440,6 +1444,7 @@ static const char *resolve_and_open(
     char *host_path,
     uint32_t desired_access,
     uint32_t share_access,
+    uint32_t create_disposition,
     uint32_t open_options,
     HANDLE *out_host_handle,
     int *out_is_directory,
@@ -1515,7 +1520,7 @@ static const char *resolve_and_open(
         return "profile-path-delete-pending";
     }
     DWORD open_error;
-    mod_redirect(host_path, MAX_PATH_LEN, desired_access);
+    mod_redirect(host_path, MAX_PATH_LEN, desired_access, create_disposition, open_options);
     if (try_open_host_file(host_path, MAX_PATH_LEN, out_host_handle,
             profile_access(host_path, desired_access), share_access, &open_error)) {
         return *out_is_writable ? "host-save-file-open" : "host-disc-file-open";
@@ -1555,7 +1560,7 @@ static void bridge_nt_open_file(void)
 
     policy = resolve_and_open(
         object_attributes, guest_path, host_path, desired_access, share_access,
-        open_options, &host_handle, &is_directory, &is_writable, &status);
+        1u /* FILE_OPEN */, open_options, &host_handle, &is_directory, &is_writable, &status);
     uint32_t save_owner = current_save_owner();
     desired_access = profile_access(host_path, desired_access);
     bool requested_write = (desired_access & 0x40000000u) != 0u;
@@ -1650,7 +1655,7 @@ static void bridge_nt_create_file(void)
 
     policy = resolve_and_open(
         object_attributes, guest_path, host_path, desired_access, share_access,
-        create_options, &host_handle, &is_directory, &is_writable, &status);
+        create_disposition, create_options, &host_handle, &is_directory, &is_writable, &status);
 
     uint32_t save_owner = current_save_owner();
     bool profile_path = is_profile_path(host_path);

@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Synthetic source authentication and target-custody checks."""
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from build_game import (STEPS, build, build_fraction, drop_owned_extraction, failure_excerpt, import_disc,
-                        lifter_revision, merge_functions, program_manifest, selected_xbe,
+                        lifter_revision, main, merge_functions, program_manifest, selected_xbe,
                         use_windows_newlines, write_functions)
 from extract_iso import sha256
 
@@ -234,6 +236,60 @@ class BuildTests(unittest.TestCase):
             (root / "public-export.json").write_text(json.dumps(dict(gitlinks=links)))
             with patch("build_game.ROOT", root), patch("build_game.LIFTER", root / "lifter"):
                 self.assertEqual(lifter_revision(), "a" * 40)
+
+
+class SoundtrackTests(unittest.TestCase):
+    """The optional Jukebox steps after a build; they read the play folder a build leaves."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        (self.root / "private/play-disc/DOA2").mkdir(parents=True)
+        (self.root / "private/play-disc/DOA2/bgm.afs").write_bytes(b"synthetic music")
+        (self.root / "jukebox").mkdir()
+
+    def run_main(self, argv, call):
+        with patch("build_game.ROOT", self.root), patch("build_game.build"), \
+                patch("build_game.sys.argv", ["build_game.py", *argv]), \
+                patch("build_game.subprocess.call", call):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main()
+        return result, output.getvalue()
+
+    def test_lift_only_skips_the_soundtrack_steps_it_cannot_finish(self):
+        call = Mock(return_value=0)
+        self.assertEqual(self.run_main(["--lift-only"], call), (0, ""))
+        call.assert_not_called()
+
+    def test_import_reads_the_play_folder_the_build_leaves(self):
+        call = Mock(return_value=0)
+        result, output = self.run_main([], call)
+        self.assertEqual((result, output), (0, ""))
+        commands = [called.args[0] for called in call.call_args_list]
+        self.assertEqual(commands[0][1:], [str(self.root / "tools/import_soundtrack.py"),
+                                           str(self.root / "private/play-disc")])
+        self.assertEqual(commands[1][1:], [str(self.root / "tools/import_soundtrack.py"), "--level"])
+
+    def test_failed_loudness_level_warns_without_failing_the_build(self):
+        for album in ("doa1u", "doa2u-movies"):
+            (self.root / "jukebox" / album).mkdir()
+            (self.root / "jukebox" / album / "tracks.txt").write_text("#title\tsynthetic\n")
+        call = Mock(return_value=3)
+        result, output = self.run_main([], call)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(call.call_args_list), 1)
+        self.assertEqual(call.call_args.args[0][-1], "--level")
+        self.assertIn("exited with 3", output)
+        self.assertIn("loudness", output)
+
+    def test_failed_import_warns_without_failing_the_build(self):
+        call = Mock(return_value=1)
+        result, output = self.run_main([], call)
+        self.assertEqual(result, 0)
+        self.assertIn("exited with 1", output)
+        self.assertIn("movies' music is missing", output)
 
 
 if __name__ == "__main__":

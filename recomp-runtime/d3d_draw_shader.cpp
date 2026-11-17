@@ -862,7 +862,7 @@ void recomp_d3d_draw_uv_clamp(const RecompD3dPresenterDrawCommand &draw, const R
     if (!layout.pretransformed || !texture_bound || !draw.has_texture || layout.texcoord_offset == RECOMP_D3D_FVF_ABSENT ||
         draw.vertex_bytes == nullptr || draw.vertex_count == 0u ||
         draw.texture.width == 0u || draw.texture.height == 0u || draw.texture.volume_depth != 0u ||
-        layout.stride < layout.texcoord_offset + 8u)
+        draw.vertex_stride < layout.texcoord_offset + 8u)
         return;
     const float scale_u = draw.texture.linear ? 1.0f / draw.texture.width : 1.0f;
     const float scale_v = draw.texture.linear ? 1.0f / draw.texture.height : 1.0f;
@@ -877,7 +877,7 @@ void recomp_d3d_draw_uv_clamp(const RecompD3dPresenterDrawCommand &draw, const R
         const uint32_t v = index != nullptr && draw.index_count != 0u ? index[i] : i;
         if (v >= draw.vertex_count) return;
         float uv[2];
-        std::memcpy(uv, bytes + static_cast<size_t>(v) * layout.stride + layout.texcoord_offset, sizeof uv);
+        std::memcpy(uv, bytes + static_cast<size_t>(v) * draw.vertex_stride + layout.texcoord_offset, sizeof uv);
         uv[0] *= scale_u;
         uv[1] *= scale_v;
         for (unsigned axis = 0; axis < 2; ++axis) {

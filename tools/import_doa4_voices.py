@@ -51,6 +51,16 @@ FIGHTER_NAMES = {
 }
 
 
+CUE_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def cue_label(label):
+    """A cue name used in an output file name: plain, so it cannot leave the output folder."""
+    if not CUE_NAME.fullmatch(label) or ".." in label:
+        raise ValueError(f"unusable cue name {label!r} in the voice bank")
+    return label
+
+
 class ArchiveView:
     """A bounded seekable archive inside an ISO; no extracted copy is needed."""
     def __init__(self, file, offset, size):
@@ -116,6 +126,8 @@ def afs_entries(path):
 
 def validate_banks(afs, entries):
     """Check every fighter bank before creating any output folders."""
+    if len(entries) <= max(BANKS.values()):
+        raise ValueError("voice archive has too few entries for the fighter banks")
     for prefix, index in BANKS.items():
         afs.seek(entries[index - 1][0])
         data = afs.read(entries[index - 1][1])
@@ -132,12 +144,18 @@ def validate_banks(afs, entries):
 
 def wave_bank(data):
     """(offset, length, channels, rate) per wave of a big-endian XACT 2 bank."""
-    if data[:4] != b"DNBW":
+    if data[:4] != b"DNBW" or len(data) < 8 + 8 * 5:
         raise ValueError("not a big-endian wave bank")
     segments = [struct.unpack_from(">II", data, 8 + 8 * i) for i in range(5)]
     bank = segments[0][0]
+    if bank + 0x4C > len(data):
+        raise ValueError("wave bank header extends beyond the bank")
     count = struct.unpack_from(">I", data, bank + 4)[0]
     size = struct.unpack_from(">I", data, bank + 0x48)[0]
+    # A zero record size or a table past the bank would read one record forever or raise
+    # struct.error; report the malformed bank instead.
+    if count == 0 or size < 16 or segments[1][0] + count * size > len(data):
+        raise ValueError("invalid wave bank table")
     waves = []
     for i in range(count):
         _, fmt, offset, length = struct.unpack_from(">4I", data, segments[1][0] + i * size)
@@ -158,6 +176,7 @@ def cue_waves(data):
     for i in range(cues):
         sound, name = s32(simple + 5 * i + 1), s32(names + 6 * i)
         label = data[name:data.index(b"\0", name)].decode("ascii")
+        label = cue_label(label)
         if data[sound] & 1 == 0:  # a simple sound: one wave
             out[label] = s16(sound + 9)
     return out
@@ -194,7 +213,7 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
             source = os.path.join(scratch, "clip.wav")
             with open(source, "wb") as file:
                 file.write(xma1_riff(bank[offset:offset + length], channels, rate))
-            name = f"{prefix}_{n:03d}" + (f"_{labels[0]}" if labels else "") + ".wav"
+            name = f"{prefix}_{n:03d}" + (f"_{cue_label(labels[0])}" if labels else "") + ".wav"
             target = os.path.join(out_folder, name)
             subprocess.run([ffmpeg, "-v", "error", "-y", "-i", source, "-ac", "1", "-ar", "48000",
                 "-c:a", "pcm_s16le", target], check=True,
@@ -344,12 +363,13 @@ def main(argv=None):
         help="write the mapping from your selections folders instead of decoding")
     parser.add_argument("--mapping", default=MANIFEST, help="the mapping file (default tools/doa4_voice_selections.json)")
     args = parser.parse_args(argv)
-    # Fetches the pinned ffmpeg (Windows) on first use, so no build is needed first.
-    args.ffmpeg = args.ffmpeg or fetch_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     print("Checking the DOA4 voice banks...", flush=True)
     with open_archive(args.source) as afs:
         entries = read_afs_entries(afs)
         validate_banks(afs, entries)
+        # Fetches the pinned ffmpeg (Windows) on first use, so no build is needed first; the
+        # 115 MB download waits until the source itself is known to be a DOA4 disc.
+        args.ffmpeg = args.ffmpeg or fetch_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
         check = subprocess.run([args.ffmpeg, "-hide_banner", "-decoders"], check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
