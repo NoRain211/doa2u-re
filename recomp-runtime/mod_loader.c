@@ -596,6 +596,8 @@ static void build_archive(const char *disc_root, const char *key)
     }
     if (data_start == UINT32_MAX || data_start < 8u + table_size) data_start = (uint32_t)align_up(8u + table_size);
 
+    if (data_start > base.size) { free(chosen); goto fail; } /* a damaged table, not a 4 GiB header */
+
     /* The new table of contents first, then each entry in the original's order. */
     o->header = calloc(1u, data_start);
     if (o->header == NULL) { free(chosen); goto fail; }
