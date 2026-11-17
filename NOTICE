@@ -63,6 +63,9 @@ full text the file keeps.
 tools/build_prerequisites.py and its test are adapted from NoRain211/doaxbv-re
 at commit 5761e89, under GPL-3.0-or-later. The build downloads, but does not
 redistribute, the llvm-mingw compiler by Martin Storsjö and contributors.
+The soundtrack and voice importers likewise download, but do not
+redistribute, Gyan Doshi's ffmpeg essentials build (FFmpeg, GPL), whose
+license remains in tools/ffmpeg.
 
 The XAudio 2.9 I3DL2 reverb conversion in recomp-runtime/xaudio2_reverb.h is
 altered from FAudio (FNA-XNA/FAudio, ReverbConvertI3DL2ToNative9 in
