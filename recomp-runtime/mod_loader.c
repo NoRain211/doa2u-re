@@ -879,6 +879,19 @@ bool recomp_mod_overlay_read(const RecompModOverlay *o, RecompModBaseRead base, 
     return true;
 }
 
+bool recomp_mod_open_writes(uint32_t desired_access, uint32_t create_disposition, uint32_t create_options)
+{
+    /* GENERIC_WRITE, GENERIC_ALL, FILE_WRITE_DATA, FILE_APPEND_DATA,
+       FILE_WRITE_EA, FILE_WRITE_ATTRIBUTES, DELETE, WRITE_DAC, WRITE_OWNER. */
+    const uint32_t writes = 0x40000000u | 0x10000000u | 0x00000002u | 0x00000004u |
+        0x00000010u | 0x00000100u | 0x00010000u | 0x00040000u | 0x00080000u;
+    if ((desired_access & writes) != 0u) return true;
+    /* FILE_SUPERSEDE, OVERWRITE, OVERWRITE_IF and FILE_DELETE_ON_CLOSE replace
+       or remove an existing file; CREATE and OPEN_IF leave one untouched. */
+    return create_disposition == 0u || create_disposition == 4u || create_disposition == 5u ||
+        (create_options & 0x04000000u) != 0u;
+}
+
 bool recomp_mod_key(const char *disc_root, const char *host_path, char *key, size_t key_size)
 {
     if (disc_root == NULL || host_path == NULL || key_size == 0u) return false;

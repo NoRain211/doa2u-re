@@ -223,6 +223,29 @@ static void test_keys(void)
     CHECK(!recomp_mod_key("C:\\Game\\disc", "C:\\Game\\disc\\.recomp-storage\\partition1\\save.dat", key, sizeof key));
 }
 
+static void test_open_writes(void)
+{
+    /* A read of the disc may be served by a mod. */
+    CHECK(!recomp_mod_open_writes(0x80000000u /* GENERIC_READ */, 1u, 0u));
+    CHECK(!recomp_mod_open_writes(0x00000001u /* FILE_READ_DATA */ | 0x00000080u /* FILE_READ_ATTRIBUTES */, 1u, 0u));
+    /* Every right that can change the file or its metadata, so a redirected
+       handle can never delete or overwrite a mod's file. */
+    CHECK(recomp_mod_open_writes(0x40000000u /* GENERIC_WRITE */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x10000000u /* GENERIC_ALL */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00000002u /* FILE_WRITE_DATA */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00000004u /* FILE_APPEND_DATA */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00000010u /* FILE_WRITE_EA */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00000100u /* FILE_WRITE_ATTRIBUTES */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x80000000u | 0x00010000u /* DELETE */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00040000u /* WRITE_DAC */, 1u, 0u));
+    CHECK(recomp_mod_open_writes(0x00080000u /* WRITE_OWNER */, 1u, 0u));
+    /* Supersede, overwrite and overwrite-if replace the file, as does delete
+       on close; open, create and open-if leave an existing file alone. */
+    for (uint32_t disposition = 0u; disposition <= 5u; ++disposition)
+        CHECK(recomp_mod_open_writes(0x80000000u, disposition, 0u) == (disposition == 0u || disposition >= 4u));
+    CHECK(recomp_mod_open_writes(0x80000000u, 1u, 0x04000000u /* FILE_DELETE_ON_CLOSE */));
+}
+
 static void test_adx_round_trip(void)
 {
     enum { FRAMES = 44100 / 2, RATE = 44100 };
@@ -395,6 +418,7 @@ int main(void)
 #endif
     make_dir(root);
     test_keys();
+    test_open_writes();
     test_archive_overlay(root);
     test_reserved_slots(root);
     test_adx_round_trip();
