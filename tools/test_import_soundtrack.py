@@ -173,6 +173,40 @@ class ImportFailureTests(unittest.TestCase):
                 self.assertIn("#level", Path(folder, "tracks.txt").read_text())
                 self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
 
+    def test_a_failed_level_leaves_every_track_and_the_rerun_input_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One"), ("two.adx", -1, -1, "Two")])
+            originals = {"one.adx": b"original one", "two.adx": b"original two"}
+            for name, content in originals.items():
+                Path(folder, name).write_bytes(content)
+            seen = []
+            fail = [True]
+
+            def encode(args, **kwargs):
+                seen.append((os.path.basename(args[-2]), Path(args[-2]).read_bytes()))
+                if fail[0] and args[-2].endswith("two.adx"):
+                    return SimpleNamespace(returncode=1, stderr="disk full", stdout="")
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+            self.assertEqual(seen, [(name, originals[name]) for name in ("one.adx", "two.adx")])
+            for name, content in originals.items():
+                self.assertEqual(Path(folder, name).read_bytes(), content)
+            self.assertEqual(sorted(path.name for path in Path(folder).iterdir()),
+                             ["one.adx", "tracks.txt", "two.adx"])
+            self.assertNotIn("#level", Path(folder, "tracks.txt").read_text())
+            # The rerun levels the originals again, never a track that was already levelled.
+            seen.clear()
+            fail[0] = False
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 2)
+            self.assertEqual(seen, [(name, originals[name]) for name in ("one.adx", "two.adx")])
+            for name in originals:
+                self.assertEqual(Path(folder, name).read_bytes(), b"levelled")
+            self.assertIn("#level", Path(folder, "tracks.txt").read_text())
+
     def test_import_rejects_negative_wave_indices_and_sanitizes_cue_files(self):
         sound = b"KBDSbgm_stream" + bytes(100)
         source = mock.Mock()
