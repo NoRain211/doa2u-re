@@ -99,6 +99,21 @@ static void test_names(const char *base)
     apply_names(&album, "album");
     (void)read_text(path, again, sizeof again);
     CHECK(strcmp(again, "# last\nalbum = Player Title\n\none.adx = Renamed\ntwo.adx = Two\n") == 0);
+
+    /* A file that exists but cannot be read is not intact: a directory fails to
+       open on Windows and fails to read elsewhere. Only an absent one is. */
+    Lines lines;
+    snprintf(path, sizeof path, "%s/unreadable", jukebox_root);
+    make_folder(path);
+    lines_open(&lines, path);
+    while (lines_next(&lines)) {}
+    CHECK(!lines.intact);
+    lines_close(&lines);
+    snprintf(path, sizeof path, "%s/absent.txt", jukebox_root);
+    lines_open(&lines, path);
+    while (lines_next(&lines)) {}
+    CHECK(lines.intact);
+    lines_close(&lines);
 }
 
 /* tracks.txt may only name files beside it. */
