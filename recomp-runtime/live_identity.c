@@ -121,8 +121,10 @@ static bool write_file(const char *path, const void *bytes, size_t size, bool re
 #endif
     const bool closed = fclose(file) == 0;
 #ifdef _WIN32
-    const bool moved = written && closed && (replace ?
-        MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING) != 0 : rename(temporary, path) == 0);
+    /* Write-through returns once the rename is on disk, as sync_folder does
+       below; without REPLACE_EXISTING it fails on a name taken, as rename does. */
+    const DWORD flags = MOVEFILE_WRITE_THROUGH | (replace ? MOVEFILE_REPLACE_EXISTING : 0u);
+    const bool moved = written && closed && MoveFileExA(temporary, path, flags) != 0;
 #else
     (void)replace;
     const bool moved = written && closed && rename(temporary, path) == 0;
