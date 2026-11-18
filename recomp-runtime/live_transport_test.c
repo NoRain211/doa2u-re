@@ -180,21 +180,43 @@ static void send_socket(SOCKET handle, const struct sockaddr_in *to, const uint8
     (void)sendto(handle, (const char *)packet, (int)size, 0, (const struct sockaddr *)to, sizeof *to);
 }
 
-/* The matchmaker's name lookup, made slow: 300 ms, then loopback or a failure. */
-static volatile int lookups;
-static bool lookup_fails;
+/* The matchmaker's name lookup, made slow: 300 ms, then loopback or a failure.
+   It runs on the lookup thread, so both values it shares with main are atomic. */
+#ifdef _WIN32
+static volatile LONG lookups, lookup_fails;
+static int lookups_seen(void) { return (int)InterlockedCompareExchange(&lookups, 0, 0); }
+static void fail_lookups(bool fail) { InterlockedExchange(&lookup_fails, fail ? 1 : 0); }
+#else
+#include <stdatomic.h>
+static atomic_int lookups;
+static atomic_bool lookup_fails;
+static int lookups_seen(void) { return atomic_load(&lookups); }
+static void fail_lookups(bool fail) { atomic_store(&lookup_fails, fail); }
+#endif
 
 static bool slow_resolver(const char *host, uint32_t *address)
 {
     (void)host;
 #ifdef _WIN32
     Sleep(300);
+    *address = htonl(0x7f000001u);
+    InterlockedIncrement(&lookups);
+    return InterlockedCompareExchange(&lookup_fails, 0, 0) == 0;
 #else
     usleep(300000);
-#endif
     *address = htonl(0x7f000001u);
-    ++lookups;
-    return !lookup_fails;
+    atomic_fetch_add(&lookups, 1);
+    return !atomic_load(&lookup_fails);
+#endif
+}
+
+/* Waits up to 3 s for the resolver to have run this many times. */
+static int lookups_after_wait(int count)
+{
+    const uint64_t until = netplay_now_ms() + 3000u;
+    while (lookups_seen() < count && netplay_now_ms() < until) {
+    }
+    return lookups_seen();
 }
 
 /* Lets the transport's millisecond clock move on, so two sends are told apart. */
@@ -933,31 +955,30 @@ int main(void)
     recomp_live_transport_send_server(request, named_size);
     check("a request does not wait for the lookup", netplay_now_ms() - asked_at < 100u);
     recomp_live_transport_send_server(request, named_size);
-    check("and none goes out before the name is found", lookups == 0 &&
+    check("and none goes out before the name is found", lookups_seen() == 0 &&
         read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
     spin_ms(600u);
     recomp_live_transport_send_server(request, named_size); /* the client's resend */
     size = read_socket(server_socket, packet, sizeof packet, &client_endpoint, 1000u);
-    check("the resend after it goes out", lookups == 1 && size == (int)named_size &&
+    check("the resend after it goes out", lookups_seen() == 1 && size == (int)named_size &&
         memcmp(packet, "D2MM", 4u) == 0 && packet[MATCH_ASKED + 3u] == 9u);
 
     /* A name that does not resolve is not asked again at once. */
-    lookup_fails = true;
+    fail_lookups(true);
     check("a server that will not resolve opens", recomp_live_transport_open("matchmaker.test", server_port));
     recomp_live_transport_send_server(request, named_size);
     spin_ms(600u);
     recomp_live_transport_send_server(request, named_size);
     recomp_live_transport_send_server(request, named_size);
-    check("a failed lookup sends nothing and is not repeated at once", lookups == 2 &&
+    check("a failed lookup sends nothing and is not repeated at once", lookups_seen() == 2 &&
         read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
 
     /* Closing while a lookup runs leaves it to its thread. */
-    lookup_fails = false;
+    fail_lookups(false);
     check("the server opens again", recomp_live_transport_open("matchmaker.test", server_port));
     recomp_live_transport_send_server(request, named_size);
     recomp_live_transport_close();
-    spin_ms(600u);
-    check("a lookup outlives the close that dropped it", lookups == 3 &&
+    check("a lookup outlives the close that dropped it", lookups_after_wait(3) == 3 &&
         read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
     recomp_live_transport_set_resolver(NULL);
 
