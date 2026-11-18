@@ -184,8 +184,7 @@ class ImportFailureTests(unittest.TestCase):
 
             with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode), \
                     mock.patch.object(soundtrack.os, "replace", side_effect=locked):
-                with self.assertRaises(PermissionError):
-                    soundtrack.level_album(folder, "encoder")
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 2)  # said, not raised
             self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
             self.assertEqual(Path(folder, "two.adx").read_bytes(), b"original")
             # A rerun while the track is still open says so and goes on to the other albums.

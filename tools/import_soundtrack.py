@@ -471,6 +471,16 @@ def write_tracks(folder, title, tracks):
 LEVEL_DB = -17.0
 
 
+def swap_levelled(folder, scratch, track):
+    """Puts a levelled scratch file in its track's place. One that cannot be (the track is open
+    elsewhere, say) keeps its scratch file for the next import to swap in, and the rest go on."""
+    try:
+        os.replace(scratch, track)
+    except OSError as error:
+        print(f"{os.path.basename(folder)}: {os.path.basename(track)} could not be swapped in ({error}); "
+              "its levelled file is kept and the next import finishes it.")
+
+
 def level_album(folder, encoder):
     """Brings each track of an album to LEVEL_DB with recomp_adx_encode --level, once: tracks.txt
     then says #level. Without the encoder (build the game first) it leaves them as they are.
@@ -478,8 +488,8 @@ def level_album(folder, encoder):
     succeeded replaces the tracks: a failure leaves the album exactly as it was, so a rerun levels
     the same input rather than levelling the tracks that worked a second time. Once they all
     succeeded, the #level mark is written first and the scratch files then replace the tracks: if
-    a replace fails (a track open elsewhere), the rest stay as scratch files and a rerun finishes
-    swapping them in rather than levelling again. Returns how many tracks it levelled successfully."""
+    a replace fails (a track open elsewhere), that track keeps its scratch file and a rerun
+    swaps it in rather than levelling again. Returns how many tracks it levelled successfully."""
     path = os.path.join(folder, "tracks.txt")
     try:
         with open(path, encoding="utf-8") as file:
@@ -493,11 +503,7 @@ def level_album(folder, encoder):
             if not line.startswith("#") and len(parts) >= 4:
                 track = os.path.join(folder, track_name(parts[0]))
                 if os.path.exists(track + ".level"):
-                    try:
-                        os.replace(track + ".level", track)
-                    except OSError as error:  # still open elsewhere: the other albums go on
-                        print(f"{os.path.basename(folder)}: {parts[0]} is not swapped in yet ({error}); "
-                              "run the import again to finish it.")
+                    swap_levelled(folder, track + ".level", track)
         return 0
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
@@ -527,7 +533,7 @@ def level_album(folder, encoder):
         atomic_text(path, "\n".join(lines) + "\n")
         committed = True  # from here a scratch file left behind is levelled audio a rerun swaps in
         for scratch, track in levelled:
-            os.replace(scratch, track)
+            swap_levelled(folder, scratch, track)
         return len(levelled)
     finally:
         for scratch, _track in levelled:
