@@ -144,6 +144,8 @@ static bool unlockAll = true; // --no-unlock-all leaves unlocks to play
    and the free camera offline; the other rows apply at the next launch. */
 static std::string launcherSettings;
 static RecompPcSettingsStore pcStore;
+/* Loopback, synctest and rollback runs: the HUD rows wait for the next start. */
+static bool pcHudLocked;
 
 static void pcSettingChanged(unsigned setting, unsigned choice, void *)
 {
@@ -152,11 +154,12 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_CPU_COSTUMES: recomp_cpu_costume_set_enabled(choice == 1u); break;
     case RECOMP_PC_FREE_CAMERA: recomp_free_camera_set_enabled(choice == 1u); break;
     case RECOMP_PC_LIFE_BAR:
+        if (pcHudLocked) break;
         recomp_combo_hud_set_life_bar_colour(choice, recomp_pc_settings_custom_life_bar(launcherSettings));
         break;
-    case RECOMP_PC_HIT_VOICES: recomp_hit_voice_set_choice(choice); break;
+    case RECOMP_PC_HIT_VOICES: if (!pcHudLocked) recomp_hit_voice_set_choice(choice); break;
     case RECOMP_PC_KO_REPLAY: recomp_ko_replay_set_enabled(choice == 1u); break;
-    case RECOMP_PC_FIGHT_HUD: recomp_combo_hud_set_choice(choice); break;
+    case RECOMP_PC_FIGHT_HUD: if (!pcHudLocked) recomp_combo_hud_set_choice(choice); break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA: {
@@ -231,6 +234,7 @@ static void installPcSettings(bool online)
     const char *path = std::getenv("RECOMP_LAUNCHER_SETTINGS");
     launcherSettings = path != nullptr ? path : "";
     pcStore = {};
+    pcHudLocked = online;
 #ifdef _WIN32
     // The launchers' defaults: the primary display's height, and its shape for 21:9
     // when it is a 21:9 display (wider than 16:9, narrower than 3:1).
@@ -266,7 +270,9 @@ static void installPcSettings(bool online)
         recomp_combo_hud_set_enabled(false);
         recomp_combo_hud_set_life_bar_colour(0u, 0u);
         recomp_hit_voice_set_choice(0u);
-        recomp_pc_settings_set_live(RECOMP_PC_FIGHT_HUD, false); // a change there waits for the next start
+        // A change to these rows waits for the next start, and pcSettingChanged leaves them alone.
+        for (unsigned setting : {RECOMP_PC_FIGHT_HUD, RECOMP_PC_LIFE_BAR, RECOMP_PC_HIT_VOICES})
+            recomp_pc_settings_set_live(setting, false);
     }
 }
 

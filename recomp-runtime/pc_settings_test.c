@@ -468,8 +468,8 @@ int main(void)
     expect("leave online help", rd16(help_text + 26u) == 'w'); /* "Takes effect when you leave ..." */
     recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, false);
     hook(0x0011cfc0u, none, 2u); /* view 3: Life Bar to KO Replay */
-    hook(0x00091560u, row3_help, 3u);
-    expect("fight hud live", rd16(help_text + 26u) == 'i'); /* row 3 is Fight HUD, live */
+    hook(0x00091560u, row2_help, 3u);
+    expect("fight hud live", rd16(help_text + 26u) == 'i'); /* row 2 is Fight HUD, live */
     hook(0x0011cfc0u, none, 2u); /* wraps to view 1 */
     confirm_pressed = 0u;
     hook(0x00091560u, row3_help, 3u);
