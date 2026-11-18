@@ -875,8 +875,8 @@ typedef struct Target {
 static Target targets[MAX_MUSIC_ENTRIES];
 static unsigned target_count;
 static bool assigning;          /* bgm.afs has slots: assignments work */
-static bool installed_online;   /* this boot was online from the start: it stays so */
-static bool online_now;         /* slots off and no previews */
+static bool installed_online;   /* this boot was online from the start: its slots stay off */
+static bool online_now;         /* no previews over the game */
 
 static int find_album(const char *tab)
 {
@@ -1087,11 +1087,13 @@ void recomp_jukebox_set_online(bool online)
        both games then read the same bytes at once. Finish the track first if
        that jump is heard and the menus can tolerate the difference.
        A boot installed online never loaded its assignments, and the archive
-       it opened is the disc's own, so it stays online whatever comes after. */
-    online_now = online || installed_online;
-    if (online_now) stop();
-    recomp_mod_loader_enable_slots(!online_now);
-    assigning = !online_now && target_count > 0u && targets[0].entry >= 0;
+       it opened is the disc's own, so its slots stay off whatever comes
+       after; previews read their own files and come back at logoff. */
+    online_now = online;
+    if (online) stop();
+    const bool slots_off = online || installed_online;
+    recomp_mod_loader_enable_slots(!slots_off);
+    assigning = !slots_off && target_count > 0u && targets[0].entry >= 0;
 }
 
 void recomp_jukebox_request_page(void) { page.requested = true; }

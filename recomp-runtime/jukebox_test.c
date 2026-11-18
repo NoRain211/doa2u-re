@@ -454,10 +454,13 @@ static void test_assignments(const char *base)
         recomp_jukebox_confirm(ROW_TRACK);
         CHECK(!player.playing && strstr(page.note, "online") != NULL);
         recomp_jukebox_set_online(false);
-        /* A boot installed online stays so: its logoff brings no slots back. */
+        /* A boot installed online keeps its slots off after logoff, but
+           previews, which read their own files, are not refused. */
         recomp_jukebox_install(true);
         recomp_jukebox_set_online(false);
         CHECK(!assigning && entry_byte(overlay, at) == 0x80u);
+        recomp_jukebox_confirm(ROW_TRACK);
+        CHECK(strstr(page.note, "online") == NULL);
         recomp_jukebox_install(false);
         CHECK(assigning && entry_byte(overlay, at) == 'Q');
         snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
