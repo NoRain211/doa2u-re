@@ -418,9 +418,11 @@ socket and nonce gets its first answer again for 60 s, which is what makes a
 resent SESSION_PUT one session and a resent FEEDBACK one count. At most
 2,048 answers are cached, 64 of them from one address, whose oldest answer
 makes room for its newest; past the total a request is answered but not
-kept, so a resend past it is applied again. A LOGON's answer is always kept,
-in place of the oldest of all: its challenge is gone, so without the answer
-a resend would be refused. An empty answer is never cached,
+kept, so a resend past it is applied again. A LOGON's answer is kept past the
+total too, in place of its address's own oldest: its challenge is gone, so
+without the answer a resend would be refused. That is what happens to an
+address with no answer of its own to drop, and no request drops another
+address's answer. An empty answer is never cached,
 so its resend is tried afresh, and neither is CONNECT: applying it twice
 changes nothing, its LPEERs must name the endpoints as they are now, and its
 resends then meet the CONNECT cap. Nor is CHALLENGE, whose resend is said

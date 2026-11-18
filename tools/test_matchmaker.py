@@ -286,14 +286,20 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
 
     def test_a_resent_logon_is_answered_when_the_cache_is_full(self):
-        self.logon()
-        self.server.cache_keys = {}
-        self.server.live_cache = {("x", i): ([], 1e9) for i in range(mm.MAX_CACHE)}
+        self.logon()  # leaves this address one cached answer, which makes room for the next
+        others = [("x", i) for i in range(mm.MAX_CACHE - len(self.server.live_cache))]
+        self.server.live_cache.update({key: ([], 1e9) for key in others})
         req, known, nonce = self.challenge(now=5.0)
         logon = live(mm.LOGON, logon_body(req, nonce=nonce))
         for _ in range(2):  # the second has no challenge left, only the first one's answer
             self.assertEqual(mm.LOGGED_BODY.unpack(self.one(logon, A_AT, 5.0, mm.LOGGED))[1], 0)
+        # No LOGON makes room with another address's answer: not one that is refused, and
+        # not one from an address with nothing of its own to drop.
+        self.one(live(mm.LOGON, logon_body(self.next_request())), A_AT, 5.0, mm.LOGGED)
+        self.assertEqual(self.logon(B_AT, B, tag=b"AYANE", now=5.0)[1], 0)
         self.assertEqual(len(self.server.live_cache), mm.MAX_CACHE)
+        self.assertTrue(all(key in self.server.live_cache for key in others))
+        self.assertNotIn(B_AT[0], self.server.cache_keys)
 
     def test_a_captured_logon_cannot_be_replayed(self):
         self.logon()

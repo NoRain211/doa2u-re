@@ -479,11 +479,11 @@ class Matchmaker:
                 del keys[oldest]
                 self.live_cache.pop(oldest, None)
             elif len(self.live_cache) >= MAX_CACHE:
-                if kind != LOGON:
+                # A LOGON's challenge went with this answer, so its repeat has nothing else: the
+                # address's own oldest makes room for it. No address's request drops another's answer.
+                if kind != LOGON or not keys:
                     return self.budgeted(answers, sender) + refresh
-                # A LOGON's challenge went with this answer, so its repeat has nothing else:
-                # the oldest answer of all makes room, the one nearest its end.
-                self.uncache(next(iter(self.live_cache)))
+                self.uncache(next(iter(keys)))
         self.cache_keys.setdefault(sender[0], {})[key] = None
         self.live_cache[key] = (answers, now + CACHE_SECONDS)
         return self.budgeted(answers, sender) + refresh
