@@ -92,6 +92,19 @@ class UpdateTest(unittest.TestCase):
             update.unpack(zipfile.ZipFile(data))
             chmod.assert_called_once_with(0o755)
 
+    def test_unpack_outside_windows_leaves_no_partial_file_when_a_write_fails(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "linux"), \
+                mock.patch.object(Path, "replace", side_effect=OSError("disk full")):
+            (update.ROOT / "build_game.sh").write_text("old")
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as writer:
+                writer.writestr("DOA2U-2/build_game.sh", "new")
+            with self.assertRaises(OSError):
+                update.unpack(zipfile.ZipFile(data))
+            self.assertEqual((update.ROOT / "build_game.sh").read_text(), "old")
+            self.assertFalse((update.ROOT / "build_game.sh.part").exists())
+
     def test_install_downloads_only_changed_entries(self):
         data = io.BytesIO()
         with zipfile.ZipFile(data, "w") as writer:

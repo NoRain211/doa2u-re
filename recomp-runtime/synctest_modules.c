@@ -1,6 +1,7 @@
 #include "synctest.h"
 
 #include "d3d8_adapter.h"
+#include "d3d8_resource_adapter.h"
 #include "d3d_vblank.h"
 #include "dsound_api_adapter.h"
 #include "dsound_buffer_adapter.h"
@@ -205,7 +206,7 @@ static bool host_reads_restorable(const void *state, size_t size)
 
 void recomp_synctest_install_default_modules(void)
 {
-    RecompSyncTestModule table[15];
+    RecompSyncTestModule table[16];
     size_t count = 0u;
     recomp_synctest_set_ram_equal(ram_equal);
     table[count++] = (RecompSyncTestModule){"cpu", recomp_runtime_state_size(),
@@ -235,6 +236,8 @@ void recomp_synctest_install_default_modules(void)
         recomp_input_adapter_state_save, recomp_input_adapter_state_restore};
     table[count++] = (RecompSyncTestModule){"d3d8", recomp_d3d8_state_size(),
         recomp_d3d8_state_save, recomp_d3d8_state_restore};
+    table[count++] = (RecompSyncTestModule){"d3d8_resources", recomp_d3d8_resource_state_size(),
+        recomp_d3d8_resource_state_save, recomp_d3d8_resource_state_restore};
     table[count++] = (RecompSyncTestModule){"dsound_api", recomp_dsound_api_state_size(),
         recomp_dsound_api_state_save, recomp_dsound_api_state_restore};
     table[count++] = (RecompSyncTestModule){"dsound_buffers", recomp_dsound_buffer_state_size(),

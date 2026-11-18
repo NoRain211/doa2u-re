@@ -84,6 +84,19 @@ int main(void)
     recomp_rollback_add_remote(&s, &two);
     check("lockstep runs confirmed frame", recomp_rollback_can_run(&s));
 
+    // Noise the game reads as zero is stored as zero; values it can see are kept.
+    recomp_rollback_init(&s, 0u);
+    RecompInputGamepad noisy = pad(0u);
+    noisy.thumb_lx = 0x1fff; noisy.thumb_ly = -0x1fff; noisy.thumb_rx = 0x2000; noisy.thumb_ry = -0x2000;
+    noisy.analog_buttons[0] = 0x1fu; noisy.analog_buttons[5] = 0x20u;
+    noisy.analog_buttons[6] = 0x7fu; noisy.analog_buttons[7] = 0x80u;
+    recomp_rollback_add_local(&s, &noisy);
+    const RecompInputGamepad stored = s.local[0];
+    check("rest noise zeroed", stored.thumb_lx == 0 && stored.thumb_ly == 0 &&
+        stored.analog_buttons[0] == 0u && stored.analog_buttons[6] == 0u);
+    check("seen values kept", stored.thumb_rx == 0x2000 && stored.thumb_ry == -0x2000 &&
+        stored.analog_buttons[5] == 0x20u && stored.analog_buttons[7] == 0x80u);
+
     if (failures != 0) return 1;
     puts("PASS rollback predicts remote pads and rewinds to the first miss");
     return 0;
