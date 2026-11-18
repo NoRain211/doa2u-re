@@ -286,11 +286,11 @@ layouts, transforms, viewport, depth/blend state, stage-0 texture and palette.
 Supported combinations include texture/diffuse modulation, white diffuse alpha
 selection, texture alpha selection and texture factors. Stage-0 min and mag
 filters reach the host sampler independently, so point requests stay point and
-linear requests stay linear; anisotropic stays on its own four-tap paths. Point
-or linear mip selection is supported, with LOD bias encoded as the lazy
-texture-state upload (0x34f400) does: 1/256 steps, truncated after +0.5 and
-clamped to the 13-bit field, so NaN and out-of-range biases clamp to -16 or
-15.99 (D3D11's maximum).
+linear requests stay linear; anisotropic min/mag requests remain guarded and
+stop the runner. Point or linear mip selection is supported, with LOD bias
+encoded as the lazy texture-state upload (0x34f400) does: 1/256 steps,
+truncated after +0.5 and clamped to the 13-bit field, so NaN and out-of-range
+biases clamp to -16 or 15.99 (D3D11's maximum).
 Pixel-shader creation, deletion, binding and
 constants retain the 5849 layout; native custom shading supports the sister
 presenter's four-tap filter in its doubled and identity-scale variants, with

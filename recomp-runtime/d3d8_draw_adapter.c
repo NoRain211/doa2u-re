@@ -1040,8 +1040,11 @@ static void projected_stages(uint32_t device, const uint32_t stage[4][32],
         uint32_t byte_count, u, v;
         bool point;
         float bias;
+        /* Only stage 0 may point-filter min/mag; stages 1-3 are guarded to linear. */
+        bool point_min, point_mag;
     } slots[3] = {{draw->texture, draw->texture_bytes, draw->texture_byte_count,
-        draw->address_u, draw->address_v, draw->point_mip_filter, draw->mip_lod_bias}};
+        draw->address_u, draw->address_v, draw->point_mip_filter, draw->mip_lod_bias,
+        draw->point_min_filter, draw->point_mag_filter}};
     uint32_t used = 1u;
     for (uint32_t i = 1u; i < 4u && stage[i][12] != 1u; ++i) {
         const uint32_t *s = stage[i];
@@ -1059,13 +1062,14 @@ static void projected_stages(uint32_t device, const uint32_t stage[4][32],
             (t->mip_levels > 1u && s[5] != 1u && s[5] != 2u))
             recomp_stop(2, "d3d8:projected-stage-texture:%u:%x:mip=%u", i, t->format_byte, s[5]);
         const struct Slot wanted = {*t, bound->texture_bytes, bound->texture_byte_count,
-            bound->address_u, bound->address_v, s[5] == 1u, lod_bias(s[6])};
+            bound->address_u, bound->address_v, s[5] == 1u, lod_bias(s[6]), false, false};
         uint32_t slot = 0u;
         while (slot < used && !(slots[slot].texture.data == t->data &&
             slots[slot].texture.format_byte == t->format_byte && slots[slot].texture.width == t->width &&
             slots[slot].texture.height == t->height && slots[slot].texture.mip_levels == t->mip_levels &&
             slots[slot].u == wanted.u && slots[slot].v == wanted.v &&
-            slots[slot].point == wanted.point && slots[slot].bias == wanted.bias)) ++slot;
+            slots[slot].point == wanted.point && slots[slot].bias == wanted.bias &&
+            slots[slot].point_min == wanted.point_min && slots[slot].point_mag == wanted.point_mag)) ++slot;
         if (slot == 3u) recomp_stop(2, "d3d8:projected-stage-slots");
         if (slot == used) slots[used++] = wanted;
         draw->projected_slots[i - 1u] = (int32_t)slot;
@@ -1113,7 +1117,7 @@ static bool fixed_stages(uint32_t device, const RecompD3dVertexLayout *layout,
     if (!draw->use_texture_factor && draw->has_texture) {
         if (layout->texcoord_count == 0u || stage[0][0] < 1u || stage[0][0] > 3u ||
             stage[0][1] < 1u || stage[0][1] > 3u ||
-            /* D3DTEXF_POINT or LINEAR; anisotropic stays on its own paths. */
+            /* D3DTEXF_POINT or LINEAR; anisotropic remains guarded. */
             stage[0][3] < 1u || stage[0][3] > 2u || stage[0][4] < 1u || stage[0][4] > 2u ||
             stage[0][9] != 0u || stage[0][10] != 0u ||
             /* ALPHAKILL is DISABLE (0) or ENABLE (4), before the texture combine. */

@@ -819,6 +819,12 @@ static int lighting_tests(void)
         projected->projected_transforms[0][12] == 0.5f && projected->projected_transforms[0][14] == 2.0f);
     CHECK(projected->material_alpha_mode == RECOMP_D3D_MATERIAL_ALPHA_SELECT_DIFFUSE &&
         projected->material_alpha == 0.25f);
+    /* A point stage 0 keeps its sampler; the linear stage 1 on the same texture gets its own slot. */
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 24u);
+    CHECK(projected->point_min_filter && projected->point_mag_filter &&
+        projected->projected_slots[0] == 1 && projected->reflection_texture.data == projected->texture.data);
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 2u;
     /* An unbound stage-1 texture passes CURRENT through. */
     *recomp_memory_u32(DEVICE + 0xf8cu) = 0u;
     invoke(0x348240u, 5u, 3u, VERTICES, 24u);

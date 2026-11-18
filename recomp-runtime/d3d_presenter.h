@@ -190,7 +190,7 @@ typedef struct RecompD3dPresenterDrawCommand {
     uint32_t address_u, address_v, address_w;
     /* Stage-0 filter selection; zero initialization keeps linear min/mag and
        mips, with no bias. D3DTEXF_POINT is the only non-linear filter here;
-       anisotropic keeps its own four-tap paths. */
+       anisotropic min/mag requests remain guarded and stop the runner. */
     bool point_min_filter, point_mag_filter;
     bool point_mip_filter;
     float mip_lod_bias;
