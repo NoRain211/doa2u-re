@@ -393,12 +393,13 @@ registers 4 new accounts a minute and 16 a day (the day counts accounts
 made, not refused attempts); a player's requests are 2 a second at most, so
 only a flood meets those. A nonce is kept for its 10 s, with its LOGON's
 answer once it has one: 32 for an address, whose oldest makes room for a new
-one, and 4,096 in all, where the oldest of all makes room. A heartbeat every
-5 s keeps two of a player's, so both caps are well past what players need. A
+one, and 12,288 in all, where the oldest of all makes room. A heartbeat every
+5 s keeps two of a player's, so a full account table of players online keeps
+8,192 and leaves a third of the total free. A
 LOGON whose nonce went that way is refused, and a heartbeat refused signs its
 player out, so the share of an address keeps a flood's cost with the
-addresses that flood: filling the table takes 128 of them, and the oldest it
-then drops are mostly nonces already answered. A LIVE_RELAY is not one of those
+addresses that flood: filling what players leave free takes 128 of them, and
+the oldest it then drops are mostly nonces already answered. A LIVE_RELAY is not one of those
 100: it has the relay's caps, 250 a second for a pair direction and 500 for
 an address, and an address may open 16 pairs. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,

@@ -46,7 +46,7 @@ XUID_TYPE = 0x0009  # the XUID's type field; the rest is the first six bytes of 
 LIVE_SECONDS = 20.0  # LOGON is the heartbeat every 5 s; this long silent is offline
 CHALLENGE_BYTES = 16
 CHALLENGE_SECONDS = 10.0  # a LOGON answers within a round trip, and its client gives up after 5 s
-MAX_CHALLENGES = 4096  # nonces not yet ended; past it the oldest makes room
+MAX_CHALLENGES = 3 * 4096  # nonces not yet ended, two a player from heartbeats; past it the oldest makes room
 CHALLENGES_PER_ADDRESS = 32  # and from one address, whose own oldest makes room
 CACHE_SECONDS = 60.0  # a repeated request gets its first answer again, for this long
 MAX_CACHE = 2048  # cached answers in all
@@ -370,7 +370,7 @@ class Matchmaker:
         self.live_counts = {}  # Live packets per address since the last sweep
         self.connect_counts = {}  # CONNECTs per address since the last sweep
         self.account_counts, self.minute = {}, None  # new accounts each address registered this minute
-        # (endpoint, socket nonce, request) -> (XUID, nonce, expires, its LOGON and the answer once it has one)
+        # (endpoint, socket nonce, request) -> (XUID, nonce, expires, its LOGON's hash and answer once it has one)
         self.challenges = {}  # oldest first
         self.challenge_keys = {}  # address -> its challenges' keys, oldest first, so a flood drops only its own
         self.live_cache = {}  # (endpoint, nonce, request, kind) -> (answers, expires)
@@ -661,7 +661,8 @@ class Matchmaker:
             answers = [(header(LOGGED) + nonce +
                         LOGGED_BODY.pack(req, hresult, ina_bytes(ina), len(given), padded(given, 15)), sender)]
             if used is not None:
-                self.challenges[key] = used + ((body, answers),)  # the one LOGON this nonce answers
+                # The one LOGON this nonce answers, as a hash: a registration's body holds the proof.
+                self.challenges[key] = used + ((hashlib.sha256(body).digest(), answers),)
             return answers
 
         if xuid == 0 or length > 15:
@@ -673,7 +674,7 @@ class Matchmaker:
             # A challenge is answered once, whatever came of its LOGON. That LOGON said again, as
             # a client does until it hears, gets the same answer while the nonce lasts; any other
             # is refused, so a captured LOGON is worth nothing from this socket or any other.
-            return first[1] if first[0] == body else logged(E_ACCESSDENIED)
+            return first[1] if first[0] == hashlib.sha256(body).digest() else logged(E_ACCESSDENIED)
         used = (asked, issued, expires)
         wanted = printable(tag[:length])
         if not wanted or name_banned(wanted):
