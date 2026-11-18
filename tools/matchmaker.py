@@ -82,7 +82,7 @@ LIVE_PER_SECOND = 100  # Live packets per address between sweeps; resends every 
 LIVE_BYTES_PER_SECOND = 256 * 1024  # answer bytes per address between sweeps: three full 100-row group-7 reads
 STORE_SECONDS = 30.0  # at most this often is --store written
 BAD_ENTRY = (KeyError, TypeError, ValueError, AttributeError, IndexError,
-             OverflowError)  # an entry raising one of these is skipped, never the whole store
+             OverflowError, struct.error)  # an entry raising one of these is skipped, never the whole store
 DATAGRAM_MAGIC = b"D2GD"  # the game's datagram, as live_transport.c wraps it
 DATAGRAM_KINDS = (1, 2)  # a game datagram, or a punch the transports exchange
 DATAGRAM_HEAD = 11  # magic, version, 4-byte sender virtual address, 2-byte guest port
@@ -1231,6 +1231,10 @@ class Matchmaker:
             try:
                 stats = {(int(stat_id), int(kind), int(value)) for stat_id, kind, value in entry["stats"]}
                 board, xuid = int(entry["board"]), int(entry["xuid"])
+                # A number the wire cannot carry would fail every read of the row: skip it here.
+                for item in stats:
+                    STAT_ITEM.pack(*item)
+                STAT_WRITE_BODY.pack(0, board, xuid, 0)
             except BAD_ENTRY:
                 skipped += 1
                 continue
