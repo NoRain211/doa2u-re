@@ -188,6 +188,10 @@ class ImportFailureTests(unittest.TestCase):
                     soundtrack.level_album(folder, "encoder")
             self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
             self.assertEqual(Path(folder, "two.adx").read_bytes(), b"original")
+            # A rerun while the track is still open says so and goes on to the other albums.
+            with mock.patch.object(soundtrack.os, "replace", side_effect=locked):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            self.assertEqual(Path(folder, "two.adx").read_bytes(), b"original")
             self.assertIn("#level", Path(folder, "tracks.txt").read_text())
             with mock.patch.object(soundtrack.subprocess, "run") as run:
                 self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
