@@ -245,17 +245,24 @@ int main(void)
     const unsigned before_online = submits[1];
     for (unsigned i = 0u; i < 20u; ++i) land(1u, 200u, 60u);
     expect("online follows the row", submits[1] > before_online);
-    /* A rollback re-runs frames it already voiced: they stay silent, and the
-       shown frame voices its hit. */
+    /* A rollback re-runs frames: a hit an earlier run of the frame voiced
+       stays silent, and one the corrected pads first land there voices. */
     recomp_hit_voice_install(root);
     recomp_hit_voice_advance_clock(2000.0);
-    const unsigned before_replay = submits[1];
-    recomp_hit_voice_set_replaying(true);
-    for (unsigned i = 0u; i < 5u; ++i) land(1u, 200u, 60u);
-    expect("replayed frames stay silent", submits[1] == before_replay);
-    recomp_hit_voice_set_replaying(false);
+    const unsigned before_shown = submits[1];
+    recomp_hit_voice_set_rollback_frame(40u, false);
     land(1u, 200u, 60u);
-    expect("the shown frame voices", submits[1] > before_replay);
+    expect("the shown frame voices", submits[1] > before_shown);
+    recomp_hit_voice_advance_clock(2000.0);
+    recomp_hit_voice_pump(); /* the frame 40 clip's tail */
+    const unsigned before_replay = submits[1];
+    recomp_hit_voice_set_rollback_frame(40u, true);
+    for (unsigned i = 0u; i < 5u; ++i) land(1u, 200u, 60u);
+    expect("a frame voiced before stays silent", submits[1] == before_replay);
+    recomp_hit_voice_set_rollback_frame(41u, true);
+    land(1u, 200u, 60u);
+    expect("a hit first landed in a re-run frame voices", submits[1] > before_replay);
+    recomp_hit_voice_set_rollback_frame(UINT32_MAX, false);
     remove("hit_voice_test_clips/kas/selections/kasumi_HIT_LV3_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_02.wav");

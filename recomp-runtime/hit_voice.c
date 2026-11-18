@@ -424,12 +424,27 @@ static void cry(unsigned side, Bank *bank);
 static void note_event(unsigned side, const Bank *bank, unsigned level, unsigned clip);
 
 static bool rollback_replaying; /* a netplay rollback is running frames again */
+static uint32_t rollback_frame;   /* the session frame + 1; 0 outside a session */
+static uint32_t voiced[2][16];    /* each side's last voiced frames + 1, past the 8-frame window */
+static unsigned voiced_next[2];
 
 /* A rollback runs frames it already showed and heard; a hit voiced then must
-   not sound a second time, and its meter must stay as the shown frame left it. */
-void recomp_hit_voice_set_replaying(bool replaying)
+   not sound a second time, and its meter must stay as the shown frame left it.
+   A hit the corrected pads first land in a re-run frame is still voiced. */
+void recomp_hit_voice_set_rollback_frame(uint32_t frame, bool replaying)
 {
+    rollback_frame = frame + 1u; /* UINT32_MAX ends the session: 0 */
     rollback_replaying = replaying;
+    if (rollback_frame == 0u) memset(voiced, 0, sizeof voiced);
+}
+
+static bool first_voicing(unsigned side)
+{
+    if (rollback_frame == 0u) return true;
+    for (unsigned i = 0u; i < 16u; ++i)
+        if (voiced[side][i] == rollback_frame) return false;
+    voiced[side][voiced_next[side]++ % 16u] = rollback_frame;
+    return true;
 }
 
 /* life: the side's life before the hit; after: once it landed; base: the
@@ -437,7 +452,7 @@ void recomp_hit_voice_set_replaying(bool replaying)
 
 static void voice_hit(unsigned side, uint32_t base, uint16_t life, uint16_t after)
 {
-    if (rollback_replaying) return;
+    if (!first_voicing(side)) return;
     Bank *bank = bank_for(*recomp_memory(SIDE_CHARACTER + side * SIDE_STRIDE, 1u));
     if (bank == NULL) return;
     const RecompHitVoiceTuning *tuning = &bank->tuning;
