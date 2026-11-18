@@ -412,6 +412,7 @@ struct Launcher {
         if (!iso || !SDL_GetPathInfo(path.c_str(), &path_info) || path_info.type != SDL_PATHTYPE_FILE) {
             build_info = "Choose your Disc 2 .iso image";
             menu = kBuildPage;
+            in_page = false; // the row may be past the BUILD GAME page's two
             return;
         }
         game_source = path;
@@ -511,6 +512,7 @@ struct Launcher {
             const std::string tail = logTail();
             build_info = (tail.rfind("Build failed", 0) == 0 ? tail : "Build failed: " + tail).substr(0, 75);
             menu = kBuildPage;
+            in_page = false;
         }
     }
 
