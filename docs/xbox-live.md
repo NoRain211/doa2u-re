@@ -17,9 +17,11 @@ line. When Live is off, the Live pages report no account, as before.
   built-in one when that is empty. `RECOMP_LIVE_SERVER=host:port` (or just
   `host`) overrides it.
 - **Identity.** The first logon writes a random 32-byte secret to
-  `.recomp-storage/live-identity.bin`. The account's XUID and the proof the
-  matchmaker checks both come from it, so copying the file moves the account
-  and losing it loses the account. `RECOMP_LIVE_IDENTITY=<file>` uses
+  `.recomp-storage/live-identity.bin`. The account's XUID, the proof that
+  registers it and the key that answers the matchmaker's challenge at every
+  logon all come from it ([Accounts](matchmaking.md#accounts)), so copying
+  the file moves the account and losing it loses the account. Anyone who
+  reads the file can log on as the account. `RECOMP_LIVE_IDENTITY=<file>` uses
   another file, which is how two runners on one machine get two accounts.
 
 ## How it fits

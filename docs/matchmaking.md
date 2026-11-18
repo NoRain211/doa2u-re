@@ -232,7 +232,7 @@ turning the server into an amplifier.
 
 | Kind | From | Body | Answer |
 | --- | --- | --- | --- |
-| 12 LOGON | player, every 5 s | request, XUID, 32-byte proof, 64-hex build digest, title id, presence state, presence session id, gamertag length and 15 bytes | 13 LOGGED: request, result, the player's virtual address, the gamertag actually given |
+| 12 LOGON | player, after each NONCE | the CHALLENGE's request, XUID, 32-byte answer, 64-hex build digest, title id, presence state, presence session id, gamertag length and 15 bytes | 13 LOGGED: request, result, the player's virtual address, the gamertag actually given |
 | 14 SESSION_PUT | host | request, session id (zeros creates), 4 slot counts, attribute length and bytes | 15 SESSION_OK: request, result, session id, 16-byte key |
 | 16 SESSION_DEL | host | request, session id | 25 DONE |
 | 17 SEARCH | anyone | request, procedure, filter length and bytes | 18 RESULT, one per session |
@@ -250,6 +250,7 @@ turning the server into an amplifier.
 | 32 STATROW | server | request, result, index, total, board total, XUID, gamertag, rank, count (at most 64), then the stats | — |
 | 33 LEADERS | anyone | request, board, pivot XUID (0 = by rank), first rank, count | 32 STATROW, one per row |
 | 34 LIVE_RELAY | either player of a Live pair | the other player's virtual address, then one guest datagram | 9 RELAY to that player: the datagram, with the sender's virtual address filled in |
+| 35 CHALLENGE | player, before each LOGON, so every 5 s | request, XUID | 36 NONCE: request, 1 when the XUID has an account and 0 when it has none, 16-byte nonce |
 
 A RESULT row is the session id, its key, the host's XUID, gamertag and
 virtual address, the four slot counts and the attributes. A FRIEND row is the
@@ -268,26 +269,98 @@ request rate, and they are never cached: a game repeats them legitimately.
 
 ### Accounts
 
-The first LOGON of a XUID registers the hash of its proof, its gamertag and
-the build digest. A client's proof is SHA-256 of `doa2u-live` and its
-32-byte secret, and its XUID is the type field 0x0009 followed by the first
-six bytes of the SHA-256 of that proof. A LOGON whose XUID is not the one its
-proof gives is refused with access denied, as is another proof for an
-existing XUID, and the game shows a logon error. Search results carry XUIDs,
-so this check keeps one player from claiming another's account by guessing,
-but it is not authentication against an observer: LOGON carries the proof
-itself, unchanged, and the heartbeat repeats it every 5 s over plain UDP, so
-anyone who can read one packet can send that proof from their own socket and
-be logged on as that XUID, answering its invites, writing its stats and
-CONNECTing as it. The cookie only proves a source address that the packet
-already shows. Closing that needs a nonce the server issues and an answer
-over it, with the store keeping a verifier; today the proof is an identity
-claim from a secret no one else holds. A gamertag is
-unique among accounts:
-the server gives a taken one a digit, 1 to 9, and past those the XUID's own
-hex digits, so every player who sends the default name gets one; LOGGED
-answers with the one it gave. A heartbeat is the same LOGON every 5 s; 20 s without one means the
-player is offline and their sessions leave the search.
+A client makes three values from its 32-byte secret. The proof is SHA-256 of
+`doa2u-live` and the secret. The key is SHA-256 of the proof. The XUID is the
+type field 0x0009 followed by the first six bytes of the key. The secret and
+the key never cross the wire, and the proof crosses it once for an account.
+
+A logon is two requests under one request id:
+
+1. CHALLENGE names the XUID. The server answers NONCE with 16 random bytes
+   and whether it has an account for that XUID. The nonce belongs to that
+   socket (its address and its nonce, as a cookie belongs to an address),
+   that request id and that XUID, and lasts 10 s. A CHALLENGE said again
+   while its nonce is unanswered gets the same nonce.
+2. LOGON answers the nonce. The first LOGON that names a nonce uses it up,
+   whatever the result, so a LOGON without a challenge, or with one that is
+   used, expired or another socket's, is refused with access denied.
+
+For an XUID with an account, the 32-byte answer is HMAC-SHA256, keyed by the
+account's key, of the nonce, the kind byte (12) and every other field of the
+LOGON body in order: the request id, the XUID, the build digest, the title
+id, the presence state, the presence session id, the gamertag length and the
+gamertag. The server makes the same HMAC from the key it holds, and any other
+answer is refused with access denied, so the game shows a logon error.
+
+For an XUID without an account, the answer is the proof itself. The server
+checks that the XUID is that proof's, and registers the account with the
+proof's SHA-256 as its key, its gamertag and the build digest. Search results
+carry XUIDs, so this check keeps one player from claiming another's account
+by guessing.
+
+A heartbeat is a whole logon every 5 s, the CHALLENGE and the LOGON both;
+20 s without one means the player is offline and their sessions leave the
+search. The other design was a key agreed at the first logon that signs the
+later requests. It only helps when every request is signed and counted
+against replay, because every request after a logon is already tied to its
+socket alone; a signed heartbeat among unsigned requests adds nothing.
+Challenging each LOGON keeps one rule (no LOGON is taken without an answer to
+a fresh nonce) and one path for the logon and the heartbeat on both sides.
+The cost is a second round trip for each heartbeat. The client sends each
+half again every 500 ms for up to 5 s, as it does any request, so a lost
+packet is repeated inside the heartbeat instead of waiting for the next one.
+
+What a reader of the wire, or of the store, can do:
+
+- A CHALLENGE, a NONCE, and the LOGON of an account that exists give nothing
+  that logs anyone on. The answer fits one nonce, which only its own socket
+  can use and which is gone once it is answered. Sent again from its own
+  socket, the LOGON gets its first answer again for 60 s (see
+  [Caps](#caps)), which changes nothing, and access denied after that.
+- The LOGON that registers an XUID carries the proof. Whoever reads that one
+  packet can make the key and log on as that account from then on. It is
+  sent once for an account on a server, and again only when the server no
+  longer has the account: after an eviction, a lost store, or a restart
+  without `--store`. The client sends it when a NONCE says the XUID has no
+  account, so someone who can read the client's packets and also send it one
+  as the server can ask for it.
+- The server holds each account's key, in memory and in the store. Whoever
+  reads the store can log on as every account in it. The key does not give
+  the proof or the secret.
+- The key is the same on every matchmaker a player uses, so a key or a proof
+  learned on one opens that account on the others. An operator learns the
+  proof of every account that registers with their matchmaker.
+- When a proof or key is known to someone else, the only remedy is a new
+  identity: a new secret, so a new XUID without the old one's friends and
+  stats. The XUID fixes its key, so neither the player nor an operator can
+  change the key of an account.
+
+Signatures made with a private key would close the registration and the
+store: the server would hold only a public key. Neither side has them without
+a new dependency, so they are in [Not done yet](#not-done-yet).
+
+A store from before the challenge needs no change. It kept each account's
+SHA-256 of the proof under the name `proof`, and that value is the key, so
+such an account answers its first challenge and is not registered again; no
+value that can be replayed is sent for it. What the earlier protocol showed
+stays shown: it sent the proof in every LOGON, so anyone who read one of an
+account's LOGONs then can make its key now. A reset would not help that
+account. The server holds only the hash of the proof, which such a reader can
+make too, so it cannot tell the owner from the reader, and a rule that let
+the first of them set a new key would let the reader take the account from
+its owner instead of sharing it. Such an account needs a new identity.
+
+A client from before the challenge sends LOGON without CHALLENGE. It has no
+nonce, so it gets LOGGED with access denied, registers nothing, and the game
+shows a logon error; its packet still shows its proof to anyone who reads it.
+A new client gets no answer to CHALLENGE from an earlier server, to which it
+is an unknown kind, and its logon fails after 5 s. The version stays 2,
+because it is the room matchmaker's version too: a version 3 server would
+answer no released runner's HOST, LIST or JOIN.
+
+A gamertag is unique among accounts: the server gives a taken one a digit, 1
+to 9, and past those the XUID's own hex digits, so every player who sends the
+default name gets one; LOGGED answers with the one it gave.
 
 Each account gets a virtual address `10.x.y.z`, unique among the accounts,
 never 10.0.* or 10.255.*, which the game puts in the XNADDR's ina and
@@ -376,8 +449,15 @@ answers (a request is small and its answer may be 100 rows of stats; past
 that the answer is dropped and the client's resend gets it later), and
 registers 4 new accounts a minute and 16 a day (the day counts accounts
 made, not refused attempts); a player's requests are 2 a second at most, so
-only a flood meets those. A LIVE_RELAY is not one of those 100: it has the relay's
-caps, 250 a second for a pair direction and 500 for an address. The rest are
+only a flood meets those. A nonce is kept until its LOGON or for 10 s: 32
+for an address, whose oldest makes room for a new one, and 4,096 in all,
+where the oldest of all makes room. A LOGON whose nonce went that way is
+refused, and a heartbeat refused signs its player out, so the share of an
+address keeps a flood's cost with the addresses that flood: filling the
+table takes 128 of them, and it then drops their own nonces first, since a
+player's is answered within a round trip. A LIVE_RELAY is not one of those
+100: it has the relay's caps, 250 a second for a pair direction and 500 for
+an address. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
 672-byte attributes, 512-byte filters, 25 search results, 100 friends and
 pending requests, 250 mutes (147 fit one MUTELIST packet, so it is cut
@@ -409,11 +489,14 @@ resends then meet the CONNECT cap.
 Without `--store` everything is in memory and a restart forgets it. With
 `--store PATH` one JSON file holds:
 
-- each account's XUID, the hex SHA-256 of its proof, its gamertag, title id
-  and when it was last heard, as wall clock time. The proof itself is never
-  written, and neither is a client's address. A store from before the
-  last-heard field existed, or holding the old loop-clock seconds, loads its
-  accounts as heard now;
+- each account's XUID, its key (the hex SHA-256 of its proof, under the
+  name `proof` as earlier stores have it), its gamertag, title id and when
+  it was last heard, as wall clock time. The proof itself is never written,
+  and neither is a client's address. The key is what answers a challenge, so
+  whoever can read the file can log on as its accounts
+  ([Accounts](#accounts)): keep it readable by the server's user alone. A
+  store from before the last-heard field existed, or holding the old
+  loop-clock seconds, loads its accounts as heard now;
 - friends as pairs of XUIDs, and pending friend requests the same way plus
   when each was made;
 - invites: session id, from, to, when it was made and the answer once there
@@ -435,8 +518,9 @@ one is reported on stderr and left alone.
 
 The Live client in `recomp-runtime/live_client.c` sends those kinds through
 the transport's socket: a request goes out again every 500 ms and fails after
-5 s, a LOGGED player says LOGON every 5 s with its presence, a PUSH makes it
-ask for its friend list again, and an LPEER becomes the peer intro the
+5 s, a logon is a CHALLENGE and then the LOGON that answers its NONCE, a
+logged-on player logs on again that way every 5 s with its presence, a PUSH
+makes it ask for its friend list again, and an LPEER becomes the peer intro the
 transport punches with. A game datagram to a paired player goes out as a
 LIVE_RELAY that names that player's virtual address, and the server sends it
 on as a room RELAY. The transport owns the request's nonce and cookie and
@@ -549,12 +633,17 @@ the ping estimate from both round trips.
   it shows with the same check as profile names.
 - The estimate goes through the server, so two players near each other
   and far from it see a ping higher than their direct one.
-- A LOGON carries its proof in the clear, and the server accepts that same
-  value for the life of the account, so a player who reads one packet can
-  act as another XUID. The identity check stops a player from claiming a
-  found XUID by guessing, not an observer from replaying; a nonce the
-  server issues and an answer over it, kept as a verifier in the store, is
-  the fix.
+- The LOGON that registers an XUID carries its proof, and the server and
+  its store hold every account's key ([Accounts](#accounts)). Whoever reads
+  that one packet, the store, or a LOGON from before the challenge can log
+  on as that account on every matchmaker that has it, and the remedy is a
+  new identity. A signature made with a private key, with only the public
+  key registered and stored, would close all three; it needs a signature
+  scheme that neither side has without a new dependency.
+- Only the logon is authenticated. Each later request is tied to its socket
+  by the address and the cookie, and nothing is encrypted. Someone who can
+  read a logged-on player's packets and send from that player's address can
+  act as the player while the session lasts, but cannot log on after it.
 - A flood from many addresses can fill the 4,096-account table, and a new
   account then evicts the player offline longest with their friends, stats
   and mutes. The caps are per address, so it takes at least 256 of them,
