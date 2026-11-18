@@ -48,6 +48,7 @@ static size_t collect_dirty(RecompGuestSnapshots *s)
        a few ms per 64 MB save; use userfaultfd write-protect on Linux when
        rollback runs there. */
     size_t written = s->size / PAGE, count = 0u;
+    bool watched = false; /* only GetWriteWatch fills watch_addresses */
 #ifdef _WIN32
     if (s->write_watch) {
         ULONG_PTR found = written;
@@ -57,10 +58,11 @@ static size_t collect_dirty(RecompGuestSnapshots *s)
             return SIZE_MAX;
         }
         written = found;
+        watched = true;
     }
 #endif
     for (size_t i = 0u; i < written; ++i) {
-        const size_t page = s->write_watch ? (size_t)((uint8_t *)s->watch_addresses[i] - s->ram) / PAGE : i;
+        const size_t page = watched ? (size_t)((uint8_t *)s->watch_addresses[i] - s->ram) / PAGE : i;
         if (memcmp(s->ram + page * PAGE, s->shadow + page * PAGE, PAGE) != 0) {
             s->dirty_pages[count++] = (uint32_t)page;
         }
@@ -68,7 +70,7 @@ static size_t collect_dirty(RecompGuestSnapshots *s)
     /* Tracking starts again only once its list is mostly pages that no longer
        change. After a reset the first write to each page faults, about 0.7 us:
        0.17 ms for a fight frame's 260 pages, against 0.1 us to compare one. */
-    if (s->write_watch && written > 2u * count + 64u) reset_tracking(s);
+    if (watched && written > 2u * count + 64u) reset_tracking(s);
     return count;
 }
 
@@ -240,7 +242,7 @@ static void rehash_all(RecompGuestSnapshots *s)
 static void rehash_stale(RecompGuestSnapshots *s)
 {
     for (size_t byte = 0u; byte < (s->size / PAGE + 7u) / 8u; ++byte) {
-        /* The last byte's high bits are past the last page after a 0xff fill. */
+        /* The last byte's bits past the final page are padding, which a failed save sets. */
         for (unsigned bit = 0u; s->hash_stale[byte] != 0u && bit < 8u && byte * 8u + bit < s->size / PAGE; ++bit) {
             if ((s->hash_stale[byte] & (1u << bit)) != 0u) rehash_page(s, byte * 8u + bit);
         }

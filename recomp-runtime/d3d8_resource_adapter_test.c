@@ -192,7 +192,8 @@ int main(void)
     /* A rewind restores the table with guest RAM: a release it undoes runs
        again, and a creation run again is listed once. */
     const size_t state_size = recomp_d3d8_resource_state_size();
-    uint8_t *saved = malloc(state_size * 2u), *after = saved + state_size;
+    /* Zeroed as SyncTest allocates its blocks: the save leaves struct padding unwritten. */
+    uint8_t *saved = calloc(2u, state_size), *after = saved + state_size;
     CHECK(saved != NULL);
     /* Different stale bytes in each buffer: padding must not reach the compare. */
     memset(saved, 0xa5, state_size);
