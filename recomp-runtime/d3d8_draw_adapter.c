@@ -1709,6 +1709,8 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     draw->fvf = *recomp_memory_u32(device + 0x798u);
     const bool program = (draw->fvf & 1u) != 0u;
     recomp_d3d8_target(&draw->target);
+    /* Counted like a built draw, so the scene freeze still sees the task draw. */
+    if (recomp_d3d8_draw_skippable(draw->target.offscreen)) { ++draw_submitted; return; }
     if (program) attach_program(device, draw);
     RecompD3dVertexLayout layout;
     /* The distortion pass's STR coordinate sets (TEXCOORDSIZE3 for sets 1-2). */

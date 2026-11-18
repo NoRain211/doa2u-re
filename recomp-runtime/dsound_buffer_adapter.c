@@ -43,8 +43,21 @@ typedef struct Buffer {
     RecompHrtfVoice hrtf;
     /* When the span the game last filled finishes playing; Unlock commits Lock's estimate. */
     uint64_t filled_until_ms, locked_until_ms;
+    /* Names each restart of this buffer's playback for heard[]. */
+    uint32_t generation;
 } Buffer;
 static Buffer buffers[BUFFER_COUNT];
+/* On the frame-locked clock, host output's own place in each buffer, on the
+   real clock (heard_span). Outside the rollback state: what was heard stays heard. */
+typedef struct Heard {
+    RecompDsoundBufferModel model;
+    RecompHrtfVoice hrtf;
+    uint32_t identity, generation;
+} Heard;
+static Heard heard[BUFFER_COUNT];
+/* Names each buffer created in a slot for heard[]. Outside the rollback state,
+   so a create run again gets a new name and SyncTest sees the same buffers. */
+static uint32_t identity[BUFFER_COUNT], identities;
 static void update_3d(Buffer *buffer);
 
 /* Guards buffers[] and host output calls shared with the output pump thread.
@@ -91,7 +104,7 @@ void recomp_dsound_buffer_state_restore(const void *state)
 }
 
 static bool output_suppressed; /* read and written only under the output lock */
-static bool game_thread_pump;  /* read and written only under the output lock */
+static bool frame_clock;       /* read and written only under the output lock */
 
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
 {
@@ -100,10 +113,10 @@ void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
     recomp_dsound_output_unlock();
 }
 
-void recomp_dsound_buffer_set_game_thread_pump(bool only)
+void recomp_dsound_buffer_set_frame_clock(bool locked)
 {
     recomp_dsound_output_lock();
-    game_thread_pump = only;
+    frame_clock = locked;
     recomp_dsound_output_unlock();
 }
 
@@ -140,6 +153,25 @@ static uint64_t now_ms(void)
     return recomp_test_dsound_now_ms();
 #else
     return recomp_xapi_performance_counter() / 1000000u;
+#endif
+}
+
+/* The host's own clock, which the frame-locked guest clock never replaces. */
+static uint64_t wall_ms(void)
+{
+#ifdef RECOMP_DSOUND_TEST_CLOCK
+    uint64_t recomp_test_dsound_wall_ms(void);
+    return recomp_test_dsound_wall_ms();
+#elif defined(_WIN32)
+    LARGE_INTEGER count, frequency;
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&frequency);
+    return (uint64_t)(count.QuadPart / frequency.QuadPart * 1000 +
+        count.QuadPart % frequency.QuadPart * 1000 / frequency.QuadPart);
+#else
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    return (uint64_t)time.tv_sec * 1000u + (uint64_t)time.tv_nsec / 1000000u;
 #endif
 }
 
@@ -302,9 +334,95 @@ static void reset_output(Buffer *buffer)
     const RecompHrtfFilter filter = buffer->hrtf.filter;
     buffer->hrtf = (RecompHrtfVoice){.filter = filter, .rendered = filter};
     buffer->filled_until_ms = buffer->locked_until_ms = 0u;
+    ++buffer->generation;
     /* The backend accepts routing only from its owner thread, so it is set here
        and on every change, never by the pump thread. */
     apply_routing(buffer);
+}
+
+static uint64_t bytes_for_ms(const RecompDsoundBufferModel *model, uint64_t ms)
+{
+    return ms * model->sample_rate / 1000u * model->block_align;
+}
+
+/* How far host output may run ahead of the guest's play cursor, and fall behind it. */
+enum { HEARD_AHEAD_MS = 50u, HEARD_BEHIND_MS = 100u };
+
+/* The span host output plays next on the frame-locked clock. The guest's
+   cursor follows guest time, which falls behind when frames run slow and
+   jumps when the game waits; output plays real time from its own place
+   instead, near that cursor: ahead into data the game has written (a
+   one-shot to its end, a timed ring to its last Lock), behind while the data
+   is still there. Past either bound it waits, or skips to the guest's cursor.
+   The pump thread reads a copy of the guest model, which only the game thread moves. */
+static uint32_t heard_span(Buffer *buffer, uint64_t now, bool background, uint32_t *offset)
+{
+    Heard *h = &heard[buffer - buffers];
+    RecompDsoundBufferModel copy = buffer->model, *guest = background ? &copy : &buffer->model;
+    recomp_dsound_buffer_cursor(guest, now);
+    /* A re-simulated frame neither plays nor moves output, which resumes at real time. */
+    if (output_suppressed) return 0u;
+    const uint64_t wall = wall_ms();
+    if (h->identity != identity[buffer - buffers] || h->generation != buffer->generation ||
+        h->model.size_bytes != guest->size_bytes || h->model.block_align != guest->block_align ||
+        h->model.loop_start_bytes != guest->loop_start_bytes ||
+        h->model.loop_end_bytes != guest->loop_end_bytes || h->model.play_flags != guest->play_flags) {
+        h->identity = identity[buffer - buffers];
+        h->generation = buffer->generation;
+        h->model = *guest;
+        h->model.last_ms = wall;
+        h->hrtf = (RecompHrtfVoice){.filter = buffer->hrtf.filter, .rendered = buffer->hrtf.filter};
+        return 0u;
+    }
+    /* A one-shot the guest finished plays on to its own end; a stop starts a new generation. */
+    if (!guest->playing && (guest->play_flags & RECOMP_DSOUND_PLAY_LOOPING)) h->model.playing = 0u;
+    if (!h->model.playing || wall < h->model.last_ms + 10u) return 0u;
+    h->model.sample_rate = guest->sample_rate; /* a pitch change plays on from here */
+    const bool looping = (guest->play_flags & RECOMP_DSOUND_PLAY_LOOPING) != 0u;
+    /* An untimed loop holds the same data on every lap. */
+    if (looping && !buffer->filled_until_ms) return recomp_dsound_buffer_consume(&h->model, wall, offset);
+    /* After a mute or stall a ring resumes at the guest's cursor, at real time;
+       its own place would have run on into data not yet written. */
+    if (looping && wall > h->model.last_ms + HEARD_BEHIND_MS) {
+        h->model.cursor_bytes = guest->cursor_bytes;
+        h->model.frame_remainder = guest->frame_remainder;
+        h->model.last_ms = wall;
+        return 0u;
+    }
+    const uint32_t start = recomp_dsound_buffer_cursor(&h->model, h->model.last_ms);
+    uint64_t ahead = 0u, behind = bytes_for_ms(guest, HEARD_BEHIND_MS), span = 0u;
+    int64_t place = (int64_t)start - guest->cursor_bytes;
+    if (looping) {
+        /* A ring holds its last Lock ahead of the cursor; the next one reuses
+           the oldest data behind it, assumed at most a quarter of the ring. */
+        span = guest->loop_end_bytes - guest->loop_start_bytes;
+        const uint64_t lead = bytes_for_ms(guest, buffer->filled_until_ms > now ? buffer->filled_until_ms - now : 0u);
+        const uint64_t kept = span - span / 4u > lead ? span - span / 4u - lead : 0u;
+        ahead = bytes_for_ms(guest, HEARD_AHEAD_MS);
+        if (ahead > lead) ahead = lead;
+        if (ahead > span) ahead = span;
+        if (behind > kept) behind = kept;
+        if (start >= guest->loop_start_bytes && guest->cursor_bytes >= guest->loop_start_bytes) {
+            const uint64_t forward = ((uint64_t)start + span - guest->cursor_bytes) % span;
+            place = forward <= ahead + (span - ahead - behind) / 2u ? (int64_t)forward : (int64_t)forward - (int64_t)span;
+        }
+    }
+    if (place < -(int64_t)behind) {
+        h->model.cursor_bytes = guest->cursor_bytes;
+        h->model.frame_remainder = guest->frame_remainder;
+        place = 0;
+    }
+    uint32_t bytes = recomp_dsound_buffer_consume(&h->model, wall, offset);
+    if (!looping) return bytes; /* a one-shot plays on to its end */
+    const uint64_t room = place < 0 ? ahead + (uint64_t)-place : (uint64_t)place < ahead ? ahead - (uint64_t)place : 0u;
+    if (bytes > room) {
+        bytes = (uint32_t)(room - room % guest->block_align);
+        uint64_t end = (uint64_t)*offset + bytes;
+        if (end >= guest->loop_end_bytes) end = guest->loop_start_bytes + (end - guest->loop_end_bytes) % span;
+        h->model.cursor_bytes = (uint32_t)end;
+        h->model.frame_remainder = 0u;
+    }
+    return bytes;
 }
 
 /* Copies the cursor's span up to now into host output. The pump thread
@@ -317,18 +435,22 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
     }
     /* Every game-thread call counts, so a loop started by Play is not capped behind its start. */
     if (!background) game_pump_ms = now;
-    if (!buffer->model.playing || !buffer->pcm) return;
-    /* A stalled game cannot refill a ring: play what its last Lock filled, and
-       at least 100 ms, then go quiet; past that the ring would replay audio
-       already heard. */
-    if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING)) {
-        uint64_t limit = game_pump_ms + 100u;
-        if (buffer->filled_until_ms > limit) limit = buffer->filled_until_ms;
-        if (now > limit) now = limit;
+    const uint32_t slot = (uint32_t)(buffer - buffers);
+    if (!buffer->pcm || !(buffer->model.playing || (frame_clock && heard[slot].model.playing))) return;
+    uint32_t offset = 0u, bytes;
+    if (frame_clock) bytes = heard_span(buffer, now, background, &offset);
+    else {
+        /* A stalled game cannot refill a ring: play what its last Lock filled, and
+           at least 100 ms, then go quiet; past that the ring would replay audio
+           already heard. */
+        if (background && (buffer->model.play_flags & RECOMP_DSOUND_PLAY_LOOPING)) {
+            uint64_t limit = game_pump_ms + 100u;
+            if (buffer->filled_until_ms > limit) limit = buffer->filled_until_ms;
+            if (now > limit) now = limit;
+        }
+        if (background && now < buffer->model.last_ms + 10u) return;
+        bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
     }
-    if (background && now < buffer->model.last_ms + 10u) return;
-    uint32_t offset = 0u;
-    uint32_t bytes = recomp_dsound_buffer_consume(&buffer->model, now, &offset);
     if (!bytes) return;
     int16_t samples[40000];
     uint8_t *pcm = (uint8_t *)samples;
@@ -358,11 +480,14 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
     }
     if (failure) {
         if (!background) recomp_stop(2, "%s", failure);
-        buffer->model.playing = 0u;
+        if (frame_clock) heard[slot].model.playing = 0u;
+        else buffer->model.playing = 0u;
         pump_failure = failure;
         return;
     }
-    const uint32_t slot = (uint32_t)(buffer - buffers);
+    /* On the frame-locked clock the ears' state follows output, not the guest. */
+    RecompHrtfVoice *voice = frame_clock ? &heard[slot].hrtf : &buffer->hrtf;
+    voice->filter = buffer->hrtf.filter;
     if (!buffer->is3d && !output_suppressed) {
         recomp_audio_output_submit(slot, pcm, bytes, buffer->model.sample_rate, buffer->channels,
             buffer->format == 0x69u ? 16u : buffer->bits, buffer->volume);
@@ -373,7 +498,7 @@ static void pump(Buffer *buffer, uint64_t now, bool background)
     if (!limit) limit = 1u;
     for (uint32_t done = 0u, frames = buffer->is3d ? bytes / 2u : 0u; done < frames;) {
         uint32_t piece = frames - done < limit ? frames - done : limit;
-        uint32_t rendered = recomp_hrtf_render(&buffer->hrtf, samples + done, piece,
+        uint32_t rendered = recomp_hrtf_render(voice, samples + done, piece,
             buffer->model.sample_rate, ears, 20000u);
         if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
             RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
@@ -454,7 +579,7 @@ static bool pump_pass(void)
 {
     recomp_dsound_output_lock();
     const bool running = !pump_stopping;
-    if (running && !game_thread_pump) {
+    if (running) {
         const uint64_t now = now_ms();
         for (uint32_t i = 0; i < BUFFER_COUNT; ++i) if (buffers[i].root) pump(&buffers[i], now, true);
     }
@@ -622,6 +747,7 @@ static void create_buffer_locked(void)
     while (slot < BUFFER_COUNT && buffers[slot].root) ++slot;
     if (slot == BUFFER_COUNT) { kernel_return(4u, RECOMP_DSOUND_OUT_OF_MEMORY); return; }
     Buffer *buffer = &buffers[slot];
+    identity[slot] = ++identities;
     *buffer = (Buffer){.root = recomp_kernel_allocate_pool(ROOT_SIZE),
         .settings = recomp_kernel_allocate_pool(SETTINGS_SIZE), .references = 1u,
         .flags = desc[1], .format = tag, .channels = channels, .bits = bits, .align = align,

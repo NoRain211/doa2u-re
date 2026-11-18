@@ -961,6 +961,14 @@ last Lock, and at least 100 ms past the game thread's last pump; a longer
 stall goes quiet instead of replaying the ring's last lap as an echo. One-shot
 buffers play on. Only the game thread sets voice
 routing. A pump gap over 100 ms still drops its span while the cursor advances.
+Netplay, replays and SyncTest run play cursors on the frame-locked guest
+clock, which falls behind real time when frames run slow and jumps when the
+game waits. Host output there keeps its own place per buffer on the real
+clock, outside the rollback state: a one-shot plays on to its end, a ring
+runs up to 50 ms ahead into its last Lock, and output falls up to 100 ms
+behind the guest's cursor before it skips to it. Re-simulated frames neither
+play nor move that place, and the pump thread feeds only it. Rings still
+gap when slow frames outrun the game's refills.
 Native endpoint consumption has an opt-in host test;
 synthetic API and backend tests remain suitable for public CI.
 

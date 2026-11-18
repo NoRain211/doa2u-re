@@ -103,6 +103,10 @@ struct RollbackRun {
     std::chrono::steady_clock::time_point hitchSince{}, frameLeft{};
     std::uint32_t hitchFrom = 0u, heldBack = 0u;
     double peerWaitMs = 0.0, longestWaitMs = 0.0, slowestFrameMs = 0.0;
+    // Frames run again after rewinds this second, each timed from its load to the frontier.
+    std::chrono::steady_clock::time_point rerunFrom{};
+    std::uint32_t rerunDepth = 0u, rerunFrames = 0u;
+    double rerunMs = 0.0;
     // The last frontier wait: how late this side first saw its frame due, and how long it then lacked pads.
     double lateMs = 0.0, blockedMs = 0.0;
 };
@@ -439,6 +443,11 @@ static void measureHitch(std::chrono::steady_clock::time_point entered)
     // frameLeft is only set after a live wait, so a round's last frame counts as its window closes.
     if (r.frameLeft != steady_clock::time_point{})
         r.slowestFrameMs = std::max(r.slowestFrameMs, duration<double, std::milli>(entered - r.frameLeft).count());
+    if (r.rerunFrom != steady_clock::time_point{}) {
+        r.rerunMs += duration<double, std::milli>(entered - r.rerunFrom).count();
+        r.rerunFrames += r.rerunDepth;
+        r.rerunFrom = steady_clock::time_point{};
+    }
     if (live && r.frameLeft != steady_clock::time_point{}) {
         r.slowestFrameMs = std::max(r.slowestFrameMs, r.lateMs);
         r.peerWaitMs += r.blockedMs;
@@ -450,12 +459,14 @@ static void measureHitch(std::chrono::steady_clock::time_point entered)
     if (measuring && live && left - r.hitchSince < seconds(1)) return;
     if (measuring && (r.peerWaitMs >= 50.0 || r.slowestFrameMs >= 33.0 || r.heldBack >= 2u))
         std::fprintf(stderr, "recomp netplay: hitch in frames %u-%u: waited %.0f ms for the other player "
-            "(longest %.0f ms), slowest frame here %.0f ms, held back %u frames for them\n",
-            r.hitchFrom, r.session.frame, r.peerWaitMs, r.longestWaitMs, r.slowestFrameMs, r.heldBack);
+            "(longest %.0f ms), slowest frame here %.0f ms, ran %u frames again in %.0f ms, "
+            "held back %u frames for them\n",
+            r.hitchFrom, r.session.frame, r.peerWaitMs, r.longestWaitMs, r.slowestFrameMs,
+            r.rerunFrames, r.rerunMs, r.heldBack);
     r.hitchSince = live ? left : steady_clock::time_point{};
     r.hitchFrom = r.session.frame;
-    r.peerWaitMs = r.longestWaitMs = r.slowestFrameMs = 0.0;
-    r.heldBack = 0u;
+    r.peerWaitMs = r.longestWaitMs = r.slowestFrameMs = r.rerunMs = 0.0;
+    r.heldBack = r.rerunFrames = 0u;
 }
 
 /* A session started from the Versus menu's room walks to character select.
@@ -665,6 +676,10 @@ static void onRollbackFrame(std::uint32_t swap)
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (rollback.mode == RollbackMode::Udp) measureHitch(entered);
         if (target != RECOMP_ROLLBACK_NONE) {
+            rollback.rerunFrom = std::chrono::steady_clock::now();
+            rollback.rerunDepth = rollback.frontier - target;
+            // The output pump must not play the buffers mid-rewind; the frames run again are muted anyway.
+            recomp_dsound_buffer_set_output_suppressed(true);
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
             if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost())
                 endSession("rollback:unrestorable");
@@ -1040,7 +1055,7 @@ void recomp_netplay_session_install(bool synctest)
     // The walks to Versus run unseen behind the last notice, and unheard (recomp_game_walk_to_versus).
     recomp_d3d8_set_present_suppressed(rollback.landOnVersus);
     recomp_dsound_buffer_set_output_suppressed(rollback.landOnVersus || backToVersus);
-    recomp_dsound_buffer_set_game_thread_pump(enabled || synctest);
+    recomp_dsound_buffer_set_frame_clock(enabled || synctest);
     if (rollback.lobby) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         if (rollback.mode == RollbackMode::Udp) {

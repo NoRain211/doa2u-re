@@ -96,7 +96,9 @@ SyncTest.
   The frame-locked clock makes time a function of the frame count.
 - Re-simulated frames must not present, play sound or rumble. The D3D8
   adapter can skip the flip and GPU work, and the buffer adapter can drop
-  audio output, while their models keep advancing. A skipped flip still
+  audio output, while their models keep advancing. Host output keeps its
+  own real-time place in each buffer outside the saved state, so a rewind
+  neither replays nor loses what was heard. A skipped flip still
   runs Present's vblank wait, which moves guest time even though the frame
   clock never sleeps there; without it hidden frames diverged.
 - Frames that write saves or present from the display mode change cannot be
@@ -128,8 +130,13 @@ SyncTest.
 
 `rollback.c` keeps both sides' pads by frame. A remote frame that has not
 arrived runs with the last remote pad; when its pad arrives and differs from
-the one that ran, the session rewinds to the earliest wrong frame. The local
-side runs at most `RECOMP_ROLLBACK_WINDOW` (8) frames past the last remote
+the one that ran, the session rewinds to the earliest wrong frame. A local
+pad is stored with the values DOA2's pad update (`0xfa760`) reads as zero
+set to zero: sticks within 0x2000 of center, face, Black and White under
+0x20, and triggers under 0x80. A resting stick's noise is then no
+misprediction. Past those limits the fight reads exact stick values (a
+0x5000-wide tracker in `0x1f4c0`), so a held stick's noise still rewinds.
+The local side runs at most `RECOMP_ROLLBACK_WINDOW` (8) frames past the last remote
 pad. The ring in `synctest.c` keeps saves of SyncTest's modules and the
 guest RAM pages, each tagged with its frame, and refuses a load that SyncTest
 would skip.
@@ -199,10 +206,29 @@ the frame where the other player went quiet and how long they were gone.
 A save waiting for the other player's pads shows the same panel.
 Shorter hitches in a live round are logged once per second when the second
 had one: the time this side waited for the other player's pads after its
-frame was due, its own slowest frame, and frames frame sync held back so the
+frame was due, its own slowest frame, how many frames it ran again after
+rewinds and how long they took, and frames frame sync held back so the
 other side could catch up. A slow second with long waits points at the other
 machine; a slow frame here points at this one, and it includes any frames run
-again after a rewind, since the player sees them as one late frame. Both
+again after a rewind, since the player sees them as one late frame.
+Two runners on one machine, through a relay holding each packet 60 ms
+(+-20%) and with the joiner pressing a new pad every live frame, ran a hidden
+frame in about 5 ms: 2.9 ms of game code, 0.7 ms building draws the hidden
+frame drops, and 1 ms saving and loading state. At input delay 0 the host
+ran about 80 frames a second again and nearly every live second had a frame
+of 33 ms or more; at delay 2 one second did, and at delay 4 none. A hidden
+frame now builds a draw only while it could still clear the back buffer
+flags the saved state carries: the first on-screen draw after a Swap. In
+the same 3,600-frame run at delay 0, frames run again in slow seconds took
+3.7 ms instead of 5.6 ms, and the host's seconds with a slow frame fell from
+28 to 3 (the joiner's from 41 to 30); guest RAM matched at every check.
+A save then took about 0.6 ms: 0.27 ms of guest RAM pages and 0.25 ms
+clearing the fiber states' 64 KB stack copies. Saves now clear only their
+headers, as a restore reads just the used stack bytes, so a save takes about
+0.4 ms. A rewind writes each page once, from the oldest save it undoes, instead
+of once per save: on the joiner, whose rewinds undid about four saves, it fell
+from 1.0 to 0.64 ms; on the host, about 1.6 saves, from 0.71 to 0.64 ms.
+Repeated runs of this test vary by about a fifth, more than this changes. Both
 renderers log each draw shader they build with how long it took: D3D11 only
 outside its boot precompile, SDL_GPU at boot too.
 Freezing the joiner's process for 6 s in the menus held the host on the

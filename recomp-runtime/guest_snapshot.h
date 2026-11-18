@@ -35,6 +35,7 @@ typedef struct RecompGuestSnapshots {
     uint8_t *shadow;      /* RAM as of the newest save */
     uint32_t *dirty_pages;
     void **watch_addresses;
+    uint8_t *restored;    /* load: one bit per page already written */
     /* Each record holds the pages that step one save back to the one before. */
     RecompSnapshotRecord *records;
     size_t slot_count;

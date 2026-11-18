@@ -82,6 +82,8 @@ void recomp_kernel_free_pool(uint32_t address) { freed = address; }
 uint32_t recomp_d3d8_require_device(void) { return DEVICE; }
 static bool overlay_hidden;
 bool recomp_scene_freeze_overlay_hidden(void) { return overlay_hidden; }
+static bool skippable;
+bool recomp_d3d8_draw_skippable(bool offscreen) { (void)offscreen; return skippable; }
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void) { return &state; }
 bool recomp_d3d8_state_set_simple(uint32_t method, uint32_t value)
 {
@@ -382,6 +384,11 @@ static int draw_tests(void)
     invoke(0x348240u, 2u, 2u, VERTICES, 20u);
     overlay_hidden = false;
     CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 1u);
+    /* A skippable run-ahead draw is counted but not built or submitted. */
+    skippable = true;
+    invoke(0x348240u, 2u, 2u, VERTICES, 20u);
+    skippable = false;
+    CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 2u);
     /* Width 2 widens an x-major line by one pixel above and below. */
     const float line[10] = {10.0f, 20.0f, 0.0f, 1.0f, 0.0f, 50.0f, 24.0f, 0.0f, 1.0f, 0.0f};
     const float wide = 2.0f;

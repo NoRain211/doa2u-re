@@ -110,6 +110,18 @@ static int run(uint8_t *ram, bool write_watch, const char *mode)
     if (!recomp_snapshots_load(&s, 2u) || memcmp(ram, first, RAM_SIZE) != 0) {
         return fail(mode, "load across the ring");
     }
+    /* A page in both undone records takes the older value, and unsaved writes go. */
+    memcpy(first, ram, RAM_SIZE);
+    fill(ram, 7, 0x11);
+    if (!recomp_snapshots_save(&s)) return fail(mode, "overlap save 1");
+    fill(ram, 7, 0x22);
+    fill(ram, 8, 0x22);
+    if (!recomp_snapshots_save(&s)) return fail(mode, "overlap save 2");
+    fill(ram, 7, 0x33);
+    fill(ram, 9, 0x33);
+    if (!recomp_snapshots_load(&s, 2u) || memcmp(ram, first, RAM_SIZE) != 0) {
+        return fail(mode, "load through a page saved twice");
+    }
 
     /* The hash follows saves, loads and moved ranges as a fresh pass would. */
     const RecompRamRange ignored[] = {{3 * PAGE + 4, 3 * PAGE + 8}, {40 * PAGE, 42 * PAGE}};
