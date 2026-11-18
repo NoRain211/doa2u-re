@@ -28,9 +28,9 @@ enum RecompPcSetting {
     RECOMP_PC_FREE_CAMERA,   /* Off, On */
     RECOMP_PC_DEDICATION,    /* Show, Hide */
     RECOMP_PC_LIFE_BAR,      /* Default, 16 colours, Custom (combo_hud.h) */
+    RECOMP_PC_FIGHT_HUD,     /* Original, Damage, Stun Meter, Both (combo_hud.h) */
     RECOMP_PC_HIT_VOICES,    /* Off, Quiet, Normal, Loud (hit_voice.h) */
     RECOMP_PC_KO_REPLAY,     /* Original, Dynamic (ko_replay.h) */
-    RECOMP_PC_FIGHT_HUD,     /* Original, Damage, Stun Meter, Both (combo_hud.h) */
     RECOMP_PC_SETTING_COUNT
 };
 
@@ -48,6 +48,8 @@ unsigned recomp_pc_settings_choices(unsigned setting);
    the host marks others its renderer applies live, after recomp_pc_settings_install. */
 bool recomp_pc_settings_applies_now(unsigned setting);
 void recomp_pc_settings_set_live(unsigned setting, bool live);
+/* A row that is not live applies when the player leaves DOA ONLINE, not at the next launch. */
+void recomp_pc_settings_set_after_online(unsigned setting, bool on);
 
 typedef struct RecompPcSettingsHost {
     /* A choice the player changed; the host applies it if it applies now. */

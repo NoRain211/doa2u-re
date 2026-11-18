@@ -81,7 +81,8 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_HIT_VOICES] = !boolean(entries, "hitVoices", true) ? 0u
         : volume == "quiet" ? 1u : volume == "loud" ? 3u : 2u;
     choices[RECOMP_PC_KO_REPLAY] = text(entries, "koReplay", "dynamic") == "original" ? 0u : 1u;
-    const std::string hud = text(entries, "fightHud", "both");
+    // fightHud replaced comboHud, whose Off is Original and On is Both.
+    const std::string hud = text(entries, "fightHud", boolean(entries, "comboHud", true) ? "both" : "original");
     choices[RECOMP_PC_FIGHT_HUD] = hud == "original" ? 0u : hud == "damage" ? 1u : hud == "stun" ? 2u : 3u;
 }
 

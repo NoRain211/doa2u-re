@@ -4,7 +4,7 @@
 
 # DOA2U Native PC Port
 
-**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source.**
+**A native Windows, macOS and Linux port of _Dead or Alive 2 Ultimate_ (Xbox), built by static recompilation, with the goal of rewriting it into readable source. Now with Xbox Live over rollback netcode.**
 
 [![Latest release](https://img.shields.io/github/v/release/NoRain211/doa2u-re?label=alpha)](https://github.com/NoRain211/doa2u-re/releases/latest)
 [![CI](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml/badge.svg)](https://github.com/NoRain211/doa2u-re/actions/workflows/public-ci.yml)
@@ -75,21 +75,28 @@ keeps running.
   Start** turns the start-up check off.
 - **PC Settings in the game.** The game's own **Options** menu has a
   **PC SETTINGS** row after **Video**, drawn and translated like the game's
-  rows, with the launcher's settings over three pages: the top **Page** row
-  (left, right or confirm) turns between the display, audio and gameplay
-  settings. **Unlocks**, **CPU Costumes**, **Free Camera** and
-  **Dedication** change at once, and so do **Resolution**, **MSAA** and
+  rows, with the launcher's settings over four pages: the top **Page** row
+  (left, right or confirm) turns between the display, audio, gameplay and
+  HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
+  **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
+  **KO Replay** change at once, and so do **Resolution**, **MSAA** and
   **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
-  breaks, as Sparring's bar does. Online both stay off.
+  breaks, as Sparring's bar does. **Fight HUD** picks **Both**, **Damage**,
+  **Stun Meter** or **Original** (the base game's HUD), online too; neither
+  addition changes the fight's state or timing.
 - **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
-  of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
+  of Dead or Alive 4, drop its ISO on the launcher (or choose it with
+  AUDIO SETTINGS' **Import DOA4 Voices**): it imports the disc's music for
+  the Jukebox, then the voices, and turns Hit Voices on. No extraction is
+  needed; on Windows it fetches the ffmpeg it needs the first time. By hand,
+  `python tools/import_doa4_voices.py <DOA4 ISO, extracted disc or snd.afs>`
   decodes every voice clip of all 15 fighters into
   `private\doa4-voice-all\<fighter>` and fills each fighter's `selections`
   folder from `tools\doa4_voice_selections.json`, a mapping of which DOA4
@@ -108,9 +115,9 @@ keeps running.
   mapping** button (or the importer's `--save-selections`) writes your picks
   back into the mapping file to share them. Hits are
   graded by the move's base damage, before combo scaling. It needs an
-  ffmpeg with XMA support. PC SETTINGS' **Hit Voices**
-  row sets them Off, Quiet, Normal or Loud. Online they stay off, since a
-  rollback would replay them.
+  ffmpeg with XMA support; on Windows the importers and the build fetch one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
+  row sets them Off, Quiet, Normal or Loud. Online each player's own row
+  applies; a rollback's re-run frames stay silent, so a hit is voiced once.
 - **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**
   (the default), a few frames after the KO hit the fight stands still and
   the game's own multi-angle replay, which DOA2U otherwise keeps for a human
@@ -119,13 +126,53 @@ keeps running.
   out live and the round moves on. KOs by the stage (hazards, fences,
   falls into another area) get no replay at all. **Original** keeps DOA2U's
   own replays.
-  Offline only.
+  Off while logged on to DOA ONLINE.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
-- **Fight HUD.** PC Settings' **Fight HUD** row picks the in-fight additions:
-  **Both** (the combo's damage under the hit counter and Sparring's
-  critical-stun segment on the life bars), **Damage**, **Stun Meter**, or
-  **Original** for the base game's HUD.
+- **Jukebox.** A **JUKEBOX** entry before Quit Game, with its own picture,
+  opens a page of the game's own Options menu with the game's music:
+  DOA2U's own 50 tracks from the disc, and the soundtracks of Dead or Alive 3
+  and Dead or Alive 4 from your own discs. **Album** and **Track** choose a
+  track (left and right) and A plays or stops it; **Play Mode** is Repeat
+  One, Play All or Shuffle (which move on after two loops, fading out).
+  **Assign To** chooses any of the game's music (a fighter's theme, its
+  remix, Character Select, the endings and so on) and A gives it the chosen
+  track, from the next time that music starts; **Assigned** shows what it
+  plays, and A there puts its own track back. Assignments are kept in
+  `jukebox\assignments.txt`. The game's own sound is muted while a
+  track plays; leaving the page returns to the main menu. Online the game
+  plays its own music. To add an album, choose **Import Disc** on the
+  launcher's **JUKEBOX** page, or drop the ISO on the launcher (a DOA3 or DOA4
+  disc is imported; any other disc is used as the game's disc and built), or
+  run `python tools/import_soundtrack.py <ISO or extracted folder>`. DOA3's
+  tracks are copied as they are; DOA4's are decoded with ffmpeg (on Windows the
+  import fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
+  `recomp_adx_encode` from the game's build, so build the game first. Albums
+  go to a `jukebox` folder beside the launcher (`jukebox\<album>`), with the
+  music of each disc's movies (opening, endings, logos) taken out of the SFD
+  files in its movie folders as well; the build adds DOA2U's own movies' music
+  as **DOA2U-MOVIES**, and the **DOA1U** album is the Dead or Alive Ultimate
+  music on DOA2U's disc (`DOA1\Sound`, from the music list in `Doa1.xbe`).
+  **JukeboxEditor.exe** (**Edit Tracks** on the launcher's **JUKEBOX** page;
+  built from `tools\jukebox_editor.cs`) lists every album, plays a preview of
+  any track, renames tracks and albums and picks what each of the game's music
+  plays. To rename tracks by hand, open `jukebox\<album>\names.txt`
+  (`jukebox\doa2u` for the game's own music): each line is `file = name`, and
+  `album = ...` names the album. The game lists every track there when it
+  starts, reads the names at start, and keeps them when you import again.
+- **Mods.** Files in a `mods` folder beside the launcher replace the
+  game's files without touching the disc. Each folder in it is a mod that
+  mirrors the disc: `mods\<mod>\DOA2\<file>.sfd` replaces a whole file,
+  and a folder named after one of the game's archives replaces single
+  entries in it, by their name in the archive or their number:
+  `mods\<mod>\DOA2\<archive>.afs\<entry>.adx` (or `<number>.adx`). An entry
+  can be a plain WAV (8 to 32-bit PCM, mono or stereo, any
+  rate): it is encoded to ADX once and kept in `mods\.cache`, and loops
+  where its `smpl` chunk says or, if the track it replaces looped, over the
+  whole song. Mods load by folder name, or in the order `mods\order.txt`
+  lists them, and a later mod's file wins; a folder whose name starts with
+  `_` is off. The game's log (`private\play-logs`) lists every mod and file
+  it serves. Netplay only pairs players whose mods are the same.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
   shown, so it stays smooth at high resolutions; the Vulkan renderer also
@@ -163,8 +210,7 @@ keeps running.
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
-| Xbox Live menus | Report no account; **Yes** quits to the desktop in place of the Dashboard |
-| Online Versus | Rollback netplay from the Versus menu; test build |
+| Xbox Live menus | On by default: the game's own Live pages run on the matchmaker, with rollback fights; logging on switches the run to online mode and back. `RECOMP_LIVE=0` turns it off, and the pages then report no account, where **Yes** quits to the desktop in place of the Dashboard. Test build ([Xbox Live](docs/xbox-live.md)) |
 | Hand-written game logic | Not started; the game runs as generated code |
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
@@ -295,11 +341,11 @@ decompiler output, generated C and retail bytes stay under `private/`.
 <!-- function-status-grid:start -->
 | Area | Named | Decompiled | Bound / tested | Total | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Game | 157 | 46 | 3 | 206 | 24% |
-| CRI middleware | 15 | 0 | 15 | 30 | 50% |
-| SDK / CRT | 138 | 131 | 4 | 273 | 49% |
-| Untagged | 521 | 131 | 1 | 653 | 20% |
-| **Total** | **831** | **308** | **23** | **1,162** | **28%** |
+| Game | 157 | 67 | 31 | 255 | 38% |
+| CRI middleware | 15 | 1 | 17 | 33 | 55% |
+| SDK / CRT | 138 | 131 | 5 | 274 | 50% |
+| Untagged | 521 | 132 | 1 | 654 | 20% |
+| **Total** | **831** | **331** | **54** | **1,216** | **32%** |
 <!-- function-status-grid:end -->
 
 Statuses are exclusive; progress counts decompiled, bound and tested. The
@@ -333,9 +379,9 @@ it, so the 3D view fills the screen at the same height, and the presenter
 keeps the 16:9 HUD and menus in their shape in the screen's center. The
 launcher's **16:10**, **21:9** (the primary monitor's own shape on a 21:9
 display, else 64:27) and
-**32:9** choices set it. Online sessions and replays use the host's 4:3 or
-16:9 mode, fitted with black bars, as both sides must compute the same
-frames. Above 480p the Direct3D 11 window fills the screen borderless in
+**32:9** choices set it. A Live fight hashes only the fight, so each player
+keeps their own shape there; the presenter fits the game's 4:3 or 16:9
+picture into the window. Above 480p the Direct3D 11 window fills the screen borderless in
 any shape, with black bars around a picture of another shape; the SDL_GPU
 window is resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; unsupported MSAA counts fall back to the
@@ -358,7 +404,8 @@ builds saved.
 `--random-cpu-costumes`, or **CPU Costumes: Random** on the **GAMEPLAY** page,
 dresses CPU opponents in Story, Time Attack, Survival and Team in random
 unlocked costumes where the game would give their first one. Story's special
-picks, such as a costume about to unlock, stay. It stays off online.
+picks, such as a costume about to unlock, stay. It stays off while logged on
+to DOA ONLINE.
 
 To package a release ZIP from a clean checkout:
 

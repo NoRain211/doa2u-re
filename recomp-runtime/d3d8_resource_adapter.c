@@ -37,6 +37,35 @@ void recomp_d3d8_resource_reset(void)
     inline_texture_active = false;
 }
 
+/* Guest RAM holds the headers and the pool their storage. A rewind that kept
+   this table as it was would stop on a resource whose release it undoes, and
+   list twice one whose creation runs again. */
+typedef struct ResourceState {
+    OwnedResource owned[OWNED_SLOTS];
+    RecompD3dTextureDesc inline_texture;
+    bool inline_texture_active;
+} ResourceState;
+
+size_t recomp_d3d8_resource_state_size(void) { return sizeof(ResourceState); }
+
+void recomp_d3d8_resource_state_save(void *state)
+{
+    ResourceState *out = state;
+    /* Padding and the texture while unused stay zero, so stale bytes never reach SyncTest's compare. */
+    memset(out, 0, sizeof *out);
+    memcpy(out->owned, owned, sizeof owned);
+    if (inline_texture_active) out->inline_texture = inline_texture;
+    out->inline_texture_active = inline_texture_active;
+}
+
+void recomp_d3d8_resource_state_restore(const void *state)
+{
+    const ResourceState *in = state;
+    memcpy(owned, in->owned, sizeof owned);
+    inline_texture = in->inline_texture;
+    inline_texture_active = in->inline_texture_active;
+}
+
 static OwnedResource *ownership(uint32_t header)
 {
     for (uint32_t i = 0u; i < OWNED_SLOTS; ++i) {

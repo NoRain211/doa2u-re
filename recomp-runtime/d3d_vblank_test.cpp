@@ -6,15 +6,20 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 static unsigned waits;
+static uint64_t last_deadline;
+static uint32_t current_thread = 1u;
 static bool fast_forward;
 static bool fast_forward_hook() { return fast_forward; }
 extern "C" void recomp_kernel_wait_for_vblank(uint64_t deadline)
 {
     ++waits;
+    last_deadline = deadline;
     recomp_xapi_skip_wait(deadline);
 }
+extern "C" uint32_t recomp_kernel_current_thread_id(void) { return current_thread; }
 
 int main()
 {
@@ -100,6 +105,47 @@ int main()
     recomp_d3d_wait_present();
     if (Clock::now() - start >= 500ms) {
         std::fprintf(stderr, "vblank: paced wait after fast-forward used host time\n");
+        return 1;
+    }
+    // A waiter kept off the CPU past refreshes is handed each one it missed
+    // (CRI refills its streams once per wake, issue #145), a few at most.
+    constexpr uint64_t interval_ns = 1000000000u / 60u;
+    recomp_d3d_vblank_reset();
+    recomp_d3d_wait_vblank();
+    const uint64_t seen = last_deadline;
+    std::this_thread::sleep_for(60ms);  // three or four refreshes
+    for (uint64_t i = 1; i <= 3; ++i) {
+        recomp_d3d_wait_vblank();
+        if (last_deadline != seen + i * interval_ns) {
+            std::fprintf(stderr, "vblank: a late waiter lost missed refresh %llu\n",
+                static_cast<unsigned long long>(i));
+            return 1;
+        }
+    }
+    current_thread = 2u;  // another thread has missed nothing of its own
+    const uint64_t other_start = recomp_xapi_performance_counter();
+    recomp_d3d_wait_vblank();
+    if (last_deadline < other_start) {
+        std::fprintf(stderr, "vblank: a first wait was handed a past refresh\n");
+        return 1;
+    }
+    current_thread = 1u;
+    std::this_thread::sleep_for(150ms);  // past the catch-up limit: resume at the next refresh
+    const uint64_t resume_start = recomp_xapi_performance_counter();
+    recomp_d3d_wait_vblank();
+    if (last_deadline < resume_start) {
+        std::fprintf(stderr, "vblank: a long stall replayed its missed refreshes\n");
+        return 1;
+    }
+    // Present's wait for a pending flip never takes a missed refresh.
+    std::this_thread::sleep_for(35ms);  // two or three refreshes
+    recomp_d3d_wait_present();
+    uint64_t pending[2];
+    recomp_d3d_vblank_state_save(pending);
+    waits = 0;
+    recomp_d3d_wait_present();
+    if (waits != 1u || last_deadline < pending[1]) {
+        std::fprintf(stderr, "vblank: Present queued a flip on a pending refresh\n");
         return 1;
     }
     return 0;

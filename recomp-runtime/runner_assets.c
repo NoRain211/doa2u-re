@@ -164,6 +164,19 @@ void recomp_runner_text_set(uint32_t number, const recomp_utf16 *const text[6])
     }
 }
 
+void recomp_runner_text_set_address(uint32_t number, uint32_t address)
+{
+    unsigned i = 0u;
+    while (i < text_count && texts[i].number != number) ++i;
+    if (i == TEXTS) {
+        recomp_stop(2, "runner-assets:texts");
+        return;
+    }
+    if (i == text_count) ++text_count;
+    texts[i].number = number;
+    for (unsigned l = 0u; l < 6u; ++l) texts[i].text[l] = address;
+}
+
 bool recomp_runner_text_lookup(uint32_t number, unsigned language, uint32_t *text)
 {
     for (unsigned i = 0u; i < text_count; ++i) {

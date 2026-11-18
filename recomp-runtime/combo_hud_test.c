@@ -198,7 +198,8 @@ static void begin(bool online)
     memset(stack, 0, sizeof stack);
     recomp_runtime.registers.esp = STACK + sizeof stack - 0x10u;
     recomp_runtime.registers.eax = 0u;
-    recomp_combo_hud_install(online);
+    recomp_combo_hud_install();
+    recomp_combo_hud_set_enabled(!online); /* the runner turns it off online */
 }
 
 static void hit(unsigned defender, unsigned damage)

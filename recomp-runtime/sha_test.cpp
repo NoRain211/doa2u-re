@@ -4,6 +4,20 @@
 #include <string>
 #include <vector>
 
+// The same digest the hex carries, as bytes: the Live identity's XUID and proof use it.
+static bool digestMatches(const char *hex, const std::uint8_t *digest)
+{
+    for (unsigned i = 0u; i < 32u; ++i) {
+        unsigned value = 0u;
+        for (unsigned digit = 0u; digit < 2u; ++digit) {
+            const char c = hex[2u * i + digit];
+            value = value << 4 | (unsigned)(c <= '9' ? c - '0' : c - 'a' + 10);
+        }
+        if (digest[i] != (std::uint8_t)value) return false;
+    }
+    return true;
+}
+
 // Known answers from Python hashlib; lengths cross the 55/56/64-byte padding edges.
 struct Case { std::size_t length; const char *sha1, *sha256; };
 
@@ -32,8 +46,12 @@ int main()
     for (const Case &c : kCases) {
         const std::vector<std::uint8_t> bytes(c.length, 'a');
         const std::string sha1 = doaxbv::sha1Hex(bytes), sha256 = doaxbv::sha256Hex(bytes);
+        std::uint8_t digest[32], plain[32];
+        doaxbv::sha256(bytes.data(), bytes.size(), digest);
+        const bool hashed = doaxbv_sha256_digest(bytes.data(), bytes.size(), plain);
         if (sha1 != c.sha1 || sha256 != c.sha256 ||
-            doaxbv::sha1Hex(bytes.data(), bytes.size()) != c.sha1) {
+            doaxbv::sha1Hex(bytes.data(), bytes.size()) != c.sha1 || !hashed ||
+            !digestMatches(c.sha256, digest) || !digestMatches(c.sha256, plain)) {
             std::fprintf(stderr, "sha mismatch for %zu bytes: %s %s\n",
                 c.length, sha1.c_str(), sha256.c_str());
             ++failures;
