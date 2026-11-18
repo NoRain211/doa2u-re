@@ -157,16 +157,25 @@ static bool open_socket(RecompNetplay *net, uint16_t local_port)
     return true;
 }
 
-static bool resolve(const char *host, uint32_t *address)
+bool recomp_netplay_resolve(const char *host, uint32_t *address)
 {
     struct addrinfo hints, *found = NULL;
+#ifdef _WIN32
+    WSADATA data; /* its caller's thread may run before any socket is open */
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return false;
+#endif
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
-    if (getaddrinfo(host, NULL, &hints, &found) != 0 || found == NULL) return false;
-    *address = ((const struct sockaddr_in *)(const void *)found->ai_addr)->sin_addr.s_addr;
-    freeaddrinfo(found);
-    return true;
+    const bool ok = getaddrinfo(host, NULL, &hints, &found) == 0 && found != NULL;
+    if (ok) {
+        *address = ((const struct sockaddr_in *)(const void *)found->ai_addr)->sin_addr.s_addr;
+        freeaddrinfo(found);
+    }
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    return ok;
 }
 
 bool recomp_netplay_listen(RecompNetplay *net, uint16_t port)
@@ -302,18 +311,6 @@ uint64_t netplay_now_ms(void)
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0u;
     return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
 #endif
-}
-
-bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t port)
-{
-    RecompNetplayMatch *m = &net->match;
-    if (port == 0u) return false;
-    if (!resolve(host, &m->server_address)) {
-        m->server_port = 0u;
-        return false;
-    }
-    m->server_port = htons(port);
-    return true;
 }
 
 void recomp_netplay_receive(RecompNetplay *net, RecompRollbackSession *s)

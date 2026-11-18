@@ -73,8 +73,10 @@ typedef struct RecompNetplay {
 /* Binds port on all interfaces with no peer yet. Live's transport sets the
    peer from the matchmaker's introductions. */
 bool recomp_netplay_listen(RecompNetplay *net, uint16_t port);
-/* Points a socket at the matchmaker; false when host does not resolve. */
-bool recomp_netplay_match_server(RecompNetplay *net, const char *host, uint16_t port);
+/* A host name's IPv4 address, in network order; false when it does not
+   resolve. It blocks for as long as the resolver takes, so the Live transport
+   calls it on a thread of its own. */
+bool recomp_netplay_resolve(const char *host, uint32_t *address);
 void recomp_netplay_close(RecompNetplay *net);
 /* True for a profile name that is not allowed online, or one too long to
    check. Takes UTF-8. */
