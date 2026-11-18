@@ -168,7 +168,12 @@ same matrix. With 1.5 the mirror covered the middle 42% of a 32:9 view, and
 the floor smeared its clamped edge texels over the rest, flickering as the
 camera moved (issue #139). Every reader of 0x877EA0, including the water
 mirror (0x26C2E0) and a plane mirror (0x280460), gets the shape for its call
-only. 16:9 keeps the game's 1.5, so its outer 8% still shows the smear. The D3D8
+only, 16:9 included: at the game's 1.5 its outer 8% showed the same smear.
+A netplay session, a replay or a SyncTest keeps 1.5, because the projections
+live in guest RAM, which netplay sessions hash and replays must recompute
+exactly: the session or replay sets `recomp_kernel_widescreen` from the host's
+flags, and the lookup leaves 0x877EA0 alone while `recomp_netplay_online`
+holds. The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
@@ -176,9 +181,7 @@ backdrops) keep filling it. A 3D draw into a viewport narrower than the
 target, such as the character select portrait in its panel, moves toward
 the center with that panel and keeps its size, since its projection already
 has the screen's shape; its scissor fits the same way, and program draws
-shift their viewport offset in c59. The projections live in guest RAM, which netplay
-sessions hash and replays must recompute exactly, so both keep 16:9: the
-session or replay sets `recomp_kernel_widescreen` from the host's flags.
+shift their viewport offset in c59.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability

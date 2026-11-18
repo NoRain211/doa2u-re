@@ -1028,6 +1028,12 @@ bool recomp_netplay_session_enabled()
     return rollback.mode != RollbackMode::Off;
 }
 
+/* Every mode whose guest RAM is hashed or replayed by another run. */
+bool recomp_netplay_online()
+{
+    return recomp_netplay_session_enabled() || recomp_synctest_enabled();
+}
+
 void recomp_netplay_session_install(bool synctest)
 {
     recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_NETPLAY] = nullptr;

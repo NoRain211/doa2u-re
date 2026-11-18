@@ -4,11 +4,16 @@
 
 #include "runtime.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* True while this boot runs a session, a replay or a SyncTest: guest RAM is
+   hashed or replayed there, so host-shaped values must stay out of it. */
+bool recomp_netplay_online(void);
 
 /* Guest hooks a netplay session sets up (netplay_session.cpp). */
 

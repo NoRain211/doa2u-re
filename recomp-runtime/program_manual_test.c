@@ -174,6 +174,8 @@ RecompFunction recomp_runner_assets_lookup_manual(uint32_t address)
 
 uint32_t recomp_kernel_video_flags(void) { return video_flags; }
 float recomp_kernel_widescreen_aspect(void) { return screen_aspect; }
+static bool online;
+bool recomp_netplay_online(void) { return online; }
 void sub_00034280(void) {}
 void sub_00034E10(void) { seen_shape = nine_sixteenths; }
 void sub_00036490(void) { seen_shape = nine_sixteenths; }
@@ -183,12 +185,13 @@ void sub_0027A070(void) { seen_reflection = back_buffer_shape; }
 void sub_0027A430(void) { seen_reflection = back_buffer_shape; }
 void sub_00280460(void) { seen_reflection = back_buffer_shape; }
 
-/* The culling views see the screen's shape during the call; the shared values come back after. */
+/* The culling views see the screen's shape during the call; the shared values come back after.
+   A session, a replay or a SyncTest hashes the projections and keeps the game's 1.5. */
 static int test_culling_shape(void)
 {
     const struct { uint32_t flags; float aspect, seen, reflection; } cases[] = {
         {0x004e0000u, 32.0f / 9.0f, 0.5625f, 1.5f},     /* 4:3 mode reads 3/4 elsewhere */
-        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 1.5f},
+        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 16.0f / 9.0f},
         {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f, 32.0f / 9.0f},
     };
     const uint32_t wrapped[] = {0x00034e10u, 0x00036490u};
@@ -207,6 +210,16 @@ static int test_culling_shape(void)
             if (seen_reflection != cases[i].reflection || back_buffer_shape != 1.5f) return 0;
         }
     }
+    /* Online the same 16:9 screen keeps the game's 1.5 in every mirror. */
+    online = true;
+    video_flags = 0x004f0000u;
+    screen_aspect = 16.0f / 9.0f;
+    for (unsigned j = 0u; j < sizeof mirrors / sizeof mirrors[0]; ++j) {
+        seen_reflection = 0.0f;
+        recomp_lookup_manual(mirrors[j])();
+        if (seen_reflection != 1.5f || back_buffer_shape != 1.5f) return 0;
+    }
+    online = false;
     video_flags = 0u;
     screen_aspect = 16.0f / 9.0f;
     return 1;
