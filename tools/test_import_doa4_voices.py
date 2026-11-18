@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import import_doa4_voices as voices
+from test_xact import sound_bank_image
 
 
 def wav(path, samples):
@@ -54,6 +55,30 @@ class MappingTests(unittest.TestCase):
             self.assertEqual(voices.pcm_of(os.path.join(chosen, "ayane_KO_02.wav")), struct.pack("<2h", 4, 5))
             self.assertEqual(voices.read_tuning(os.path.join(chosen, "voice.ini")), {"gap_ms": "700"})
             self.assertEqual(voices.selection_files(os.path.join(out, "zac", "selections")), ["mine_KO_01.wav"])
+
+
+class CueTests(unittest.TestCase):
+    def test_only_simple_cues_map_to_waves(self):
+        bank = sound_bank_image([("left_hit", 3), ("theme", [1, 2]), ("right_hit", 9)])
+        self.assertEqual(voices.cue_waves(bank), {"left_hit": 3, "right_hit": 9})
+
+    def test_cue_names_that_could_leave_the_output_folder_raise(self):
+        for name in ("../evil", "sub/evil", "sub\\evil", "..", ""):
+            with self.assertRaises(ValueError, msg=name):
+                voices.cue_waves(sound_bank_image([(name, 3)]))
+
+
+class AfsTests(unittest.TestCase):
+    def test_an_entry_count_larger_than_the_file_raises_before_reading(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "snd.afs")
+            with open(path, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<I", 0xFFFFFFFF) + bytes(8))
+            with self.assertRaises(SystemExit):
+                voices.afs_entries(path)
+            with open(path, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<III", 1, 16, 4))
+            self.assertEqual(voices.afs_entries(path), [(16, 4)])
 
 
 if __name__ == "__main__":

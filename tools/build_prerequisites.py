@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Find the pinned llvm-mingw compiler and, on x86-64 Linux, extract-xiso, downloading each when missing."""
+"""Find the pinned llvm-mingw compiler, ffmpeg on Windows and, on x86-64 Linux, extract-xiso,
+downloading each when missing."""
 # Adapted from committed DOAXBV tools/build_prerequisites.py at 5761e89.
 import os
 from pathlib import Path
@@ -24,6 +25,14 @@ LLVM_MINGW = Path("tools/llvm-mingw")
 EXTRACT_XISO_URL = ("https://github.com/XboxDev/extract-xiso/releases/download/build-202609111233/"
                     "extract-xiso_Linux.zip")
 EXTRACT_XISO_SHA256 = "c4b9fbf86b57c74d07fb643522740ae82034d8280ccde24528752cd1cb0b798d"
+
+
+# ffmpeg decodes DOA4's XMA audio for tools/import_doa4_voices.py and tools/import_soundtrack.py.
+# Gyan Doshi's essentials build (GPL, as this project; static, with the xma1 decoder), mirrored on GitHub.
+FFMPEG_URL = ("https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/"
+              "ffmpeg-9.0.2-essentials_build.zip")
+FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+FFMPEG = Path("tools/ffmpeg")
 
 
 def runs_upstream_linux_binary():
@@ -119,3 +128,56 @@ def extract_xiso(root):
             staged.chmod(0o755)
             staged.replace(tool)
     return tool
+
+
+def find_ffmpeg(root):
+    """The ffmpeg the build fetched (tools/ffmpeg), else the one on PATH, else None."""
+    bundled = Path(root) / FFMPEG / "ffmpeg.exe"
+    if bundled.is_file():
+        return str(bundled)
+    # Only absolute PATH entries: a relative one resolves against the working directory, and on
+    # Windows shutil.which prepends that directory itself, so a planted ffmpeg.exe there would be
+    # found and run. Nothing this starts may come from where the tool happened to be run.
+    path = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(entry)]
+    found = shutil.which("ffmpeg", path=os.pathsep.join(path))
+    if found is None:
+        return None
+    if os.path.normcase(os.path.dirname(os.path.abspath(found))) == os.path.normcase(os.path.abspath(os.curdir)):
+        return None  # shutil.which found it there, not on PATH
+    return found
+
+
+def ffmpeg(root):
+    """On Windows, fetch the pinned ffmpeg into tools/ffmpeg once (ffmpeg.exe and its licence); return find_ffmpeg."""
+    target = Path(root) / FFMPEG
+    if sys.platform == "win32" and not (target / "ffmpeg.exe").is_file():
+        if target.exists():
+            raise ValueError(f"{target} exists but has no ffmpeg.exe. Delete it and rerun.")
+        (Path(root) / "private").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=Path(root) / "private") as folder:
+            archive = Path(folder) / "ffmpeg.zip"
+            print("Downloading ffmpeg for DOA4's audio (115 MB)...", flush=True)
+            fetch_verified(FFMPEG_URL, FFMPEG_SHA256, archive, "ffmpeg")
+            staging = Path(folder) / "ffmpeg"
+            staging.mkdir()
+            with zipfile.ZipFile(archive) as contents:
+                for name in contents.namelist():
+                    if name.endswith(("/bin/ffmpeg.exe", "/LICENSE", "/README.txt")):
+                        (staging / name.rsplit("/", 1)[1]).write_bytes(contents.read(name))
+            if not (staging / "ffmpeg.exe").is_file():
+                raise ValueError(f"{FFMPEG_URL} holds no bin/ffmpeg.exe")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            for attempt in range(30):
+                try:
+                    staging.replace(target)
+                    break
+                except PermissionError:
+                    if attempt == 29:
+                        raise
+                    time.sleep(1)
+    found = find_ffmpeg(root)
+    if found is None:
+        # Never the bare name "ffmpeg": a subprocess would resolve it against the working
+        # directory on Windows and run whatever file sits there.
+        raise FileNotFoundError("ffmpeg was not found: none is bundled in tools/ffmpeg and none is on PATH.")
+    return found

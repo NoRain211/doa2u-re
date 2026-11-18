@@ -15,7 +15,7 @@ own disc; folders that already hold clips are kept. Your own picks go in
 (medium), _HIT_LV3_ (heavy) and <name>_KO_NN.wav; --save-selections writes
 them back into the mapping. A fighter without selections stays silent.
 Nothing it writes into private/ may be committed; the mapping holds no audio. Needs an ffmpeg with the xma1 decoder
-(any ordinary build) on PATH or given with --ffmpeg.
+(any ordinary build): the one the build fetches into tools/ffmpeg on Windows, else on PATH or given with --ffmpeg.
 
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs --save-selections
@@ -30,6 +30,9 @@ import struct
 import subprocess
 import sys
 import tempfile
+
+from build_prerequisites import find_ffmpeg
+from xact import afs_table, cue_tracks, wave_bank, xma1_riff
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
 # the wave bank is the entry before it.
@@ -47,54 +50,31 @@ FIGHTER_NAMES = {
 }
 
 
+CUE_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def cue_label(label):
+    """A cue name used in an output file name: plain, so it cannot leave the output folder."""
+    if not CUE_NAME.fullmatch(label) or ".." in label:
+        raise ValueError(f"unusable cue name {label!r} in the voice bank")
+    return label
+
+
 def afs_entries(path):
+    """(offset, length) per entry of an AFS archive, from its table alone: the banks are seeked."""
     with open(path, "rb") as file:
         head = file.read(8)
-        if head[:3] != b"AFS":
+        if len(head) < 8 or head[:3] != b"AFS":
             raise SystemExit(f"{path} is not an AFS archive")
         count = struct.unpack_from("<I", head, 4)[0]
-        table = file.read(8 * count)
-    return [struct.unpack_from("<II", table, 8 * i) for i in range(count)]
-
-
-def wave_bank(data):
-    """(offset, length, channels, rate) per wave of a big-endian XACT 2 bank."""
-    if data[:4] != b"DNBW":
-        raise ValueError("not a big-endian wave bank")
-    segments = [struct.unpack_from(">II", data, 8 + 8 * i) for i in range(5)]
-    bank = segments[0][0]
-    count = struct.unpack_from(">I", data, bank + 4)[0]
-    size = struct.unpack_from(">I", data, bank + 0x48)[0]
-    waves = []
-    for i in range(count):
-        _, fmt, offset, length = struct.unpack_from(">4I", data, segments[1][0] + i * size)
-        if fmt & 1 == 0:
-            raise ValueError(f"wave {i} is not XMA")
-        waves.append((segments[4][0] + offset, length, (fmt >> 1) & 7, (fmt >> 4) & 0x7FFFF))
-    return waves
+        if 8 + 8 * count > os.fstat(file.fileno()).st_size:  # read() would allocate the whole count first
+            raise SystemExit(f"{path} lists {count} AFS entries, more than the file can hold")
+        return afs_table(head + file.read(8 * count))
 
 
 def cue_waves(data):
     """Cue name -> wave index for a big-endian XACT 2 sound bank's simple cues."""
-    if data[:4] != b"KBDS":
-        raise ValueError("not a big-endian sound bank")
-    s16 = lambda at: struct.unpack_from(">h", data, at)[0]
-    s32 = lambda at: struct.unpack_from(">i", data, at)[0]
-    cues, simple, names = s16(0x09), s32(0x1A), s32(0x3A)
-    out = {}
-    for i in range(cues):
-        sound, name = s32(simple + 5 * i + 1), s32(names + 6 * i)
-        label = data[name:data.index(b"\0", name)].decode("ascii")
-        if data[sound] & 1 == 0:  # a simple sound: one wave
-            out[label] = s16(sound + 9)
-    return out
-
-
-def xma1_riff(raw, channels, rate):
-    fmt = struct.pack("<HHHHHBB", 0x165, 16, 0x10D6, 0, 1, 0, 2)
-    fmt += struct.pack("<IIIIBBH", rate * channels // 2, rate, 0, 0, 0, channels, 4 if channels == 1 else 3)
-    body = b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(raw)) + raw
-    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
+    return {cue_label(cue): wave for cue, wave, _loop, complex_sound in cue_tracks(data) if not complex_sound}
 
 
 def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
@@ -114,7 +94,7 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
     os.makedirs(out_folder, exist_ok=True)
     files = {}
     with tempfile.TemporaryDirectory() as scratch:
-        for n, (offset, length, channels, rate) in enumerate(waves):
+        for n, (offset, length, channels, rate, _samples) in enumerate(waves):
             if only is not None and n not in only:
                 continue
             labels = sorted(names.get(n, []))
@@ -262,13 +242,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("snd_afs", help="snd.afs from your extracted DOA4 disc")
     parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "private", "doa4-voice-all"))
-    parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--ffmpeg", help="ffmpeg with the xma1 decoder (default: the build's tools/ffmpeg, else PATH)")
     parser.add_argument("--no-selections", action="store_true", help="decode only; don't build selections from the mapping")
     parser.add_argument("--replace-selections", action="store_true", help="rebuild selections folders that already have clips")
     parser.add_argument("--save-selections", action="store_true",
         help="write the mapping from your selections folders instead of decoding")
     parser.add_argument("--mapping", default=MANIFEST, help="the mapping file (default tools/doa4_voice_selections.json)")
     args = parser.parse_args()
+    args.ffmpeg = args.ffmpeg or find_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    if args.ffmpeg is None:
+        raise FileNotFoundError("ffmpeg was not found: none is in tools/ffmpeg and none is on PATH.")
     entries = afs_entries(args.snd_afs)
     with open(args.snd_afs, "rb") as afs:
         if args.save_selections:
