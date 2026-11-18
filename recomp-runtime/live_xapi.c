@@ -143,7 +143,9 @@ enum {
     LIVE_TASK_RUNNING = 0,
     LIVE_TASK_SUCCESS = 0x001500f0u,
     LIVE_TASK_RESULTS = 0x001500f1u, /* friends enumerate: GetLatest now */
-    LIVE_TASK_MUTELIST_STARTUP = 0x001500f2u,
+    /* Startup tasks stay alive: online_logoff (0x2a4010) continues the
+       friends startup task until it reads this code. */
+    LIVE_TASK_IDLE = 0x001500f2u,
     LIVE_TASK_LOGON_SUCCESS = 0x001510f0u,
     LIVE_E_INVALIDARG = 0x80150005u,
     LIVE_E_FAIL = 0x80004005u,
@@ -441,8 +443,9 @@ static uint32_t live_task_finished(LiveTask *task)
     case LIVE_KIND_FRIENDS_ENUMERATE:
         result = LIVE_TASK_RESULTS;
         break;
+    case LIVE_KIND_FRIENDS_STARTUP:
     case LIVE_KIND_MUTELIST_STARTUP:
-        result = LIVE_TASK_MUTELIST_STARTUP;
+        result = LIVE_TASK_IDLE;
         break;
     case LIVE_KIND_MUTELIST_GET:
         live_finish_mutelist(task);
