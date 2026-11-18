@@ -30,6 +30,9 @@ void recomp_xapi_frame_clock_restore(const RecompFrameClockState *state);
 /* Added to the counter-derived UTC while the frame clock runs, so a switch to
    it keeps the guest's date where the host clock left it. 100 ns units. */
 uint64_t recomp_xapi_frame_clock_utc_offset(void);
+/* Added to the host's wall clock while the frame clock is off, so stopping
+   it never takes the guest's date back. 100 ns units. */
+uint64_t recomp_xapi_host_utc_skip(void);
 /* Opt-in fast-forward of an idle wait; all guest counter readers share it. */
 bool recomp_xapi_skip_wait(uint64_t deadline_ns);
 /* Hides host time the guest spent held outside its frame loop. */
