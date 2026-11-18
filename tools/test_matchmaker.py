@@ -1131,6 +1131,24 @@ class LiveTest(unittest.TestCase):
             self.assertEqual(server.stats, {(3, B): {1: (2, -5)}})
             self.assertIn("skipped 5 malformed entries", errors.getvalue())
 
+    def test_stored_xuids_and_titles_the_wire_cannot_carry_are_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            proof = (b"p" * 32).hex()
+            data = {"version": 1,
+                    "accounts": [{"xuid": A, "proof": proof, "gamertag": "AAA", "title": 2 ** 32},
+                                 {"xuid": 2 ** 64, "proof": proof, "gamertag": "BIG", "title": 1}],
+                    "friends": [[A, 2 ** 64], [A, -1]], "requests": [[A, 2 ** 64, 1]],
+                    "invites": [{"kid": NO_KID.hex(), "from": A, "to": -1, "answer": ""}],
+                    "mutes": [[A, 2 ** 64]], "stats": []}
+            Path(path).write_text(json.dumps(data), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.assertEqual((server.accounts, server.requests, server.invites, server.mutes), ({}, {}, {}, {}))
+            self.assertEqual(list(server.related(A)), [])
+            self.assertIn("skipped 7 malformed entries", errors.getvalue())
+
     def test_a_failed_store_write_keeps_the_last_file_and_removes_its_temp(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "live.json")
