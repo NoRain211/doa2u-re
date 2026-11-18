@@ -62,7 +62,7 @@ static size_t collect_dirty(RecompGuestSnapshots *s)
     }
 #endif
     for (size_t i = 0u; i < written; ++i) {
-        const size_t page = watched ?(size_t)((uint8_t *)s->watch_addresses[i] - s->ram) / PAGE : i;
+        const size_t page = watched ? (size_t)((uint8_t *)s->watch_addresses[i] - s->ram) / PAGE : i;
         if (memcmp(s->ram + page * PAGE, s->shadow + page * PAGE, PAGE) != 0) {
             s->dirty_pages[count++] = (uint32_t)page;
         }
