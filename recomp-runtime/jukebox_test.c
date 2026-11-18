@@ -449,6 +449,17 @@ static void test_assignments(const char *base)
         CHECK(!assigning && entry_byte(overlay, at) == 0x80u);
         recomp_jukebox_set_online(false);
         CHECK(assigning && entry_byte(overlay, at) == 'Q');
+        /* Online, the page plays nothing over the game. */
+        recomp_jukebox_set_online(true);
+        recomp_jukebox_confirm(ROW_TRACK);
+        CHECK(!player.playing && strstr(page.note, "online") != NULL);
+        recomp_jukebox_set_online(false);
+        /* A boot installed online stays so: its logoff brings no slots back. */
+        recomp_jukebox_install(true);
+        recomp_jukebox_set_online(false);
+        CHECK(!assigning && entry_byte(overlay, at) == 0x80u);
+        recomp_jukebox_install(false);
+        CHECK(assigning && entry_byte(overlay, at) == 'Q');
         snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
         (void)read_text(path, text, sizeof text);
         CHECK(strstr(text, "one.adx\tDOA3\ttrack.adx") != NULL);
