@@ -492,7 +492,11 @@ def level_album(folder, encoder):
             if not line.startswith("#") and len(parts) >= 4:
                 track = os.path.join(folder, track_name(parts[0]))
                 if os.path.exists(track + ".level"):
-                    os.replace(track + ".level", track)
+                    try:
+                        os.replace(track + ".level", track)
+                    except OSError as error:  # still open elsewhere: the other albums go on
+                        print(f"{os.path.basename(folder)}: {parts[0]} is not swapped in yet ({error}); "
+                              "run the import again to finish it.")
         return 0
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
