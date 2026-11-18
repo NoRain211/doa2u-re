@@ -66,6 +66,15 @@ void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const c
     recomp_runtime.registers.eax = address == 0x000fa170u ? finished : 0u;
 }
 
+/* program_manual.c now binds the Live guest API first. This test installs no
+   backend, so no Live path runs; this one stands in for the kernel host's pool
+   allocator, which the QoS and search scratch would use. */
+uint32_t recomp_kernel_allocate_pool(uint32_t size)
+{
+    (void)size;
+    return 0u;
+}
+
 RecompFunction recomp_d3d8_lookup_manual(uint32_t address)
 {
     (void)address;
@@ -96,7 +105,13 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     return NULL;
 }
 
-RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
+RecompFunction recomp_live_fight_lookup(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
+
+RecompFunction recomp_game_decomp_lookup_manual(uint32_t address)
 {
     (void)address;
     return NULL;
@@ -188,7 +203,7 @@ static int test_culling_shape(void)
 {
     const struct { uint32_t flags; float aspect, seen, reflection; } cases[] = {
         {0x004e0000u, 32.0f / 9.0f, 0.5625f, 1.5f},     /* 4:3 mode reads 3/4 elsewhere */
-        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 1.5f},
+        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 16.0f / 9.0f},
         {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f, 32.0f / 9.0f},
     };
     const uint32_t wrapped[] = {0x00034e10u, 0x00036490u};

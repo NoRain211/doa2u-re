@@ -168,7 +168,8 @@ same matrix. With 1.5 the mirror covered the middle 42% of a 32:9 view, and
 the floor smeared its clamped edge texels over the rest, flickering as the
 camera moved (issue #139). Every reader of 0x877EA0, including the water
 mirror (0x26C2E0) and a plane mirror (0x280460), gets the shape for its call
-only. 16:9 keeps the game's 1.5, so its outer 8% still shows the smear. The D3D8
+only, 16:9 included: at the game's 1.5 its outer 8% showed the same smear.
+The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
@@ -176,9 +177,9 @@ backdrops) keep filling it. A 3D draw into a viewport narrower than the
 target, such as the character select portrait in its panel, moves toward
 the center with that panel and keeps its size, since its projection already
 has the screen's shape; its scissor fits the same way, and program draws
-shift their viewport offset in c59. The projections live in guest RAM, which netplay
-sessions hash and replays must recompute exactly, so both keep 16:9: the
-session or replay sets `recomp_kernel_widescreen` from the host's flags.
+shift their viewport offset in c59. The projections live in guest RAM,
+outside the ranges a Live fight's desync check hashes, so each player keeps
+their own shape.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability
@@ -190,6 +191,19 @@ The launcher exposes 480p through 2160p, mapped to `RECOMP_D3D_SCALE` as
 height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output
 and shared depth after capability fallback.
+
+Planned graphics work keeps the authentic look (see `GLOSSARY.md`), one PR
+each, in this order: restore the mip levels that uncompressed textures lose on
+the host; accept point min/mag filtering, which currently stops the runner;
+16x anisotropic filtering behind an environment variable, its default chosen
+from in-game frame dumps; give the 16:9 mirror projection the screen's shape
+outside netplay and replays; scale depthless effect targets (shadow map,
+bloom, heat haze) with the main scale on SDL_GPU, correcting filter radii.
+Every step but the mirror one is presenter-only: the mirror projection lives
+in guest RAM, which is why netplay and replays keep the game's 1.5. The first
+two are accuracy fixes and the third is an enhancement, all three in both
+presenters. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA above 8x)
+are separate work.
 
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
@@ -276,19 +290,26 @@ uncompressed volume's full span: width x height x depth per level, each
 axis halving to 1. Stage-0 fixed-function FVF 0x142 draws can sample a
 single-level A8R8G8B8 volume through a native D3D11 Texture3D. The upload
 unswizzles all three axes; UV0 supplies S/T, with R zero unless COUNT3's
-texture matrix supplies it. U/V/W addressing and linear filtering apply.
-Other volume formats, mip chains, coordinate generators, locks and views
-remain guarded.
+texture matrix supplies it. U/V/W addressing and point or linear min/mag
+filtering apply. Other volume formats, mip chains, coordinate generators, locks
+and views remain guarded.
 
 `d3d8_draw_adapter.c` binds DrawVertices, DrawVerticesUP and
 DrawIndexedVertices to the existing D3D11 presenter. It snapshots fixed-function
 layouts, transforms, viewport, depth/blend state, stage-0 texture and palette.
 Supported combinations include texture/diffuse modulation, white diffuse alpha
-selection, texture alpha selection and texture factors. Linear min/mag filters
-support point or linear mip selection with LOD bias encoded as the lazy
-texture-state upload (0x34f400) does: 1/256 steps, truncated after +0.5 and
-clamped to the 13-bit field, so NaN and out-of-range biases clamp to -16 or
-15.99 (D3D11's maximum).
+selection, texture alpha selection and texture factors. Stage-0 min and mag
+filters reach the host sampler independently, so point requests stay point and
+linear requests stay linear; anisotropic min/mag requests remain guarded and
+stop the runner. Point or linear mip selection is supported, with LOD bias
+encoded as the lazy texture-state upload (0x34f400) does: 1/256 steps,
+truncated after +0.5 and clamped to the 13-bit field, so NaN and out-of-range
+biases clamp to -16 or 15.99 (D3D11's maximum).
+Uncompressed textures keep every guest mip level: each level is unswizzled from
+its own guest surface, laid end to end as the level locks read them, so a
+minified sample reads the level the game stored. A level count or span that
+disagrees with that storage keeps level 0 alone. Mipped 2D art keeps the
+guest's levels and is not upscaled: only single-level art gets the larger copy.
 Pixel-shader creation, deletion, binding and
 constants retain the 5849 layout; native custom shading supports the sister
 presenter's four-tap filter in its doubled and identity-scale variants, with
@@ -413,6 +434,16 @@ respectively; both use the same eye and normal inputs. The queued draw owns
 the third texture's bytes. Native pixels cover its alpha endpoints and midpoint,
 its independent matrix and CLAMP addressing, and the final diffuse RGB/alpha.
 Other third-stage combiners and coordinate sources remain guarded.
+
+A capture packet also keeps standing texture bytes: a copy keyed by guest
+address, length and sampled contents survives the present that queued it, so
+the next frame's draws reuse it instead of copying it again. A write lock,
+Register or free, the events that also invalidate presenter textures, drops
+the span in every packet; linear surfaces and palettes are rewritten in place
+and stay per-present. A raw guest store that skips those wrappers can leave
+later binds with the previous contents until the span is locked, registered or
+freed.
+
 Vertex records may overlap: SetStateUP (0x3506f0) and DrawVerticesUP copy the
 full declaration and advance by the caller's stride, even when it is smaller
 than that declaration. The adapter checks the final record's complete extent
@@ -762,16 +793,52 @@ Stage Select also offers Tengu's boss stage (issue #117). Its list
 (`stage_select_build_rows`, `0x1354a0`) writes one-byte entry numbers into
 rows at `0xdf5f10`, indexing the 24-byte entries at `0x6e22b0`, and appends
 Random; every other read goes through `0x135410`, `0x135510` and
-`0x135580`. `stage_select.c`
-replaces those four and adds stage 18 (the Miyama his story fight loads)
+`0x135580`, and a row's confirm through `0x1357f0`. `stage_select.c`
+replaces those five and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. Random's pick
-(`0x135700`) can then choose it too. The tag list stays as it was.
-Only Sparring was played with it. The stage's season variants (ids 27, 64,
-65) load inconsistently and are left out. Random's row moves one place, so
-online players need this build on both sides, which netplay's build check
-already requires.
+`0x03ff0c00`, since other data follows the table. The tag list stays as it was.
+
+Ids 18, 27, 63, 64 and 65 are one stage group (`0x693370`) with identical data
+and area descriptors. Stage Select's preview load (`0x12e720`) sets the stage
+layout to 0 for all of them, as Story's ladder does for the only two it uses
+(18 and 64). The game's own confirm handler (`0x1357f0`) already committed 27,
+63 and 65 from 64 with X, Y and Left trigger plus A or Start, but retail never
+offers 64, so that path was dead. D-pad Up (or left-stick up) on the Miyama
+row now steps the entry's id through 18, 64, 63, 65 and back, and Down steps
+the other way, playing the row
+sound (`0xfed70`) and committing the new id to the preview through the call a
+row change makes (`0x12f360`); after a confirm it does nothing. 27 showed a
+black void in game, so it is left out of the cycle and X on the row does
+nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
+changes. The entry's id bytes hold the pick, and it stays across visits to
+the screen. Random's `row_stage(row, 0)` and the confirm take the current
+variant; find-stage (`0x135580`), which only the online match scene uses,
+writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
+so any variant replays without a row. Played in game: the Up cycle, a fight
+on each variant, the X, Y and Left trigger picks, the kept variant and
+Random; 27 was the black void. Online play and the online match scene's
+restore were not tested. The variant is a stage id the game already syncs, the entry
+sits in the kernel page that rollback restores, and Up is read from the
+lockstepped per-player pad block, so both sides need this build, which
+netplay's build check already requires.
+
+Modes that pick stages without Stage Select read fixed lists, so Miyama is
+added to those too. Time Attack (game mode 4) fills one stage per opponent
+from the 20 stages at `0x692ba4` (`battle_fill_random_stages`, `0xc7fd0`,
+cdecl list and count); a pick in a stage group becomes a random member of
+that group. The fill now gets that pool plus 18, with the
+Miyama group narrowed to 18, 64, 63 and 65 only while it runs, so 27 never
+comes up. `battle_pick_next_stage` (`0xc7c80`) steps rematches through the 21
+stages at `0x692bd0` (`g_stage_rotation_index`, `0x8783b5`) or draws one at
+random through `rand_below` (`0xc4410`, `rand() % EAX`, from `0xc7e86` and
+`0xc447e`). Miyama now follows the 21st stage of the rotation, and the draw is
+from 22, the 22nd being Miyama; both take the row's current variant. The
+pending step and the draw's result sit in the reserved kernel page after the
+Miyama entry (`0x03ff0c18`, the pool copy at `0x03ff0c20`), so rollback
+restores them. Survival always uses stage 9, Story its ladder and the tag
+lists stay as they were. Time Attack was played with this build; which menu
+paths reach the rotation and the draw was not traced.
 
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) points 0xf200 into the active profile's 0x12118-byte
@@ -779,9 +846,12 @@ save slot and holds one costume byte per character at +0x2ed8, in the
 15-character order from `0x6959dc` mapped through `0x6959c0`. New saves start
 at 2; the select screen (`0x11e410`) shows `min(byte, count)` with counts from
 `0x6e0f08`. Characters 0x11, 0x18 and 0x15 need the flags at +0x2ed2, +0x2ed3
-and +0x2ed4 (`0x11e5f0`). After each Swap, `unlock_profile.c` records the
-live profile's 18 values as earned, then sets each costume byte to its count
-and the three flags to 1. The records sit in the reserved kernel page at
+and +0x2ed4 (`0x11e5f0`). The main menu list (`0x134330`) hides the item
+collection (mode 0xb) until +0x2ed5 is set and CG Gallery (0x17) until +0x2ed6
+is; the game sets them only after a fight, from earned values. After each Swap,
+`unlock_profile.c` records the live profile's 20 values as earned, then sets
+each costume byte to its count, the character flags and +0x2ed6 to 1 and
++0x2ed5 to 3. The records sit in the reserved kernel page at
 `0x03ff0d00` (eight of 0x20 bytes), so rollback restores them. Every slot
 save goes through `0x21b50` or `0x21bb0` and every load through `0x21d90` or
 `0x21de0` (cdecl name, slot); the saves write the earned values and unlock
@@ -805,7 +875,8 @@ the second when the player wears the first, becomes a random unlocked group
 (`0x11e410`), skipping one that matches the player's costume (`0xc5490`).
 Other callers ask again during a run, so the pick hashes a per-boot seed with
 the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
-index. Story's own picks stay. Netplay and SyncTest boots leave it off.
+index. Story's own picks stay. Netplay and SyncTest boots leave it off, and so does
+a logon to DOA ONLINE until the player leaves.
 The hook is routed whenever it may be wanted and checks the setting itself,
 so PC Settings can switch it while the game runs.
 
@@ -842,9 +913,10 @@ brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
 own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
-`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks, CPU
-Costumes, Free Camera and Dedication apply at once (the first three offline
-only), and the others at the next launch.
+`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
+Dedication, the life bar, the combo HUD, hit voices and the KO replay apply at
+once, as do CPU Costumes and the Free Camera offline (both are off while
+logged on to DOA ONLINE), and the others at the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
@@ -852,7 +924,7 @@ menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
 switch ignores. Its confirm opens the runner's quit prompt; keeping on plays
 the cancel sound and runs the menu's own transition cancel (`0x135ae0`).
 
-Both features' guest data lives in the runner's asset area (144 KiB at
+Both features' guest data lives in the runner's asset area (256 KiB at
 `0x03f00000`, below the startup stack), which `runner_assets.c` hands out at
 each boot. It also owns their sprites, a group past the game's `0x1a5`
 (`0xaa970` rectangle, `0xaa9b0` texture and palette), and their message text
@@ -912,6 +984,16 @@ last Lock, and at least 100 ms past the game thread's last pump; a longer
 stall goes quiet instead of replaying the ring's last lap as an echo. One-shot
 buffers play on. Only the game thread sets voice
 routing. A pump gap over 100 ms still drops its span while the cursor advances.
+Netplay and SyncTest run play cursors on the frame-locked guest
+clock, which falls behind real time when frames run slow and jumps when the
+game waits. Host output there keeps its own place per buffer on the real
+clock, outside the rollback state: a one-shot plays on to its end, also
+after the guest's cursor has reached it, a ring
+runs up to 50 ms ahead into its last Lock, and output falls up to 100 ms
+behind the guest's cursor before it skips to it. Re-simulated frames neither
+play nor move that place, and the pump thread feeds only it. A timed ring that
+was muted or frozen for more than 100 ms starts again at the guest's cursor.
+Rings still gap when slow frames outrun the game's refills.
 Native endpoint consumption has an opt-in host test;
 synthetic API and backend tests remain suitable for public CI.
 
@@ -1015,6 +1097,11 @@ the existing worker modules run; they do not force middleware load status.
 Swap waits for the host to finish earlier frames as a guest wait, so those
 vblank threads keep their 60 Hz refills of CRI's audio rings when the GPU
 falls behind; a host-blocked Swap let the rings replay as echoes (issue #69).
+The Xbox preempts the game at each vblank to run those threads, but here they
+run only when the game yields. A game frame that used the whole refresh
+halved their wakes and speech crackled with stale ring audio (issue #145), so
+a late vblank waiter is handed the refreshes it missed, up to four. The frame
+clock keeps the plain wait for netplay determinism.
 
 Movies no longer run CRI's Sofdec player. Its MPEG decoder ran on CRI's file
 server thread, and one decode burst held every other guest thread, the audio
@@ -1066,7 +1153,8 @@ the first differing bytes.
 The state is a table of modules (`synctest_modules.c`): CPU and FPU, clock
 and vblank marks, XAPI fibers, guest threads, file positions and the handle
 table, kernel allocations, the guest heap cursors, input, the D3D8 device,
-frame and render-state models with completed visibility counts, and the
+frame and render-state models with completed visibility counts, the
+resource adapter's table of owned resources, and the
 DirectSound device, buffers and effects. Guest RAM rewinds through
 `guest_snapshot.c`. The compare skips host-scheduled ranges: audio worker
 counters, QPC bookkeeping, XAPI fiber and guest thread stacks, and the whole
@@ -1099,11 +1187,66 @@ Some frames cannot be rewound and are skipped rather than reported:
 On this branch a loop run from frame 600 through the scripted Story fight
 and back to the menus matched 6,295 frames with no mismatch. It skipped three
 display mode changes and one save. With asynchronous reads, 102 more frames
-were skipped.
+were skipped. With the owned-resource table in the state, a loop run of 540 s
+matched 15,636 frames, from 601 to 16,724, through the Story fights and their
+stage loads; it skipped five display mode changes, two saves and one frame
+whose guest thread could not be rewound.
 
 `RECOMP_ROLLBACK=loopback` keeps the same state in a ring of saves
 and rewinds it on mispredicted input; `docs/rollback-netcode.md` describes
 the run. It uses the frame clock and synchronous reads as SyncTest does.
+
+## Decompiled game functions
+
+The hottest lifted game functions of a rollback re-run frame have
+hand-decompiled replacements in `recomp-runtime/game_*.c`, one file per
+group. `recomp_lookup_manual()` binds them through
+`recomp_game_decomp_lookup_manual()`. `RECOMP_DECOMP` selects the groups:
+unset binds all, `none` binds none (the lifted reference), and a comma list
+binds only the named groups. `tools/doa2u/function_status.json` lists each
+bound function with its source and symbol.
+
+A replacement must leave guest RAM identical to the lifted body, or rollback
+peers diverge. Each group, and all groups together, gave the same guest RAM
+as `RECOMP_DECOMP=none` after the scripted boot, menus and a Story fight
+(loopback, frame 600). A lag 4 loopback run with all groups bound also
+matched. With all groups bound, a SyncTest loop matched 12,028 frames (601
+to 12,933) with no mismatch. Two netplay sessions paired a lifted runner with
+a runner that had all groups bound, once as host and once as joiner, at 40 ms
+delay. Each ran 3,600 frames with no desync over 5 guest RAM checks.
+
+Exactness covers more than the result:
+
+- Game code reads leftover stack. Light setup copies a word that an earlier
+  call left in the argument area, and `render_vec4_remove_axis` (`0x283c60`)
+  reloads 16 bytes over a 12-byte scratch, so its fourth lane is old stack.
+  A replacement makes its pushes, spills and guest calls at the original's
+  stack depth, and writes the final frame image the original leaves.
+- `kernel_call_guest` pushes 0 as the return address. Where that word
+  survives below ESP, push the original CALL's return address instead.
+  `game_render_state.c` does this; without it a netplay session from boot
+  desynced at frame 600, which the scripted check did not reach.
+- `fighter_strand_update` (`0x591a0`) reads EAX left by an earlier callee.
+  A replacement keeps every register a caller reads.
+- SSE math is single precision in the original order; x87 math is double,
+  rounded where the original stores.
+
+`game_library_hot.c` is a temporary exception to replacing library code
+wholesale: it holds exact copies of the CRI ADX decoder (`0x30bf90`,
+`0x30c280`) and the SDK matrix multiply (`0x2bffba`) until native
+replacements exist, because both are hot in rollback re-runs.
+
+These functions stay lifted:
+
+- `world_matrix_orthonormalize` (`0x63630`) and `node_list_transform`
+  (`0x63780`): the leftover-stack lane above reaches `g_matrix_current`.
+- `bone_segment_distance` (`0x144940`) and `sweep_triangle_callback`
+  (`0x14a6c0`): not yet exact; no replacement is kept.
+- `fighter_cloth_strand_update` (`0x51f20`) and `fighter_strand_update`
+  (`0x591a0`): not yet decompiled.
+
+In three interleaved lag 4 loopback runs, a re-run frame took 3.7 to 4.8 ms
+lifted and 2.9 to 3.1 ms with all groups bound.
 
 
 ## Remaining work

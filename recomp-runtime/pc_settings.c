@@ -3,6 +3,8 @@
 #include "button_config.h"
 #include "kernel_abi.h"
 #include "runner_assets.h"
+#include "jukebox.h"
+#include "utf8_text.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -21,18 +23,25 @@
    row count.
 
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
-   no table uses. Its settings are split over three views of five, under a
-   Page row (1 / 3 to 3 / 3) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
+   no table uses. Its settings are split over four views of four, under a
+   Page row (1 / 4 to 4 / 4) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
    own art (group 3), with the same blue glow, as two runner sprites; its
    text is runner text (runner_assets.c). The Controller page's Rebind row and
-   the Button Config screen it opens are button_config.c. */
+   the Button Config screen it opens are button_config.c.
+
+   The Jukebox (jukebox.c) is page 19 too: the per-page tables hold 20 pages,
+   so there is no page 20. The main menu's JUKEBOX entry enters Options (its
+   mode, 0xa) and asks for it; the first update then opens page 19 as the
+   Jukebox, without the top list, and leaving it leaves Options for the main
+   menu as the top list's back does. Its labels, values and help line are
+   written into guest buffers each frame from jukebox.c's text. */
 enum {
     PC_ROW = 5,
     TOP_ROWS = 8,
     PC_PAGE = 19,
     PC_ROWS = RECOMP_PC_SETTING_COUNT,
-    PER_VIEW = 5,
-    VIEWS = 3,
+    PER_VIEW = 4,
+    VIEWS = 4,
     SHOWN = PER_VIEW + 1,          /* the Page row, then a view's settings */
     VALUE_KIND = 0x7e00,           /* 0x910a0 keys for each row's values, outside its 1-28 */
 
@@ -48,6 +57,7 @@ enum {
     PAGE_IN = 0x0067b040u,
     LAYOUT_TEMPLATE = 0x0067a540u, /* page 8's layout */
 
+    OPTIONS_INIT = 0x0011afd0u,
     OPTIONS_UPDATE = 0x0011cfc0u,
     ROW_COUNT = 0x0011ac90u,
     ROW_COUNT_ALIAS = 0x0011ad10u,
@@ -65,6 +75,10 @@ enum {
     PC_ENTER = 0x03fffff0u,
     PC_DRAW = 0x03fffff4u,
     PC_LEAVE = 0x03fffff8u,
+
+    JB_ROWS = RECOMP_JUKEBOX_ROWS,
+    JB_TEXT = 64,                  /* UTF-16 units per label or value buffer */
+    JB_HELP = 160,
 };
 
 /* A page layout is a record per row (x 0x10a), then one per row with a value
@@ -79,6 +93,7 @@ enum {
     WHITE_H = 18,
 };
 
+extern void sub_0011AFD0(void);
 extern void sub_0011CFC0(void);
 extern void sub_0011AC90(void);
 extern void sub_0011AD10(void);
@@ -107,13 +122,14 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 2u};
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 2u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
-    [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
+    [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_COMBO_HUD] = true,
+    [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
 };
-static bool live[PC_ROWS];
-enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELPS = 4 };
+static bool live[PC_ROWS], after_online[PC_ROWS];
+enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELP_LEAVE = 4, HELPS = 5 };
 _Static_assert(PER_VIEW * VIEWS == PC_ROWS, "every setting is on one view");
 
 typedef struct Language {
@@ -123,7 +139,7 @@ typedef struct Language {
     const recomp_utf16 *help[HELPS];
     const recomp_utf16 *page;   /* the Page row */
 } Language;
-static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 3", u"2 / 3", u"3 / 3"};
+static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 4", u"2 / 4", u"3 / 4", u"4 / 4"};
 
 /* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
@@ -136,67 +152,72 @@ static const Language LANGUAGES[5] = {
     {u"PC SETTINGS",
      {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Audio Output",
       u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera", u"Dedication",
-      u"Life Bar", u"Hit Voices", u"KO Replay"},
+      u"Life Bar", u"Combo HUD", u"Hit Voices", u"KO Replay"},
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"}, {u"Show", u"Hide"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
-       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
+       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"On"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
      {u"Graphics, audio and gameplay settings for this PC.", u"Takes effect immediately.",
       u"Takes effect the next time the game starts.",
-      u"Left or right shows another page of settings."},
+      u"Left or right shows another page of settings.",
+      u"Takes effect when you leave DOA ONLINE."},
      u"Page"},
     {u"PARAM\u00c8TRES PC",
      {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Sortie audio",
       u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre", u"D\u00e9dicace",
-      u"Barre de vie", u"Voix des coups", u"Replay K.O."},
+      u"Barre de vie", u"Affichage combo", u"Voix des coups", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"}, {u"Afficher", u"Masquer"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
-       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
+       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Oui"}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
      {u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
       u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu.",
-      u"Gauche ou droite affiche une autre page de param\u00e8tres."},
+      u"Gauche ou droite affiche une autre page de param\u00e8tres.",
+      u"Pris en compte en quittant DOA ONLINE."},
      u"Page"},
     {u"PC-EINSTELLUNGEN",
      {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Audioausgabe",
       u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera", u"Widmung",
-      u"Lebensleiste", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
+      u"Lebensleiste", u"Combo-Anzeige", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"}, {u"Anzeigen", u"Ausblenden"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
-       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
+       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Ein"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
      {u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
       u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart.",
-      u"Links oder rechts zeigt eine andere Einstellungsseite."},
+      u"Links oder rechts zeigt eine andere Einstellungsseite.",
+      u"Wirkt beim Verlassen von DOA ONLINE."},
      u"Seite"},
     {u"IMPOSTAZIONI PC",
      {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Uscita audio",
       u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera", u"Dedica",
-      u"Barra vita", u"Voci dei colpi", u"Replay K.O."},
+      u"Barra vita", u"HUD combo", u"Voci dei colpi", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"}, {u"Mostra", u"Nascondi"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
-       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
+       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"S\u00ec"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
      {u"Impostazioni grafiche, audio e di gioco di questo PC.", u"Effettivo immediatamente.",
       u"Effettivo al prossimo avvio del gioco.",
-      u"Sinistra o destra mostra un'altra pagina di impostazioni."},
+      u"Sinistra o destra mostra un'altra pagina di impostazioni.",
+      u"Effettivo all'uscita da DOA ONLINE."},
      u"Pagina"},
     {u"CONFIG. PC",
      {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Salida de audio",
       u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre", u"Dedicatoria",
-      u"Barra de vida", u"Voces de golpes", u"Repetici\u00f3n K.O."},
+      u"Barra de vida", u"HUD de combo", u"Voces de golpes", u"Repetici\u00f3n K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"}, {u"Mostrar", u"Ocultar"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
-       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
+       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"S\u00ed"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
      {u"Opciones de gr\u00e1ficos, audio y juego de este PC.", u"Se aplica de inmediato.",
       u"Se aplica la pr\u00f3xima vez que inicies el juego.",
-      u"Izquierda o derecha muestra otra p\u00e1gina de opciones."},
+      u"Izquierda o derecha muestra otra p\u00e1gina de opciones.",
+      u"Se aplica al salir de DOA ONLINE."},
      u"P\u00e1gina"},
 };
 
@@ -233,11 +254,16 @@ static const uint32_t GLOW_BASE[6] = {0x30006u, 0x30006u, 0x30014u, 0x30022u, 0x
 static RecompPcSettingsHost host;
 static uint32_t values;          /* guest u16 per setting: the choices */
 static uint32_t shown;           /* guest u16 per shown row: the view, then its settings' choices */
-static unsigned view;            /* which five settings page 19 shows */
+static unsigned view;            /* which four settings page 19 shows */
 static uint32_t layout;          /* guest page layout: LAYOUT_RECORDS of 28 bytes, then 0 */
 static bool drawing_top;
 static bool drawing_pc;          /* page 19's own draw is running */
 static int label_language = -1; /* the language the label sprites were made in */
+static bool jukebox_mode;        /* page 19 shows the Jukebox, not PC Settings */
+static bool jukebox_from_menu;   /* opened by the main menu: back leaves Options */
+static uint32_t jb_values;       /* guest u16 per Jukebox row: its choice */
+static uint32_t jb_layout;       /* guest layout of the Jukebox's rows */
+static uint32_t jb_labels, jb_texts, jb_help; /* guest UTF-16 buffers */
 
 /* ---- Guest helpers -------------------------------------------------- */
 
@@ -262,6 +288,7 @@ static uint32_t text_for(unsigned message)
 unsigned recomp_pc_settings_choices(unsigned setting) { return setting < PC_ROWS ? CHOICES[setting] : 0u; }
 bool recomp_pc_settings_applies_now(unsigned setting) { return setting < PC_ROWS && live[setting]; }
 void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on; }
+void recomp_pc_settings_set_after_online(unsigned setting, bool on) { if (setting < PC_ROWS) after_online[setting] = on; }
 uint8_t recomp_pc_settings_choice(unsigned setting)
 {
     return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;
@@ -279,6 +306,36 @@ static void refresh_shown(void)
 static void reset_layout(void)
 {
     for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) set_u32(layout + record * 28u + 0xcu, 0u);
+}
+
+static void reset_jb_layout(void)
+{
+    for (unsigned record = 0u; record < 2u * JB_ROWS; ++record) set_u32(jb_layout + record * 28u + 0xcu, 0u);
+}
+
+/* UTF-8 into a guest UTF-16 buffer of size units; returns it. */
+static uint32_t put_text(uint32_t buffer, unsigned size, const char *text)
+{
+    unsigned n = 0u;
+    while (*text != '\0' && n + 1u < size) {
+        uint32_t value = recomp_utf8_next(&text);
+        if (value > 0xffffu) {
+            if (n + 2u >= size) break;
+            value -= 0x10000u;
+            set_u16(buffer + 2u * n++, (uint16_t)(0xd800u + (value >> 10)));
+            value = 0xdc00u + (value & 0x3ffu);
+        }
+        set_u16(buffer + 2u * n++, (uint16_t)value);
+    }
+    set_u16(buffer + 2u * n, 0u);
+    return buffer;
+}
+
+static unsigned page_rows(void) { return jukebox_mode ? JB_ROWS : SHOWN; }
+
+static void refresh_jukebox(void)
+{
+    for (unsigned row = 0u; row < JB_ROWS; ++row) set_u16(jb_values + 2u * row, (uint16_t)recomp_jukebox_choice(row));
 }
 
 void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t choices[RECOMP_PC_SETTING_COUNT])
@@ -323,6 +380,24 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
 
     /* As page 8: start and enter reset the layout, draw shows the page, and
        in and leave draw it sliding. 0x95a70 waits on a null entry forever. */
+    /* The Jukebox's buffers and layout, as PC Settings' for its rows. */
+    jukebox_mode = jukebox_from_menu = false;
+    jb_values = recomp_runner_alloc(2u * JB_ROWS, 4u);
+    jb_layout = recomp_runner_alloc(28u * 2u * JB_ROWS + 4u, 4u);
+    jb_labels = recomp_runner_alloc(2u * JB_TEXT * JB_ROWS, 4u);
+    jb_texts = recomp_runner_alloc(2u * JB_TEXT * JB_ROWS, 4u);
+    jb_help = recomp_runner_alloc(2u * JB_HELP, 4u);
+    for (unsigned record = 0u; record < 2u * JB_ROWS; ++record) {
+        const unsigned row = record % JB_ROWS;
+        const bool value = record >= JB_ROWS;
+        const uint32_t to = jb_layout + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
+        memcpy(recomp_memory(to, 28u), recomp_memory(LAYOUT_TEMPLATE + 28u * (value ? 4u : 0u), 28u), 28u);
+        set_u32(to, at);
+        set_u32(to + 4u, at);
+    }
+    set_u32(jb_layout + 28u * 2u * JB_ROWS, 0u);
+    recomp_runner_text_set_address(RECOMP_RUNNER_TEXT_JUKEBOX_HELP, jb_help);
+
     set_u32(PAGE_START + 4u * PC_PAGE, PC_ENTER);
     set_u32(PAGE_ENTER + 4u * PC_PAGE, PC_ENTER);
     set_u32(PAGE_DRAW + 4u * PC_PAGE, PC_DRAW);
@@ -524,6 +599,7 @@ static void top_input(void)
     }
     if ((call1(sub_0011BDA0, 1u) & 0xffu) == 0u) return;
     if (row == PC_ROW) {
+        jukebox_mode = false;
         view = 0u;
         set_u16(DEPTH, 1u);
         set_u16(CURSORS + 2u, 0u);
@@ -585,8 +661,62 @@ static void pc_input(void)
     if (after != before && host.changed != NULL) host.changed((unsigned)setting, after, host.context);
 }
 
+/* The Jukebox's rows: up and down, left and right step a row's choice, A acts. */
+static void jukebox_input(void)
+{
+    const uint32_t navigate[2] = {CURSORS + 2u, JB_ROWS};
+    kernel_call_lifted(sub_0011B8D0, navigate, 2u);
+    const uint16_t row = u16(CURSORS + 2u);
+    const uint32_t back[2] = {row, JB_ROWS};
+    if ((kernel_call_lifted(sub_0011BCA0, back, 2u) & 0xffu) != 0u) {
+        recomp_jukebox_page_closed();
+        set_u16(DEPTH, 0u);
+        set_u16(PAGE, 0u);
+        if (!jukebox_from_menu) {
+            jukebox_mode = false;
+        } else {
+            /* As the top list's back: out of Options to the main menu. The
+               Jukebox stays in charge (nothing drawn, no input) while Options
+               fades out; entering Options again clears it. */
+            call1(sub_00134950, 1u);
+            kernel_call_lifted(sub_00020A70, NULL, 0u);
+        }
+        return;
+    }
+    if (row >= JB_ROWS) return;
+    refresh_jukebox();
+    const uint32_t value = jb_values + 2u * row;
+    const uint16_t before = u16(value);
+    const uint32_t step[4] = {value, recomp_jukebox_choices(row), 1u, 0u};
+    kernel_call_lifted(sub_0011B9F0, step, 4u);
+    const uint16_t after = u16(value);
+    if (after != before) recomp_jukebox_choose(row, after);
+    if ((call1(sub_0011BDA0, 1u) & 0xffu) != 0u) recomp_jukebox_confirm(row);
+    refresh_jukebox();
+}
+
 static void options_update(void)
 {
+    if (recomp_jukebox_take_request()) {
+        /* The main menu's JUKEBOX: straight into its page. */
+        jukebox_mode = jukebox_from_menu = true;
+        recomp_jukebox_page_opened();
+        reset_jb_layout();
+        refresh_jukebox();
+        set_u16(DEPTH, 1u);
+        set_u16(CURSORS + 2u, 0u);
+        set_u16(PAGE, PC_PAGE);
+    }
+    if (jukebox_mode && jukebox_from_menu && u16(DEPTH) == 0u) {
+        /* Leaving for the main menu: the Options list never shows. */
+        kernel_return_caller_cleanup(1u);
+        return;
+    }
+    if (u16(DEPTH) != 0u && u16(PAGE) == PC_PAGE && jukebox_mode) {
+        jukebox_input();
+        kernel_return_caller_cleanup(1u);
+        return;
+    }
     if (u16(DEPTH) == 0u) {
         top_input();
         kernel_return_caller_cleanup(1u);
@@ -605,15 +735,27 @@ static void row_count(void (*original)(void))
     const uint16_t page = (uint16_t)kernel_arg(1u);
     uint32_t rows;
     if (page == 0u) kernel_return_caller_cleanup(TOP_ROWS);
-    else if (page == PC_PAGE) kernel_return_caller_cleanup(SHOWN);
+    else if (page == PC_PAGE) kernel_return_caller_cleanup(page_rows());
     else if (recomp_button_config_rows(page, &rows)) kernel_return_caller_cleanup(rows);
     else original();
 }
 static void row_count_main(void) { row_count(sub_0011AC90); }
 static void row_count_alias(void) { row_count(sub_0011AD10); }
 
+/* Options starts: whatever the Jukebox left behind is over. */
+static void options_init(void)
+{
+    if (jukebox_mode) recomp_jukebox_page_closed(); /* releases its mute */
+    jukebox_mode = jukebox_from_menu = false;
+    sub_0011AFD0();
+}
+
 static void options_draw(void)
 {
+    if (jukebox_mode && jukebox_from_menu && u16(DEPTH) == 0u) {
+        kernel_return_caller_cleanup(0u);
+        return;
+    }
     make_label();
     drawing_top = true;
     sub_00095A70();
@@ -634,6 +776,11 @@ static void top_preview(void)
 /* 0x97830 (sprite, x, y, layer, fade, colour, scale, mode, flags) */
 static void sprite(void)
 {
+    /* The Jukebox stands alone: no top list beside it. */
+    if (drawing_top && jukebox_mode && (kernel_arg(2u) == 0xf0u || kernel_arg(2u) == 0xf6u)) {
+        kernel_return_caller_cleanup(0u);
+        return;
+    }
     if (!drawing_top) {
         sub_00097830();
         return;
@@ -696,12 +843,22 @@ static void help(void)
         } else if (row > PC_ROW) {
             args[1] = game_row(row);
         }
+    } else if (page == PC_PAGE && jukebox_mode) {
+        args[0] = 0u;
+        args[1] = 0u;
+        put_text(jb_help, JB_HELP, recomp_jukebox_help(row));
+        recomp_runner_text_redirect(0xc4u, RECOMP_RUNNER_TEXT_JUKEBOX_HELP);
+        const uint32_t eax = kernel_call_lifted(sub_00091560, args, 3u);
+        recomp_runner_text_redirect(0u, 0u);
+        kernel_return_caller_cleanup(eax);
+        return;
     } else if (page == PC_PAGE) {
         args[0] = 0u;
         args[1] = 0u;
         const int setting = setting_at(row);
         message = RECOMP_RUNNER_TEXT_PC + MSG_HELP +
-            (row == 0u ? HELP_PAGE : setting >= 0 && live[setting] ? HELP_NOW : HELP_NEXT);
+            (row == 0u ? HELP_PAGE : setting < 0 ? HELP_NEXT : live[setting] ? HELP_NOW :
+             after_online[setting] ? HELP_LEAVE : HELP_NEXT);
     } else {
         message = recomp_button_config_help(page, row, args);
     }
@@ -718,7 +875,7 @@ static void page_layout(void)
 {
     const uint16_t page = (uint16_t)kernel_arg(1u);
     const uint32_t own = recomp_button_config_layout(page);
-    if (page == PC_PAGE) kernel_return_caller_cleanup(layout);
+    if (page == PC_PAGE) kernel_return_caller_cleanup(jukebox_mode ? jb_layout : layout);
     else if (own != 0u) kernel_return_caller_cleanup(own);
     else sub_00090AD0();
 }
@@ -736,6 +893,19 @@ static void page_cursor(void)
 static void page_text(void)
 {
     if (recomp_button_config_text()) return;
+    if (drawing_pc && jukebox_mode) {
+        const uint16_t key = (uint16_t)kernel_arg(1u);
+        if (key == PC_PAGE && kernel_arg(2u) < JB_ROWS) {
+            const unsigned row = kernel_arg(2u);
+            kernel_return_caller_cleanup(put_text(jb_labels + 2u * JB_TEXT * row, JB_TEXT, recomp_jukebox_label(row)));
+            return;
+        }
+        if (key >= VALUE_KIND && key < VALUE_KIND + JB_ROWS) {
+            const unsigned row = key - VALUE_KIND;
+            kernel_return_caller_cleanup(put_text(jb_texts + 2u * JB_TEXT * row, JB_TEXT, recomp_jukebox_value(row)));
+            return;
+        }
+    }
     if (drawing_pc) {
         const uint16_t key = (uint16_t)kernel_arg(1u);
         if (key == PC_PAGE && kernel_arg(2u) < SHOWN) {
@@ -761,14 +931,15 @@ static void page_text(void)
 /* Every shown row has a value, so the value row is the row. */
 static void value_text(void)
 {
-    if ((uint16_t)kernel_arg(1u) == PC_PAGE && kernel_arg(2u) < SHOWN)
+    if ((uint16_t)kernel_arg(1u) == PC_PAGE && kernel_arg(2u) < page_rows())
         kernel_return_caller_cleanup(VALUE_KIND + kernel_arg(2u));
     else sub_00091370();
 }
 
 static void pc_enter(void)
 {
-    reset_layout();
+    if (jukebox_mode) reset_jb_layout();
+    else reset_layout();
     kernel_return_caller_cleanup(0u);
 }
 
@@ -776,21 +947,23 @@ static void pc_enter(void)
 static void pc_page_draw(uint32_t visible)
 {
     const uint32_t context = kernel_arg(1u), fade = *recomp_memory_u32(context + 0x10u);
-    const uint32_t cursor = u16(CURSORS + 2u), mask = (1u << SHOWN) - 1u;
+    const unsigned rows_shown = page_rows();
+    const uint32_t cursor = u16(CURSORS + 2u), mask = (1u << rows_shown) - 1u;
     static unsigned reported;
     if (reported < 2u) {
         fprintf(stderr, "recomp pc settings: page draws, visible %u, cursor %u\n", visible, cursor);
         ++reported;
     }
-    refresh_shown();
+    if (jukebox_mode) refresh_jukebox();
+    else refresh_shown();
     drawing_pc = true;
     const uint32_t rows[4] = {PC_PAGE, cursor, fade, visible};
     kernel_call_lifted(sub_00091440, rows, 4u);
-    const uint32_t value_args[6] = {PC_PAGE, cursor, fade, mask, shown, visible};
+    const uint32_t value_args[6] = {PC_PAGE, cursor, fade, mask, jukebox_mode ? jb_values : shown, visible};
     kernel_call_lifted(sub_00093270, value_args, 6u);
     /* (context, layout, value mask, cursor, rows, visible): the bars and the
        cursor slide out from the left while visible and back while not. */
-    const uint32_t mark[6] = {context, layout, mask, cursor, SHOWN, visible};
+    const uint32_t mark[6] = {context, jukebox_mode ? jb_layout : layout, mask, cursor, rows_shown, visible};
     const uint32_t eax = kernel_call_lifted(sub_00090F00, mark, 6u);
     drawing_pc = false;
     kernel_return_caller_cleanup(eax);
@@ -801,6 +974,7 @@ static void pc_leave(void) { pc_page_draw(0u); }
 RecompFunction recomp_pc_settings_lookup_manual(uint32_t guest_address)
 {
     switch (guest_address) {
+    case OPTIONS_INIT: return options_init;
     case OPTIONS_UPDATE: return options_update;
     case ROW_COUNT: return row_count_main;
     case ROW_COUNT_ALIAS: return row_count_alias;
