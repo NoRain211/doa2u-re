@@ -219,6 +219,10 @@ int main(void)
     uint8_t *plain = calloc(RAM_SIZE, 1u);
     if (plain == NULL) return fail("allocate", "plain RAM");
     result = run(plain, false, "page compare");
+#ifndef _WIN32
+    /* Hosts without write watch compare every page even when it is asked for. */
+    if (result == 0) result = run(plain, true, "write watch asked, page compare");
+#endif
     free(plain);
     if (result == 0) printf("guest snapshot: write watch=%d ok\n", write_watch ? 1 : 0);
     return result;
