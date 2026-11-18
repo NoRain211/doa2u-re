@@ -18,7 +18,8 @@ else
     SRC="${ROOT}/tools"
     DEST="$(dirname "${OUT}")"
 fi
-docker run --rm --platform linux/amd64 -v "${SRC}:/src:ro" -v "${DEST}:/out" ubuntu:22.04 bash -euxc '
+docker run --rm --platform linux/amd64 -v "${SRC}:/src:ro" -v "${DEST}:/out" -e NAME="$(basename "${OUT}")" \
+    ubuntu:22.04 bash -euxc '
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config curl ca-certificates \
@@ -33,10 +34,10 @@ cmake -S SDL3-3.4.12 -B sdl-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_IN
     -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
 cmake --build sdl-build
 cmake --install sdl-build
-g++ -O2 -std=c++17 -o /out/launcher-linux-x86_64 /src/launcher_sdl.cpp -I/opt/sdl/include \
+g++ -O2 -std=c++17 -o "/out/$NAME" /src/launcher_sdl.cpp -I/opt/sdl/include \
     -static-libstdc++ -static-libgcc $(PKG_CONFIG_PATH=/opt/sdl/lib/pkgconfig pkg-config --static --libs sdl3)
-strip /out/launcher-linux-x86_64
-objdump -p /out/launcher-linux-x86_64 | grep NEEDED
-ldd /out/launcher-linux-x86_64
+strip "/out/$NAME"
+objdump -p "/out/$NAME" | grep NEEDED
+ldd "/out/$NAME"
 '
 echo "Built ${OUT}"
