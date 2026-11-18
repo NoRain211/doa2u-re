@@ -105,10 +105,21 @@ def live_relaying(destination, **fields):
     return live(mm.LIVE_RELAY, struct.pack(">I", destination) + guest(**fields))
 
 
-def logon_body(req=1, xuid=A, proof=None, digest=BUILD, title=TITLE, state=0, kid=NO_KID, tag=b"KASUMI"):
+def challenge_body(req=1, xuid=A):
+    return mm.CHALLENGE_BODY.pack(req, xuid)
+
+
+def logon_body(req=1, xuid=A, proof=None, digest=BUILD, title=TITLE, state=0, kid=NO_KID, tag=b"KASUMI",
+               nonce=None):
+    """A LOGON as a client with this proof sends it: the proof itself for a new XUID (no nonce),
+    else its answer to the server's nonce."""
     if proof is None:
         proof = PROOFS[xuid]
-    return mm.LOGON_BODY.pack(req, xuid, proof, digest, title, state, kid, len(tag), tag.ljust(15, b"\0"))
+    body = mm.LOGON_BODY.pack(req, xuid, proof, digest, title, state, kid, len(tag), tag.ljust(15, b"\0"))
+    if nonce is None:
+        return body
+    answer = mm.logon_answer(hashlib.sha256(proof).digest(), nonce, body)
+    return body[:mm.LOGON_ANSWER.start] + answer + body[mm.LOGON_ANSWER.stop:]
 
 
 def put_body(req=2, kid=NO_KID, slots=(1, 7, 0, 0), attrs=b"\x01\x02"):
@@ -463,10 +474,17 @@ class LiveTest(unittest.TestCase):
         self.assertEqual((to, packet[5]), (sender, kind))
         return packet[mm.ASKED - mm.TOKEN:]
 
+    def challenge(self, sender=A_AT, xuid=A, now=0.0, req=None):
+        """Asks for a LOGON's nonce: the request id, whether the XUID has an account, and the nonce."""
+        req = self.next_request() if req is None else req
+        return mm.NONCE_BODY.unpack(self.one(live(mm.CHALLENGE, challenge_body(req, xuid)), sender, now, mm.NONCE))
+
     def logon(self, sender=A_AT, xuid=A, proof=None, tag=b"KASUMI", now=0.0, state=0, kid=NO_KID,
               digest=BUILD, title=TITLE, req=None):
-        body = self.one(live(mm.LOGON, logon_body(self.next_request() if req is None else req, xuid, proof, digest,
-                                                  title, state, kid, tag)), sender, now, mm.LOGGED)
+        """A whole logon, as the client does it: CHALLENGE, then the LOGON that answers its nonce."""
+        req, known, nonce = self.challenge(sender, xuid, now, req)
+        body = self.one(live(mm.LOGON, logon_body(req, xuid, proof, digest, title, state, kid, tag,
+                                                  nonce if known else None)), sender, now, mm.LOGGED)
         return mm.LOGGED_BODY.unpack(body)
 
     def put(self, sender=A_AT, now=0.0, req=None, kid=NO_KID, slots=(1, 7, 0, 0), attrs=b"\x01\x02"):
@@ -546,8 +564,100 @@ class LiveTest(unittest.TestCase):
         # A client cannot squat another player's XUID, which search results show.
         self.assertEqual(self.logon(A_AT, A, proof=OTHER_PROOF, now=1.0)[1], mm.E_ACCESSDENIED)
         self.assertEqual(self.logon(B_AT, B, proof=PROOF, now=1.0)[1], mm.E_ACCESSDENIED)
-        self.assertEqual(self.server.accounts[A].proof, hashlib.sha256(PROOF).digest())
+        self.assertEqual(self.server.accounts[A].key, hashlib.sha256(PROOF).digest())
         self.assertEqual(self.logon(B_AT, B, now=1.0)[1], 0)
+
+    def test_a_logon_without_a_challenge_is_refused(self):
+        # What a client from before the challenge sends: its proof, unasked. It registers nothing.
+        body = self.one(live(mm.LOGON, logon_body(900)), A_AT, 0.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
+        self.assertEqual(self.server.accounts, {})
+        self.assertEqual(self.logon(now=1.0)[1], 0)
+        # Nor does the proof log an account on once it has a challenge: only the answer does.
+        req, known, nonce = self.challenge(now=2.0)
+        self.assertEqual(known, 1)
+        body = self.one(live(mm.LOGON, logon_body(req)), A_AT, 2.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
+
+    def test_a_captured_logon_cannot_be_replayed(self):
+        self.logon()
+        req, known, nonce = self.challenge(now=5.0)
+        captured = logon_body(req, nonce=nonce, state=0x13)
+        self.assertEqual(mm.LOGGED_BODY.unpack(self.one(live(mm.LOGON, captured), A_AT, 5.0, mm.LOGGED))[1], 0)
+
+        def replayed(sender, now):
+            return mm.LOGGED_BODY.unpack(self.one(live(mm.LOGON, captured), sender, now, mm.LOGGED))[1]
+
+        # From another socket there is no challenge, and one that socket asks for has another nonce.
+        self.assertEqual(replayed(C_AT, 5.5), mm.E_ACCESSDENIED)
+        self.assertEqual(self.challenge(C_AT, A, 6.0, req)[0], req)
+        self.assertEqual(replayed(C_AT, 6.0), mm.E_ACCESSDENIED)
+        self.assertIs(self.server.by_endpoint[A_AT], self.server.accounts[A])
+        self.assertNotIn(C_AT, self.server.by_endpoint)
+        # From its own socket a repeat gets the first answer again while that is cached, and
+        # is refused after: the challenge went with its first answer.
+        self.assertEqual(replayed(A_AT, 6.0), 0)
+        self.assertEqual(self.server.accounts[A].seen, 5.0)
+        self.assertEqual(replayed(A_AT, 5.0 + mm.CACHE_SECONDS + 1.0), mm.E_ACCESSDENIED)
+
+    def test_a_challenge_is_answered_once_and_expires(self):
+        self.logon()
+        req, known, nonce = self.challenge(now=1.0)
+        self.assertEqual(self.challenge(now=1.5, req=req)[2], nonce)  # a resent CHALLENGE: the same nonce
+        self.server.live_cache.clear()
+        self.assertEqual(self.challenge(now=1.5, req=req)[2], nonce)  # even when no answer was kept
+        body = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], 0)
+        self.assertEqual(self.server.challenges, {})
+        # The same nonce under another request id, or again once the cache forgot the first answer.
+        other = self.one(live(mm.LOGON, logon_body(req + 1, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(other)[1], mm.E_ACCESSDENIED)
+        self.server.live_cache.clear()
+        again = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(again)[1], mm.E_ACCESSDENIED)
+        # One for another XUID does not serve this one, and one left unanswered runs out.
+        req, known, nonce = self.challenge(A_AT, B, now=3.0)
+        late = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 3.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(late)[1], mm.E_ACCESSDENIED)
+        req, known, nonce = self.challenge(now=4.0)
+        late = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 4.0 + mm.CHALLENGE_SECONDS, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(late)[1], mm.E_ACCESSDENIED)
+        self.assertEqual(self.server.challenges, {})
+
+    def test_challenges_are_capped_per_address_and_in_all(self):
+        # An address past its share of unanswered challenges drops its own oldest.
+        other = (A_AT[0], A_AT[1] + 1)  # another socket behind the same address
+        first = self.challenge(other, B, now=1.5, req=99)
+        for index in range(mm.CHALLENGES_PER_ADDRESS + 4):
+            self.challenge(now=1.5, req=100 + index)
+        self.assertEqual(len(self.server.challenges), mm.CHALLENGES_PER_ADDRESS)
+        self.assertEqual(len(self.server.challenge_keys[A_AT[0]]), mm.CHALLENGES_PER_ADDRESS)
+        body = self.one(live(mm.LOGON, logon_body(99, B, nonce=first[2])), other, 1.5, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)  # its oldest went
+        # A table full of other addresses' drops the oldest of all, so a flood cannot keep players out.
+        self.server.challenges = {((f"x{i}", 1), b"", b""): (A, bytes(16), 1e9) for i in range(mm.MAX_CHALLENGES)}
+        self.server.challenge_keys = {}
+        self.assertEqual(self.logon(B_AT, B, now=3.0)[1], 0)
+        self.assertEqual(len(self.server.challenges), mm.MAX_CHALLENGES - 1)
+        self.assertNotIn((("x0", 1), b"", b""), self.server.challenges)
+        self.assertNotIn(B_AT[0], self.server.challenge_keys)  # answered, so nothing is left of it
+        # What nobody answers runs out, and its address's note with it.
+        self.challenge(C_AT, C, now=4.0)
+        self.server.challenges = {key: value for key, value in self.server.challenges.items() if key[0] == C_AT}
+        self.server.sweep(4.0 + mm.CHALLENGE_SECONDS)
+        self.assertEqual((self.server.challenges, self.server.challenge_keys), ({}, {}))
+
+    def test_heartbeats_keep_a_session_alive(self):
+        self.logon()
+        self.logon(B_AT, B, tag=b"AYANE")
+        self.put(now=0.0)
+        registered = self.server.registered
+        for beat in range(1, 9):  # every 5 s, each a CHALLENGE and the LOGON that answers it
+            self.assertEqual(self.logon(now=5.0 * beat)[1], 0)
+        self.assertEqual(self.server.registered, registered)
+        self.assertIsNotNone(self.server.online_at(A_AT, 40.0 + mm.LIVE_SECONDS))
+        self.assertIsNone(self.server.online_at(B_AT, 40.0))  # B said nothing since its logon
+        self.assertEqual(len(self.server.sessions), 1)  # A's, still there for a search
 
     def test_a_session_is_created_updated_found_and_deleted(self):
         self.logon()
@@ -1142,12 +1252,11 @@ class LiveTest(unittest.TestCase):
 
     def test_an_answer_replaced_in_the_cache_is_counted_once(self):
         self.logon(now=0.0)
-        key = next(key for key in self.server.live_cache if key[3] == mm.LOGON)
-        answers = self.server.live_cache[key][0]
-        self.server.live_cache[key] = (answers, 0.0)  # expired, but no sweep has run yet
-        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)
-        self.assertEqual(self.logon(now=0.5, req=1)[1], 0)  # the same request, cached again
-        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)
+        for key, (answers, _) in list(self.server.live_cache.items()):
+            self.server.live_cache[key] = (answers, 0.0)  # expired, but no sweep has run yet
+        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 2)  # its NONCE and its LOGGED
+        self.assertEqual(self.logon(now=0.5, req=1)[1], 0)  # the same requests, cached again
+        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 2)
 
     def test_an_address_registers_only_a_few_accounts_a_minute(self):
         identities = [(xuid_for(proof_for(bytes((10 + index,)) * 32)), proof_for(bytes((10 + index,)) * 32))
@@ -1281,6 +1390,27 @@ class LiveTest(unittest.TestCase):
             self.assertEqual((hresult, tag[:length]), (0, b"KASUMI"))
             self.assertEqual(reloaded.sessions, {})
             self.assertEqual(self.server.stats[(1, A)], {1: (1, 100), 2: (3, 0)})
+
+    def test_an_account_stored_before_the_challenge_keeps_its_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            # As a server from before the challenge wrote it: the hash of the proof it was sent.
+            stored = {"version": 1, "accounts": [{"xuid": A, "proof": hashlib.sha256(PROOF).hexdigest(),
+                                                  "gamertag": "KASUMI", "title": TITLE}]}
+            Path(path).write_text(json.dumps(stored), encoding="utf-8")
+            self.server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            # That hash is the key: the account answers its first challenge, and is not registered again.
+            self.assertEqual(self.challenge(now=1.0)[1], 1)
+            req, hresult, ina, length, tag = self.logon(now=1.0, tag=b"OTHER")
+            self.assertEqual((hresult, tag[:length], self.server.registered), (0, b"KASUMI", 0))
+            # Nobody claims it with another secret, or with the proof alone.
+            self.assertEqual(self.logon(B_AT, A, proof=OTHER_PROOF, now=2.0)[1], mm.E_ACCESSDENIED)
+            req, known, nonce = self.challenge(B_AT, A, now=2.0)
+            body = self.one(live(mm.LOGON, logon_body(req)), B_AT, 2.0, mm.LOGGED)
+            self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
+            self.server.save(3.0)
+            self.assertEqual(json.loads(Path(path).read_text(encoding="utf-8"))["accounts"][0]["proof"],
+                             stored["accounts"][0]["proof"])
 
     def test_a_store_from_before_seen_loads_its_accounts_as_seen_now(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -1499,16 +1629,10 @@ VECTOR_GAMERTAG = b"KASUMI"
 
 
 def live_identity(secret=VECTOR_SECRET):
-    """The XUID and proof a client derives from a secret."""
+    """The XUID, proof and key a client derives from a secret."""
     proof = hashlib.sha256(b"doa2u-live" + secret).digest()
-    return {"secret": secret.hex(), "xuid": xuid_for(proof), "proof": proof.hex()}
-
-
-def logon_fields(xuid, tag, proof=None, digest=BUILD, title=TITLE, state=0, kid=NO_KID):
-    """A LOGON body after its request id; title is LIVE_TITLE in the C client."""
-    if proof is None:
-        proof = PROOFS[xuid]
-    return mm.LOGON_BODY.pack(0, xuid, proof, digest, title, state, kid, len(tag), tag.ljust(15, b"\0"))[4:]
+    return {"secret": secret.hex(), "xuid": xuid_for(proof), "proof": proof.hex(),
+            "key": hashlib.sha256(proof).hexdigest()}
 
 
 class VectorClient:
@@ -1530,6 +1654,23 @@ class VectorClient:
         """Sends the same request, id and all, with the cookie the server just gave."""
         packet = packet[:mm.ASKED - mm.TOKEN] + self.cookie + packet[mm.ASKED:]
         return packet, self.hear(packet, now)
+
+    def logon(self, xuid, proof, now, state=0, kid=NO_KID):
+        """A whole logon, as live_client.c does it: CHALLENGE, again with the cookie when the
+        server asks, then LOGON under the same request id. Returns the packets and the answers."""
+        packet, answers = self.send(mm.CHALLENGE, mm.CHALLENGE_BODY.pack(0, xuid)[4:], now)
+        requests = [packet]
+        if [answer[5] for answer in answers] == [mm.COOKIE]:  # the first ask, with no cookie
+            packet, again = self.retry(packet, now)
+            requests.append(packet)
+            answers = answers + again
+        assert answers[-1][5] == mm.NONCE
+        _, known, nonce = mm.NONCE_BODY.unpack(answers[-1][mm.ASKED - mm.TOKEN:])
+        body = logon_body(self.request, xuid, proof, self.digest, TITLE, state, kid, self.tag,
+                          nonce if known else None)
+        packet = mm.header(mm.LOGON) + self.nonce + self.cookie + body
+        requests.append(packet)
+        return requests, answers + self.hear(packet, now)
 
     def hear(self, packet, now):
         answers = []
@@ -1559,21 +1700,15 @@ def live_vectors():
 
     # Two other players, online and in sessions of their own, so search, find,
     # connect, friends and invites have someone to act on.
-    def login(client, xuid, tag, now, state=0, kid=NO_KID):
-        packet, answers = client.send(mm.LOGON, logon_fields(xuid, tag, state=state, kid=kid), now)
-        if [answer[5] for answer in answers] == [mm.COOKIE]:  # the first ask, with no cookie
-            packet, answers = client.retry(packet, now)
-        return answers
-
     b, c = VectorClient(server, B_AT, b"AYANE"), VectorClient(server, C_AT, b"HAYATE")
-    login(b, B, b"AYANE", now)
-    login(c, C, b"HAYATE", now)
+    b.logon(B, OTHER_PROOF, now)
+    c.logon(C, THIRD_PROOF, now)
     b_kid = mm.SESSION_OK_BODY.unpack(b.send(mm.SESSION_PUT, mm.SESSION_PUT_BODY.pack(
         0, NO_KID, 1, 7, 0, 0, 0)[4:], now)[1][0][mm.ASKED - mm.TOKEN:])[2]
     c_kid = mm.SESSION_OK_BODY.unpack(c.send(mm.SESSION_PUT, mm.SESSION_PUT_BODY.pack(
         0, NO_KID, 1, 7, 0, 0, 0)[4:], now)[1][0][mm.ASKED - mm.TOKEN:])[2]
-    login(b, B, b"AYANE", now, state=0x13, kid=b_kid)
-    login(c, C, b"HAYATE", now, state=0x13, kid=c_kid)
+    b.logon(B, OTHER_PROOF, now, state=0x13, kid=b_kid)
+    c.logon(C, THIRD_PROOF, now, state=0x13, kid=c_kid)
     ina_c = struct.unpack(">I", server.accounts[C].ina)[0]
     server.add_friend(me, C)
     server.requests[(B, me)] = now
@@ -1610,9 +1745,20 @@ def live_vectors():
         steps.append(entry)
         return answers
 
+    def step_logon(call, now, **presence):
+        requests, answers = a.logon(me, bytes.fromhex(identity["proof"]), now, **presence)
+        entry = {"call": call, "kind": mm.LOGON, "requests": [packet.hex() for packet in requests],
+                 "answers": [answer.hex() for answer in answers]}
+        if presence:
+            entry.update(state=presence["state"], kid=presence["kid"].hex())
+        steps.append(entry)
+        return answers
+
     now += 0.5
-    answers = step("logon", mm.LOGON, logon_fields(me, VECTOR_GAMERTAG, proof=bytes.fromhex(identity["proof"])), now)
-    assert len(answers) == 2 and answers[0][5] == mm.COOKIE and answers[1][5] == mm.LOGGED
+    # The first logon of this XUID: the server has no account, so the LOGON carries the proof.
+    answers = step_logon("logon", now)
+    assert [answer[5] for answer in answers] == [mm.COOKIE, mm.NONCE, mm.LOGGED]
+    assert answers[1][mm.ASKED - mm.TOKEN + 4] == 0
     now += 0.25
     answers = step("session_create", mm.SESSION_PUT,
                    mm.SESSION_PUT_BODY.pack(0, NO_KID, 1, 7, 0, 0, 2)[4:] + b"\x11\x22", now,
@@ -1623,9 +1769,10 @@ def live_vectors():
          mm.SESSION_PUT_BODY.pack(0, kid_a, 2, 6, 0, 0, 1)[4:] + b"\x33", now,
          kid=kid_a.hex(), slots=[2, 6, 0, 0], attrs="33")
     now += 0.25
-    step("presence", mm.LOGON, logon_fields(me, VECTOR_GAMERTAG, proof=bytes.fromhex(identity["proof"]),
-                                            state=0x13, kid=kid_a), now,
-         state=0x13, kid=kid_a.hex())
+    # The heartbeat: the account is there now, so the LOGON answers the nonce with its key.
+    answers = step_logon("presence", now, state=0x13, kid=kid_a)
+    assert [answer[5] for answer in answers] == [mm.NONCE, mm.LOGGED]
+    assert answers[0][mm.ASKED - mm.TOKEN + 4] == 1
     now += 0.25
     step("search", mm.SEARCH, mm.SEARCH_BODY.pack(0, 0, 0)[4:], now, procedure=0, filters="")
     now += 0.25

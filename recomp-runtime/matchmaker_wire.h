@@ -14,7 +14,10 @@
    nonce, then for HOST, JOIN, LEAVE, RELAY and LIVE_RELAY the server's
    cookie, then a body whose numbers are big endian. The kinds sit in their
    number order: 1..10 are the room matchmaker's, 12..33 are the Live
-   client's (live_client.c, whose LIVE_ names they keep), 34 relays for Live. */
+   client's (live_client.c, whose LIVE_ names they keep), 34 relays for Live
+   and 35..36 are the challenge every LOGON answers. The version is the room
+   matchmaker's too, so a new Live kind does not change it: an older server
+   gives an unknown kind no answer. */
 static const uint8_t MATCH_MAGIC[4] = {'D', '2', 'M', 'M'};
 enum {
     MATCH_VERSION = 2u,
@@ -25,6 +28,7 @@ enum {
     LIVE_PUSH, LIVE_MUTES, LIVE_MUTELIST, LIVE_FEEDBACK, LIVE_STAT_WRITE, LIVE_STAT_READ, LIVE_STATROW,
     LIVE_LEADERS,
     MATCH_LIVE_RELAY = 34u, /* the Live client asks for one addressee */
+    LIVE_CHALLENGE = 35u, LIVE_NONCE,
     MATCH_HEADER = 6u,
     MATCH_BODY = MATCH_HEADER + RECOMP_NETPLAY_TOKEN_BYTES, /* after the nonce */
     MATCH_ASKED = MATCH_BODY + RECOMP_NETPLAY_TOKEN_BYTES,  /* after the cookie */

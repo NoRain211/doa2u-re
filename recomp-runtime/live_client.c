@@ -17,7 +17,10 @@ enum {
     LIVE_DIGEST_BYTES = 64u,
 
     /* Request sizes. SESSION_PUT, SEARCH, STAT_WRITE and STAT_READ add their list. */
+    LIVE_CHALLENGE_BYTES = MATCH_ASKED + 4u + 8u,
     LIVE_LOGON_BYTES = MATCH_ASKED + 4u + 8u + 32u + 64u + 4u + 4u + 8u + 1u + 15u,
+    LIVE_LOGON_ANSWER = MATCH_ASKED + 4u + 8u, /* where a LOGON's 32-byte answer is */
+    LIVE_NONCE_BYTES = 16u,                    /* the server's nonce, which that answer is made over */
     LIVE_SESSION_PUT_BYTES = MATCH_ASKED + 4u + 8u + 16u + 2u,
     LIVE_SESSION_DEL_BYTES = MATCH_ASKED + 4u + 8u,
     LIVE_SEARCH_BYTES = MATCH_ASKED + 4u + 4u + 2u,
@@ -33,6 +36,7 @@ enum {
     LIVE_GROUP_BYTES = LIVE_FRIEND_OP_BYTES,
 
     /* Answer body sizes, after the header and nonce. */
+    LIVE_CHALLENGED_BYTES = 4u + 1u + LIVE_NONCE_BYTES, /* a NONCE */
     LIVE_LOGGED_BYTES = 4u + 4u + 4u + 1u + 15u,
     LIVE_SESSION_OK_BYTES = 4u + 4u + 8u + 16u,
     LIVE_RESULT_BYTES = 4u + 4u + 1u + 1u,
@@ -434,50 +438,65 @@ static size_t tag_length(const char *tag)
     return length;
 }
 
-/* LOGON, which is also the heartbeat. */
-static uint32_t build_logon(uint8_t *packet, size_t capacity)
+/* A logon, and every heartbeat, is two requests under one id: CHALLENGE asks
+   the matchmaker for a nonce, and LOGON answers it. The slot holds whichever
+   is out, so each goes again every 500 ms until its answer comes. A heartbeat
+   is the client's own (owned), which the game never polls. */
+static uint32_t start_logon(bool owned)
 {
+    uint8_t packet[LIVE_CHALLENGE_BYTES];
     uint32_t id;
     LiveRequestState *slot = new_request(LIVE_LOGON, &id);
-    uint8_t *at = slot != NULL ? begin_request(LIVE_LOGON, id, packet, capacity, LIVE_LOGON_BYTES) : NULL;
+    uint8_t *at = slot != NULL ? begin_request(LIVE_CHALLENGE, id, packet, sizeof packet, sizeof packet) : NULL;
     if (at == NULL) {
         if (slot != NULL) slot->id = 0u;
         return 0u;
     }
-    const size_t length = tag_length(live.user.gamertag);
     put64be(at, live.identity.xuid);
-    memcpy(at + 8u, live.identity.proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES);
-    memcpy(at + 40u, live.digest, sizeof live.digest);
-    put32be(at + 104u, LIVE_TITLE);
-    put32be(at + 108u, live.presence);
-    memcpy(at + 112u, live.presence_kid, 8u);
-    at[120] = (uint8_t)length;
-    memcpy(at + 121u, live.user.gamertag, length);
-    if (!send_request(slot, packet, LIVE_LOGON_BYTES)) {
+    slot->owned = owned;
+    if (!send_request(slot, packet, sizeof packet)) {
         slot->id = 0u;
         return 0u;
     }
     return id;
 }
 
-/* A heartbeat is not a request the game polls: it takes no slot, so a lost
-   answer costs nothing but the next heartbeat 5 s later. */
-static void send_heartbeat(void)
+/* The LOGON that answers a NONCE. An XUID the matchmaker has no account for
+   registers with its proof, the one LOGON that carries it. Any other carries
+   an HMAC, under the account's key, of the nonce, the kind and every field but
+   the answer itself, which nobody can use for another logon. */
+static bool build_logon(uint8_t packet[LIVE_LOGON_BYTES], uint32_t id, bool registered,
+    const uint8_t nonce[LIVE_NONCE_BYTES])
 {
-    uint8_t packet[LIVE_LOGON_BYTES];
-    const uint32_t id = next_request_id();
-    uint8_t *at = begin_request(LIVE_LOGON, id, packet, sizeof packet, LIVE_LOGON_BYTES);
-    if (at == NULL) return;
+    enum { ANSWERED = LIVE_LOGON_ANSWER + RECOMP_LIVE_HMAC_BYTES }; /* the fields after the answer */
+    uint8_t message[LIVE_NONCE_BYTES + 1u + LIVE_LOGON_BYTES - MATCH_ASKED - RECOMP_LIVE_HMAC_BYTES];
+    uint8_t *at = begin_request(LIVE_LOGON, id, packet, LIVE_LOGON_BYTES, LIVE_LOGON_BYTES);
+    if (at == NULL) return false;
     const size_t length = tag_length(live.user.gamertag);
     put64be(at, live.identity.xuid);
-    memcpy(at + 8u, live.identity.proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES);
     memcpy(at + 40u, live.digest, sizeof live.digest);
     put32be(at + 104u, LIVE_TITLE);
     put32be(at + 108u, live.presence);
     memcpy(at + 112u, live.presence_kid, 8u);
     at[120] = (uint8_t)length;
     memcpy(at + 121u, live.user.gamertag, length);
-    send_packet(packet, LIVE_LOGON_BYTES);
+    if (!registered) {
+        memcpy(packet + LIVE_LOGON_ANSWER, live.identity.proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES);
+        return true;
+    }
+    memcpy(message, nonce, LIVE_NONCE_BYTES);
+    message[LIVE_NONCE_BYTES] = LIVE_LOGON;
+    memcpy(message + LIVE_NONCE_BYTES + 1u, packet + MATCH_ASKED, LIVE_LOGON_ANSWER - MATCH_ASKED);
+    memcpy(message + LIVE_NONCE_BYTES + 1u + LIVE_LOGON_ANSWER - MATCH_ASKED, packet + ANSWERED,
+        LIVE_LOGON_BYTES - ANSWERED);
+    return recomp_live_hmac(live.identity.key, message, sizeof message, packet + LIVE_LOGON_ANSWER);
+}
+
+/* A heartbeat is a whole logon, so no LOGON goes out that the matchmaker did
+   not just ask for. With no slot free, the next tick tries again. */
+static void send_heartbeat(void)
+{
+    if (start_logon(true) == 0u) return;
     live.heartbeat_ms = live.now_ms;
     live.heartbeat_due = false;
 }
@@ -702,10 +721,39 @@ static uint32_t refused_request(uint8_t kind, uint32_t hresult)
 
 /* --- answers --- */
 
+/* The matchmaker's nonce for a logon: its LOGON takes the CHALLENGE's place in
+   the slot, inside the same 5 s. */
+static void handle_nonce(LiveRequestState *slot, const uint8_t *body, size_t size)
+{
+    uint8_t packet[LIVE_LOGON_BYTES];
+    if (size < LIVE_CHALLENGED_BYTES || get32be(body) != slot->id) return;
+    /* A NONCE said again, or one for a logon that has ended: its LOGON is out or not wanted. */
+    if (slot->kind != LIVE_LOGON || slot->status != RECOMP_LIVE_PENDING || slot->packet[5] != LIVE_CHALLENGE) return;
+    if (slot->owned && !live.logged_on) { /* a heartbeat the player's logoff overtook */
+        finish_request(slot, LIVE_HRESULT_FAIL);
+        return;
+    }
+    if (!build_logon(packet, slot->id, body[4] != 0u, body + 5u)) {
+        finish_request(slot, LIVE_HRESULT_FAIL);
+        return;
+    }
+    memcpy(slot->packet, packet, sizeof packet);
+    slot->size = LIVE_LOGON_BYTES;
+    slot->last_ms = live.now_ms;
+    send_packet(slot->packet, slot->size);
+}
+
+static void handle_heartbeat(const uint8_t *body);
+
 static void handle_logged(LiveRequestState *slot, const uint8_t *body, size_t size)
 {
     if (size < LIVE_LOGGED_BYTES || get32be(body) != slot->id) return;
     const uint32_t hresult = get32be(body + 4u);
+    if (slot->owned) {
+        handle_heartbeat(body);
+        finish_request(slot, hresult);
+        return;
+    }
     slot->virtual_ina = get32be(body + 8u);
     if (body[12] > 15u) return;
     copy_tag(slot->gamertag, body + 13u);
@@ -929,11 +977,11 @@ static void sign_out(void)
     memset(live.connects, 0, sizeof live.connects);
 }
 
-/* The heartbeat takes no slot, so its LOGGED answer has no request id to find:
-   a new virtual address is adopted here and the transport told. */
-static void handle_heartbeat(const uint8_t *body, size_t size)
+/* A heartbeat's LOGGED: a new virtual address is adopted here and the
+   transport told. One that a logoff overtook changes nothing. */
+static void handle_heartbeat(const uint8_t *body)
 {
-    if (size < LIVE_LOGGED_BYTES || !live.logged_on) return;
+    if (!live.logged_on) return;
     const uint32_t hresult = get32be(body + 4u);
     if (hresult != 0u) {
         /* The matchmaker no longer accepts this account, as a logon it refused
@@ -963,11 +1011,9 @@ static void handle_answer(uint8_t kind, const uint8_t *body, size_t size)
     }
     if (size < 4u) return;
     LiveRequestState *slot = find_request(get32be(body));
-    if (slot == NULL) {
-        if (kind == LIVE_LOGGED) handle_heartbeat(body, size);
-        return; /* a late answer for a request the game already dropped */
-    }
+    if (slot == NULL) return; /* a late answer for a request the game already dropped */
     switch (kind) {
+    case LIVE_NONCE: handle_nonce(slot, body, size); break;
     case LIVE_LOGGED: handle_logged(slot, body, size); break;
     case LIVE_SESSION_OK: handle_session_ok(slot, body, size); break;
     case LIVE_RESULT: handle_result(slot, body, size); break;
@@ -1003,9 +1049,8 @@ static bool client_local_user(void *self, RecompLiveUser *user)
 
 static RecompLiveRequest client_logon(void *self)
 {
-    uint8_t packet[LIVE_LOGON_BYTES];
     (void)self;
-    return build_logon(packet, sizeof packet);
+    return start_logon(false);
 }
 
 static void client_logoff(void *self)

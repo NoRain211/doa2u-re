@@ -104,7 +104,7 @@ static bool write_secret(const char *path, const uint8_t secret[RECOMP_LIVE_IDEN
 bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
     RecompLiveIdentity *identity)
 {
-    uint8_t digest[32], material[sizeof proof_prefix - 1u + RECOMP_LIVE_IDENTITY_SECRET_BYTES];
+    uint8_t material[sizeof proof_prefix - 1u + RECOMP_LIVE_IDENTITY_SECRET_BYTES];
     memcpy(identity->secret, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
     memcpy(material, proof_prefix, sizeof proof_prefix - 1u);
     memcpy(material + sizeof proof_prefix - 1u, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
@@ -112,7 +112,10 @@ bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_
        secret, and only the first six bytes of SHA-256(proof) reach it, so the
        proof itself is not published: the type in the high 16 bits, then those
        bytes as a big-endian 48-bit number. A server can reject a LOGON whose
-       XUID does not match its proof. */
+       XUID does not match its proof. That hash is also the key: the server
+       keeps it from the proof that registered the XUID, and this side never
+       sends it. */
+    uint8_t *digest = identity->key;
     if (!doaxbv_sha256_digest(material, sizeof material, identity->proof) ||
         !doaxbv_sha256_digest(identity->proof, RECOMP_LIVE_IDENTITY_PROOF_BYTES, digest)) {
         /* Without a digest there is no account to publish: an empty identity
@@ -125,6 +128,22 @@ bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_
         (uint64_t)digest[0] << 40 | (uint64_t)digest[1] << 32 | (uint64_t)digest[2] << 24 |
         (uint64_t)digest[3] << 16 | (uint64_t)digest[4] << 8 | digest[5];
     return true;
+}
+
+bool recomp_live_hmac(const uint8_t key[RECOMP_LIVE_IDENTITY_KEY_BYTES], const uint8_t *message, size_t size,
+    uint8_t mac[RECOMP_LIVE_HMAC_BYTES])
+{
+    enum { BLOCK = 64 }; /* SHA-256's; the key is shorter, so it is padded with zeros, not hashed */
+    uint8_t inner[BLOCK + RECOMP_LIVE_HMAC_MESSAGE_BYTES], outer[BLOCK + 32];
+    if (message == NULL || size > RECOMP_LIVE_HMAC_MESSAGE_BYTES) return false;
+    for (unsigned i = 0u; i < BLOCK; ++i) {
+        const uint8_t byte = i < RECOMP_LIVE_IDENTITY_KEY_BYTES ? key[i] : 0u;
+        inner[i] = byte ^ 0x36u;
+        outer[i] = byte ^ 0x5cu;
+    }
+    memcpy(inner + BLOCK, message, size);
+    return doaxbv_sha256_digest(inner, BLOCK + size, outer + BLOCK) &&
+        doaxbv_sha256_digest(outer, sizeof outer, mac);
 }
 
 bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity)

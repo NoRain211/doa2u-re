@@ -522,6 +522,24 @@ static void feed_body(uint8_t kind, const uint8_t *body, size_t size)
     feed(packet, MATCH_BODY + size);
 }
 
+/* The matchmaker's side of a logon: a NONCE for the CHALLENGE the client sent
+   last, which makes it send its LOGON, then that LOGON's LOGGED. */
+static void answer_logon(bool registered, uint32_t hresult, uint32_t virtual_ina)
+{
+    uint8_t nonce[21], logged[28];
+    if (captured_count == 0u) return;
+    const uint32_t id = read32be(captured[captured_count - 1u] + MATCH_ASKED);
+    memset(nonce, 0x5a, sizeof nonce);
+    put32be(nonce, id);
+    nonce[4] = registered ? 1u : 0u;
+    feed_body(LIVE_NONCE, nonce, sizeof nonce);
+    memset(logged, 0, sizeof logged);
+    put32be(logged, id);
+    put32be(logged + 4u, hresult);
+    put32be(logged + 8u, virtual_ina);
+    feed_body(LIVE_LOGGED, logged, sizeof logged);
+}
+
 /* A push: type, the player it is about, and an invite's session id. */
 static void push_body(uint8_t body[17], uint8_t type, uint64_t xuid)
 {
@@ -575,19 +593,43 @@ static void checkHeartbeat(const RecompLiveIdentity *identity)
     recomp_live_client_tick(1000u);
     captured_count = 0u;
     const RecompLiveRequest request = backend->logon(backend->self);
-    check("the heartbeat test logs on", request != 0u && captured_count == 1u);
-    uint8_t body[28];
-    memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + MATCH_ASKED));
-    put32be(body + 8u, 0x0a010009u);
-    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
+    check("a logon asks for a challenge first", request != 0u && captured_count == 1u &&
+        captured[0][5] == LIVE_CHALLENGE);
+    answer_logon(false, 0u, 0x0a010009u);
+    /* The matchmaker has no account for this XUID: the one LOGON that carries the proof. */
+    check("a new XUID registers with its proof", captured_count == 2u && captured[1][5] == LIVE_LOGON &&
+        read32be(captured[1] + MATCH_ASKED) == read32be(captured[0] + MATCH_ASKED) &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) == 0);
     check("the logon answer names the player", done(request) && local_ina == 0x0a010009u);
     backend->release(backend->self, request);
-    /* A heartbeat's LOGGED takes no request slot; a moved address is adopted. */
-    put32be(body, 0x7fffffffu);
-    put32be(body + 8u, 0x0a01000au);
-    feed_body(LIVE_LOGGED, body, sizeof body);
+    /* 5 s on, the heartbeat is a logon of its own: its CHALLENGE goes again
+       until the NONCE comes, and its LOGON answers that nonce. */
+    captured_count = 0u;
+    recomp_live_client_tick(6000u);
+    check("a heartbeat asks for a challenge", captured_count == 1u && captured[0][5] == LIVE_CHALLENGE);
+    recomp_live_client_tick(6500u);
+    check("and again while no nonce came", captured_count == 2u && captured[1][5] == LIVE_CHALLENGE &&
+        read32be(captured[1] + MATCH_ASKED) == read32be(captured[0] + MATCH_ASKED));
+    answer_logon(true, 0u, 0x0a01000au);
+    uint8_t message[16u + 1u + 12u + 96u], answer[RECOMP_LIVE_HMAC_BYTES];
+    memset(message, 0x5a, 16u); /* answer_logon's nonce */
+    message[16] = LIVE_LOGON;
+    memcpy(message + 17u, captured[2] + MATCH_ASKED, 12u);        /* request id, XUID */
+    memcpy(message + 29u, captured[2] + MATCH_ASKED + 44u, 96u); /* everything after the answer */
+    check("a heartbeat answers the nonce with its key", captured_count == 3u && captured[2][5] == LIVE_LOGON &&
+        captured_size[2] == MATCH_ASKED + 140u && recomp_live_hmac(copy.key, message, sizeof message, answer) &&
+        memcmp(captured[2] + MATCH_ASKED + 12u, answer, sizeof answer) == 0);
     check("a heartbeat answer is adopted", local_ina == 0x0a01000au);
+    /* A NONCE said again finds the heartbeat done, and nothing more goes out until the next one. */
+    uint8_t nonce[21];
+    memset(nonce, 0x5a, sizeof nonce);
+    memcpy(nonce, captured[2] + MATCH_ASKED, 4u);
+    captured_count = 0u;
+    feed_body(LIVE_NONCE, nonce, sizeof nonce);
+    recomp_live_client_tick(7000u);
+    check("an answered heartbeat is over", captured_count == 0u);
+    recomp_live_client_tick(11000u);
+    check("the next heartbeat is 5 s on", captured_count == 1u && captured[0][5] == LIVE_CHALLENGE);
     const unsigned before = forget_calls;
     backend->logoff(backend->self);
     check("a logoff forgets every peer", forget_calls == before + 1u && forget_ina == 0u);
@@ -766,10 +808,7 @@ static void checkConnectRetry(const RecompLiveIdentity *identity)
     captured_count = 0u;
     const RecompLiveRequest logon = backend->logon(backend->self);
     uint8_t body[28];
-    memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + MATCH_ASKED));
-    put32be(body + 8u, 0x0a010001u);
-    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
+    answer_logon(false, 0u, 0x0a010001u);
     check("the connect test logs on", done(logon));
     backend->release(backend->self, logon);
 
@@ -859,19 +898,18 @@ static void checkHeartbeatRefused(const RecompLiveIdentity *identity)
     recomp_live_client_tick(1000u);
     captured_count = 0u;
     const RecompLiveRequest request = backend->logon(backend->self);
-    uint8_t body[28];
-    memset(body, 0, sizeof body);
-    put32be(body, read32be(captured[0] + MATCH_ASKED));
-    put32be(body + 8u, 0x0a010009u);
-    feed_body(LIVE_LOGGED, body, sizeof body); /* LOGGED */
+    answer_logon(false, 0u, 0x0a010009u);
     check("the refused heartbeat test logs on", done(request) && local_ina == 0x0a010009u);
     backend->release(backend->self, request);
     const unsigned before = forget_calls;
-    put32be(body, 0x7fffffffu); /* the heartbeat's own id: no slot to find */
-    put32be(body + 4u, 0x80070005u); /* E_ACCESSDENIED */
-    feed_body(LIVE_LOGGED, body, sizeof body);
+    captured_count = 0u;
+    recomp_live_client_tick(6000u); /* the heartbeat's CHALLENGE */
+    answer_logon(true, 0x80070005u, 0u); /* E_ACCESSDENIED */
     check("a refused heartbeat signs the account out",
         forget_calls == before + 1u && forget_ina == 0u && local_ina == 0u);
+    captured_count = 0u;
+    recomp_live_client_tick(12000u);
+    check("and ends the heartbeats", captured_count == 0u);
     recomp_live_client_detach();
 }
 
@@ -1049,6 +1087,16 @@ int main(int argc, char **argv)
     check("the proof comes from the secret",
         readHex(findKey(identity, "proof"), proof, sizeof proof) == sizeof proof &&
         memcmp(proof, mine.proof, sizeof proof) == 0);
+    uint8_t key[RECOMP_LIVE_IDENTITY_KEY_BYTES];
+    check("the key comes from the secret",
+        readHex(findKey(identity, "key"), key, sizeof key) == sizeof key && memcmp(key, mine.key, sizeof key) == 0);
+    /* RFC 4231, test case 1: its 20-byte key, which HMAC pads with zeros as this one is. */
+    uint8_t rfc_key[RECOMP_LIVE_IDENTITY_KEY_BYTES] = {0u}, rfc_mac[RECOMP_LIVE_HMAC_BYTES], mac[RECOMP_LIVE_HMAC_BYTES];
+    memset(rfc_key, 0x0b, 20u);
+    check("HMAC-SHA256 is RFC 4231's",
+        readHex("\"b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7\"", rfc_mac, sizeof rfc_mac) ==
+            sizeof rfc_mac &&
+        recomp_live_hmac(rfc_key, (const uint8_t *)"Hi There", 8u, mac) && memcmp(mac, rfc_mac, sizeof mac) == 0);
     check("the vectors carry a nonce", readHex(findKey(document, "nonce"), test_nonce, sizeof test_nonce) == 8u);
     check("the vectors carry a digest",
         readString(document, "digest", transcript_digest, sizeof transcript_digest) == 64u);

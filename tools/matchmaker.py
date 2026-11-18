@@ -7,7 +7,8 @@ routers, and relays a pair's packets when punching fails. One UDP port, no
 accounts, everything in memory. docs/matchmaking.md describes the packets.
 
 The same port serves the port's Xbox Live service (kinds 12 and up): accounts
-with a proof, session listings, friends, invites, mutes, feedback and stats.
+that log on by answering a challenge, session listings, friends, invites,
+mutes, feedback and stats.
 --store keeps those in one JSON file; without it they last as long as the
 process.
 """
@@ -51,9 +52,14 @@ ADDR6_PER_SECOND = 10  # per address
 (LOGON, LOGGED, SESSION_PUT, SESSION_OK, SESSION_DEL, SEARCH, RESULT, FIND, CONNECT, LPEER, FRIENDS,
  FRIEND, FRIEND_OP, DONE, PUSH, MUTES, MUTELIST, FEEDBACK, STAT_WRITE, STAT_READ, STATROW, LEADERS) = range(12, 34)
 LIVE_RELAY = 34  # either player of a Live pair: destination virtual address, then one guest datagram
+CHALLENGE, NONCE = 35, 36  # before every LOGON: the server's nonce, which the LOGON answers
 MAX_PACKET = 1200  # every Live packet, both ways, except a LIVE_RELAY's larger body
 XUID_TYPE = 0x0009  # the XUID's type field; the rest is the first six bytes of the proof's hash
 LIVE_SECONDS = 20.0  # LOGON is the heartbeat every 5 s; this long silent is offline
+CHALLENGE_BYTES = 16
+CHALLENGE_SECONDS = 10.0  # a LOGON answers within a round trip, and its client gives up after 5 s
+MAX_CHALLENGES = 4096  # unanswered ones; past it the oldest makes room
+CHALLENGES_PER_ADDRESS = 32  # unanswered ones; past it the address's own oldest makes room
 CACHE_SECONDS = 60.0  # a repeated request gets its first answer again, for this long
 MAX_CACHE = 2048  # cached answers in all
 CACHE_PER_ADDRESS = 64  # and from one address, past which answers simply are not kept
@@ -109,7 +115,10 @@ LAN_NETWORKS = [ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172
 
 # Live bodies. Requests carry the nonce and cookie, answers only the nonce, so
 # every body below starts at ASKED or at ASKED - TOKEN.
-LOGON_BODY = struct.Struct(">IQ32s64sII8sB15s")  # request, XUID, proof, digest, title, presence, kid, tag length, tag
+CHALLENGE_BODY = struct.Struct(">IQ")  # request, XUID
+NONCE_BODY = struct.Struct(">IB16s")  # request, whether the XUID has an account, nonce
+LOGON_BODY = struct.Struct(">IQ32s64sII8sB15s")  # request, XUID, answer, digest, title, presence, kid, tag length, tag
+LOGON_ANSWER = slice(12, 44)  # where the answer is in a LOGON body
 LOGGED_BODY = struct.Struct(">IIIB15s")  # request, hresult, virtual address, tag length, tag
 SESSION_PUT_BODY = struct.Struct(">I8s4IH")  # request, kid, four slot counts, attribute length
 SESSION_OK_BODY = struct.Struct(">II8s16s")  # request, hresult, kid, key
@@ -244,6 +253,12 @@ def xuid_of(proof):
     return (XUID_TYPE << 48) | int.from_bytes(hashlib.sha256(proof).digest()[:6], "big")
 
 
+def logon_answer(key, nonce, body):
+    """What an account's LOGON must carry: an HMAC, keyed by the account, of the server's nonce and every other field."""
+    message = nonce + bytes((LOGON,)) + body[:LOGON_ANSWER.start] + body[LOGON_ANSWER.stop:]
+    return hmac.new(key, message, hashlib.sha256).digest()
+
+
 def online(account, now):
     return account.endpoint is not None and now - account.seen <= LIVE_SECONDS
 
@@ -261,10 +276,10 @@ class Pair:
 
 
 class Account:
-    """One logged-on XUID. proof is the hash of the proof the first logon gave."""
+    """One logged-on XUID. key is the SHA-256 of the proof its first logon gave, which keys its later answers."""
 
-    def __init__(self, xuid, proof, gamertag, title):
-        self.xuid, self.proof, self.gamertag, self.title = xuid, proof, gamertag, title
+    def __init__(self, xuid, key, gamertag, title):
+        self.xuid, self.key, self.gamertag, self.title = xuid, key, gamertag, title
         self.ina = bytes(4)
         self.endpoint, self.nonce = None, bytes(TOKEN)
         self.seen = 0.0
@@ -344,6 +359,8 @@ class Matchmaker:
         self.live_counts = {}  # Live packets per address since the last sweep
         self.connect_counts = {}  # CONNECTs per address since the last sweep
         self.account_counts = {}  # new accounts each address registered this minute
+        self.challenges = {}  # (endpoint, socket nonce, request) -> (XUID, nonce, expires), oldest first
+        self.challenge_keys = {}  # address -> its challenges' keys, oldest first, so a flood drops only its own
         self.live_cache = {}  # (endpoint, nonce, request, kind) -> (answers, expires)
         self.cache_keys = {}  # address -> its cached keys, oldest first, so one address cannot fill the cache
         self.ina_next = 0
@@ -510,6 +527,8 @@ class Matchmaker:
         self.live_counts.clear()
         self.answer_bytes.clear()
         self.connect_counts.clear()
+        for key in [key for key, (_, _, expires) in self.challenges.items() if expires <= now]:
+            self.take_challenge(key)
         if int(now // 60) != self.minute:
             self.minute = int(now // 60)
             self.room_counts.clear()
@@ -560,7 +579,7 @@ class Matchmaker:
     # first answer again instead of a second account, invite or feedback.
 
     def live(self, kind, nonce, cookie, body, data, sender, now):
-        checks = {LOGON: live_logon_ok, SESSION_PUT: live_put_ok, SESSION_DEL: live_del_ok,
+        checks = {CHALLENGE: live_challenge_ok, LOGON: live_logon_ok, SESSION_PUT: live_put_ok, SESSION_DEL: live_del_ok,
                   SEARCH: live_search_ok, FIND: live_find_ok, CONNECT: live_connect_ok,
                   FRIENDS: live_query_ok, FRIEND_OP: live_friend_op_ok, MUTES: live_query_ok,
                   FEEDBACK: live_feedback_ok, STAT_WRITE: live_stat_write_ok, STAT_READ: live_stat_read_ok,
@@ -636,6 +655,8 @@ class Matchmaker:
         return [(header(RELAY) + other.nonce + datagram, other.endpoint)] + refresh
 
     def live_request(self, kind, body, nonce, sender, now):
+        if kind == CHALLENGE:
+            return self.live_challenge(body, nonce, sender, now)
         if kind == LOGON:
             return self.live_logon(body, nonce, sender, now)
         if kind == SESSION_PUT:
@@ -724,8 +745,36 @@ class Matchmaker:
         self.dirty = True
         return True
 
+    def live_challenge(self, body, nonce, sender, now):
+        """A nonce for one LOGON: of this socket, this request id and this XUID, for CHALLENGE_SECONDS."""
+        req, xuid = CHALLENGE_BODY.unpack(body)
+        key = (sender, nonce, body[:4])
+        pending = self.challenges.get(key)
+        if pending is None or pending[0] != xuid or pending[2] <= now:
+            self.take_challenge(key)  # a new one is the newest, wherever the old one was
+            mine = self.challenge_keys.get(sender[0], ())
+            # An address past its share drops its own oldest, so only a table full of
+            # other addresses' costs anyone else a challenge: the oldest of all, whose LOGON is refused.
+            if len(mine) >= CHALLENGES_PER_ADDRESS:
+                self.take_challenge(next(iter(mine)))
+            elif len(self.challenges) >= MAX_CHALLENGES:
+                self.take_challenge(next(iter(self.challenges)))
+            pending = self.challenges[key] = (xuid, self.random_bytes(CHALLENGE_BYTES), now + CHALLENGE_SECONDS)
+            self.challenge_keys.setdefault(sender[0], {})[key] = None
+        # A repeat while it is unanswered says the same nonce, so a resend never outdates an answer on its way.
+        return [(header(NONCE) + nonce + NONCE_BODY.pack(req, xuid in self.accounts, pending[1]), sender)]
+
+    def take_challenge(self, key):
+        """Removes one challenge, with its address's note of it, and returns it or None."""
+        keys = self.challenge_keys.get(key[0][0])
+        if keys is not None:
+            keys.pop(key, None)
+            if not keys:
+                del self.challenge_keys[key[0][0]]
+        return self.challenges.pop(key, None)
+
     def live_logon(self, body, nonce, sender, now):
-        req, xuid, proof, digest, title, state, kid, length, tag = LOGON_BODY.unpack(body)
+        req, xuid, answer, digest, title, state, kid, length, tag = LOGON_BODY.unpack(body)
 
         def logged(hresult, ina=bytes(4), given=bytes(0)):
             return [(header(LOGGED) + nonce +
@@ -733,12 +782,18 @@ class Matchmaker:
 
         if xuid == 0 or length > 15:
             return logged(E_INVALIDARG)
-        if xuid != xuid_of(proof):
-            return logged(E_ACCESSDENIED)  # not the XUID of the proof it carries
+        # A challenge is answered once: it goes whatever comes of this LOGON, so a
+        # captured LOGON is worth nothing afterwards, from this socket or any other.
+        asked, issued, expires = self.take_challenge((sender, nonce, body[:4])) or (0, b"", 0.0)
+        if asked != xuid or expires <= now:
+            return logged(E_ACCESSDENIED)  # no challenge, as from a client that sends its proof unasked
         wanted = printable(tag[:length]) or b"PLAYER"
-        proof = hashlib.sha256(proof).digest()
         account = self.accounts.get(xuid)
         if account is None:
+            # A new XUID answers with its proof, once: the XUID must be the proof's,
+            # and the proof's hash becomes the key of every later answer.
+            if xuid != xuid_of(answer):
+                return logged(E_ACCESSDENIED)
             # The minute's cap counts attempts, to slow a flood; the day's counts accounts made,
             # so a refused attempt does not lock an address shared by real players out for the day.
             if (over(self.account_counts, sender[0], ACCOUNTS_PER_ADDRESS) or
@@ -749,14 +804,14 @@ class Matchmaker:
             given = self.taken_tag(wanted, xuid)  # a taken gamertag gets a digit
             if given is None:
                 return logged(E_FAIL)
-            account = self.accounts[xuid] = Account(xuid, proof, given, title)
+            account = self.accounts[xuid] = Account(xuid, hashlib.sha256(answer).digest(), given, title)
             account.ina = self.next_ina()  # the game's XNADDR uses it for both ina and inaOnline
             self.by_ina[account.ina] = account
             self.account_days[sender[0]] = self.account_days.get(sender[0], 0) + 1
             self.registered += 1
             self.dirty = True
-        elif not hmac.compare_digest(account.proof, proof):
-            return logged(E_ACCESSDENIED)  # another proof for this XUID: the game shows a logon error
+        elif not hmac.compare_digest(answer, logon_answer(account.key, issued, body)):
+            return logged(E_ACCESSDENIED)  # not this account's key: the game shows a logon error
         if account.endpoint is not None and self.by_endpoint.get(account.endpoint) is account:
             del self.by_endpoint[account.endpoint]
         account.endpoint, account.nonce, account.seen = sender, nonce, now
@@ -1198,7 +1253,7 @@ class Matchmaker:
             except BAD_ENTRY:
                 skipped += 1
                 continue
-            if account.xuid == 0 or account.xuid in self.accounts or len(account.proof) != 32:
+            if account.xuid == 0 or account.xuid in self.accounts or len(account.key) != 32:
                 continue
             account.ina = self.next_ina()
             self.accounts[account.xuid] = account
@@ -1261,7 +1316,8 @@ class Matchmaker:
 
         return {
             "version": 1,
-            "accounts": [{"xuid": account.xuid, "proof": account.proof.hex(),
+            # "proof" is the name earlier stores gave this hash of the proof, so they still load.
+            "accounts": [{"xuid": account.xuid, "proof": account.key.hex(),
                           "gamertag": account.gamertag.decode("ascii", "replace"), "title": account.title,
                           "seen": heard(account.seen)}
                          for account in self.accounts.values()],
@@ -1326,6 +1382,10 @@ class Matchmaker:
 
 
 # Request sizes, before any state is read. A malformed packet gets no answer.
+def live_challenge_ok(body):
+    return len(body) == CHALLENGE_BODY.size
+
+
 def live_logon_ok(body):
     return len(body) == LOGON_BODY.size and body[LOGON_BODY.size - 16] <= 15
 

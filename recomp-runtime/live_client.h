@@ -5,9 +5,11 @@
 /* RecompLiveBackend (live_backend.h) over tools/matchmaker.py's Live kinds
    (docs/matchmaking.md), through the one socket live_transport.c owns. Every
    request carries an id, goes out again every 500 ms until its answer, and
-   fails after 5 s; after LOGGED the client says LOGON every 5 s as the
-   heartbeat, with the player's presence. An answer that arrives late is
-   dropped, and a repeated request id gets the server's first answer again. */
+   fails after 5 s. A logon is a CHALLENGE and then the LOGON that answers the
+   server's nonce, under one id; after LOGGED the client logs on again that
+   way every 5 s as the heartbeat, with the player's presence. An answer that
+   arrives late is dropped, and a repeated request id gets the server's first
+   answer again. */
 #include "live_backend.h"
 #include "live_identity.h"
 
