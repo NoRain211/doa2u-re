@@ -858,8 +858,14 @@ static void feed(void)
         pcm[2u * frames + 1u] = s[1];
         ++frames;
     }
+    /* The game's own music: its two 44.1 kHz stereo stream buffers play at
+       -15.9 dB (the buffer headroom's 6 and the game's 9.9), and every album
+       is levelled to DOA2U's music files, so a preview at that volume matches
+       it. shortcut: fixed at the game's default music volume; read the
+       stream buffer's volume if the game's own setting turns out to move it. */
     if (frames > 0u)
-        recomp_audio_output_submit(RECOMP_AUDIO_OUTPUT_JUKEBOX_SLOT, (const uint8_t *)pcm, frames * 4u, rate, 2u, 16u, 0);
+        recomp_audio_output_submit(RECOMP_AUDIO_OUTPUT_JUKEBOX_SLOT, (const uint8_t *)pcm, frames * 4u, rate, 2u, 16u,
+            -1590);
     player.sent += frames;
 }
 
