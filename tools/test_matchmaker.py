@@ -247,6 +247,12 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.logon(tag=b"AYANE", now=3.0)[4][:5], b"AYANE")  # a fallback takes a real name
         self.assertEqual(self.logon(tag=b"KASUMI", now=4.0)[4][:5], b"AYANE")  # which then stays
 
+    def test_a_digit_suffix_never_makes_a_banned_gamertag(self):
+        self.fill_accounts(8)
+        for index, tag in enumerate((b"148", b"1481", b"1482", b"1483", b"1484", b"1485", b"1486", b"1487")):
+            self.server.accounts[1 << 60 | index].gamertag = tag
+        self.assertEqual(self.logon(tag=b"148")[4][:4], b"1489")  # not 1488
+
     def test_a_logon_must_carry_the_xuid_of_its_proof(self):
         self.logon()
         # A client cannot squat another player's XUID, which search results show.

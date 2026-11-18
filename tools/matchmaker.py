@@ -556,7 +556,9 @@ class Matchmaker:
         taken = {other.gamertag.lower() for other in self.accounts.values() if other.xuid != xuid}
         candidates = [wanted] + [wanted[:14] + bytes((digit,)) for digit in b"123456789"]
         candidates += [wanted[:9] + b"%06X" % (xuid & 0xffffff), wanted[:3] + b"%012X" % (xuid & 0xffffffffffff)]
-        return next((candidate for candidate in candidates if candidate.lower() not in taken), None)
+        # A suffix can spell a banned name ("148" + "8"), so each candidate is checked again.
+        return next((candidate for candidate in candidates
+                     if candidate.lower() not in taken and not name_banned(candidate)), None)
 
     def evict_account(self, now):
         """Makes room in a full table: the account offline longest, and everything that names it.
