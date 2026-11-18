@@ -27,7 +27,8 @@ public:
           resident_index_(std::move(other.resident_index_)),
           resident_used_(std::exchange(other.resident_used_, 0u)),
           resident_live_(std::exchange(other.resident_live_, 0u)),
-          resident_added_(std::exchange(other.resident_added_, 0u)), sealed_(other.sealed_) {}
+          resident_added_(std::exchange(other.resident_added_, 0u)),
+          sealed_(std::exchange(other.sealed_, false)) {}
     D3dCapturePacket &operator=(D3dCapturePacket &&other) noexcept
     {
         entries_ = std::move(other.entries_);
@@ -41,7 +42,7 @@ public:
         resident_used_ = std::exchange(other.resident_used_, 0u);
         resident_live_ = std::exchange(other.resident_live_, 0u);
         resident_added_ = std::exchange(other.resident_added_, 0u);
-        sealed_ = other.sealed_;
+        sealed_ = std::exchange(other.sealed_, false);
         return *this;
     }
 

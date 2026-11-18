@@ -387,6 +387,10 @@ int main()
         CHECK(source.bytes() == target.bytes());
         source.seal();
         CHECK(std::memcmp(source.command(0).data.draw.texture_bytes, texture.data(), texture.size()) == 0);
+        // A sealed packet's seal moves with it, so its source takes draws again.
+        D3dCapturePacket sealed(std::move(source));
+        CHECK(source.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        CHECK(sealed.add(standingDraw(false)) != RECOMP_D3D_PRESENTER_OK);
     }
 
     // The mask and both reflection textures drop by their own addresses.
