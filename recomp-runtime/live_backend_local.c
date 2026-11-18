@@ -387,6 +387,10 @@ static RecompLiveRequest local_session_create(void *self, const uint32_t slots[R
     unsigned index = 0u;
     while (index < LOCAL_SESSIONS && local.session_used[index]) ++index;
     if (index == LOCAL_SESSIONS) return local_other_request(0x80004005u);
+    /* The request first: a full request table hands the guest no id, so a
+       session committed before it could never be found or deleted. */
+    LocalRequest *request = local_request_new(LOCAL_REQUEST_SESSION);
+    if (request == NULL) return 0u;
     RecompLiveSession *session = &local.sessions[index];
     memset(session, 0, sizeof *session);
     local_session_id(session->id.kid, session->id.key, local.local_index);
@@ -395,8 +399,6 @@ static RecompLiveRequest local_session_create(void *self, const uint32_t slots[R
     memcpy(session->slots, slots, sizeof session->slots);
     local_fill_attributes(session->attributes, &session->attributes_size, attributes, attributes_size);
     local.session_used[index] = true;
-    LocalRequest *request = local_request_new(LOCAL_REQUEST_SESSION);
-    if (request == NULL) return 0u;
     memcpy(request->kid, session->id.kid, 8u);
     return request->id;
 }
@@ -407,11 +409,11 @@ static RecompLiveRequest local_session_update(void *self, const uint8_t kid[8],
     (void)self;
     const int index = local_session_at(kid);
     if (index < 0) return local_other_request(0x80004005u);
+    LocalRequest *request = local_request_new(LOCAL_REQUEST_SESSION);
+    if (request == NULL) return 0u;
     RecompLiveSession *session = &local.sessions[index];
     memcpy(session->slots, slots, sizeof session->slots);
     local_fill_attributes(session->attributes, &session->attributes_size, attributes, attributes_size);
-    LocalRequest *request = local_request_new(LOCAL_REQUEST_SESSION);
-    if (request == NULL) return 0u;
     memcpy(request->kid, kid, 8u);
     return request->id;
 }
@@ -421,9 +423,9 @@ static RecompLiveRequest local_session_delete(void *self, const uint8_t kid[8])
     (void)self;
     const int index = local_session_at(kid);
     if (index < 0) return local_other_request(0x80004005u);
-    local.session_used[index] = false;
     LocalRequest *request = local_request_new(LOCAL_REQUEST_SESSION);
     if (request == NULL) return 0u;
+    local.session_used[index] = false;
     memcpy(request->kid, kid, 8u);
     return request->id;
 }
@@ -671,10 +673,15 @@ static uint32_t local_stat_results(void *self, RecompLiveRequest id, RecompLiveL
     }
     if (request->kind == LOCAL_REQUEST_LEADER) {
         const LocalStatRow *rows[LOCAL_STAT_ROWS];
-        unsigned total = local_rank_board(request->board, rows, LOCAL_STAT_ROWS);
-        unsigned start = request->first_rank == 0u ? 0u : request->first_rank - 1u;
+        const unsigned total = local_rank_board(request->board, rows, LOCAL_STAT_ROWS);
+        /* Ranks are 1-based, as live_leaders() in tools/matchmaker.py reads
+           them: the pivot's rank when one is named, else first_rank, and at
+           most count rows (none when count is zero). */
+        unsigned start = request->xuid != 0u ? local_rank_of(request->board, request->xuid) : 0u;
+        if (start == 0u) start = request->first_rank != 0u ? request->first_rank : 1u;
+        const unsigned limit = request->count < capacity ? request->count : capacity;
         unsigned count = 0u;
-        for (unsigned i = start; i < total && count < capacity; ++i, ++count) {
+        for (unsigned i = start - 1u; i < total && count < limit; ++i, ++count) {
             RecompLiveLeaderRow *result = &out[count];
             memset(result, 0, sizeof *result);
             result->xuid = rows[i]->xuid;

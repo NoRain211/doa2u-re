@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import re
 import struct
 import sys
@@ -12,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # `python -m unittest tools/test_matchmaker.py` runs from the repository root,
 # where the matchmaker module is not on the path; `discover -s tools` already
@@ -1094,6 +1096,64 @@ class LiveTest(unittest.TestCase):
             self.assertEqual(server.stats[(2, A)], {1: (1, 2)})
             self.assertIn("skipped 7 malformed entries", errors.getvalue())
             self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_a_store_number_too_large_for_float_is_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            huge = int("9" * 400)  # float() of it raises OverflowError, not ValueError
+            data = {"version": 1, "accounts": [], "friends": [], "requests": [[A, B, huge]],
+                    "invites": [{"kid": NO_KID.hex(), "from": A, "to": B, "answer": "", "seen": huge}],
+                    "mutes": [], "stats": []}
+            Path(path).write_text(json.dumps(data), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.assertNotIn((A, B), server.requests)
+            self.assertEqual(server.invites, {})
+            self.assertIn("skipped 2 malformed entries", errors.getvalue())
+            self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_a_failed_store_write_keeps_the_last_file_and_removes_its_temp(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            self.server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.logon(now=1.0)
+            self.server.save(2.0)
+            good = Path(path).read_bytes()
+            self.server.dirty = True  # something new to write
+            errors = io.StringIO()
+            with mock.patch.object(mm.os, "replace", side_effect=OSError("no space")), \
+                    contextlib.redirect_stderr(errors):
+                self.server.save(3.0)
+            self.assertIn(f"matchmaker: cannot write {path}", errors.getvalue())
+            self.assertEqual(Path(path).read_bytes(), good)  # the last good file
+            self.assertEqual(os.listdir(folder), ["live.json"])  # and no temporary file beside it
+            self.assertTrue(self.server.dirty)  # the next save tries again
+
+    def test_a_store_write_does_not_write_through_a_stale_temp_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            os.mkdir(path + ".tmp")  # a leftover, or a trap, at the name an older save used
+            self.server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.logon(now=1.0)
+            self.server.save(2.0)
+            self.assertEqual(json.loads(Path(path).read_text(encoding="utf-8"))["accounts"][0]["xuid"], A)
+            self.assertTrue(os.path.isdir(path + ".tmp"))
+            self.assertEqual(sorted(os.listdir(folder)), ["live.json", "live.json.tmp"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes")
+    def test_the_store_is_written_owner_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            self.server = mm.Matchmaker(lambda: 1, store=path, random_bytes=self.random)
+            self.logon(now=1.0)
+            self.server.save(2.0)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            # A store made wider by an older server or by hand is narrowed by the next save.
+            os.chmod(path, 0o644)
+            self.server.dirty = True
+            self.server.save(3.0)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 
     def test_without_a_store_nothing_is_written(self):
         with tempfile.TemporaryDirectory() as folder:

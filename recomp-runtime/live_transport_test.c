@@ -380,9 +380,11 @@ int main(void)
     recomp_live_backend_set(&fake_backend);
 
     /* --- open, and the matchmaker's cookie handling --- */
-    check("transport opens", recomp_live_transport_open("127.0.0.1", ntohs(server_address.sin_port)));
+    /* A caller may register its handler and address before the socket exists;
+       opening must keep both. */
     recomp_live_transport_set_server_handler(on_server);
     recomp_live_transport_set_local(ina_a);
+    check("transport opens", recomp_live_transport_open("127.0.0.1", ntohs(server_address.sin_port)));
     /* The game's socket and bind: one UDP socket on port 1000. */
     uint32_t args[6];
     args[0] = 2u; args[1] = 2u; args[2] = 0u;
