@@ -17,7 +17,7 @@ public:
     D3dCapturePacket() = default;
     D3dCapturePacket(const D3dCapturePacket &) = delete;
     D3dCapturePacket &operator=(const D3dCapturePacket &) = delete;
-    // The move empties spans_, so the source's span count must reset with it.
+    // The move empties spans_ and the resident arena, so their counts reset with them.
     D3dCapturePacket(D3dCapturePacket &&other) noexcept
         : entries_(std::move(other.entries_)), commands_(std::move(other.commands_)),
           payload_(std::move(other.payload_)), spans_(std::move(other.spans_)),
@@ -25,9 +25,9 @@ public:
           resident_(std::move(other.resident_)),
           resident_bytes_(std::move(other.resident_bytes_)),
           resident_index_(std::move(other.resident_index_)),
-          resident_used_(other.resident_used_),
-          resident_live_(other.resident_live_),
-          resident_added_(other.resident_added_), sealed_(other.sealed_) {}
+          resident_used_(std::exchange(other.resident_used_, 0u)),
+          resident_live_(std::exchange(other.resident_live_, 0u)),
+          resident_added_(std::exchange(other.resident_added_, 0u)), sealed_(other.sealed_) {}
     D3dCapturePacket &operator=(D3dCapturePacket &&other) noexcept
     {
         entries_ = std::move(other.entries_);
@@ -38,9 +38,9 @@ public:
         resident_ = std::move(other.resident_);
         resident_bytes_ = std::move(other.resident_bytes_);
         resident_index_ = std::move(other.resident_index_);
-        resident_used_ = other.resident_used_;
-        resident_live_ = other.resident_live_;
-        resident_added_ = other.resident_added_;
+        resident_used_ = std::exchange(other.resident_used_, 0u);
+        resident_live_ = std::exchange(other.resident_live_, 0u);
+        resident_added_ = std::exchange(other.resident_added_, 0u);
         sealed_ = other.sealed_;
         return *this;
     }

@@ -375,6 +375,20 @@ int main()
         texture[8] = 0xffu;
     }
 
+    // A moved-from packet keeps no resident counts and can fill again.
+    {
+        D3dCapturePacket source, target;
+        CHECK(source.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        D3dCapturePacket moved(std::move(source));
+        CHECK(source.bytes() == 0u);
+        target = std::move(moved);
+        CHECK(moved.bytes() == 0u);
+        CHECK(source.add(standingDraw(false)) == RECOMP_D3D_PRESENTER_OK);
+        CHECK(source.bytes() == target.bytes());
+        source.seal();
+        CHECK(std::memcmp(source.command(0).data.draw.texture_bytes, texture.data(), texture.size()) == 0);
+    }
+
     // The mask and both reflection textures drop by their own addresses.
     {
         std::vector<uint8_t> mask(2048u, 0x21u), reflection(3072u, 0x31u), reflection2(2048u, 0x41u);
