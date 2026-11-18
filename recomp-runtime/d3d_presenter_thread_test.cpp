@@ -42,6 +42,7 @@ static ULONGLONG GetTickCount64()
 
 // d3d_vblank.cpp's guest pacing reaches the kernel; these tests use only its host sleep.
 extern "C" void recomp_kernel_wait_for_vblank(uint64_t) {}
+extern "C" uint32_t recomp_kernel_current_thread_id(void) { return 1u; }
 
 static const RecompD3dPresenterConfig config = {
     320u, 240u, RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM,

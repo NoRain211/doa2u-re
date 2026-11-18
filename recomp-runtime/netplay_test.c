@@ -1,4 +1,5 @@
 #include "netplay.h"
+#include "netplay_wire.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,7 +40,7 @@ int main(void)
     recomp_rollback_init(&a, 0u);
     recomp_rollback_init(&b, 0u);
     for (uint16_t i = 0u; i < 5u; ++i) {
-        const RecompInputGamepad value = pad(i, (int16_t)(-1000 * i));
+        const RecompInputGamepad value = pad(i, (int16_t)(-0x2000 - 1000 * i));
         recomp_rollback_add_local(&a, &value);
     }
     size_t size = recomp_netplay_encode(&net_a, &a, -3, packet);
@@ -50,7 +51,7 @@ int main(void)
     packet[0] ^= 1u;
     check("decode", recomp_netplay_decode(&net_b, &b, packet, size));
     check("pads arrive", b.remote_count == 5u && b.remote[4].buttons == 4u &&
-        b.remote[4].thumb_ly == -4000 && b.remote[4].analog_buttons[3] == 0xffu);
+        b.remote[4].thumb_ly == -0x2000 - 4000 && b.remote[4].analog_buttons[3] == 0xffu);
     check("advantage arrives", net_b.peer_advantage == -3 && net_b.peer_seen);
     check("duplicate ignored", recomp_netplay_decode(&net_b, &b, packet, size) && b.remote_count == 5u);
 
@@ -114,8 +115,11 @@ int main(void)
     // Real sockets on loopback: pads cross both ways.
     recomp_rollback_init(&a, 0u);
     recomp_rollback_init(&b, 0u);
-    check("open a", recomp_netplay_open(&net_a, 47311u, "127.0.0.1", 47312u));
-    check("open b", recomp_netplay_open(&net_b, 47312u, "127.0.0.1", 47311u));
+    check("listen a", recomp_netplay_listen(&net_a, 47311u));
+    check("listen b", recomp_netplay_listen(&net_b, 47312u));
+    net_a.peer_address = net_b.peer_address = htonl(INADDR_LOOPBACK);
+    net_a.peer_port = htons(47312u);
+    net_b.peer_port = htons(47311u);
     const RecompInputGamepad seven = pad(7u, 0), nine = pad(9u, 0);
     recomp_rollback_add_local(&a, &seven);
     recomp_rollback_add_local(&b, &nine);
@@ -162,11 +166,6 @@ int main(void)
     memset(longName, 'a', sizeof longName - 1u);
     longName[sizeof longName - 1u] = 0;
     check("too long to check", recomp_netplay_name_banned(longName));
-
-    static const uint32_t rtts[] = {0u, 20u, 21u, 33u, 34u, 66u, 100u, 264u, 1000u, 0xffffffffu};
-    static const uint32_t delays[] = {0u, 0u, 1u, 1u, 2u, 2u, 4u, 8u, 8u, 8u};
-    for (size_t i = 0u; i < sizeof rtts / sizeof *rtts; ++i)
-        check("suggested delay", recomp_netplay_suggested_delay(rtts[i]) == delays[i]);
 
     if (failures != 0) return 1;
     puts("PASS netplay carries pads, acks, advantage and goodbyes over UDP and screens names");

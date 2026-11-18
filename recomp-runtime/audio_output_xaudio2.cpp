@@ -179,10 +179,12 @@ bool applyDefaultRouting(OutputVoice &voice)
 {
     const uint32_t speakers = recomp_audio_output_speakers();
     if (speakers != 6) return true;
-    /* An unrouted voice sits in front left/right; the other speakers stay silent. */
+    /* An unrouted voice sits in front left/right; the other speakers stay silent.
+       Mono feeds both, as SDL3 does (the hit voices, issue #217). */
     float dry[3 * 6] = {};
     for (uint32_t source = 0; source < voice.channels && source < 2; ++source)
         dry[source + source * voice.channels] = 1.0f;
+    if (voice.channels == 1) dry[1] = 1.0f;
     const HRESULT error = voice.source->SetOutputMatrix(
         master, voice.channels, speakers, dry);
     if (FAILED(error)) {

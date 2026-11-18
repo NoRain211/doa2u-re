@@ -16,6 +16,7 @@
 #include <thread>
 
 extern "C" void recomp_kernel_wait_for_vblank(uint64_t deadline_ns);
+extern "C" uint32_t recomp_kernel_current_thread_id(void);
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -38,6 +39,15 @@ thread_local std::unique_ptr<void, decltype(&CloseHandle)>
 // ponytail: the supported progressive NTSC mode; other video modes need their rate.
 constexpr auto interval = std::chrono::nanoseconds(1000000000 / 60);
 constexpr auto spin_window = std::chrono::microseconds(500);
+/* The refresh each guest thread last waited for. CRI's sound server waits
+   every refresh and refills its streams once per wake; the Xbox preempts the
+   game at each vblank to run it, but these cooperative threads run only when
+   the game yields. A game that yields late each frame halved its wakes, the
+   rings ran dry and speech replayed stale audio (issue #145), so a late
+   waiter is handed the refreshes it missed, a few at most. */
+struct VblankWaiter { uint32_t thread; Clock::time_point seen; };
+VblankWaiter waiters[16];
+constexpr int max_catch_up = 4;
 
 Clock::time_point guest_now()
 {
@@ -104,6 +114,7 @@ void recomp_d3d_vblank_reset(void)
 {
     last_vblank = guest_now();
     presented_vblank = last_vblank;
+    for (auto &waiter : waiters) waiter = {};
 }
 
 void recomp_d3d_vblank_state_save(uint64_t *state)
@@ -120,7 +131,9 @@ void recomp_d3d_vblank_state_restore(const uint64_t *state)
     presented_vblank = Clock::time_point(std::chrono::nanoseconds(state[1]));
 }
 
-void recomp_d3d_wait_vblank(void)
+// Present's wait for a pending flip passes catch_up false: a missed refresh
+// is already past, so it would queue a second frame on the pending flip.
+static void waitVblank(bool catch_up)
 {
     const auto wait_start = Clock::now();
     // Every waiter in this refresh interval observes the same vblank.
@@ -129,7 +142,22 @@ void recomp_d3d_wait_vblank(void)
     // A refresh exactly at now counts as reached. The frame clock reads every
     // frame's end, which sits on the grid, so rounding past it doubled each frame.
     if (last_vblank < now) last_vblank = nextRefresh(now);
-    const auto deadline = last_vblank;
+    auto deadline = last_vblank;
+    // The frame clock keeps netplay and synctest deterministic, so it keeps the plain wait.
+    if (!recomp_xapi_frame_clock_enabled()) {
+        const uint32_t thread = recomp_kernel_current_thread_id();
+        VblankWaiter *waiter = nullptr;
+        for (auto &entry : waiters) {
+            if (entry.thread == thread) { waiter = &entry; break; }
+            if (waiter == nullptr && entry.thread == 0u) waiter = &entry;
+        }
+        if (waiter != nullptr) {
+            const auto missed = waiter->seen + interval;
+            if (catch_up && waiter->thread == thread && missed < deadline && deadline - missed <= interval * max_catch_up)
+                deadline = missed;
+            *waiter = {thread, deadline};
+        }
+    }
     const auto deadline_ns = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             deadline.time_since_epoch()).count());
@@ -144,13 +172,18 @@ void recomp_d3d_wait_vblank(void)
         std::chrono::duration<double, std::milli>(Clock::now() - wait_start).count();
 }
 
+void recomp_d3d_wait_vblank(void)
+{
+    waitVblank(true);
+}
+
 void recomp_d3d_wait_present(void)
 {
     // Like Swap on hardware: block only while the previous flip is pending, then
     // queue this one for the next refresh. Waiting for that refresh here made a
     // guest that presented just before it miss the next one in its own wait.
     if (presented_vblank > guest_now()) {
-        recomp_d3d_wait_vblank();
+        waitVblank(false);
         ++present_waits;
     }
     const auto now = guest_now();
