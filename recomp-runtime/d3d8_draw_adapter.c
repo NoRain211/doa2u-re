@@ -491,6 +491,8 @@ static void distortion(uint32_t device, uint32_t stride, RecompD3dPresenterDrawC
     draw->texture_byte_count = scene->texture_byte_count;
     draw->address_u = scene->address_u;
     draw->address_v = scene->address_v;
+    draw->point_min_filter = *recomp_memory_u32(STAGES + 256u + 12u) == 1u;
+    draw->point_mag_filter = *recomp_memory_u32(STAGES + 256u + 16u) == 1u;
     draw->point_mip_filter = *recomp_memory_u32(STAGES + 256u + 20u) == 1u;
     draw->mip_lod_bias = lod_bias(*recomp_memory_u32(STAGES + 256u + 24u));
     draw->texture_is_backbuffer = scene->texture_is_backbuffer;
@@ -583,6 +585,8 @@ static void bump_stages(uint32_t device, bool water, RecompD3dPresenterDrawComma
     draw->alpha_mask_byte_count = map_byte_count;
     draw->bump_address_u = stage[0][0];
     draw->bump_address_v = stage[0][1];
+    draw->point_min_filter = stage[first][3] == 1u;
+    draw->point_mag_filter = stage[first][4] == 1u;
     draw->point_mip_filter = stage[first][5] == 1u;
     draw->mip_lod_bias = lod_bias(stage[first][6]);
     draw->reflection_texture = mask->texture;
@@ -1046,8 +1050,11 @@ static void projected_stages(uint32_t device, const uint32_t stage[4][32],
         uint32_t byte_count, u, v;
         bool point;
         float bias;
+        /* Only stage 0 may point-filter min/mag; stages 1-3 are guarded to linear. */
+        bool point_min, point_mag;
     } slots[3] = {{draw->texture, draw->texture_bytes, draw->texture_byte_count,
-        draw->address_u, draw->address_v, draw->point_mip_filter, draw->mip_lod_bias}};
+        draw->address_u, draw->address_v, draw->point_mip_filter, draw->mip_lod_bias,
+        draw->point_min_filter, draw->point_mag_filter}};
     uint32_t used = 1u;
     for (uint32_t i = 1u; i < 4u && stage[i][12] != 1u; ++i) {
         const uint32_t *s = stage[i];
@@ -1065,13 +1072,14 @@ static void projected_stages(uint32_t device, const uint32_t stage[4][32],
             (t->mip_levels > 1u && s[5] != 1u && s[5] != 2u))
             recomp_stop(2, "d3d8:projected-stage-texture:%u:%x:mip=%u", i, t->format_byte, s[5]);
         const struct Slot wanted = {*t, bound->texture_bytes, bound->texture_byte_count,
-            bound->address_u, bound->address_v, s[5] == 1u, lod_bias(s[6])};
+            bound->address_u, bound->address_v, s[5] == 1u, lod_bias(s[6]), false, false};
         uint32_t slot = 0u;
         while (slot < used && !(slots[slot].texture.data == t->data &&
             slots[slot].texture.format_byte == t->format_byte && slots[slot].texture.width == t->width &&
             slots[slot].texture.height == t->height && slots[slot].texture.mip_levels == t->mip_levels &&
             slots[slot].u == wanted.u && slots[slot].v == wanted.v &&
-            slots[slot].point == wanted.point && slots[slot].bias == wanted.bias)) ++slot;
+            slots[slot].point == wanted.point && slots[slot].bias == wanted.bias &&
+            slots[slot].point_min == wanted.point_min && slots[slot].point_mag == wanted.point_mag)) ++slot;
         if (slot == 3u) recomp_stop(2, "d3d8:projected-stage-slots");
         if (slot == used) slots[used++] = wanted;
         draw->projected_slots[i - 1u] = (int32_t)slot;
@@ -1118,7 +1126,9 @@ static bool fixed_stages(uint32_t device, const RecompD3dVertexLayout *layout,
         stage[0][16], stage[0][18]);
     if (!draw->use_texture_factor && draw->has_texture) {
         if (layout->texcoord_count == 0u || stage[0][0] < 1u || stage[0][0] > 3u ||
-            stage[0][1] < 1u || stage[0][1] > 3u || stage[0][3] != 2u || stage[0][4] != 2u ||
+            stage[0][1] < 1u || stage[0][1] > 3u ||
+            /* D3DTEXF_POINT or LINEAR; anisotropic remains guarded. */
+            stage[0][3] < 1u || stage[0][3] > 2u || stage[0][4] < 1u || stage[0][4] > 2u ||
             stage[0][9] != 0u || stage[0][10] != 0u ||
             /* ALPHAKILL is DISABLE (0) or ENABLE (4), before the texture combine. */
             (stage[0][11] != 0u && stage[0][11] != 4u) ||
@@ -1127,6 +1137,8 @@ static bool fixed_stages(uint32_t device, const RecompD3dVertexLayout *layout,
                 stage[0][0], stage[0][1], stage[0][3], stage[0][4], stage[0][5], stage[0][9],
                 stage[0][10], stage[0][11], draw->texture.mip_levels, layout->texcoord_count);
         draw->alpha_kill = stage[0][11] == 4u;
+        draw->point_min_filter = stage[0][3] == 1u;
+        draw->point_mag_filter = stage[0][4] == 1u;
         draw->point_mip_filter = stage[0][5] == 1u;
         draw->mip_lod_bias = lod_bias(stage[0][6]);
         const bool color_modulate = stage[0][12] == 4u && stage[0][14] == 2u &&
@@ -1383,12 +1395,15 @@ static void program_stages(uint32_t device, RecompD3dPresenterDrawCommand *draw)
         draw->reflection_bytes = mask->texture_bytes;
         draw->reflection_byte_count = mask->texture_byte_count;
     }
-    /* Admitted: linear min/mag, point mip on the mask, point or linear mip on
-       stage 0, optional stage-0 zero-alpha kill, no color key, sign or transform. */
+    /* Admitted: point or linear min/mag on stage 0 and linear min/mag on the
+       mask, point mip on the mask, point or linear mip on stage 0, optional
+       stage-0 zero-alpha kill, no color key, sign or transform. */
     for (uint32_t i = 0u; i < (draw->program_alpha_mask ? 2u : 1u); ++i) {
         const uint32_t *t = stage[i];
         if ((i == 1u && t[0] != t[1]) || t[0] < 1u || t[0] > 3u || t[1] < 1u || t[1] > 3u ||
-            t[3] != 2u || t[4] != 2u ||
+            t[3] < 1u || t[3] > 2u || t[4] < 1u || t[4] > 2u ||
+            /* The mask sampler keeps linear min/mag until it carries its own. */
+            (i == 1u && (t[3] != 2u || t[4] != 2u)) ||
             (i == 1u && t[5] != 1u) || t[7] != 0u || t[9] != 0u || t[10] != 0u ||
             (t[11] != 0u && (i != 0u || t[11] != 4u)) ||
             t[21] != 0u || (i == 0u && draw->texture.mip_levels != 1u && t[5] != 1u && t[5] != 2u)) {
@@ -1399,6 +1414,8 @@ static void program_stages(uint32_t device, RecompD3dPresenterDrawCommand *draw)
         if (i == 1u) memcpy(&draw->program_mask_lod_bias, &t[6], sizeof draw->program_mask_lod_bias);
     }
     draw->alpha_kill = stage[0][11] == 4u;
+    draw->point_min_filter = stage[0][3] == 1u;
+    draw->point_mag_filter = stage[0][4] == 1u;
     draw->point_mip_filter = stage[0][5] == 1u;
     draw->mip_lod_bias = lod_bias(stage[0][6]);
     if (!isfinite(draw->program_mask_lod_bias) || draw->program_mask_lod_bias < -16.0f ||
@@ -1491,7 +1508,8 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
         (stage[18] == 3u && stage[19] == 2u));
     if (!(color_texture || color_diffuse || color_modulate || color_factor) ||
         !(alpha_texture || alpha_modulate || alpha_factor) ||
-        stage[3] != 2u || stage[4] != 2u || stage[9] != 0u || stage[10] != 0u ||
+        stage[3] < 1u || stage[3] > 2u || stage[4] < 1u || stage[4] > 2u ||
+        stage[9] != 0u || stage[10] != 0u ||
         stage[11] != 0u || stage[20] != 0u || stage[21] != 0u)
         recomp_stop(2, "d3d8:point-sprite-stage:%u,%u,%u/%u,%u,%u:filter=%u,%u:key=%x:sign=%x:"
             "kill=%u:tc=%u,%x:ret=%08x", stage[12], stage[14], stage[15], stage[16], stage[18],
@@ -1527,6 +1545,8 @@ static void point_sprites(uint32_t device, const RecompD3dVertexLayout *layout,
     attach_texture(device, 3u, draw);
     if (!draw->has_texture || (draw->texture.mip_levels > 1u && stage[5] != 1u && stage[5] != 2u))
         recomp_stop(2, "d3d8:point-sprite-texture");
+    draw->point_min_filter = stage[3] == 1u;
+    draw->point_mag_filter = stage[4] == 1u;
     draw->point_mip_filter = stage[5] == 1u;
     draw->mip_lod_bias = lod_bias(stage[6]);
     draw->texture_alpha_only = color_diffuse;

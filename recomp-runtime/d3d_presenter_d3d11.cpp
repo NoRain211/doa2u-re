@@ -166,7 +166,7 @@ constexpr uint32_t kSamplerSlots = 64u;
 
 struct SamplerEntry {
     D3D11_TEXTURE_ADDRESS_MODE u, v, w;
-    bool point_mip_filter;
+    bool point_min_filter, point_mag_filter, point_mip_filter;
     float mip_lod_bias;
     ID3D11SamplerState *state;
 };
@@ -2268,8 +2268,8 @@ ID3D11ShaderResourceView *lookupBackBufferTexture(
 /* Xbox D3DTADDRESS WRAP..BORDER (1..4) share D3D11's values and CLAMPTOEDGE
    clamps. The casino Zack sprite draws V 0..2 with CLAMP; wrap shows it twice. */
 ID3D11SamplerState *lookupDrawSampler(RecompD3dPresenter *presenter,
-    uint32_t address_u, uint32_t address_v, bool point_mip_filter, float bias,
-    uint32_t address_w = 1u)
+    uint32_t address_u, uint32_t address_v, bool point_min_filter, bool point_mag_filter,
+    bool point_mip_filter, float bias, uint32_t address_w = 1u)
 {
     const auto host = [](uint32_t mode) {
         return mode == 5u ? D3D11_TEXTURE_ADDRESS_CLAMP : mode >= 1u && mode <= 4u
@@ -2278,11 +2278,13 @@ ID3D11SamplerState *lookupDrawSampler(RecompD3dPresenter *presenter,
     if (presenter->draw_sampler == nullptr) return nullptr;
     const D3D11_TEXTURE_ADDRESS_MODE u = host(address_u), v = host(address_v), w = host(address_w);
     if (u == D3D11_TEXTURE_ADDRESS_WRAP && v == D3D11_TEXTURE_ADDRESS_WRAP &&
-        w == D3D11_TEXTURE_ADDRESS_WRAP && !point_mip_filter && bias == 0.0f) return presenter->draw_sampler;
+        w == D3D11_TEXTURE_ADDRESS_WRAP && !point_min_filter && !point_mag_filter &&
+        !point_mip_filter && bias == 0.0f) return presenter->draw_sampler;
     for (uint32_t i = 0u; i < presenter->sampler_count; ++i) {
         const SamplerEntry &entry = presenter->samplers[i];
-        if (entry.u == u && entry.v == v && entry.w == w &&
-            entry.point_mip_filter == point_mip_filter && entry.mip_lod_bias == bias) {
+        if (entry.u == u && entry.v == v && entry.w == w && entry.point_min_filter == point_min_filter &&
+            entry.point_mag_filter == point_mag_filter && entry.point_mip_filter == point_mip_filter &&
+            entry.mip_lod_bias == bias) {
             return entry.state;
         }
     }
@@ -2291,14 +2293,16 @@ ID3D11SamplerState *lookupDrawSampler(RecompD3dPresenter *presenter,
     desc.AddressU = u;
     desc.AddressV = v;
     desc.AddressW = w;
-    desc.Filter = point_mip_filter
-        ? D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    /* D3D11 filter bits: 0x10 linear min, 0x4 linear mag, 0x1 linear mip; a
+       clear bit is point. */
+    desc.Filter = static_cast<D3D11_FILTER>((point_min_filter ? 0u : 0x10u) |
+        (point_mag_filter ? 0u : 0x4u) | (point_mip_filter ? 0u : 0x1u));
     desc.MipLODBias = bias;
     ID3D11SamplerState *state = nullptr;
     if (FAILED(presenter->device->CreateSamplerState(&desc, &state))) return nullptr;
     SamplerEntry &entry = presenter->samplers[presenter->next_sampler_slot];
     releaseCom(entry.state);
-    entry = {u, v, w, point_mip_filter, bias, state};
+    entry = {u, v, w, point_min_filter, point_mag_filter, point_mip_filter, bias, state};
     presenter->next_sampler_slot = (presenter->next_sampler_slot + 1u) % kSamplerSlots;
     if (presenter->sampler_count < kSamplerSlots) ++presenter->sampler_count;
     return state;
@@ -3011,7 +3015,8 @@ RecompD3dPresenterError submitDraw(
                 (draw.program_count && (!draw.address_u || !draw.address_v))
             ? presenter->filter_sampler
             : lookupDrawSampler(presenter, draw.address_u, draw.address_v,
-                draw.point_mip_filter, draw.mip_lod_bias, volume ? draw.address_w : 1u);
+                draw.point_min_filter, draw.point_mag_filter, draw.point_mip_filter,
+                draw.mip_lod_bias, volume ? draw.address_w : 1u);
     if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     // Bind before the next lookup, which may evict this cache entry.
     presenter->context->PSSetSamplers(0u, 1u, &sampler);
@@ -3019,15 +3024,16 @@ RecompD3dPresenterError submitDraw(
             : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env
                 || draw.projected_stage_count != 0u
             ? lookupDrawSampler(presenter, draw.reflection_address_u,
-                draw.reflection_address_v, draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
+                draw.reflection_address_v, false, false, draw.reflection_point_mip_filter,
+                draw.reflection_mip_lod_bias)
             : presenter->filter_sampler;
     if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     presenter->context->PSSetSamplers(1u, 1u, &sampler);
     if (draw.bump_env || draw.reflection_stage2 || draw.projected_stage_count != 0u) {
         sampler = draw.reflection_stage2 || draw.projected_stage_count != 0u
             ? lookupDrawSampler(presenter, draw.reflection_stage2_address_u, draw.reflection_stage2_address_v,
-                draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
-            : lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, 0.0f);
+                false, false, draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
+            : lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, false, false, 0.0f);
         if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         presenter->context->PSSetSamplers(2u, 1u, &sampler);
     }

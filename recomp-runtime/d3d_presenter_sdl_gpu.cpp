@@ -147,7 +147,7 @@ struct DepthTargetEntry {
 
 struct SamplerEntry {
     SDL_GPUSamplerAddressMode u, v, w;
-    bool point_mip_filter;
+    bool point_min_filter, point_mag_filter, point_mip_filter;
     float mip_lod_bias;
     SDL_GPUSampler *sampler;
 };
@@ -779,12 +779,13 @@ SDL_GPUSamplerAddressMode hostAddressMode(uint32_t mode)
 }
 
 SDL_GPUSampler *createSampler(RecompD3dPresenter *presenter, SDL_GPUSamplerAddressMode u,
-    SDL_GPUSamplerAddressMode v, SDL_GPUSamplerAddressMode w, bool point_mip_filter, float bias,
+    SDL_GPUSamplerAddressMode v, SDL_GPUSamplerAddressMode w, bool point_min_filter,
+    bool point_mag_filter, bool point_mip_filter, float bias,
     SDL_GPUFilter filter = SDL_GPU_FILTER_LINEAR)
 {
     SDL_GPUSamplerCreateInfo info{};
-    info.min_filter = filter;
-    info.mag_filter = filter;
+    info.min_filter = point_min_filter ? SDL_GPU_FILTER_NEAREST : filter;
+    info.mag_filter = point_mag_filter ? SDL_GPU_FILTER_NEAREST : filter;
     info.mipmap_mode = point_mip_filter ? SDL_GPU_SAMPLERMIPMAPMODE_NEAREST : SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
     info.address_mode_u = u;
     info.address_mode_v = v;
@@ -796,22 +797,27 @@ SDL_GPUSampler *createSampler(RecompD3dPresenter *presenter, SDL_GPUSamplerAddre
 
 /* Zero-initialized draw commands keep the linear/wrap sampler. */
 SDL_GPUSampler *lookupDrawSampler(RecompD3dPresenter *presenter, uint32_t address_u, uint32_t address_v,
-    bool point_mip_filter, float bias, uint32_t address_w = 1u)
+    bool point_min_filter, bool point_mag_filter, bool point_mip_filter, float bias,
+    uint32_t address_w = 1u)
 {
     const SDL_GPUSamplerAddressMode u = hostAddressMode(address_u), v = hostAddressMode(address_v),
         w = hostAddressMode(address_w);
     if (u == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && v == SDL_GPU_SAMPLERADDRESSMODE_REPEAT &&
-        w == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && !point_mip_filter && bias == 0.0f) {
+        w == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && !point_min_filter && !point_mag_filter &&
+        !point_mip_filter && bias == 0.0f) {
         return presenter->draw_sampler;
     }
     for (const SamplerEntry &entry : presenter->samplers) {
-        if (entry.u == u && entry.v == v && entry.w == w &&
-            entry.point_mip_filter == point_mip_filter && entry.mip_lod_bias == bias) {
+        if (entry.u == u && entry.v == v && entry.w == w && entry.point_min_filter == point_min_filter &&
+            entry.point_mag_filter == point_mag_filter && entry.point_mip_filter == point_mip_filter &&
+            entry.mip_lod_bias == bias) {
             return entry.sampler;
         }
     }
-    SDL_GPUSampler *sampler = createSampler(presenter, u, v, w, point_mip_filter, bias);
-    if (sampler != nullptr) presenter->samplers.push_back({u, v, w, point_mip_filter, bias, sampler});
+    SDL_GPUSampler *sampler = createSampler(presenter, u, v, w, point_min_filter, point_mag_filter,
+        point_mip_filter, bias);
+    if (sampler != nullptr) presenter->samplers.push_back({u, v, w, point_min_filter,
+        point_mag_filter, point_mip_filter, bias, sampler});
     return sampler;
 }
 
@@ -2239,18 +2245,20 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     bindings.samplers[0] = draw.four_tap_filter || draw.has_alpha_mask ||
             (draw.program_count && (!draw.address_u || !draw.address_v))
         ? presenter->filter_sampler
-        : lookupDrawSampler(presenter, draw.address_u, draw.address_v, draw.point_mip_filter,
-            draw.mip_lod_bias, volume ? draw.address_w : 1u);
+        : lookupDrawSampler(presenter, draw.address_u, draw.address_v, draw.point_min_filter,
+            draw.point_mag_filter, draw.point_mip_filter, draw.mip_lod_bias,
+            volume ? draw.address_w : 1u);
     bindings.samplers[1] = draw.program_alpha_mask ? presenter->program_mask_sampler
         : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env ||
             draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_address_u, draw.reflection_address_v,
-            draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
+            false, false, draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
         : presenter->filter_sampler;
     bindings.samplers[2] = draw.reflection_stage2 || draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_stage2_address_u, draw.reflection_stage2_address_v,
-            draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
-        : draw.bump_env ? lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, 0.0f)
+            false, false, draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
+        : draw.bump_env ? lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v,
+            false, false, false, 0.0f)
         : presenter->filter_sampler;
     // The volume samples with the stage-0 sampler, as guest_sampler on D3D11.
     bindings.samplers[3] = bindings.samplers[0];
@@ -3157,14 +3165,15 @@ bool createResources(RecompD3dPresenter *presenter)
     if (!uploadTexture(presenter, presenter->white_texture, &white, 4u, 0u, 1u, 1u) ||
         !uploadTexture(presenter, presenter->white_volume, &white, 4u, 0u, 1u, 1u)) return false;
     presenter->draw_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, false, false, 0.0f);
     presenter->filter_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, true, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, false, false,
+        true, 0.0f);
     presenter->program_mask_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, true, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, false, true, 0.0f);
     presenter->point_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, true, 0.0f,
-        SDL_GPU_FILTER_NEAREST);
+        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, false, false,
+        true, 0.0f, SDL_GPU_FILTER_NEAREST);
     if (presenter->draw_sampler == nullptr || presenter->filter_sampler == nullptr ||
         presenter->program_mask_sampler == nullptr || presenter->point_sampler == nullptr) return false;
     return ensureRingCapacity(presenter, presenter->vertex_buffer, presenter->vertex_transfer,
