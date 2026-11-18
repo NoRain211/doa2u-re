@@ -81,6 +81,9 @@ class BankTests(unittest.TestCase):
             self.assertRaises(ValueError, xact.wave_bank, bytes(corrupt))
         self.assertRaises(ValueError, xact.wave_bank, wave_bank_image([(self.XMA, 0xFFF0, 16)]))
         self.assertRaises(ValueError, xact.wave_bank, wave_bank_image([(self.XMA, 0, 16)], entry=8))
+        many = bytearray(wave_bank_image([(self.XMA, 0, 16)]))
+        struct.pack_into(">I", many, 0x100 + 4, 0x1000)  # more waves than the 0x500-byte bank holds
+        self.assertRaises(ValueError, xact.wave_bank, bytes(many))
 
     def test_corrupt_sound_bank_raises_value_error(self):
         self.assertRaises(ValueError, xact.cue_tracks, b"KBDS" + bytes(8))
@@ -90,6 +93,10 @@ class BankTests(unittest.TestCase):
             struct.pack_into(">i", corrupt, at, 0xFFF0)
             self.assertRaises(ValueError, xact.cue_tracks, bytes(corrupt))
         self.assertRaises(ValueError, xact.cue_tracks, bytes(good[:0x10]))
+        for at, value in ((0x40 + 1, -4), (0x80, -1)):  # a negative sound or name offset
+            corrupt = bytearray(good)
+            struct.pack_into(">i", corrupt, at, value)
+            self.assertRaises(ValueError, xact.cue_tracks, bytes(corrupt))
         negative = bytearray(good)
         struct.pack_into(">h", negative, 0x09, -1)  # a negative cue count
         self.assertRaises(ValueError, xact.cue_tracks, bytes(negative))

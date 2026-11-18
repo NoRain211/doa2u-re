@@ -91,7 +91,11 @@ keeps running.
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
-  of Dead or Alive 4, `python tools/import_doa4_voices.py <DOA4>/snd.afs`
+  of Dead or Alive 4, drop its ISO on the launcher (or choose it with
+  AUDIO SETTINGS' **Import DOA4 Voices**): it imports the disc's music for
+  the Jukebox, then the voices, and turns Hit Voices on. No extraction is
+  needed; on Windows it fetches the ffmpeg it needs the first time. By hand,
+  `python tools/import_doa4_voices.py <DOA4 ISO, extracted disc or snd.afs>`
   decodes every voice clip of all 15 fighters into
   `private\doa4-voice-all\<fighter>` and fills each fighter's `selections`
   folder from `tools\doa4_voice_selections.json`, a mapping of which DOA4
@@ -110,7 +114,7 @@ keeps running.
   mapping** button (or the importer's `--save-selections`) writes your picks
   back into the mapping file to share them. Hits are
   graded by the move's base damage, before combo scaling. It needs an
-  ffmpeg with XMA support; on Windows the build fetches one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
+  ffmpeg with XMA support; on Windows the importers and the build fetch one into `tools\ffmpeg`. PC SETTINGS' **Hit Voices**
   row sets them Off, Quiet, Normal or Loud. Online each player's own row
   applies; a rollback's re-run frames stay silent, so a hit is voiced once.
 - **Dynamic KO replay.** PC SETTINGS' **KO Replay** row: with **Dynamic**
@@ -140,8 +144,8 @@ keeps running.
   launcher's **JUKEBOX** page, or drop the ISO on the launcher (a DOA3 or DOA4
   disc is imported; any other disc is used as the game's disc and built), or
   run `python tools/import_soundtrack.py <ISO or extracted folder>`. DOA3's
-  tracks are copied as they are; DOA4's are decoded with ffmpeg (the build
-  fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
+  tracks are copied as they are; DOA4's are decoded with ffmpeg (on Windows the
+  import fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
   `recomp_adx_encode` from the game's build, so build the game first. Albums
   go to a `jukebox` folder beside the launcher (`jukebox\<album>`), with the
   music of each disc's movies (opening, endings, logos) taken out of the SFD

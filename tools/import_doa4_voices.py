@@ -4,7 +4,7 @@
 
 DOA2U's fighters make no sound when hit. recomp-runtime/hit_voice.c plays
 DOA4 clips instead, the ones you choose. This tool decodes every wave of the
-15 fighters' voice banks from the snd.afs on your extracted DOA4 disc into
+15 fighters' voice banks from your DOA4 ISO, extracted disc or snd.afs into
 private/doa4-voice-all/<prefix>/<prefix>_NNN_<cue>.wav, named after the
 first cue that plays it, with index.csv listing each clip's length and cues.
 Then it builds each fighter's <prefix>/selections/ from the mapping in
@@ -21,6 +21,7 @@ Nothing it writes into private/ may be committed; the mapping holds no audio. Ne
     python tools/import_doa4_voices.py F:/DOA4U/extracted_ISO/snd.afs --save-selections
 """
 import argparse
+from contextlib import contextmanager
 import csv
 import json
 import os
@@ -31,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 
-from build_prerequisites import find_ffmpeg
+from import_soundtrack import Folder, Xdvdfs, detect, open_source, resolve_ffmpeg
 from xact import afs_table, cue_tracks, wave_bank, xma1_riff
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
@@ -60,21 +61,87 @@ def cue_label(label):
     return label
 
 
-def afs_entries(path):
-    """(offset, length) per entry of an AFS archive, from its table alone: the banks are seeked."""
-    with open(path, "rb") as file:
-        head = file.read(8)
-        if len(head) < 8 or head[:3] != b"AFS":
-            raise SystemExit(f"{path} is not an AFS archive")
-        count = struct.unpack_from("<I", head, 4)[0]
-        if 8 + 8 * count > os.fstat(file.fileno()).st_size:  # read() would allocate the whole count first
-            raise SystemExit(f"{path} lists {count} AFS entries, more than the file can hold")
-        return afs_table(head + file.read(8 * count))
+class ArchiveView:
+    """A bounded seekable archive inside an ISO; no extracted copy is needed."""
+    def __init__(self, file, offset, size):
+        self.file, self.offset, self.size, self.position = file, offset, size, 0
+
+    def seek(self, offset, whence=0):
+        position = offset + (self.position if whence == 1 else self.size if whence == 2 else 0)
+        if whence not in (0, 1, 2) or not 0 <= position <= self.size:
+            raise ValueError("voice archive seek outside its disc entry")
+        self.position = position
+        return position
+
+    def read(self, size=-1):
+        size = self.size - self.position if size < 0 else min(size, self.size - self.position)
+        self.file.seek(self.offset + self.position)
+        data = self.file.read(size)
+        if len(data) != size:
+            raise ValueError("truncated voice archive")
+        self.position += size
+        return data
+
+
+@contextmanager
+def open_archive(path):
+    """Open an existing AFS or the bounded snd.afs entry of a DOA4 disc."""
+    if os.path.isfile(path) and os.path.splitext(path)[1].lower() == ".afs":
+        with open(path, "rb") as file:
+            yield ArchiveView(file, 0, os.fstat(file.fileno()).st_size)
+        return
+    source = open_source(path)
+    try:
+        if detect(source) != "doa4":
+            raise ValueError("Choose a Dead or Alive 4 ISO or extracted disc folder")
+        sector, size = source.find("snd.afs")
+        if isinstance(source, Xdvdfs):
+            yield ArchiveView(source.file, source.base + sector * 2048, size)
+        elif isinstance(source, Folder):
+            with open(source._resolve("snd.afs"), "rb") as file:
+                yield ArchiveView(file, 0, size)
+    finally:
+        source.close()
+
+
+def read_afs_entries(file):
+    """(offset, length) per entry of a streaming AFS archive, from its header and table."""
+    file.seek(0)
+    head = file.read(8)
+    if len(head) != 8:
+        raise ValueError("not an AFS voice archive")
+    count = struct.unpack_from("<I", head, 4)[0]
+    # The table alone is enough to reject a wrong file; refuse an absurd count rather
+    # than read most of the disc first.
+    if count > 65536 or 8 + 8 * count > file.size:
+        raise ValueError("unsupported voice archive table")
+    entries = afs_table(head + file.read(8 * count))
+    if any(offset + length > file.size for offset, length in entries):
+        raise ValueError("voice archive entry extends beyond the archive")
+    return entries
 
 
 def cue_waves(data):
     """Cue name -> wave index for a big-endian XACT 2 sound bank's simple cues."""
     return {cue_label(cue): wave for cue, wave, _loop, complex_sound in cue_tracks(data) if not complex_sound}
+
+
+def validate_banks(afs, entries):
+    """Check every fighter bank before creating any output folders."""
+    if len(entries) <= max(BANKS.values()):
+        raise ValueError("voice archive has too few entries for the fighter banks")
+    for prefix, index in BANKS.items():
+        afs.seek(entries[index - 1][0])
+        data = afs.read(entries[index - 1][1])
+        waves = wave_bank(data)
+        if not waves or any(length == 0 or channels not in (1, 2) or rate == 0
+                            for _offset, length, channels, rate, _samples in waves):
+            raise ValueError(f"{prefix}: invalid wave bank")
+        afs.seek(entries[index][0])
+        cues = cue_waves(afs.read(entries[index][1]))
+        if not cues or not any(cue.startswith(prefix + "_") for cue in cues) or \
+                any(wave < 0 or wave >= len(waves) for wave in cues.values()):
+            raise ValueError(f"{prefix}: this is not the expected DOA4 fighter sound bank")
 
 
 def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
@@ -93,7 +160,7 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
         names.setdefault(wave, []).append(cue[len(prefix) + 1:] if cue.startswith(prefix + "_") else cue)
     os.makedirs(out_folder, exist_ok=True)
     files = {}
-    with tempfile.TemporaryDirectory() as scratch:
+    with tempfile.TemporaryDirectory(prefix=".decode-", dir=out_folder) as scratch:
         for n, (offset, length, channels, rate, _samples) in enumerate(waves):
             if only is not None and n not in only:
                 continue
@@ -101,10 +168,11 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
             source = os.path.join(scratch, "clip.wav")
             with open(source, "wb") as file:
                 file.write(xma1_riff(bank[offset:offset + length], channels, rate))
-            name = f"{prefix}_{n:03d}" + (f"_{labels[0]}" if labels else "") + ".wav"
+            name = f"{prefix}_{n:03d}" + (f"_{cue_label(labels[0])}" if labels else "") + ".wav"
             target = os.path.join(out_folder, name)
             subprocess.run([ffmpeg, "-v", "error", "-y", "-i", source, "-ac", "1", "-ar", "48000",
-                "-c:a", "pcm_s16le", target], check=True)
+                "-c:a", "pcm_s16le", target], check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             files[n] = name
             if rows is not None:
                 frames = (os.path.getsize(target) - 44) // 2
@@ -209,7 +277,8 @@ def save_selections(afs, entries, out, ffmpeg, manifest_path):
     """Writes the mapping from the selections folders: each clip's wave, found by its sound."""
     fighters = {}
     unknown = []
-    with tempfile.TemporaryDirectory() as scratch:
+    os.makedirs(out, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mapping-", dir=out) as scratch:
         for prefix in sorted(BANKS):
             folder = os.path.join(out, prefix, "selections")
             chosen = selection_files(folder)
@@ -238,9 +307,9 @@ def save_selections(afs, entries, out, ffmpeg, manifest_path):
     print(f"Wrote {manifest_path}")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("snd_afs", help="snd.afs from your extracted DOA4 disc")
+    parser.add_argument("source", help="your DOA4 ISO, extracted disc folder or snd.afs")
     parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "private", "doa4-voice-all"))
     parser.add_argument("--ffmpeg", help="ffmpeg with the xma1 decoder (default: the build's tools/ffmpeg, else PATH)")
     parser.add_argument("--no-selections", action="store_true", help="decode only; don't build selections from the mapping")
@@ -248,17 +317,20 @@ def main():
     parser.add_argument("--save-selections", action="store_true",
         help="write the mapping from your selections folders instead of decoding")
     parser.add_argument("--mapping", default=MANIFEST, help="the mapping file (default tools/doa4_voice_selections.json)")
-    args = parser.parse_args()
-    args.ffmpeg = args.ffmpeg or find_ffmpeg(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    if args.ffmpeg is None:
-        raise FileNotFoundError("ffmpeg was not found: none is in tools/ffmpeg and none is on PATH.")
-    entries = afs_entries(args.snd_afs)
-    with open(args.snd_afs, "rb") as afs:
+    args = parser.parse_args(argv)
+    print("Checking the DOA4 voice banks...", flush=True)
+    with open_archive(args.source) as afs:
+        entries = read_afs_entries(afs)
+        validate_banks(afs, entries)
+        # Fetches the pinned ffmpeg (Windows) on first use, so no build is needed first; the
+        # 115 MB download waits until the source itself is known to be a DOA4 disc.
+        args.ffmpeg = resolve_ffmpeg(args.ffmpeg)
         if args.save_selections:
             save_selections(afs, entries, args.out, args.ffmpeg, args.mapping)
             return 0
         rows = []
-        for prefix in sorted(BANKS):
+        for index, prefix in enumerate(sorted(BANKS), 1):
+            print(f"[{index}/{len(BANKS)}] Importing {FIGHTER_NAMES[prefix]}...", flush=True)
             files = decode_bank(afs, entries, prefix, os.path.join(args.out, prefix), args.ffmpeg, rows)
             print(f"{prefix}: {len(files)} clips")
         with open(os.path.join(args.out, "index.csv"), "w", newline="") as file:
@@ -268,7 +340,12 @@ def main():
         if not args.no_selections and os.path.exists(args.mapping):
             with open(args.mapping, encoding="utf-8") as file:
                 apply_selections(afs, entries, args.out, args.ffmpeg, json.load(file), args.replace_selections)
+    kept = "" if args.no_selections or args.replace_selections else " Your existing selections were kept."
+    print(f"Voice import complete.{kept} Enable Hit Voices in PC SETTINGS.", flush=True)
     return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"Voice import failed: {error}") from error
