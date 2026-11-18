@@ -55,7 +55,7 @@ enum {
 enum {
     TASK_SUCCESS = 0x001500f0u,
     TASK_RESULTS = 0x001500f1u,
-    TASK_MUTELIST = 0x001500f2u,
+    TASK_IDLE = 0x001500f2u,
     TASK_LOGON = 0x001510f0u,
     E_INVALIDARG = 0x80150005u,
     E_FAIL = 0x80004005u,
@@ -482,7 +482,7 @@ int main(void)
     check("mutelist startup returns S_OK", call2(thunk_mutelist_startup, 0u, TASK_OUT) == 0u);
     const uint32_t mutelist_start = peek32(TASK_OUT);
     check("mutelist startup task", mutelist_start != 0u);
-    check("mutelist startup completes", wait_task(mutelist_start) == TASK_MUTELIST);
+    check("mutelist startup completes", wait_task(mutelist_start) == TASK_IDLE);
     close_task(mutelist_start);
     const uint32_t mutelist_args[6] = {0u, 250u, 0u, TASK_OUT, MUTES, COUNT_OUT};
     check("mutelist get returns S_OK", call(thunk_mutelist_get, mutelist_args, 6u) == 0u);
@@ -588,7 +588,7 @@ int main(void)
     /* --- friends: a list with one friend and one invite --- */
     check("friends startup returns an HRESULT", call2(thunk_friends_startup, 0u, TASK_OUT) == 0u);
     const uint32_t friends_start = peek32(TASK_OUT);
-    check("friends startup completes", wait_task(friends_start) == TASK_SUCCESS);
+    check("friends startup goes idle", wait_task(friends_start) == TASK_IDLE);
     close_task(friends_start);
     check("friends enumerate returns an HRESULT", call(thunk_friends_enumerate,
         (const uint32_t[]){0u, 0u, TASK_OUT}, 3u) == 0u);
