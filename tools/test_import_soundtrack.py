@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import os
 import struct
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -252,6 +253,14 @@ class ImportFailureTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 soundtrack.main()
         self.assertIn("ffmpeg was not found", str(caught.exception))
+        doa4.assert_not_called()
+
+    def test_an_ffmpeg_that_fails_its_probe_is_reported_before_the_import(self):
+        broken = subprocess.CalledProcessError(1, ["ffmpeg", "-hide_banner", "-decoders"])
+        with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso", "--ffmpeg", "ffmpeg"]),                 mock.patch.object(soundtrack, "open_source", return_value=mock.Mock()),                 mock.patch.object(soundtrack, "detect", return_value="doa4"),                 mock.patch.object(soundtrack.subprocess, "run", side_effect=broken),                 mock.patch.object(soundtrack, "import_doa4") as doa4:
+            with self.assertRaises(SystemExit) as caught:
+                soundtrack.main()
+        self.assertIn("could not list its decoders", str(caught.exception))
         doa4.assert_not_called()
 
     def test_missing_encoder_when_levelling_reports_its_path(self):

@@ -601,9 +601,12 @@ def find_encoder(given):
 def resolve_ffmpeg(given=None):
     """The ffmpeg with the xma1 decoder DOA4 needs, fetching it (Windows) when none is found."""
     tool = given or find_ffmpeg(ROOT) or fetch_ffmpeg(ROOT)
-    check = run_tool([tool, "-hide_banner", "-decoders"], check=True,
-                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    try:
+        check = run_tool([tool, "-hide_banner", "-decoders"], check=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    except subprocess.CalledProcessError as error:  # a broken ffmpeg is reported, not a traceback
+        raise ValueError(f"{tool} could not list its decoders (exit {error.returncode})") from error
     if not re.search(r"\bxma1\b", check.stdout):
         raise ValueError("FFmpeg lacks the XMA decoder required by DOA4")
     return tool
