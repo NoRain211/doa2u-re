@@ -191,19 +191,26 @@ bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity
     return identity->xuid != 0u;
 }
 
-bool recomp_live_identity_knows_server(const RecompLiveIdentity *identity, const char *server)
+/* Whether the list names the server: 1, 0, or -1 for a list that is there but cannot be read. */
+static int listed_server(const RecompLiveIdentity *identity, const char *server)
 {
     char line[512];
     bool known = false;
-    if (identity == NULL || server == NULL || server[0] == '\0' || identity->servers[0] == '\0') return false;
     FILE *file = fopen(identity->servers, "rb");
-    if (file == NULL) return false;
+    if (file == NULL) return errno == ENOENT ? 0 : -1;
     while (!known && fgets(line, sizeof line, file) != NULL) {
         line[strcspn(line, "\r\n")] = '\0';
         known = strcmp(line, server) == 0;
     }
+    const bool failed = ferror(file) != 0;
     fclose(file);
-    return known;
+    return known ? 1 : failed ? -1 : 0;
+}
+
+bool recomp_live_identity_knows_server(const RecompLiveIdentity *identity, const char *server)
+{
+    if (identity == NULL || server == NULL || server[0] == '\0' || identity->servers[0] == '\0') return false;
+    return listed_server(identity, server) != 0; /* an unreadable list may name it, so the proof stays here */
 }
 
 bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, const char *server)
@@ -212,15 +219,12 @@ bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, co
     char text[4096];
     size_t size = 0u;
     if (identity == NULL || server == NULL || server[0] == '\0' || identity->servers[0] == '\0') return true;
-    if (recomp_live_identity_knows_server(identity, server)) return true;
+    const int listed = listed_server(identity, server);
+    if (listed != 0) return listed > 0; /* unreadable: writing now would drop the servers it names */
     FILE *file = fopen(identity->servers, "rb");
     if (file != NULL) {
         size = fread(text, 1, sizeof text - 1u, file);
-        const bool failed = ferror(file) != 0;
         fclose(file);
-        if (failed) return false;
-    } else if (errno != ENOENT) {
-        return false; /* there but unreadable: writing now would drop the servers it names */
     }
     if (size != 0u && text[size - 1u] != '\n') text[size++] = '\n'; /* a last line someone left open */
     const int needed = snprintf(text + size, sizeof text - size, "%s\n", server);

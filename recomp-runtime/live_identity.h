@@ -64,11 +64,12 @@ bool recomp_live_hmac(const uint8_t key[RECOMP_LIVE_IDENTITY_KEY_BYTES], const u
 
 /* The matchmakers this account has logged on to, one "host:port" a line in
    identity->servers. The proof registers the account with a matchmaker once,
-   so one in this list is never sent it again (live_client.c). A list that is
-   missing or cannot be read holds no server. */
+   so one in this list is never sent it again (live_client.c). A missing list
+   holds no server. One that is there but cannot be read may name any server,
+   so it knows them all. */
 bool recomp_live_identity_knows_server(const RecompLiveIdentity *identity, const char *server);
 /* Adds a server to that list, replacing the file whole as the secret is
-   written. False when the list could not be written; true when the server is
+   written. False when the list could not be read or written; true when the server is
    in it, or when the identity keeps no list. */
 bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, const char *server);
 

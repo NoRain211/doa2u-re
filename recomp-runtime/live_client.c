@@ -744,9 +744,10 @@ static void handle_nonce(LiveRequestState *slot, const uint8_t *body, size_t siz
            stays here: a NONCE forged from the server's address says "no
            account" to be sent it. The logon ends as a refused one does, and a
            heartbeat signs the account out as its refusal would. */
-        fprintf(stderr, "recomp live: %s says this account does not exist, but it has logged on there before. "
-            "Its proof was withheld to protect the account. If that server lost its accounts, remove the line "
-            "\"%s\" from %s to register again\n", live.server, live.server, live.identity.servers);
+        fprintf(stderr, "recomp live: %s says this account does not exist, but it has logged on there before "
+            "(or %s cannot be read). Its proof was withheld to protect the account. If that server lost its "
+            "accounts, remove the line \"%s\" from that file to register again\n",
+            live.server, live.identity.servers, live.server);
         if (slot->owned) sign_out();
         finish_request(slot, LIVE_HRESULT_ACCESSDENIED);
         return;

@@ -29,7 +29,9 @@ line. When Live is off, the Live pages report no account, as before.
   sends that server the proof again. Keep the list with the identity file
   when you move the account. If a matchmaker lost its accounts, the logon
   fails and stderr names the line to remove from that file to register
-  again; that registration sends the proof once more.
+  again; that registration sends the proof once more. A list that is there
+  but cannot be read counts as naming every server, so a matchmaker that
+  says "no account" is refused the same way until the file can be read.
 
 ## How it fits
 

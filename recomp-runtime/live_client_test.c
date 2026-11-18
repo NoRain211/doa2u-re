@@ -1100,6 +1100,21 @@ static void checkDowngradeGuard(const RecompLiveIdentity *identity)
     recomp_live_client_tick(6500u);
     check("and its run still withholds the proof", captured_kind(LIVE_LOGON) == 0u);
     recomp_live_client_detach();
+
+    /* A list that is there but cannot be read may name the server. A folder
+       is one on every platform: it does not open, or opens and does not read. */
+    snprintf(copy.servers, sizeof copy.servers, "%s", ".");
+    check("an unreadable list knows every server", recomp_live_identity_knows_server(&copy, "example.test:47700"));
+    check("and is not written over", !recomp_live_identity_remember_server(&copy, "example.test:47700"));
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "example.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_challenge(false);
+    recomp_live_client_tick(1500u);
+    check("an unreadable list withholds the proof", captured_count == 1u && captured_kind(LIVE_LOGON) == 0u);
+    backend->release(backend->self, request);
+    recomp_live_client_detach();
 }
 
 static void checkIdentityFile(void)
