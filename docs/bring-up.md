@@ -762,16 +762,52 @@ Stage Select also offers Tengu's boss stage (issue #117). Its list
 (`stage_select_build_rows`, `0x1354a0`) writes one-byte entry numbers into
 rows at `0xdf5f10`, indexing the 24-byte entries at `0x6e22b0`, and appends
 Random; every other read goes through `0x135410`, `0x135510` and
-`0x135580`. `stage_select.c`
-replaces those four and adds stage 18 (the Miyama his story fight loads)
+`0x135580`, and a row's confirm through `0x1357f0`. `stage_select.c`
+replaces those five and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. Random's pick
-(`0x135700`) can then choose it too. The tag list stays as it was.
-Only Sparring was played with it. The stage's season variants (ids 27, 64,
-65) load inconsistently and are left out. Random's row moves one place, so
-online players need this build on both sides, which netplay's build check
-already requires.
+`0x03ff0c00`, since other data follows the table. The tag list stays as it was.
+
+Ids 18, 27, 63, 64 and 65 are one stage group (`0x693370`) with identical data
+and area descriptors. Stage Select's preview load (`0x12e720`) sets the stage
+layout to 0 for all of them, as Story's ladder does for the only two it uses
+(18 and 64). The game's own confirm handler (`0x1357f0`) already committed 27,
+63 and 65 from 64 with X, Y and Left trigger plus A or Start, but retail never
+offers 64, so that path was dead. D-pad Up (or left-stick up) on the Miyama
+row now steps the entry's id through 18, 64, 63, 65 and back, and Down steps
+the other way, playing the row
+sound (`0xfed70`) and committing the new id to the preview through the call a
+row change makes (`0x12f360`); after a confirm it does nothing. 27 showed a
+black void in game, so it is left out of the cycle and X on the row does
+nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
+changes. The entry's id bytes hold the pick, and it stays across visits to
+the screen. Random's `row_stage(row, 0)` and the confirm take the current
+variant; find-stage (`0x135580`), which only the online match scene uses,
+writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
+so any variant replays without a row. Played in game: the Up cycle, a fight
+on each variant, the X, Y and Left trigger picks, the kept variant and
+Random; 27 was the black void. Online play and the online match scene's
+restore were not tested. The variant is a stage id the game already syncs, the entry
+sits in the kernel page that rollback restores, and Up is read from the
+lockstepped per-player pad block, so both sides need this build, which
+netplay's build check already requires.
+
+Modes that pick stages without Stage Select read fixed lists, so Miyama is
+added to those too. Time Attack (game mode 4) fills one stage per opponent
+from the 20 stages at `0x692ba4` (`battle_fill_random_stages`, `0xc7fd0`,
+cdecl list and count); a pick in a stage group becomes a random member of
+that group. The fill now gets that pool plus 18, with the
+Miyama group narrowed to 18, 64, 63 and 65 only while it runs, so 27 never
+comes up. `battle_pick_next_stage` (`0xc7c80`) steps rematches through the 21
+stages at `0x692bd0` (`g_stage_rotation_index`, `0x8783b5`) or draws one at
+random through `rand_below` (`0xc4410`, `rand() % EAX`, from `0xc7e86` and
+`0xc447e`). Miyama now follows the 21st stage of the rotation, and the draw is
+from 22, the 22nd being Miyama; both take the row's current variant. The
+pending step and the draw's result sit in the reserved kernel page after the
+Miyama entry (`0x03ff0c18`, the pool copy at `0x03ff0c20`), so rollback
+restores them. Survival always uses stage 9, Story its ladder and the tag
+lists stay as they were. Time Attack was played with this build; which menu
+paths reach the rotation and the draw was not traced.
 
 Every costume and character is offered. The game data pointer at `0x87cfa8`
 (observed `0x7feae0`) points 0xf200 into the active profile's 0x12118-byte
