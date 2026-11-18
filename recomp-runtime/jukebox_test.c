@@ -443,6 +443,12 @@ static void test_assignments(const char *base)
         recomp_jukebox_confirm(ROW_TARGET);
         CHECK(targets[0].album == doa3 && targets[0].track == track);
         CHECK(entry_byte(overlay, at) == 'Q');
+        /* Going online mid-run, the open archive plays the entry's own track,
+           and going offline again brings the assignment back. */
+        recomp_jukebox_set_online(true);
+        CHECK(!assigning && entry_byte(overlay, at) == 0x80u);
+        recomp_jukebox_set_online(false);
+        CHECK(assigning && entry_byte(overlay, at) == 'Q');
         snprintf(path, sizeof path, "%s/assignments.txt", jukebox_root);
         (void)read_text(path, text, sizeof text);
         CHECK(strstr(text, "one.adx\tDOA3\ttrack.adx") != NULL);

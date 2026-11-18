@@ -27,6 +27,9 @@ extern "C" {
 uint64_t recomp_jukebox_prepare(const char *disc_root, const char *private_dir);
 /* Each boot, after the mod loader: applies the saved assignments. */
 void recomp_jukebox_install(bool online);
+/* A run that goes online after install (Xbox Live's logon) and back: online,
+   both games hear the game's own music and nothing plays over it. */
+void recomp_jukebox_set_online(bool online);
 
 /* The main menu's entry asks for the page; the Options menu opens it at its
    next update and takes the request. */
