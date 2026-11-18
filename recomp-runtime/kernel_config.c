@@ -15,9 +15,9 @@ int recomp_kernel_surround = -1;
 
 static int setting(int chosen, const char *name)
 {
+    if (chosen >= 0) return chosen; /* a session asks every camera setup, so no getenv */
     const char *value = getenv(name);
-
-    return chosen >= 0 ? chosen : value != NULL && strcmp(value, "0") != 0;
+    return value != NULL && strcmp(value, "0") != 0;
 }
 
 /* DOA2U selects its native 16:9 camera and UI from XC_VIDEO's widescreen bit;

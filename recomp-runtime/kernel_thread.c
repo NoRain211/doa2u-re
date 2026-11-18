@@ -179,16 +179,18 @@ static uint64_t interrupt_time(void)
 static uint64_t system_time(void)
 {
     /* Frame-locked guest time: the host wall clock differs on every replay,
-       so UTC rides the same counter as interrupt time. */
+       so UTC rides the same counter as interrupt time. The offset keeps a
+       switch into the frame clock continuous with the host clock. */
     if (recomp_xapi_frame_clock_enabled()) {
-        return 116444736000000000ull + recomp_xapi_performance_counter() / 100u;
+        return 116444736000000000ull + recomp_xapi_performance_counter() / 100u +
+            recomp_xapi_frame_clock_utc_offset();
     }
     struct timespec now;
     if (timespec_get(&now, TIME_UTC) != TIME_UTC) {
         recomp_stop(2, "thread:system-time");
     }
     return ((uint64_t)now.tv_sec + 11644473600ull) * 10000000ull +
-        (uint64_t)now.tv_nsec / 100ull;
+        (uint64_t)now.tv_nsec / 100ull + recomp_xapi_host_utc_skip();
 }
 
 static uint64_t wait_deadline(uint32_t timeout)
@@ -1048,7 +1050,9 @@ size_t recomp_kernel_thread_fiber_state_size(void)
 void recomp_kernel_thread_fiber_state_save(void *state)
 {
     KernelThreadFiberState *out = state;
-    memset(out, 0, sizeof *out);
+    /* Each slot's 64 KB stack copy is written only up to its used bytes. */
+    for (unsigned i = 0u; i < MAX_THREADS; ++i)
+        memset(&out->threads[i], 0, offsetof(KernelThreadFiber, native.stack));
     for (unsigned i = 0u; i < MAX_THREADS; ++i) {
         if (threads[i].native_fiber == NULL || i == current_thread) continue;
         /* A converted thread keeps the runner's own stack; its guest state

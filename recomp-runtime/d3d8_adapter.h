@@ -18,6 +18,9 @@ uint32_t recomp_d3d8_require_device(void);
 void recomp_d3d8_target(RecompD3dPresenterTarget *target);
 void recomp_d3d8_submit(const RecompD3dPresenterCommand *command);
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);
+/* A repeated run-ahead frame's draw to this target leaves the saved state as
+   it is, so it need not be built. */
+bool recomp_d3d8_draw_skippable(bool offscreen);
 /* Width over height the game draws its frames for: 4:3, or the widescreen shape. */
 float recomp_d3d8_content_aspect(void);
 /* Fits an on-screen pretransformed draw of the game's 16:9 2D layer to
@@ -33,6 +36,11 @@ void recomp_d3d8_reset_keeping_window(void);
 void recomp_d3d8_set_present_suppressed(bool suppressed);
 /* Repeated run-ahead frames also skip draws, clears, copies and visibility tests. */
 void recomp_d3d8_set_gpu_work_suppressed(bool suppressed);
+/* A save waits for the GPU to finish a pending visibility test, so a replay
+   reads the count the first pass read; SyncTest and loopback compare it. A
+   netplay session turns the wait off: its desync checks read the counts as
+   zero, since each player's GPU reports its own. */
+void recomp_d3d8_set_save_waits_for_visibility(bool waits);
 /* Clears the main target, draws a BGRA card at level (0 black..255 full)
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,
@@ -48,7 +56,6 @@ extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
    before its Present, in this order. Each owner sets only its own slot. */
 enum {
     RECOMP_D3D_OVERLAY_PERF,    /* the runner's frame rate readout */
-    RECOMP_D3D_OVERLAY_NETPLAY, /* the netplay menu or session screens */
     RECOMP_D3D_OVERLAY_HOOKS,
 };
 extern void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);

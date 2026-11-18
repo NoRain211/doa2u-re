@@ -24,10 +24,6 @@ are under the Apache License 2.0; its glslang code is under glslang's BSD,
 MIT and Apache 2.0 licenses. Each keeps its own notices. LWJGL's build is
 under the BSD 3-Clause license.
 
-The runner links miniupnpc 2.3.3 (miniupnp/miniupnp, tag miniupnpc_2_3_3),
-Copyright (c) 2005-2025 Thomas Bernard, under the BSD 3-Clause license. The
-build fetches it; its LICENSE remains in the fetched source.
-
 The runner decodes movie video with pl_mpeg by Dominic Szablewski
 (phoboslab/pl_mpeg, revision c871f2be022ece7ef4f64230b4fb8e1fb9eb6023), under
 the MIT license. The build fetches pl_mpeg.h, which carries its notice, and
@@ -63,6 +59,9 @@ full text the file keeps.
 tools/build_prerequisites.py and its test are adapted from NoRain211/doaxbv-re
 at commit 5761e89, under GPL-3.0-or-later. The build downloads, but does not
 redistribute, the llvm-mingw compiler by Martin Storsjö and contributors.
+The soundtrack and voice importers likewise download, but do not
+redistribute, Gyan Doshi's ffmpeg essentials build (FFmpeg, GPL), whose
+license remains in tools/ffmpeg.
 
 The XAudio 2.9 I3DL2 reverb conversion in recomp-runtime/xaudio2_reverb.h is
 altered from FAudio (FNA-XNA/FAudio, ReverbConvertI3DL2ToNative9 in
