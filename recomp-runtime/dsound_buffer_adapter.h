@@ -22,6 +22,8 @@ void recomp_dsound_buffer_state_save(void *state);
 void recomp_dsound_buffer_state_restore(const void *state);
 /* Hidden run-ahead frames advance the buffers without output. */
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed);
+/* Muted voices keep playing at zero volume (the Jukebox over the game). */
+void recomp_dsound_buffer_set_output_muted(bool muted);
 /* A session that must match another runner or a replay reads play cursors on
    the frame-locked guest clock; host output then keeps its own place on the
    real clock, and the pump thread moves only that. */

@@ -104,12 +104,20 @@ void recomp_dsound_buffer_state_restore(const void *state)
 }
 
 static bool output_suppressed; /* read and written only under the output lock */
+static bool output_muted;      /* the Jukebox plays over the game; under the output lock too */
 static bool frame_clock;       /* read and written only under the output lock */
 
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed)
 {
     recomp_dsound_output_lock();
     output_suppressed = suppressed;
+    recomp_dsound_output_unlock();
+}
+
+void recomp_dsound_buffer_set_output_muted(bool muted)
+{
+    recomp_dsound_output_lock();
+    output_muted = muted;
     recomp_dsound_output_unlock();
 }
 
@@ -503,7 +511,7 @@ static void output_span(Buffer *buffer, uint32_t offset, uint32_t bytes, bool ba
     voice->filter = buffer->hrtf.filter;
     if (!buffer->is3d && !output_suppressed) {
         recomp_audio_output_submit(slot, pcm, bytes, buffer->model.sample_rate, buffer->channels,
-            buffer->format == 0x69u ? 16u : buffer->bits, buffer->volume);
+            buffer->format == 0x69u ? 16u : buffer->bits, output_muted ? -10000 : buffer->volume);
     }
     /* The APU filters 3D voices at 48 kHz; pieces keep each submission in bounds. */
     static float ears[3u * 20000u];
@@ -514,7 +522,7 @@ static void output_span(Buffer *buffer, uint32_t offset, uint32_t bytes, bool ba
         uint32_t rendered = recomp_hrtf_render(voice, samples + done, piece,
             buffer->model.sample_rate, ears, 20000u);
         if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
-            RECOMP_HRTF_RATE, 3u, 32u, buffer->volume);
+            RECOMP_HRTF_RATE, 3u, 32u, output_muted ? -10000 : buffer->volume);
         done += piece;
     }
     if (!background && !recomp_audio_output_ready()) recomp_stop(2, "dsound:audio-output-failed");

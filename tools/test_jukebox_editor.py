@@ -1,0 +1,195 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Run the editor's persistence and archive checks without opening a window."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+class EditorTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "uses the Windows .NET Framework compiler")
+    def test_persistence_and_malformed_archive(self):
+        compiler = Path(os.environ.get("WINDIR", "C:/Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+        if not compiler.is_file():
+            self.skipTest(".NET Framework compiler unavailable")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            harness = root / "checks.cs"
+            harness.write_text(r'''
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Text;
+using System.Windows.Forms;
+static class EditorChecks
+{
+    static object Call(string name, params object[] args)
+    {
+        return typeof(JukeboxEditor).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, args);
+    }
+    static object Run(JukeboxEditor editor, string name, params object[] args)
+    {
+        return typeof(JukeboxEditor).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, args);
+    }
+    static object Get(object target, string name)
+    {
+        return typeof(JukeboxEditor).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(target);
+    }
+    static void Set(object target, string name, object value)
+    {
+        typeof(JukeboxEditor).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).SetValue(target, value);
+    }
+    static void Be32(byte[] b, int at, uint v)
+    {
+        b[at] = (byte)(v >> 24); b[at + 1] = (byte)(v >> 16); b[at + 2] = (byte)(v >> 8); b[at + 3] = (byte)v;
+    }
+    // A synthetic bgm.afs: an ADX header of the given samples per entry, named.
+    static byte[] Archive(string[] names, uint[] samples)
+    {
+        int count = names.Length, entry = 0x800, namesAt = entry + 0x800 * count;
+        byte[] data = new byte[namesAt + 48 * count];
+        Array.Copy(new byte[] {65,70,83,0}, data, 4);
+        BitConverter.GetBytes((uint)count).CopyTo(data, 4);
+        for (int i = 0; i < count; ++i)
+        {
+            BitConverter.GetBytes((uint)(entry + 0x800 * i)).CopyTo(data, 8 + 8 * i);
+            BitConverter.GetBytes(0x800u).CopyTo(data, 12 + 8 * i);
+            int at = entry + 0x800 * i;
+            data[at] = 0x80; data[at + 2] = 0x20; data[at + 4] = 3; data[at + 5] = 0x12;
+            data[at + 6] = 4; data[at + 7] = 1;
+            Be32(data, at + 8, 22050); Be32(data, at + 12, samples[i]);
+            Encoding.ASCII.GetBytes(names[i]).CopyTo(data, namesAt + 48 * i);
+        }
+        BitConverter.GetBytes((uint)namesAt).CopyTo(data, 8 + 8 * count);
+        BitConverter.GetBytes((uint)(48 * count)).CopyTo(data, 12 + 8 * count);
+        return data;
+    }
+    static void Check(bool ok) { if (!ok) throw new Exception("Editor regression failed"); }
+    static void Main()
+    {
+        string path = Path.GetFullPath("assignments.txt");
+        Call("AtomicText", path, "one\tDOA3\told.adx\ntwo\tDOA4\tgame.adx\nthree\tDOA3\tclear.adx\n");
+        var picks = new Dictionary<string, string> { {"one", "DOA4\tedited.adx"}, {"two", "DOA3\tstale.adx"} };
+        var merged = (Dictionary<string, string>)Call("MergeAssignments", path, picks, new[] {"one", "three"});
+        Check(merged["one"] == "DOA4\tedited.adx" && merged["two"] == "DOA4\tgame.adx" && !merged.ContainsKey("three"));
+        Check((string)Call("RecordText", "one\r\ntwo\tthree = four") == "one  two three = four");
+
+        // A save keeps the player's own lines and only rewrites the records it knows.
+        string names = Path.GetFullPath("names.txt");
+        Call("AtomicText", names, "# keep me\nalbum = Old Title\none.adx = Player One\nmystery = whatever\n");
+        var named = new Album { Tab = "DOA3", Title = "Titles", Folder = "doa3" };
+        named.Tracks.Add(new Track { File = "one.adx", Name = "One" });
+        named.Tracks.Add(new Track { File = "two.adx", Name = "Two" });
+        Call("MergeNames", names, named);
+        string mergedNames = File.ReadAllText(names);
+        Check(mergedNames.Contains("# keep me") && mergedNames.Contains("mystery = whatever"));
+        Check(mergedNames.Contains("album = Titles"));
+        Check(mergedNames.Contains("one.adx = One") && mergedNames.Contains("two.adx = Two"));
+        Call("MergeNames", names, named);
+        Check(File.ReadAllText(names) == mergedNames);
+        Directory.CreateDirectory("fresh");
+        string fresh = Path.GetFullPath("fresh/names.txt");
+        Call("MergeNames", fresh, named);
+        Check(File.ReadAllText(fresh).Contains("album = Titles") && File.ReadAllText(fresh).Contains("two.adx = Two"));
+
+        // Saving assignments keeps the player's comments and writes the header once.
+        string assignments = Path.GetFullPath("kept-assignments.txt");
+        Call("AtomicText", assignments, "# The Jukebox's assignments: the game's music<TAB>album<TAB>track file. Set in game.\n# mine\nold.adx\tDOA3\tx.adx\n");
+        var kept = new Dictionary<string, string> { { "new.adx", "DOA4\ty.adx" } };
+        string saved = (string)Call("AssignmentText", assignments, kept);
+        Check(saved.Contains("# mine\n") && saved.Contains("new.adx\tDOA4\ty.adx\n") && !saved.Contains("old.adx"));
+        Check(saved.IndexOf("# The Jukebox's assignments") == saved.LastIndexOf("# The Jukebox's assignments"));
+
+        // Two tracks can share a name: the chosen row keeps its track, not the last matching text.
+        var picker = (JukeboxEditor)FormatterServices.GetUninitializedObject(typeof(JukeboxEditor));
+        var shared = new Album { Tab = "DOA4", Title = "Dead or Alive 4", Folder = "doa4" };
+        shared.Tracks.Add(new Track { File = "a.adx", Name = "Same" });
+        shared.Tracks.Add(new Track { File = "b.adx", Name = "Same" });
+        var music = new List<Track> { new Track { File = "game.adx", Name = "Game Theme" } };
+        Set(picker, "albums", new List<Album> { shared });
+        Set(picker, "music", music);
+        Set(picker, "assigned", new Dictionary<string, string>());
+        Set(picker, "editedSlots", new HashSet<string>());
+        var slots = new DataGridView();
+        slots.Columns.Add(new DataGridViewTextBoxColumn());
+        Type choice = typeof(JukeboxEditor).GetNestedType("Choice", BindingFlags.NonPublic);
+        slots.Columns.Add(new DataGridViewComboBoxColumn { ValueType = choice });
+        Set(picker, "slots", slots);
+        Run(picker, "BuildSlots");
+        object chosen = null;
+        foreach (object item in ((DataGridViewComboBoxColumn)slots.Columns[1]).Items)
+        {
+            var track = (Track)choice.GetField("Track").GetValue(item);
+            if (track != null && track.File == "a.adx") chosen = item;
+        }
+        Check(chosen != null && Convert.ToString(chosen) == (string)Call("TrackLabel", shared, shared.Tracks[0]));
+        Check(slots.Rows.Count > 0 && Convert.ToString(slots.Rows[0].Cells[0].Value) == "Game Theme");
+        slots.Rows[0].Cells[1].Value = chosen;
+        Run(picker, "SlotEdited", null, new DataGridViewCellEventArgs(1, 0));
+        Check(((Dictionary<string, string>)Get(picker, "assigned"))["game.adx"] == "DOA4\ta.adx");
+
+        using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            bool failed = false;
+            try { Call("AtomicText", path, "partial"); }
+            catch (TargetInvocationException) { failed = true; }
+            Check(failed);
+        }
+        Check(File.ReadAllText(path).Contains("game.adx"));
+        Check(Directory.GetFiles(".", "*.tmp.*").Length == 0);
+        Call("AtomicText", path, "complete");
+        Check(File.ReadAllText(path) == "complete");
+        Directory.CreateDirectory("disc/DOA2");
+        Directory.CreateDirectory("jukebox");
+        Directory.CreateDirectory("jukebox/doa2u");
+        File.WriteAllText("jukebox/doa2u/names.txt",
+            "album = Titles\nsecond.adx = Player Name\n", new UTF8Encoding(false));
+        var editor = (JukeboxEditor)FormatterServices.GetUninitializedObject(typeof(JukeboxEditor));
+        typeof(JukeboxEditor).GetField("disc", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(editor, Path.GetFullPath("disc"));
+        typeof(JukeboxEditor).GetField("jukebox", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(editor, Path.GetFullPath("jukebox"));
+        typeof(JukeboxEditor).GetField("music", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(editor, new List<Track>());
+        foreach (uint count in new uint[] {0, 0xffffffff, 4097, 1})
+        {
+            byte[] bytes = new byte[24];
+            Array.Copy(new byte[] {65,70,83,0}, bytes, 4);
+            Array.Copy(BitConverter.GetBytes(count), 0, bytes, 4, 4);
+            File.WriteAllBytes("disc/DOA2/bgm.afs", bytes);
+            var album = (Album)typeof(JukeboxEditor).GetMethod("LoadDoa2u", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+            Check(album.Tracks.Count == 0);
+        }
+        // The game's list orders and names the tracks; a one-sample placeholder is not music.
+        File.WriteAllBytes("disc/DOA2/bgm.afs",
+            Archive(new[] {"first.adx", "placeholder.adx", "second.adx"}, new uint[] {44100, 1, 44100}));
+        var loaded = (Album)typeof(JukeboxEditor).GetMethod("LoadDoa2u", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(editor, null);
+        Run(editor, "ApplyNames", loaded);
+        Check(loaded.Tracks.Count == 2 && loaded.Title == "Titles");
+        Check(loaded.Tracks[0].File == "second.adx" && loaded.Tracks[0].Name == "Player Name");
+        Check(loaded.Tracks[1].File == "first.adx" && loaded.Tracks[1].Name == "First");
+        Check(((List<Track>)Get(editor, "music")).Count == 2);
+
+        // tracks.txt names files beside itself only, as the game's own reader holds.
+        Directory.CreateDirectory("jukebox/bad");
+        File.WriteAllText("jukebox/bad/tracks.txt",
+            "#title\tBad\nok.adx\t-2\t-2\tOk\n../out.adx\t-2\t-2\tOut\n..\\out.adx\t-2\t-2\tUp\nsub/out.adx\t-2\t-2\tSub\nC:\\abs.adx\t-2\t-2\tAbs\n\t-2\t-2\tEmpty\n",
+            new UTF8Encoding(false));
+        var bad = (Album)Run(editor, "LoadFolder", "bad");
+        Check(bad != null && bad.Title == "Bad" && bad.Tracks.Count == 1 && bad.Tracks[0].File == "ok.adx");
+        Console.WriteLine("Editor persistence and archive checks passed");
+    }
+}
+''', encoding="utf-8", newline="\n")
+            exe = root / "checks.exe"
+            source = Path(__file__).with_name("jukebox_editor.cs")
+            compiled = subprocess.run([str(compiler), "/nologo", "/target:exe", "/main:EditorChecks",
+                                       f"/out:{exe}", str(source), str(harness)], capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            checked = subprocess.run([str(exe)], cwd=root, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
