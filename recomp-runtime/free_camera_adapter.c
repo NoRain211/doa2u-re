@@ -106,7 +106,7 @@ static const double MAX_STEP_SECONDS = 0.1;
 static struct {
     int enabled;              /* -1 until RECOMP_FREE_CAMERA is read */
     bool installed;           /* recomp_free_camera_install ran this boot */
-    bool online;              /* this boot plays an online session, a synctest or a replay */
+    bool online;              /* this run has Live or a synctest */
     bool active, started;
     bool toggle_held, freeze_held, overlay_held, cycle_held, reset_held, aim_held, step_held, shot_held;
     bool r3_held;             /* the right stick's click, last sample */
@@ -168,7 +168,7 @@ static void set_hooks(bool on)
 bool recomp_free_camera_install(bool online)
 {
     /* The camera and the freeze change one game's memory or timing only, so
-       an online session would desync; a reboot into one drops them. */
+       a Live fight or a synctest would desync. */
     state.online = online;
     state.installed = true;
     if (!enabled()) return false;
@@ -190,6 +190,21 @@ void recomp_free_camera_set_enabled(bool on)
         if (state.active) set_active(false);
     }
     set_hooks(on);
+}
+
+void recomp_free_camera_set_online(bool online)
+{
+    if (state.online == online) return;
+    state.online = online;
+    if (!state.installed) return;
+    if (online) {
+        if (recomp_scene_freeze_active()) recomp_scene_freeze_set(false);
+        if (state.active) set_active(false);
+        set_hooks(false);
+        fprintf(stderr, "recomp free camera: off while logged on to DOA ONLINE\n");
+    } else {
+        set_hooks(enabled());
+    }
 }
 
 bool recomp_free_camera_enabled(void) { return enabled() && !state.online; }
@@ -438,8 +453,9 @@ static uint32_t next_built(uint32_t object)
 /* 0x000399D0, the camera build: the object is in ESI. */
 static void camera_build(void)
 {
-    /* Installed for every offline boot: PC Settings can turn the camera on and off. */
-    if (!enabled()) {
+    /* Installed for every boot: PC Settings can turn the camera on and off and
+       a Live logon takes it away. */
+    if (state.online || !enabled()) {
         sub_000399D0();
         return;
     }
@@ -512,5 +528,7 @@ static void camera_build(void)
 
 RecompFunction recomp_free_camera_lookup_manual(uint32_t guest_address)
 {
-    return guest_address == CAMERA_BUILD && state.installed && !state.online ? camera_build : NULL;
+    /* Routed for every boot, so a cached lookup sees a later online switch;
+       camera_build checks the state itself. */
+    return guest_address == CAMERA_BUILD && state.installed ? camera_build : NULL;
 }

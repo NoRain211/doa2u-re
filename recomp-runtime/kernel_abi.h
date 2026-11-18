@@ -41,10 +41,14 @@ static inline void kernel_return_caller_cleanup(uint32_t result)
     recomp_runtime.registers.eax = result;
 }
 
-/* Calls back into guest code with stdcall arguments. ESP is restored
-   afterwards rather than trusted, because a generated callee that mismanages
-   its own cleanup would otherwise corrupt the caller silently. */
-static inline void kernel_call_guest(
+/* Calls back into guest code with stdcall arguments, pushing return_address
+   where the CALL's would be. ESP is restored afterwards rather than trusted,
+   because a generated callee that mismanages its own cleanup would otherwise
+   corrupt the caller silently. A replacement of game code passes the original
+   CALL's return address: the word stays below ESP, and game code reads such
+   leftover stack back into guest RAM that netplay peers compare. */
+static inline void kernel_call_guest_at(
+    uint32_t return_address,
     uint32_t guest_address,
     const uint32_t *arguments,
     unsigned count)
@@ -56,10 +60,19 @@ static inline void kernel_call_guest(
         *recomp_memory_u32(recomp_runtime.registers.esp) = arguments[i - 1u];
     }
     recomp_runtime.registers.esp -= 4u;
-    *recomp_memory_u32(recomp_runtime.registers.esp) = 0u;
+    *recomp_memory_u32(recomp_runtime.registers.esp) = return_address;
     recomp_dispatch_indirect_site(
         guest_address, saved_esp, __FILE__, __LINE__);
     recomp_runtime.registers.esp = saved_esp;
+}
+
+/* kernel_call_guest_at for adapters, whose callers never read the word. */
+static inline void kernel_call_guest(
+    uint32_t guest_address,
+    const uint32_t *arguments,
+    unsigned count)
+{
+    kernel_call_guest_at(0u, guest_address, arguments, count);
 }
 
 /* Calls a lifted function directly, past the manual hooks, with cdecl

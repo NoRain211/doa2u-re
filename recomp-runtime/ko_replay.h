@@ -16,9 +16,12 @@ extern "C" {
    game stands still and DOA2U's own multi-angle replay (which it otherwise
    keeps for a human winner's few special moves) shows the hit three times,
    each from a camera of its own, the last at 85% speed; then the fall plays
-   out live and the round moves on without the game's usual replay. Offline
-   only. */
+   out live and the round moves on without the game's usual replay. Off
+   while online. */
 void recomp_ko_replay_install(bool online);
+/* DOA ONLINE's logon state: online drops a pending replay and stays out of
+   the round's way until the player leaves. */
+void recomp_ko_replay_set_online(bool online);
 void recomp_ko_replay_set_enabled(bool enabled);
 /* From hit_voice.c's 0x119420 hook: side's life just fell to 0. */
 void recomp_ko_replay_note_ko(unsigned side);

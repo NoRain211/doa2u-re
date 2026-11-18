@@ -85,6 +85,28 @@ bool recomp_d3d_texture_describe(
     RecompD3dTextureDesc *out);
 uint32_t recomp_d3d_texture_compressed_mip_span(
     const RecompD3dTextureDesc *desc);
+
+/* One level of an uncompressed swizzled guest texture: where the guest stores
+   it and how many bytes it holds. Level 0 starts at desc->data and each next
+   level follows the previous one, the way the guest lays out its mip chain. */
+typedef struct RecompD3dTextureLevel {
+    uint32_t offset;
+    uint32_t width;
+    uint32_t height;
+    uint32_t bytes;
+} RecompD3dTextureLevel;
+
+/* Fills `out` for `level` of a non-linear 2D texture. Returns false unless the
+   descriptor is one of those, both dimensions are powers of two, the sizes are
+   sane and the level is inside the chain. */
+bool recomp_d3d_texture_uncompressed_level(
+    const RecompD3dTextureDesc *desc,
+    uint32_t level,
+    RecompD3dTextureLevel *out);
+/* The whole guest span of that chain, or 0 when it cannot be described. */
+uint32_t recomp_d3d_texture_uncompressed_mip_span(
+    const RecompD3dTextureDesc *desc);
+
 void recomp_d3d_texture_census_record(
     RecompD3dTextureCensus *census,
     const RecompD3dTextureDesc *desc,

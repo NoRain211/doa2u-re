@@ -162,9 +162,11 @@ static uint32_t stream_vertices(uint32_t first, uint32_t *stride)
 }
 
 /* Grow-only buffers. Slots: 0 indices, 1 packed vertices, 2 widened lines or
-   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2. */
-static uint8_t *draw_scratch[4];
-static size_t draw_scratch_size[4];
+   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2.
+   Pieces use their own slot 4 so their index copy cannot clobber a widened
+   line's vertices. */
+static uint8_t *draw_scratch[5];
+static size_t draw_scratch_size[5];
 
 static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDrawCommand *draw);
 
@@ -254,14 +256,22 @@ static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDr
     if (desc->volume_depth != 0u && stage != 0u)
         recomp_stop(2, "d3d8:volume-texture-stage:%u", stage);
     uint64_t bytes = recomp_d3d_texture_compressed_mip_span(desc);
-    if (bytes == 0u) bytes = desc->linear ? (uint64_t)desc->pitch * desc->height :
+    const uint64_t level0 = desc->linear ? (uint64_t)desc->pitch * desc->height :
         (uint64_t)desc->width * desc->height * (desc->volume_depth ? desc->volume_depth : 1u) *
             desc->bits_per_pixel / 8u;
+    /* Uncompressed textures store their levels in the same span, so hand the
+       presenter every level the guest wrote. */
+    if (bytes == 0u) bytes = recomp_d3d_texture_uncompressed_mip_span(desc);
+    if (bytes == 0u) bytes = level0;
     if (bytes == 0u || bytes > RECOMP_XBOX_RAM_SIZE)
         recomp_stop(2, "d3d8:draw-texture-span");
     uint32_t address;
     if (!recomp_d3d_texture_resolve_cpu_address(desc->data, &address))
         recomp_stop(2, "d3d8:draw-texture-address");
+    /* A chain that runs past RAM keeps level 0, as it did before. */
+    if (address >= RECOMP_XBOX_RAM_SIZE) recomp_stop(2, "d3d8:draw-texture-address");
+    if (bytes > RECOMP_XBOX_RAM_SIZE - address) bytes = level0;
+    if (bytes > RECOMP_XBOX_RAM_SIZE - address) recomp_stop(2, "d3d8:draw-texture-span");
     draw->texture_bytes = recomp_memory(address, (size_t)bytes);
     draw->texture_byte_count = (uint32_t)bytes;
     draw->has_texture = true;
@@ -1636,6 +1646,64 @@ static bool projected_add_stages(uint32_t device)
 }
 
 static uint32_t draw_submitted;
+
+/* 2D art at a larger size: the presenter keeps a draw's samples inside its
+   texcoords' box (d3d_draw_shader.cpp), which only works when the draw is one
+   piece. A screen-space triangle list of separate pieces (a string's letters,
+   a banner's tiles: "Counter Hit") is sent piece by piece, each a run of
+   triangles sharing vertices, so each piece samples only its own art. Each
+   piece also uploads only the vertex range its indices use: a non-indexed list
+   carries identity indices, so every triangle is its own piece and the whole
+   list would otherwise be re-uploaded once per triangle. */
+static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_art)
+{
+    const RecompD3dPresenterDrawCommand *draw = &command->data.draw;
+    const uint32_t triangles = draw->index_count / 3u;
+    if (!screen_art || draw->primitive_type != 5u || !draw->has_texture || draw->index_bytes == NULL ||
+        triangles < 2u || triangles > 512u || draw->index_count != triangles * 3u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    const uint16_t *index = draw->index_bytes;
+    static uint32_t tags[65536], generation;
+    uint32_t pieces = 0u;
+    uint32_t starts[513], low[513], high[513];
+    for (uint32_t t = 0u; t < triangles; ++t) {
+        bool shared = t != 0u && (tags[index[t * 3u]] == generation ||
+            tags[index[t * 3u + 1u]] == generation || tags[index[t * 3u + 2u]] == generation);
+        if (!shared) {
+            starts[pieces] = t;
+            low[pieces] = 0xffffffffu;
+            high[pieces] = 0u;
+            ++pieces;
+            if (++generation == 0u) { memset(tags, 0, sizeof tags); ++generation; }
+        }
+        for (uint32_t b = 0u; b < 3u; ++b) {
+            const uint16_t v = index[t * 3u + b];
+            tags[v] = generation;
+            if (v < low[pieces - 1u]) low[pieces - 1u] = v;
+            if (v > high[pieces - 1u]) high[pieces - 1u] = v;
+        }
+    }
+    if (pieces < 2u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    starts[pieces] = triangles;
+    RecompD3dPresenterCommand piece = *command;
+    for (uint32_t p = 0u; p < pieces; ++p) {
+        const uint32_t first = starts[p] * 3u, count = (starts[p + 1u] - starts[p]) * 3u;
+        uint16_t *rebased = (uint16_t *)(void *)scratch(4u, (size_t)count * sizeof *rebased);
+        for (uint32_t i = 0u; i < count; ++i) rebased[i] = (uint16_t)(index[first + i] - low[p]);
+        piece.data.draw.index_bytes = rebased;
+        piece.data.draw.index_count = count;
+        piece.data.draw.triangle_count = count / 3u;
+        piece.data.draw.vertex_bytes =
+            (const uint8_t *)draw->vertex_bytes + (size_t)low[p] * draw->vertex_stride;
+        piece.data.draw.vertex_count = high[p] - low[p] + 1u;
+        recomp_d3d8_submit(&piece);
+    }
+}
 /* Shared identity indices for non-indexed draws (count is at most 65536). */
 static uint16_t draw_indices[65536u];
 
@@ -1664,11 +1732,16 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     if (!points && !quads && !line_strip && primitive != 2u && (primitive < 5u || primitive > 7u))
         recomp_stop(2, "d3d8:draw-primitive:%u", primitive);
     if (triangles == 0u) return;
+    /* A hidden frame drops every draw once the back buffer flags are clear,
+       whatever the target, so it need not resolve one. */
+    if (recomp_d3d8_draw_skippable(false)) { ++draw_submitted; return; }
     RecompD3dPresenterCommand command = {0};
     RecompD3dPresenterDrawCommand *draw = &command.data.draw;
     draw->fvf = *recomp_memory_u32(device + 0x798u);
     const bool program = (draw->fvf & 1u) != 0u;
     recomp_d3d8_target(&draw->target);
+    /* Counted like a built draw, so the scene freeze still sees the task draw. */
+    if (recomp_d3d8_draw_skippable(draw->target.offscreen)) { ++draw_submitted; return; }
     if (program) attach_program(device, draw);
     RecompD3dVertexLayout layout;
     /* The distortion pass's STR coordinate sets (TEXCOORDSIZE3 for sets 1-2). */
@@ -1817,8 +1890,6 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
             (int32_t)(viewport.x + viewport.width), (int32_t)(viewport.y + viewport.height)};
         memcpy(draw->scissor, clip, sizeof clip);
     }
-    if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
-    else recomp_d3d8_fit_3d_viewport(draw);
     const RecompD3dRenderStateModel *state = recomp_d3d8_state_model();
     const bool native_line = primitive == 2u && !program && draw->fvf == 0x42u &&
         *recomp_memory_u32(device + 0xf88u) == 0u && *recomp_memory_u32(0x3553f8u) == 0u;
@@ -1838,6 +1909,9 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
         state->cull_mode == 0x901u ? RECOMP_D3D_CULL_COUNTER_CLOCKWISE : RECOMP_D3D_CULL_NONE;
     draw->texture_factor = state->texture_factor;
     attach_texture(device, 0u, draw);
+    /* After the texture: a 2D draw of a render target is a screen effect (fit_2d_layer). */
+    if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
+    else recomp_d3d8_fit_3d_viewport(draw);
     if (draw->texture.volume_depth != 0u &&
         (program || points || draw->fvf != 0x142u ||
          *recomp_memory_u32(device + PIXEL_HANDLE) != 0u ||
@@ -1878,7 +1952,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
        tasks does not change. */
     if (!(layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u &&
             recomp_scene_freeze_overlay_hidden()))
-        recomp_d3d8_submit(&command);
+        submit_pieces(&command, layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u);
     ++draw_submitted;
 }
 

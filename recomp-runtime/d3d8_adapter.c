@@ -55,6 +55,13 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
 {
     gpu_work_suppressed = suppressed;
 }
+
+static bool save_waits_for_visibility = true;
+
+void recomp_d3d8_set_save_waits_for_visibility(bool waits)
+{
+    save_waits_for_visibility = waits;
+}
 void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
 /* Counts host draws for the first-draw log only. It stays out of the saved
    state: the F3 readout draws on shown frames alone, so SyncTest's replayed
@@ -148,8 +155,10 @@ static bool visibility_capture_pending(void)
 void recomp_d3d8_state_save(void *state)
 {
     /* A repeated run-ahead frame drops its query, so a pending result belongs to
-       the shown frame; polling resolves it later, without stalling on the GPU. */
-    if (!gpu_work_suppressed && visibility_capture_pending()) {
+       the shown frame; polling resolves it later, without stalling on the GPU.
+       A netplay session's saves leave it to the polls as well: the wait held a
+       save 2 to 3 ms for the frame's GPU work. */
+    if (!gpu_work_suppressed && visibility_capture_pending() && save_waits_for_visibility) {
         flush(true);
         (void)visibility_capture_pending();
     }
@@ -251,6 +260,12 @@ void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
     }
 }
 
+bool recomp_d3d8_draw_skippable(bool offscreen)
+{
+    /* submit drops the draw; only the back-buffer flags it clears reach the saved state. */
+    return gpu_work_suppressed && (offscreen || (!back_buffer_displayed && !back_buffer_saved));
+}
+
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw)
 {
     /* A hidden frame submits no draws, so drop this one without a GPU wait. */
@@ -281,19 +296,27 @@ void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
     const float aspect = recomp_d3d8_content_aspect();
     if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen) return;
     const float width = (float)draw->target.color.width;
-    float left = INFINITY, right = -INFINITY;
+    float left = INFINITY, right = -INFINITY, top = INFINITY, bottom = -INFINITY;
     /* An indexed draw may share its buffer, so only the vertices it uses count. */
     const uint16_t *indices = draw->index_count != 0u ? draw->index_bytes : NULL;
     const uint32_t count = indices != NULL ? draw->index_count : draw->vertex_count;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t vertex = indices != NULL ? indices[i] : i;
         if (vertex >= draw->vertex_count) continue;
-        float x;
-        memcpy(&x, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof x);
-        if (!isfinite(x)) continue;
-        left = fminf(left, x);
-        right = fmaxf(right, x);
+        float xy[2];
+        memcpy(xy, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof xy);
+        if (!isfinite(xy[0]) || !isfinite(xy[1])) continue;
+        left = fminf(left, xy[0]);
+        right = fmaxf(right, xy[0]);
+        top = fminf(top, xy[1]);
+        bottom = fmaxf(bottom, xy[1]);
     }
+    /* A screen effect laid over the whole height from one of the game's own
+       render targets (Danger Zone's glow) fills the screen like a fade, even
+       drawn narrower than the target; a picture in a menu panel is shorter. */
+    if (draw->has_texture && draw->texture.render_target && top <= 1.0f &&
+        bottom >= (float)draw->target.color.height - 1.0f)
+        return;
     float scale[2];
     recomp_widescreen_2d_scale(aspect, width, left, right, scale);
     if (scale[0] == 1.0f && scale[1] == 1.0f) return;

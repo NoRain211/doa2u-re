@@ -979,11 +979,18 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
     const bool linear_bgra = desc.format_byte == 0x12u;
     const bool compressed = desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ||
         desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 || desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5;
-    const uint32_t levels = compressed && desc.mip_levels ? desc.mip_levels : 1u;
+    uint32_t levels = compressed && desc.mip_levels ? desc.mip_levels : 1u;
     if (compressed) {
         const uint32_t span = recomp_d3d_texture_compressed_mip_span(&desc);
         if (span == 0u || span > draw.texture_byte_count ||
             desc.width > kMaxTextureSize || desc.height > kMaxTextureSize) return nullptr;
+    }
+    /* Uncompressed levels sit in one guest span, each swizzled on its own. Keep
+       them all when that span holds the chain; otherwise sample level 0 alone. */
+    if (!compressed && !volume && !linear_bgra && desc.mip_levels > 1u &&
+        (palettized || isSwizzledTextureFormat(desc.format_byte))) {
+        const uint32_t span = recomp_d3d_texture_uncompressed_mip_span(&desc);
+        if (span != 0u && span <= draw.texture_byte_count) levels = desc.mip_levels;
     }
 
     if (draw.texture_is_backbuffer) {
@@ -1064,6 +1071,38 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
     }
 
     std::vector<uint8_t> unpacked;
+    /* Decodes one guest level into host order: its texels, rows packed. */
+    const auto decodeLevel = [&](uint32_t level, std::vector<uint8_t> &texels,
+                                 uint32_t &width, uint32_t &height) {
+        RecompD3dTextureLevel guest{};
+        if (!recomp_d3d_texture_uncompressed_level(&desc, level, &guest) ||
+            static_cast<uint64_t>(guest.offset) + guest.bytes > draw.texture_byte_count) return false;
+        width = guest.width;
+        height = guest.height;
+        const auto *source = static_cast<const uint8_t *>(draw.texture_bytes) + guest.offset;
+        if (palettized) {
+            std::vector<uint8_t> indices(static_cast<size_t>(width) * height);
+            if (!recomp_d3d_texture_unswizzle(source, indices.data(), width, height, 1u)) return false;
+            texels.resize(indices.size() * 4u);
+            const auto *palette = static_cast<const uint8_t *>(draw.palette_bytes);
+            for (size_t i = 0u; i < indices.size(); ++i) {
+                /* Little-endian ARGB palette words are already BGRA bytes. */
+                std::memcpy(texels.data() + i * 4u, palette + indices[i] * 4u, 4u);
+            }
+            return true;
+        }
+        const uint32_t texel_bytes = desc.bits_per_pixel / 8u;
+        if (texel_bytes == 0u) return false;
+        texels.resize(static_cast<size_t>(width) * height * texel_bytes);
+        if (!recomp_d3d_texture_unswizzle(source, texels.data(), width, height, texel_bytes)) return false;
+        if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8) {
+            std::vector<uint8_t> white(texels.size() * 4u, 0xffu);
+            for (size_t i = 0u; i < texels.size(); ++i) white[i * 4u + 3u] = texels[i];
+            texels.swap(white);
+        }
+        return true;
+    };
+
     if (volume) {
         unpacked.resize(static_cast<size_t>(desc.width) * desc.height * desc.volume_depth * 4u);
         if (!recomp_d3d_texture_unswizzle_volume(static_cast<const uint8_t *>(draw.texture_bytes),
@@ -1077,35 +1116,15 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
                 static_cast<const uint8_t *>(draw.texture_bytes) + static_cast<size_t>(y) * desc.pitch,
                 desc.width * 4u);
         }
-    } else if (palettized) {
-        const size_t texels = static_cast<size_t>(desc.width) * desc.height;
-        if (desc.width == 0u || desc.height == 0u || desc.width > kMaxTextureSize ||
-            desc.height > kMaxTextureSize || texels > draw.texture_byte_count) return nullptr;
-        std::vector<uint8_t> indices(texels);
-        if (!recomp_d3d_texture_unswizzle(static_cast<const uint8_t *>(draw.texture_bytes),
-                indices.data(), desc.width, desc.height, 1u)) return nullptr;
-        unpacked.resize(texels * 4u);
-        const auto *palette = static_cast<const uint8_t *>(draw.palette_bytes);
-        for (size_t i = 0u; i < texels; ++i) {
-            /* Little-endian ARGB palette words are already BGRA bytes. */
-            std::memcpy(unpacked.data() + i * 4u, palette + indices[i] * 4u, 4u);
-        }
-    } else if (isSwizzledTextureFormat(desc.format_byte)) {
-        const uint32_t texel_bytes = desc.bits_per_pixel / 8u;
-        if (texel_bytes == 0u || desc.width == 0u || desc.height == 0u ||
+    } else if (!compressed) {
+        if (desc.width == 0u || desc.height == 0u ||
             desc.width > kMaxTextureSize || desc.height > kMaxTextureSize) return nullptr;
-        unpacked.resize(static_cast<size_t>(desc.width) * desc.height * texel_bytes);
-        if (!recomp_d3d_texture_unswizzle(static_cast<const uint8_t *>(draw.texture_bytes),
-                unpacked.data(), desc.width, desc.height, texel_bytes)) return nullptr;
-        if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8) {
-            std::vector<uint8_t> white(unpacked.size() * 4u, 0xffu);
-            for (size_t i = 0u; i < unpacked.size(); ++i) white[i * 4u + 3u] = unpacked[i];
-            unpacked.swap(white);
-        }
+        uint32_t level_width = 0u, level_height = 0u;
+        if (!decodeLevel(0u, unpacked, level_width, level_height)) return nullptr;
     }
 
     std::vector<uint8_t> upscaled;
-    const bool larger = scale > 1u &&
+    const bool larger = levels == 1u && scale > 1u &&
         unpacked.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
         recomp_texture_upscale(unpacked.data(), desc.width, desc.height, scale, upscaled);
     uint32_t larger_levels = 1u;
@@ -1135,6 +1154,14 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
             offset += size;
             width = width > 1u ? width / 2u : 1u;
             height = height > 1u ? height / 2u : 1u;
+        }
+    } else if (levels > 1u) {
+        for (uint32_t level = 0u; level < levels && uploaded; ++level) {
+            std::vector<uint8_t> level_texels;
+            uint32_t width = 0u, height = 0u;
+            uploaded = decodeLevel(level, level_texels, width, height) &&
+                uploadTexture(presenter, texture, level_texels.data(),
+                    static_cast<uint32_t>(level_texels.size()), level, width, height);
         }
     } else {
         uploaded = uploadTexture(presenter, texture, unpacked.data(), static_cast<uint32_t>(unpacked.size()),

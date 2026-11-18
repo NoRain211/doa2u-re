@@ -38,6 +38,7 @@ uint32_t *recomp_memory_u32_checked(uint32_t address)
 /* Character i's costume byte and the three flags, as the game lays them out. */
 static uint8_t *costume(unsigned i) { return &slot[0xf200u + 0x2ed8u + slot_of[order[i]]]; }
 static uint8_t *flag(unsigned i) { return &slot[0xf200u + 0x2ed2u + i]; }
+static void unlocked_flags(void) { memset(flag(0), 1, 5u); *flag(3) = 3u; }
 
 static uint8_t saved_costume0, saved_flag0;
 static unsigned saves, loads;
@@ -48,7 +49,7 @@ void sub_00021D90(void)
 {
     ++loads;
     for (unsigned i = 0u; i < 15u; ++i) *costume(i) = 3u; /* another profile, three costumes each */
-    memset(flag(0), 0, 3u);
+    memset(flag(0), 0, 5u);
 }
 void sub_00021DE0(void) { sub_00021D90(); }
 /* An award: one more costume for the first character and its hidden flag. */
@@ -80,12 +81,13 @@ static int test_unlock_profile(void)
         counts[order[i]] = (uint8_t)(4u + i % 3u);
         *costume(i) = 2u; /* earned: two each */
     }
-    memset(flag(0), 0, 3u);
+    memset(flag(0), 0, 5u);
     game_data = DATA;
     recomp_unlock_profile_reset();
 
     recomp_unlock_profile_frame(true);
-    if (*costume(0) != counts[order[0]] || *costume(14) != counts[order[14]] || *flag(2) != 1u)
+    if (*costume(0) != counts[order[0]] || *costume(14) != counts[order[14]] || *flag(2) != 1u ||
+        *flag(3) != 3u || *flag(4) != 1u)
         return fail("unlocks in memory");
     call(0x00021b50u);
     if (saves != 1u || saved_costume0 != 2u || saved_flag0 != 0u) return fail("save holds the earned values");
@@ -114,10 +116,10 @@ static int test_unlock_profile(void)
     if (saved_costume0 != 3u || saved_flag0 != 0u) return fail("the loaded profile's values are saved");
     /* A profile loaded fully unlocked after the record went is left as it is. */
     for (unsigned i = 0u; i < 15u; ++i) *costume(i) = counts[order[i]];
-    memset(flag(0), 1, 3u);
+    unlocked_flags();
     call(0x00021de0u);
     for (unsigned i = 0u; i < 15u; ++i) *costume(i) = counts[order[i]];
-    memset(flag(0), 1, 3u);
+    unlocked_flags();
     recomp_unlock_profile_frame(false);
     if (*costume(0) != counts[order[0]] || *flag(0) != 1u) return fail("a loaded unlocked profile is not reverted");
 

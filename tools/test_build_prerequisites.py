@@ -23,7 +23,9 @@ class PrerequisiteTests(unittest.TestCase):
         self.download = self.enterContext(mock.patch.object(
             prerequisites.urllib.request, "urlopen", side_effect=AssertionError("Unexpected download")))
         self.enterContext(mock.patch("builtins.print"))
-        self.enterContext(mock.patch.dict(os.environ, PATH="system-tools"))
+        # Absolute, as find_on_path only searches absolute PATH entries.
+        self.system_tools = str(self.root / "system-tools")
+        self.enterContext(mock.patch.dict(os.environ, PATH=self.system_tools))
 
     def llvm_mingw_zip(self):
         data = io.BytesIO()
@@ -40,7 +42,7 @@ class PrerequisiteTests(unittest.TestCase):
         self.assertEqual(clang.read_bytes(), b"clang")
         self.assertEqual(list((self.root / "private").iterdir()), [])
         self.download.assert_called_once_with(prerequisites.LLVM_MINGW_URL, timeout=60)
-        self.assertEqual(os.environ["PATH"], os.pathsep.join([str(clang.parent), "system-tools"]))
+        self.assertEqual(os.environ["PATH"], os.pathsep.join([str(clang.parent), self.system_tools]))
 
     def test_path_toolchain_with_make_is_used_without_download(self):
         bin_dir = self.root / "winget/bin"
@@ -111,6 +113,73 @@ class PrerequisiteTests(unittest.TestCase):
                 mock.patch.object(prerequisites.shutil, "which", return_value=None):
             with self.assertRaisesRegex(ValueError, "SHA-256"):
                 prerequisites.extract_xiso(self.root)
+        self.assertEqual(list((self.root / "private").iterdir()), [])
+
+    def ffmpeg_zip(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as archive:
+            archive.writestr("ffmpeg-test/bin/ffmpeg.exe", b"ffmpeg")
+            archive.writestr("ffmpeg-test/LICENSE", b"license")
+        return data.getvalue()
+
+    def test_ffmpeg_is_never_the_bare_name_that_a_working_directory_could_supply(self):
+        with mock.patch.object(prerequisites.sys, "platform", "linux"), \
+                mock.patch.object(prerequisites.shutil, "which", return_value=None):
+            self.assertIsNone(prerequisites.find_ffmpeg(self.root))
+            with self.assertRaisesRegex(FileNotFoundError, "tools/ffmpeg.*PATH"):
+                prerequisites.ffmpeg(self.root)
+
+    def test_ffmpeg_from_the_working_directory_is_refused(self):
+        # shutil.which prepends the working directory on Windows unless NoDefaultCurrentDirectoryInExePath
+        # is set, so a planted ffmpeg.exe there must not be returned.
+        planted = os.path.join(os.getcwd(), "ffmpeg.exe")
+        for found in (planted, os.path.join(os.curdir, "ffmpeg.exe")):
+            with self.subTest(found=found), \
+                    mock.patch.object(prerequisites.shutil, "which", return_value=found):
+                self.assertIsNone(prerequisites.find_ffmpeg(self.root))
+
+    def test_ffmpeg_searches_only_absolute_path_entries(self):
+        elsewhere = tempfile.gettempdir()
+        for entries, expected in ((("system-tools", os.curdir), ""), (("system-tools", elsewhere), elsewhere)):
+            with self.subTest(entries=entries), \
+                    mock.patch.dict(os.environ, PATH=os.pathsep.join(entries)), \
+                    mock.patch.object(prerequisites.shutil, "which", return_value=None) as which:
+                prerequisites.find_ffmpeg(self.root)
+            which.assert_called_once_with("ffmpeg", path=expected)
+
+    def test_bundled_ffmpeg_comes_before_path(self):
+        bundled = self.root / prerequisites.FFMPEG / "ffmpeg.exe"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_bytes(b"ffmpeg")
+        with mock.patch.object(prerequisites.shutil, "which") as which:
+            self.assertEqual(prerequisites.find_ffmpeg(self.root), str(bundled))
+        which.assert_not_called()
+
+    def test_ffmpeg_partial_folder_is_reported_before_download(self):
+        (self.root / prerequisites.FFMPEG).mkdir(parents=True)
+        with mock.patch.object(prerequisites.sys, "platform", "win32"):
+            with self.assertRaisesRegex(ValueError, "exists but has no ffmpeg.exe"):
+                prerequisites.ffmpeg(self.root)
+        self.download.assert_not_called()
+
+    def test_ffmpeg_retries_antivirus_lock_and_installs_once(self):
+        payload = self.ffmpeg_zip()
+        self.download.side_effect = lambda *args, **kwargs: io.BytesIO(payload)
+        original = Path.replace
+        calls = []
+        def replace(path, target):
+            calls.append(path)
+            if len(calls) < 3: raise PermissionError("antivirus scan")
+            return original(path, target)
+        with mock.patch.object(prerequisites.sys, "platform", "win32"), \
+                mock.patch.object(prerequisites, "FFMPEG_SHA256", hashlib.sha256(payload).hexdigest()), \
+                mock.patch.object(Path, "replace", replace), \
+                mock.patch.object(prerequisites.time, "sleep") as sleep:
+            tool = prerequisites.ffmpeg(self.root)
+            self.assertEqual(prerequisites.ffmpeg(self.root), tool)
+        self.assertEqual(Path(tool).read_bytes(), b"ffmpeg")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleep.call_count, 2)
         self.assertEqual(list((self.root / "private").iterdir()), [])
 
 
