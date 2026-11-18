@@ -288,6 +288,15 @@ static void close_task(uint32_t handle)
     if (handle != 0u && handle != 0xffffffffu) check("task closes", call1(thunk_task_close, handle) == 0u);
 }
 
+/* The runner's online-mode hook: a logon turns it on, closing the logon task off. */
+static unsigned online_changes;
+static bool online_last;
+static void note_online(bool online)
+{
+    ++online_changes;
+    online_last = online;
+}
+
 /* One attribute record of the game's create/update array (27 x 16 bytes). */
 static void set_attribute(unsigned index, uint32_t id, uint32_t value, uint32_t length)
 {
@@ -411,9 +420,11 @@ int main(void)
     uint32_t service_ids[5] = {1u, 2u, 6u, 14u, 15u};
     memcpy(&guest[REQUEST], service_ids, sizeof service_ids);
     uint32_t logon_args[5] = {USERS, REQUEST, 5u, 0u, TASK_OUT};
+    recomp_live_online_hook = note_online;
     check("logon returns S_OK", call(thunk_logon, logon_args, 5u) == 0u);
     const uint32_t logon_task = peek32(TASK_OUT);
     check("logon returns a task", logon_task != 0u && logon_task != 0xffffffffu);
+    check("logon reports online", online_changes == 1u && online_last);
     check("logon completes", wait_task(logon_task) == TASK_LOGON);
     check("logon results", call1(thunk_logon_results, logon_task) == TASK_LOGON);
     /* The game's array is on its stack, so the logon users are a lasting copy. */
@@ -426,6 +437,7 @@ int main(void)
     check("services are available", call2(thunk_service_info, 1u, 0u) == 0u &&
         call2(thunk_service_info, 14u, 0u) == 0u);
     close_task(logon_task);
+    check("closing the logon task reports offline", online_changes == 2u && !online_last);
 
     /* The account page can put the account in another of the four user slots;
        the logon user record has to land there. */

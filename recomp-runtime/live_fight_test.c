@@ -141,7 +141,7 @@ static void test_hash_ranges(void)
 {
     RecompRamRange ignored[RECOMP_SNAPSHOT_HASH_RANGES];
     const size_t count = recomp_live_hash_ignored(ignored, RECOMP_SNAPSHOT_HASH_RANGES);
-    CHECK(count == 5u);
+    CHECK(count > 5u);
     const RecompRamRange kept[] = {
         {0x00863a8cu, 0x0087d56cu},
         {0x0087d570u, 0x0087f53cu},
@@ -149,24 +149,33 @@ static void test_hash_ranges(void)
         {0x008a5768u, 0x008a612cu},
     };
     const size_t kept_count = sizeof kept / sizeof *kept;
-    size_t kept_bytes = 0u, covered = 0u;
+    size_t kept_bytes = 0u, outside = 0u;
     for (size_t i = 0u; i < kept_count; ++i) kept_bytes += kept[i].stop - kept[i].start;
-    /* Sorted, disjoint, never overlapping the fight: the two sets partition RAM. */
+    /* Sorted and disjoint; every byte outside the fight is ignored. */
     for (size_t i = 0u; i < count; ++i) {
         CHECK(ignored[i].stop > ignored[i].start);
         if (i > 0u) CHECK(ignored[i].start >= ignored[i - 1u].stop);
-        covered += ignored[i].stop - ignored[i].start;
+        bool inside = false;
         for (size_t k = 0u; k < kept_count; ++k)
-            CHECK(ignored[i].stop <= kept[k].start || ignored[i].start >= kept[k].stop);
+            inside = inside || (ignored[i].start >= kept[k].start && ignored[i].stop <= kept[k].stop);
+        if (!inside) outside += ignored[i].stop - ignored[i].start;
     }
-    CHECK(covered + kept_bytes == RECOMP_XBOX_RAM_SIZE);
-    /* Frames since boot (g_game_mode_frame_counter, 0x87d56c..0x87d570) stay out of the hash. */
-    bool counter_ignored = false;
-    for (size_t i = 0u; i < count; ++i)
-        counter_ignored = counter_ignored || (ignored[i].start <= 0x0087d56cu && ignored[i].stop >= 0x0087d570u);
-    CHECK(counter_ignored);
+    CHECK(outside + kept_bytes == RECOMP_XBOX_RAM_SIZE);
+    /* Frames since boot, and what a player's widescreen and 5.1 choices change,
+       stay out; the fighters and the random numbers stay in. */
+    static const struct { uint32_t address; bool skipped; } probes[] = {
+        {0x0087d56cu, true}, {0x00877c6cu, true}, {0x00879bf8u, true}, {0x00879c10u, true},
+        {0x0087a93cu, true}, {0x0087d360u, true}, {0x0087d39cu, true}, {0x0087f538u, true},
+        {0x00863a8cu, false}, {0x0087f539u, false}, {0x008a3968u, false}, {0x008a5768u, false},
+    };
+    for (size_t p = 0u; p < sizeof probes / sizeof *probes; ++p) {
+        bool skipped = false;
+        for (size_t i = 0u; i < count; ++i)
+            skipped = skipped || (ignored[i].start <= probes[p].address && ignored[i].stop > probes[p].address);
+        CHECK(skipped == probes[p].skipped);
+    }
     /* A buffer that cannot hold the ranges says so instead of overflowing. */
-    CHECK(recomp_live_hash_ignored(ignored, 4u) == 0u);
+    CHECK(recomp_live_hash_ignored(ignored, count - 1u) == 0u);
     CHECK(recomp_live_hash_ignored(NULL, RECOMP_SNAPSHOT_HASH_RANGES) == 0u);
 }
 

@@ -12,8 +12,8 @@ D3D8 5849 device, frame and state APIs to the shared semantic presenter.
 DirectSound 5849 owns native device/buffer lifetime and PCM output.
 Effects-image download owns decoded maps/state and binds native I3DL2 reverb.
 XAPI fibers run on native Windows fibers through `fiber_adapter.c`.
-XOnline and XNet bind to the Live adapter (`live_xapi.c`) when `RECOMP_LIVE`
-starts a backend; read `docs/xbox-live.md` before extending it.
+XOnline and XNet bind to the Live adapter (`live_xapi.c`) unless
+`RECOMP_LIVE=0`; read `docs/xbox-live.md` before extending it.
 3D voices render through the game's HRTF tables with crosstalk bins folded to
 stereo. Recording sends and additional DSP processing remain guarded.
 Read the audio limits in `docs/bring-up.md` before extending this adapter.

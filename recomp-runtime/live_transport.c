@@ -6,7 +6,7 @@
    same socket. The matchmaker must see the endpoint the peers punch to, so
    nothing here opens a second one.
 
-   Reused from netplay.c, exactly as a room does it: recomp_netplay_listen
+   Reused from netplay.c: recomp_netplay_listen
    opens and randomizes the socket, recomp_netplay_match_server resolves the
    server, netplay_send_raw sends, netplay_now_ms reads the clock, and the
    matchmaker's cookie/nonce framing is matchmaker_wire.h's, shared with
@@ -149,7 +149,11 @@ typedef struct LivePeer {
 } LivePeer;
 
 static struct {
-    bool open;
+    bool started; /* recomp_live_transport_open ran; the socket waits for the first request */
+    bool open; /* the socket is up and the server resolved */
+    char server_host[256];
+    uint16_t server_port;
+    uint64_t retry_ms; /* when a socket that failed to open is tried again */
     RecompNetplay net; /* the socket, its nonce, cookie and the relay framing */
     uint32_t last_error;
     uint32_t local_ina; /* this player's virtual address, once logged on */
@@ -387,7 +391,7 @@ static void peer_relay_on(LivePeer *peer, const char *why)
 }
 
 /* The first datagram to an address without a route asks the backend to pair
-   us, as a room's JOIN does; the matchmaker then sends the other player's
+   us (CONNECT); the matchmaker then sends the other player's
    LPEER, which recomp_live_transport_peer takes. */
 static LivePeer *peer_for_send(uint32_t virtual_ina)
 {
@@ -423,7 +427,7 @@ static bool rollback_packet(const uint8_t *data, size_t size)
 {
     if (size < 4u) return false;
     const uint32_t magic = get32(data);
-    return magic == MAGIC || magic == GOODBYE_MAGIC || magic == ROOM_CLOSED_MAGIC || magic == LOBBY_MAGIC;
+    return magic == MAGIC || magic == GOODBYE_MAGIC;
 }
 
 static void queue_rollback(uint32_t virtual_ina, uint16_t port, const uint8_t *data, size_t size)
@@ -523,7 +527,7 @@ static void server_packet(const uint8_t *raw, size_t size)
         raw[4] != MATCH_VERSION)
         return;
     /* Anyone can send from the server's address; only the server knows this
-       socket's nonce, so a forged answer is dropped (as netplay.c does). */
+       socket's nonce, so a forged answer is dropped. */
     if (memcmp(raw + MATCH_HEADER, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES) != 0) return;
     if (raw[5] == MATCH_COOKIE) {
         if (size != MATCH_ASKED) return;
@@ -544,7 +548,7 @@ static void server_packet(const uint8_t *raw, size_t size)
     if (raw[5] == MATCH_RELAY) {
         /* The server forwards header, the destination's nonce, then the guest
            datagram: the cookie is a request field, so the body starts at
-           MATCH_BODY (netplay.c's relay receive does the same). */
+           MATCH_BODY. */
         if (size > MATCH_BODY) peer_packet(raw + MATCH_BODY, size - MATCH_BODY, NULL, true);
         return;
     }
@@ -631,17 +635,34 @@ bool recomp_live_transport_open(const char *server_host, uint16_t server_port)
     recomp_live_transport_close();
     live.handler = handler;
     live.local_ina = local_ina;
-    if (!recomp_netplay_listen(&live.net, 0u)) return false;
-    /* Without a server the peers still reach each other; the runner always
-       has one, and the tests script it. */
-    if (server_host != NULL && server_port != 0u &&
-        !recomp_netplay_match_server(&live.net, server_host, server_port)) {
+    if (server_host == NULL || server_port == 0u || strlen(server_host) >= sizeof live.server_host) return false;
+    memcpy(live.server_host, server_host, strlen(server_host) + 1u);
+    live.server_port = server_port;
+    live.started = true;
+    live.guest_port = htons(LIVE_GUEST_PORT);
+    live.replay_frame = UINT32_MAX;
+    return true;
+}
+
+/* Opens the socket and resolves the server on the first request, so a player
+   who never logs on sends no lookup and meets no firewall prompt. A failure is
+   tried again 5 s later, when the client's resend comes. */
+static bool live_socket_up(void)
+{
+    if (live.open) return true;
+    const uint64_t now = netplay_now_ms();
+    if (!live.started || now < live.retry_ms) return false;
+    live.retry_ms = now + 5000u;
+    if (!recomp_netplay_listen(&live.net, 0u)) {
+        fprintf(stderr, "recomp live: cannot open the socket\n");
+        return false;
+    }
+    if (!recomp_netplay_match_server(&live.net, live.server_host, live.server_port)) {
+        fprintf(stderr, "recomp live: cannot resolve the matchmaker %s\n", live.server_host);
         recomp_netplay_close(&live.net);
         return false;
     }
     live.open = true;
-    live.guest_port = htons(LIVE_GUEST_PORT);
-    live.replay_frame = UINT32_MAX;
     return true;
 }
 
@@ -663,7 +684,7 @@ void recomp_live_transport_set_server_handler(RecompLiveServerHandler handler)
    new cookie answers it. */
 void recomp_live_transport_send_server(const uint8_t *packet, size_t size)
 {
-    if (!live.open || live.net.match.server_port == 0u || packet == NULL) return;
+    if (packet == NULL || !live_socket_up()) return;
     if (size < MATCH_ASKED || size > LIVE_MATCH_BYTES || size > sizeof live.asked) return;
     if (memcmp(packet, MATCH_MAGIC, sizeof MATCH_MAGIC) != 0 || packet[4] != MATCH_VERSION) return;
     memcpy(live.asked, packet, size);
@@ -921,14 +942,15 @@ void recomp_live_transport_session_end(void)
 
 /* --- the guest's winsock and XNet transport thunks --- */
 
-/* socket(af, type, protocol): the game's one UDP socket, already open here. */
+/* socket(af, type, protocol): the game's one UDP socket, carried on the
+   transport's, which opens with the first matchmaker request. */
 static void live_socket(void)
 {
     kernel_return(3u, 0x100u);
 }
 
 /* bind(s, name, namelen): keeps the guest's port for its XNADDR and packets.
-   The host socket's port is the one the matchmaker sees, as a room's is. */
+   The host socket's port is the one the matchmaker sees. */
 static void live_bind(void)
 {
     const uint32_t name = kernel_arg(2u);

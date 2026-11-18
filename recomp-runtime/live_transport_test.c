@@ -28,7 +28,7 @@
 RecompFunction recomp_live_transport_lookup(uint32_t guest_address);
 
 /* The guest's memory: enough for the buffers and stack the thunks are called
-   with. Addresses here are synthetic, as in netplay_guest_test.c. */
+   with. Addresses here are synthetic, as in netplay_test.c. */
 enum {
     GUEST_BASE = 0x00400000u,
     GUEST_BYTES = 0x00010000u,

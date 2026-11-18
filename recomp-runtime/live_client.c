@@ -1494,6 +1494,13 @@ const RecompLiveBackend *recomp_live_client_attach(const RecompLiveIdentity *ide
 void recomp_live_client_detach(void)
 {
     if (!live.attached) return;
+    if (live.logged_on) {
+        /* A zero session id logs off, so a quitting host leaves search results
+           and friends' lists now instead of when its heartbeat lapses. */
+        static const uint8_t logoff[8] = {0u};
+        uint8_t packet[LIVE_SESSION_DEL_BYTES];
+        (void)build_session_del(packet, sizeof packet, logoff);
+    }
     recomp_live_transport_set_server_handler(NULL);
     memset(&live, 0, sizeof live);
 }

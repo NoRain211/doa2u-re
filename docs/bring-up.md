@@ -176,9 +176,9 @@ backdrops) keep filling it. A 3D draw into a viewport narrower than the
 target, such as the character select portrait in its panel, moves toward
 the center with that panel and keeps its size, since its projection already
 has the screen's shape; its scissor fits the same way, and program draws
-shift their viewport offset in c59. The projections live in guest RAM, which netplay
-sessions hash and replays must recompute exactly, so both keep 16:9: the
-session or replay sets `recomp_kernel_widescreen` from the host's flags.
+shift their viewport offset in c59. The projections live in guest RAM,
+outside the ranges a Live fight's desync check hashes, so each player keeps
+their own shape.
 
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability
@@ -805,7 +805,8 @@ the second when the player wears the first, becomes a random unlocked group
 (`0x11e410`), skipping one that matches the player's costume (`0xc5490`).
 Other callers ask again during a run, so the pick hashes a per-boot seed with
 the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
-index. Story's own picks stay. Netplay and SyncTest boots leave it off.
+index. Story's own picks stay. Netplay and SyncTest boots leave it off, and so does
+a logon to DOA ONLINE until the player leaves.
 The hook is routed whenever it may be wanted and checks the setting itself,
 so PC Settings can switch it while the game runs.
 
@@ -842,9 +843,10 @@ brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
 own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
-`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks, CPU
-Costumes, Free Camera and Dedication apply at once (the first three offline
-only), and the others at the next launch.
+`RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
+Dedication, the life bar, the combo HUD, hit voices and the KO replay apply at
+once, as do CPU Costumes and the Free Camera offline (both are off while
+logged on to DOA ONLINE), and the others at the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
@@ -912,7 +914,7 @@ last Lock, and at least 100 ms past the game thread's last pump; a longer
 stall goes quiet instead of replaying the ring's last lap as an echo. One-shot
 buffers play on. Only the game thread sets voice
 routing. A pump gap over 100 ms still drops its span while the cursor advances.
-Netplay, replays and SyncTest run play cursors on the frame-locked guest
+Netplay and SyncTest run play cursors on the frame-locked guest
 clock, which falls behind real time when frames run slow and jumps when the
 game waits. Host output there keeps its own place per buffer on the real
 clock, outside the rollback state: a one-shot plays on to its end, a ring

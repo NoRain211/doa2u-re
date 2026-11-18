@@ -22,6 +22,17 @@
    guest API without the transport, as recomp_live_transport_lookup's does. */
 void recomp_live_transport_forget(uint32_t virtual_ina);
 
+/* Set by the runner: the guest logged on, or closed the task that carried the
+   logon. A failed logon the game then closes counts as leaving. */
+void (*recomp_live_online_hook)(bool online) = NULL;
+
+static const void *live_logon_task; /* the task of the newest logon */
+
+static void live_online_changed(bool online)
+{
+    if (recomp_live_online_hook != NULL) recomp_live_online_hook(online);
+}
+
 /* The guest's statically linked XOnline/XNet service, replaced at the API
    boundary (docs/xbox-live.md). Every entry is a stdcall thunk whose argument
    count was read from the function's RET in the retail executable; the
@@ -618,6 +629,8 @@ static void live_logon(void)
         kernel_return(5u, LIVE_E_FAIL);
         return;
     }
+    live_logon_task = task;
+    live_online_changed(true);
     kernel_return(5u, 0u);
 }
 
@@ -658,7 +671,14 @@ static void live_task_continue(void)
 static void live_task_close(void)
 {
     LiveTask *task = live_task_find(kernel_arg(1));
-    if (task != NULL) live_task_release(task);
+    if (task != NULL) {
+        /* online_logoff 0x2a4010 ends with XOnlineTaskClose(g_online_logon_task). */
+        if (task == live_logon_task) {
+            live_logon_task = NULL;
+            live_online_changed(false);
+        }
+        live_task_release(task);
+    }
     kernel_return(1u, 0u);
 }
 

@@ -100,7 +100,6 @@ static Bank banks[CHARACTERS];
 static Voice voices[2];
 static char root[1024];
 static unsigned choice = 2u;
-static bool online_session;
 static uint32_t seed = 1u;
 static uint32_t base_damage[2];  /* this frame's, from 0x10ce60 */
 
@@ -424,10 +423,21 @@ static unsigned level_with_clips(const Bank *bank, unsigned level)
 static void cry(unsigned side, Bank *bank);
 static void note_event(unsigned side, const Bank *bank, unsigned level, unsigned clip);
 
+static bool rollback_replaying; /* a netplay rollback is running frames again */
+
+/* A rollback runs frames it already showed and heard; a hit voiced then must
+   not sound a second time, and its meter must stay as the shown frame left it. */
+void recomp_hit_voice_set_replaying(bool replaying)
+{
+    rollback_replaying = replaying;
+}
+
 /* life: the side's life before the hit; after: once it landed; base: the
    hit's base damage (its landed damage when 0x10ce60 gave none). */
+
 static void voice_hit(unsigned side, uint32_t base, uint16_t life, uint16_t after)
 {
+    if (rollback_replaying) return;
     Bank *bank = bank_for(*recomp_memory(SIDE_CHARACTER + side * SIDE_STRIDE, 1u));
     if (bank == NULL) return;
     const RecompHitVoiceTuning *tuning = &bank->tuning;
@@ -521,6 +531,12 @@ static void note_event(unsigned side, const Bank *bank, unsigned level, unsigned
 
 void recomp_hit_voice_frame(void)
 {
+    /* A re-run frame moves the game's replay ring backwards; watching it would
+       drop every clip noted before the rewind. */
+    if (rollback_replaying) {
+        recomp_hit_voice_pump();
+        return;
+    }
     const uint16_t write = *recomp_memory_u16(RING_WRITE);
     const uint16_t shown = *recomp_memory_u16(REPLAY_FRAME);
     const uint16_t length = *recomp_memory_u16(RING_LENGTH);
@@ -529,7 +545,7 @@ void recomp_hit_voice_frame(void)
     else if (length != 0u) ring_frames += (uint32_t)((write + length - last_write) % length);
     /* The replay runs while the ring stands still and the shown frame steps on. */
     const bool replaying = write == last_write && shown > last_shown && shown - last_shown <= 3;
-    if (replaying && choice != 0u && !online_session && length != 0u) {
+    if (replaying && choice != 0u && length != 0u) {
         for (unsigned i = 0u; i < event_count; ++i) {
             const Event *event = &events[i];
             if (ring_frames - event->frame >= length) continue; /* no longer in the ring */
@@ -571,7 +587,7 @@ static void apply_life(void)
     for (unsigned side = 0u; side < 2u; ++side)
         if (pending[side] != 0u && life[side] != 0u && *recomp_memory_u16(SIDE_LIFE + side * SIDE_STRIDE) == 0u)
             recomp_ko_replay_note_ko(side);
-    if (choice == 0u || online_session) return;
+    if (choice == 0u) return;
     for (unsigned side = 0u; side < 2u; ++side) {
         if (pending[side] == 0u) continue;
         voice_hit(side, base[side] != 0u ? base[side] : pending[side], life[side],
@@ -589,9 +605,8 @@ void recomp_hit_voice_set_choice(unsigned value)
     }
 }
 
-void recomp_hit_voice_install(bool online, const char *directory)
+void recomp_hit_voice_install(const char *directory)
 {
-    online_session = online;
     snprintf(root, sizeof root, "%s", directory != NULL ? directory : "");
     struct timespec t;
     timespec_get(&t, TIME_UTC);

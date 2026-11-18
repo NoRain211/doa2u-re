@@ -20,8 +20,9 @@
 #include "input_adapter.h"
 #include "input_host_win32.h"
 #include "input_pulse_source.h"
-#include "netplay_menu.h"
 #include "rebind.h"
+#include "live_session.h"
+#include "live_xapi.h"
 #include "netplay_session.h"
 #include "perf_overlay.h"
 #include "rollback.h"
@@ -33,7 +34,6 @@
 #include "xbox_memory_layout.h"
 extern "C" {
 #include "kernel_abi.h"
-#include "native_fiber.h"
 #include "overlay_text.h"
 #include "program_manual.h"
 #include "quit_prompt.h"
@@ -42,6 +42,7 @@ RecompFunction recomp_program_lookup(std::uint32_t address);
 }
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -96,8 +97,7 @@ static void quitPrompt(std::uint32_t port, RecompInputGamepad *gamepad)
     }
 }
 
-// A host pad goes through the quit prompt, then Rebind, then the netplay menu.
-// The open prompt owns the pads, so the room cannot inject its A behind it.
+// A host pad goes through the quit prompt, then Rebind.
 static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool sampled)
 {
     quitPrompt(port, sampled ? gamepad : nullptr);
@@ -107,7 +107,6 @@ static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool 
     }
     if (recomp_quit_prompt_open()) return;
     recomp_rebind_filter(port, gamepad);
-    recomp_netplay_menu_filter(port, gamepad);
 }
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
@@ -128,7 +127,7 @@ static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
         startHeld = start;
     }
     filterHostPad(0u, gamepad, sampled);
-    return recomp_netplay_session_back_pad(gamepad) || sampled;
+    return sampled;
 }
 
 /* Offer every costume and character without saving them (unlock_profile.c):
@@ -138,8 +137,8 @@ static bool unlockAll = true; // --no-unlock-all leaves unlocks to play
 
 /* PC SETTINGS in the game's Options menu (pc_settings.c) edits the launchers'
    private/launcher.json, which run_game.py names in RECOMP_LAUNCHER_SETTINGS.
-   Unlocks and CPU Costumes change at once (offline only); the other rows
-   apply at the next launch. */
+   Unlocks, the HUD rows and the KO replay change at once, as do CPU costumes
+   and the free camera offline; the other rows apply at the next launch. */
 static std::string launcherSettings;
 static RecompPcSettingsStore pcStore;
 
@@ -152,6 +151,7 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_LIFE_BAR:
         recomp_combo_hud_set_life_bar_colour(choice, recomp_pc_settings_custom_life_bar(launcherSettings));
         break;
+    case RECOMP_PC_COMBO_HUD: recomp_combo_hud_set_enabled(choice == 1u); break;
     case RECOMP_PC_HIT_VOICES: recomp_hit_voice_set_choice(choice); break;
     case RECOMP_PC_KO_REPLAY: recomp_ko_replay_set_enabled(choice == 1u); break;
     case RECOMP_PC_RESOLUTION:
@@ -179,7 +179,7 @@ static void pcSettingsClosed(void *)
 /* The DOA4 clips tools/import_doa4_voices.py decodes and the player picks
    into <prefix>/selections: RECOMP_HIT_VOICES, or doa4-voice-all beside
    private/launcher.json. */
-static void installHitVoices(bool online)
+static void installHitVoices()
 {
     std::string directory;
     if (const char *path = std::getenv("RECOMP_HIT_VOICES"); path != nullptr && *path != '\0') {
@@ -189,7 +189,7 @@ static void installHitVoices(bool online)
         const std::size_t slash = directory.find_last_of("/\\");
         directory = (slash == std::string::npos ? std::string(".") : directory.substr(0, slash)) + "/doa4-voice-all";
     }
-    recomp_hit_voice_install(online, directory.c_str());
+    recomp_hit_voice_install(directory.c_str());
 }
 
 static void installPcSettings(bool online)
@@ -214,6 +214,7 @@ static void installPcSettings(bool online)
         choices[RECOMP_PC_FREE_CAMERA] = recomp_free_camera_enabled() ? 1u : 0u;
     }
     recomp_combo_hud_set_life_bar_colour(choices[RECOMP_PC_LIFE_BAR], recomp_pc_settings_custom_life_bar(launcherSettings));
+    recomp_combo_hud_set_enabled(choices[RECOMP_PC_COMBO_HUD] == 1u);
     recomp_hit_voice_set_choice(choices[RECOMP_PC_HIT_VOICES]);
     recomp_ko_replay_set_enabled(choices[RECOMP_PC_KO_REPLAY] == 1u);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
@@ -225,9 +226,13 @@ static void installPcSettings(bool online)
     const bool quality = recomp_d3d_presenter_quality_live();
     for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA})
         recomp_pc_settings_set_live(setting, quality);
-    // Online they show the page's next-start help; the choice applies at the next offline start.
-    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA})
-        recomp_pc_settings_set_live(setting, !online);
+    /* Synctest and Loopback compare whole runs against themselves: no
+       per-player HUD colour or voices there. */
+    if (online) {
+        recomp_combo_hud_set_enabled(false);
+        recomp_combo_hud_set_life_bar_colour(0u, 0u);
+        recomp_hit_voice_set_choice(0u);
+    }
 }
 
 /* Dedication card shown each time the staff roll starts, unless the PC
@@ -376,13 +381,55 @@ static void showCard()
     recomp_dsound_output_unlock();
 }
 
+/* Xbox Live switches the run between offline and online at the player's logon
+   and logoff (docs/xbox-live.md). The guest reports those from its XOnline
+   calls; the frame's present applies them, where the clocks and hooks can
+   change. Loopback and synctest runs keep the online mode from boot. */
+static std::atomic<bool> onlineRequested{false};
+static bool liveSwitchable;    /* Live can log on and off in this run */
+static bool onlineApplied;     /* the mode the clocks and hooks are in */
+static bool frameClockWanted;  /* RECOMP_FRAME_CLOCK allows frame-locked time */
+
+static void requestOnline(bool online)
+{
+    onlineRequested.store(online, std::memory_order_relaxed);
+}
+
+static void setOnlineMode(bool online)
+{
+    onlineApplied = online;
+    recomp_xapi_frame_clock_set_enabled(frameClockWanted && online);
+    // An asynchronous read already under way finishes as it began; the mode applies to later reads.
+    recomp_kernel_file_set_synchronous_reads(online);
+    recomp_dsound_buffer_set_frame_clock(online);
+    // A Live fight needs both players' guest state to agree.
+    recomp_free_camera_set_online(online);
+    recomp_cpu_costume_set_online(online);
+    recomp_ko_replay_set_online(online);
+    // Those two rows show the next-start help while online; offline they apply.
+    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA})
+        recomp_pc_settings_set_live(setting, !online);
+}
+
+static void applyOnlineSwitch()
+{
+    // Never inside a Live fight's session: its snapshots carry the clock state.
+    if (!liveSwitchable || recomp_live_rollback_active()) return;
+    const bool online = onlineRequested.load(std::memory_order_relaxed);
+    if (online == onlineApplied) return;
+    setOnlineMode(online);
+    std::fprintf(stderr, "recomp runner: %s\n",
+        online ? "logged on to DOA ONLINE: online mode on" : "left DOA ONLINE: online mode off");
+}
+
 static void onSwap(std::uint32_t frame)
 {
+    applyOnlineSwitch();
     recomp_ko_replay_frame(); // steers the replay before hit_voice listens to it
     recomp_hit_voice_frame();
-    recomp_unlock_profile_frame(recomp_netplay_session_unlock_all(unlockAll));
+    recomp_unlock_profile_frame(unlockAll);
     if (storyFinale) applyStoryFinale();
-    recomp_netplay_session_on_swap(frame);
+    recomp_netplay_session_on_swap();
     if (!cardPending) return;
     cardPending = false;
     showCard();
@@ -430,29 +477,11 @@ static bool loadImage()
 
 static void bootGuest();
 
-static VOID WINAPI rebootGuest(void *)
-{
-    recomp_reset_runtime_modules();
-    if (!loadImage()) recomp_stop(2, "runner:reboot-image");
-    bootGuest();
-}
-
-static void reboot()
-{
-    recomp_input_host_stop_vibration();
-    // The guest's stacks are never resumed; the new fiber frees them.
-    void *fiber = recomp_native_fiber_create(rebootGuest, nullptr);
-    if (fiber == nullptr) recomp_stop(2, "runner:reboot-fiber");
-    recomp_native_fiber_switch(fiber);
-}
-
 int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
     recomp_d3d_frame_breakdown = recomp_kernel_thread_times;
     std::string xbePath, discRoot, expectStop, milestoneLog;
-    std::string replayPath;
-    RecompNetplayLaunch launch;
     recomp_rebind_load(); // before the first pad sample
     recomp_input_pulse_source_init(&inputPulses, recomp_input_host_sample, 0u);
     for (int i = 1; i < argc; ++i) {
@@ -472,28 +501,6 @@ int main(int argc, char **argv)
         }
         if (argument == "--skip-intro") {
             recomp_skip_intro = true;
-            continue;
-        }
-        if ((argument == "--netplay-host" || argument == "--netplay-delay") && i + 1 < argc) {
-            const std::string value = argv[++i];
-            std::uint32_t number = 0u;
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
-            const bool host = argument == "--netplay-host";
-            if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() ||
-                (host ? number == 0u || number > 65535u : number > RECOMP_ROLLBACK_WINDOW)) {
-                std::cerr << "recomp runner: --netplay-host needs a UDP port and --netplay-delay at most "
-                          << RECOMP_ROLLBACK_WINDOW << " frames\n";
-                return 64;
-            }
-            (host ? launch.hostPort : launch.delay) = number;
-            continue;
-        }
-        if (argument == "--netplay-join" && i + 1 < argc) {
-            launch.join = argv[++i];
-            continue;
-        }
-        if (argument == "--replay" && i + 1 < argc) {
-            replayPath = argv[++i];
             continue;
         }
         if (argument == "--input-start-pulse-at" && i + 1 < argc) {
@@ -578,8 +585,7 @@ int main(int argc, char **argv)
                 " [--input-buttons-pulse-at <poll> <decimal-mask>]"
                 " [--input-analog-pulse-at <poll> <button-index>]"
                 " [--input-analog-pulse-every <first-poll> <period> <last-poll> <button-index>]"
-                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]"
-                " [--netplay-host <port> [--netplay-delay <frames>] | --netplay-join <host>:<port> | --replay <file>]\n";
+                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]\n";
             return 64;
         }
         const std::string value = argv[++i];
@@ -590,10 +596,6 @@ int main(int argc, char **argv)
     }
     if (xbePath.empty()) {
         std::cerr << "recomp runner: --xbe is required\n";
-        return 64;
-    }
-    if ((launch.hostPort != 0u) + !launch.join.empty() + !replayPath.empty() > 1) {
-        std::cerr << "recomp runner: --netplay-host, --netplay-join and --replay cannot be combined\n";
         return 64;
     }
     recomp_stop_configure(expectStop.empty() ? nullptr : expectStop.c_str(),
@@ -623,18 +625,13 @@ int main(int argc, char **argv)
         return 1;
     }
     recomp_disc_root_path = discRoot.c_str();
-    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam, unlockAll, reboot});
-    if (launch.hostPort == 0u && launch.join.empty() && replayPath.empty()) recomp_netplay_session_start_live();
-    if ((launch.hostPort != 0u || !launch.join.empty()) && !recomp_netplay_session_connect(launch)) return 1;
-    if (!replayPath.empty() && !recomp_netplay_session_load_replay(replayPath)) return 1;
+    recomp_netplay_session_init({discPath, RECOMP_NETPLAY_BUILD, &inputPulses, scriptedInputOnly, guestRam});
+    recomp_netplay_session_start_live();
     bootGuest();
 }
 
 static void bootGuest()
 {
-    static bool booted;
-    const bool first = !booted;
-    booted = true;
     if (!recomp_save_initialize(recomp_disc_root_path)) {
         std::cerr << "recomp runner: save recovery failed; guest not started\n";
         std::exit(2);
@@ -644,24 +641,22 @@ static void bootGuest()
     recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
     recomp_runtime_set_lookup(recomp_program_lookup);
     if (!recomp_netplay_session_read_env()) {
-        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback or udp:<local port>:<peer host>:<peer port>, "
-                  << "with decimal frame counts, a lag or delay of at most " << RECOMP_ROLLBACK_WINDOW
-                  << " frames, and the UDP port must open\n";
+        std::cerr << "recomp runner: RECOMP_ROLLBACK must be loopback, with decimal frame counts and "
+                  << "a lag of at most " << RECOMP_ROLLBACK_WINDOW << " frames\n";
         std::exit(1);
     }
     const bool rollbackEnabled = recomp_netplay_session_enabled();
-    // Each boot sets every hook, so nothing from a session that ended carries over.
+    const bool live = recomp_netplay_session_live();
     recomp_d3d_frame_boundary_hook = nullptr;
     recomp_kernel_profile_mutation_hook = nullptr;
     recomp_xapi_frame_clock_set_enabled(false);
     recomp_kernel_file_set_synchronous_reads(false);
     recomp_dsound_buffer_set_frame_clock(false);
+    recomp_xapi_frame_clock_reset(); // a boot starts guest time at zero
     if (recomp_synctest_enabled() || rollbackEnabled) {
         const char *clock = std::getenv("RECOMP_FRAME_CLOCK");
-        if (clock == nullptr || std::strcmp(clock, "0") != 0)
-            recomp_xapi_frame_clock_set_enabled(true);
+        frameClockWanted = clock == nullptr || std::strcmp(clock, "0") != 0;
         recomp_synctest_set_guest_ram(guestRam, RECOMP_XBOX_RAM_SIZE, guestRamWriteWatch);
-        recomp_kernel_file_set_synchronous_reads(true);
         recomp_synctest_install_default_modules();
         if (!rollbackEnabled) {
             recomp_synctest_set_extra_state(sizeof inputPulses, saveInputPulses, restoreInputPulses);
@@ -673,44 +668,49 @@ static void bootGuest()
     recomp_d3d_present_hook = onSwap;
     recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_PERF] = recomp_perf_overlay;
     recomp_netplay_session_install(recomp_synctest_enabled());
+    /* Live switches at the player's logon: the run starts offline, with the
+       mods the player chose, until the game logs on. A Loopback or synctest
+       session stays online for the whole run. */
+    liveSwitchable = live;
+    const bool online = (rollbackEnabled || recomp_synctest_enabled()) && !live;
+    if (liveSwitchable) recomp_live_online_hook = requestOnline;
+    onlineRequested.store(online, std::memory_order_relaxed);
     /* The free camera and the scene freeze run only with RECOMP_FREE_CAMERA=1,
        and never online; off, input samples and task switches go unhooked.
        Random CPU costumes are off online too, where both games must agree. */
-    const bool online = recomp_netplay_session_enabled() || recomp_synctest_enabled();
     recomp_free_camera_install(online);
     recomp_cpu_costume_install(online);
-    recomp_combo_hud_install(online);
-    installHitVoices(online);
+    recomp_combo_hud_install();
+    installHitVoices();
     recomp_ko_replay_install(online);
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
     installPcSettings(online);
+    setOnlineMode(online);
     recomp_menu_quit_install();
-    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); first && card != nullptr && *card != '\0') {
+    if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;
         else std::fprintf(stderr, "recomp runner: dedication card is not a 24/32-bit BMP; skipped\n");
     }
     if (!scriptedInputOnly) recomp_input_adapter_set_feedback_sink(recomp_netplay_session_set_vibration);
-    if (first) {
 #ifdef _WIN32
-        /* Guest frame waits that lost a 15.6 ms scheduler tick dropped frames on
-           a power-managed handheld (issue #69): ask for a 1 ms tick, keep Windows
-           from throttling the process, and run the game thread above normal. */
-        timeBeginPeriod(1u);
-        PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-            PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0u};
-        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
-        // Separate call: Windows 10 rejects the Windows 11 timer flag.
-        throttling.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
-        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    /* Guest frame waits that lost a 15.6 ms scheduler tick dropped frames on
+       a power-managed handheld (issue #69): ask for a 1 ms tick, keep Windows
+       from throttling the process, and run the game thread above normal. */
+    timeBeginPeriod(1u);
+    PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0u};
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
+    // Separate call: Windows 10 rejects the Windows 11 timer flag.
+    throttling.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof throttling);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
-        std::atexit(recomp_netplay_session_exit);
-        std::atexit(recomp_input_host_stop_vibration);
-        std::atexit(recomp_d3d8_shutdown);
-        std::atexit(recomp_dsound_api_shutdown);
-        recomp_watchdog_start();
-    }
+    std::atexit(recomp_netplay_session_exit);
+    std::atexit(recomp_input_host_stop_vibration);
+    std::atexit(recomp_d3d8_shutdown);
+    std::atexit(recomp_dsound_api_shutdown);
+    recomp_watchdog_start();
     recomp_runtime.registers.esp = XBOX_STARTUP_STACK_TOP;
     std::fprintf(stderr, "recomp runner: entry=0x%08x image_end=0x%08x native-d3d8-dsound\n",
         xbe->metadata.selectedEntryPoint,

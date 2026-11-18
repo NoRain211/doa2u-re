@@ -40,12 +40,10 @@ bool recomp_live_client_attached(void);
 /* Once per frame: resends, timeouts and the heartbeat. */
 void recomp_live_client_tick(uint64_t now_ms);
 
-/* The runner's version (live_bridge.cpp, which reads the netplay side): the
-   identity in <storage>/live-identity.bin and its server list beside it, the
-   gamertag from the player's profile, and the matchmaker from NETPLAY
-   SETTINGS, or the built-in one.
-   RECOMP_LIVE_SERVER=host:port overrides both; a bare host keeps the port
-   MATCHMAKER names (or the built-in server's). It opens the transport and
+/* The runner's version (live_bridge.cpp): the identity in
+   <storage>/live-identity.bin and its server list beside it, the gamertag from the player's profile, and
+   the built-in matchmaker. RECOMP_LIVE_SERVER=host:port overrides it; a bare
+   host keeps the built-in server's port. It opens the transport and
    returns the backend to give recomp_live_backend_set, or NULL. */
 const RecompLiveBackend *recomp_live_client_start(const char *storage, const char *digest);
 void recomp_live_client_stop(void);

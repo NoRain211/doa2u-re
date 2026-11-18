@@ -29,18 +29,22 @@ enum {
 
 extern void sub_000C6B00(void);
 
-static bool enabled, online_session;
+static bool chosen, online_session;
 static uint32_t seed;
 
 void recomp_cpu_costume_install(bool online)
 {
     const char *value = getenv("RECOMP_RANDOM_CPU_COSTUMES");
     online_session = online;
-    enabled = !online && value != NULL && strcmp(value, "1") == 0;
+    chosen = value != NULL && strcmp(value, "1") == 0;
     struct timespec now;
     timespec_get(&now, TIME_UTC); /* nanoseconds, so quick reboots still differ */
     seed = ((uint32_t)now.tv_sec * 2654435761u ^ (uint32_t)now.tv_nsec) | 1u;
 }
+
+static bool enabled(void) { return chosen && !online_session; }
+
+void recomp_cpu_costume_set_online(bool online) { online_session = online; }
 
 static uint32_t hash_bytes(uint32_t hash, const uint8_t *bytes, uint32_t size)
 {
@@ -86,17 +90,17 @@ static bool wears_player_costume(uint8_t character, uint8_t costume)
 
 void recomp_cpu_costume_set_enabled(bool on)
 {
-    enabled = !online_session && on;
+    chosen = on;
 }
 
 bool recomp_cpu_costume_enabled(void)
 {
-    return enabled;
+    return enabled();
 }
 
 static void fighter_costume(void)
 {
-    if (!enabled) {
+    if (!enabled()) {
         sub_000C6B00();
         return;
     }

@@ -21,9 +21,10 @@ extern "C" {
    (RecompHitVoiceTuning's keys). A character without a selections folder
    stays silent. A changed folder is picked up within a second, mid-game.
 
-   Call install at each boot; online sessions keep the fighters silent, since
-   a rollback replays the frames that land hits. */
-void recomp_hit_voice_install(bool online, const char *directory);
+   Call install at each boot. Each fighter's voices follow the player's PC
+   SETTINGS row, online too: they are host audio only, and a rollback's re-run
+   frames stay silent, so a hit is voiced once. */
+void recomp_hit_voice_install(const char *directory);
 /* The PC Settings row: 0 Off, 1 Quiet, 2 Normal, 3 Loud. */
 void recomp_hit_voice_set_choice(unsigned choice);
 /* Keeps a playing clip fed; called by the hooks every frame. */
@@ -32,6 +33,9 @@ RecompFunction recomp_hit_voice_lookup_manual(uint32_t guest_address);
 /* Once a presented frame: cries as the KO replay shows the KO, and keeps
    the clips fed. */
 void recomp_hit_voice_frame(void);
+/* The rollback runs frames again: those were already heard, so they voice
+   no hit. Set by netplay around each re-run frame. */
+void recomp_hit_voice_set_replaying(bool replaying);
 
 /* A fighter's tuning, voice.ini's keys in brackets. */
 typedef struct RecompHitVoiceTuning {

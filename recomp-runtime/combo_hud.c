@@ -79,7 +79,7 @@ extern void sub_000B8AE0(void);
 extern void sub_000B8810(void);
 extern void sub_000B11E0(void);
 
-static bool online_session;
+static bool enabled = true;          /* PC Settings: the combo HUD row */
 static uint32_t life_rgb;            /* 0: the game's own colours */
 static bool hud_moved;               /* the popups are moved down this frame */
 static unsigned latched_damage[2];
@@ -88,7 +88,7 @@ static unsigned latched_hits[2];
 static bool fight_hud(void)
 {
     const uint8_t mode = *recomp_memory(BATTLE_MODE, 1u);
-    return !online_session && mode != 9u && mode != 10u;
+    return enabled && mode != 9u && mode != 10u;
 }
 
 static unsigned counter_hits(unsigned side)
@@ -284,6 +284,9 @@ static void colour_life_texture(void)
             to[i + 3u] = from[i + 3u];
         }
         own_rgb = life_rgb;
+        // A rollback to before the palette was made zeroed its header in guest RAM.
+        *recomp_memory_u32(own_palette) = 0x00830001u;
+        *recomp_memory_u32(own_palette + 4u) = own_colours;
         *recomp_memory_u32(entry + 4u) = own_palette;
     }
 }
@@ -324,7 +327,7 @@ static void critical_segment(uint32_t record)
 static void sprite_draw(void)
 {
     const uint32_t record = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
-    const bool life = !online_session && record != 0u && *recomp_memory_u32(record + 4u) == LIFE_SPRITE;
+    const bool life = record != 0u && *recomp_memory_u32(record + 4u) == LIFE_SPRITE;
     if (life) colour_life_texture();
     sub_000B11E0();
     if (life && fight_hud()) {
@@ -334,15 +337,21 @@ static void sprite_draw(void)
     }
 }
 
-void recomp_combo_hud_install(bool online)
+void recomp_combo_hud_install(void)
 {
-    online_session = online;
+    enabled = true;
     hud_moved = false;
     memset(latched_damage, 0, sizeof latched_damage);
     memset(latched_hits, 0, sizeof latched_hits);
     /* The asset area is reset after this, each boot. */
     life_entry = game_palette = own_palette = own_colours = 0u;
     own_rgb = 0xffffffffu;
+}
+
+void recomp_combo_hud_set_enabled(bool on)
+{
+    enabled = on;
+    if (!on) hud_moved = false;
 }
 
 RecompFunction recomp_combo_hud_lookup_manual(uint32_t guest_address)

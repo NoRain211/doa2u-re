@@ -183,7 +183,7 @@ int main(void)
     write_wav("hit_voice_test_clips/kas/selections/kasumi_HIT_LV3_01.wav", 24000u);
     write_wav("hit_voice_test_clips/kas/selections/kasumi_KO_01.wav", 96000u);
     write_wav("hit_voice_test_clips/kas/selections/kasumi_KO_02.wav", 90000u);
-    recomp_hit_voice_install(false, root);
+    recomp_hit_voice_install(root);
     ram[0x01u + 0x94u] = 5u; /* side 1 */
     ram[0x01u] = 99u;        /* side 0: no bank */
     for (unsigned i = 0u; i < 20u; ++i) land(0u, 200u, 60u);
@@ -241,9 +241,21 @@ int main(void)
     recomp_hit_voice_set_choice(0u);
     expect("off stops", resets[1] == before_off + 1u);
     recomp_hit_voice_set_choice(2u);
-    recomp_hit_voice_install(true, root);
+    recomp_hit_voice_install(root);
+    const unsigned before_online = submits[1];
     for (unsigned i = 0u; i < 20u; ++i) land(1u, 200u, 60u);
-    expect("online silent", resets[1] == before_off + 1u);
+    expect("online follows the row", submits[1] > before_online);
+    /* A rollback re-runs frames it already voiced: they stay silent, and the
+       shown frame voices its hit. */
+    recomp_hit_voice_install(root);
+    recomp_hit_voice_advance_clock(2000.0);
+    const unsigned before_replay = submits[1];
+    recomp_hit_voice_set_replaying(true);
+    for (unsigned i = 0u; i < 5u; ++i) land(1u, 200u, 60u);
+    expect("replayed frames stay silent", submits[1] == before_replay);
+    recomp_hit_voice_set_replaying(false);
+    land(1u, 200u, 60u);
+    expect("the shown frame voices", submits[1] > before_replay);
     remove("hit_voice_test_clips/kas/selections/kasumi_HIT_LV3_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_01.wav");
     remove("hit_voice_test_clips/kas/selections/kasumi_KO_02.wav");

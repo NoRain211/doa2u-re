@@ -53,8 +53,7 @@ typedef enum RecompLiveEnd {
     RECOMP_LIVE_END_PEER_LEFT,
 } RecompLiveEnd;
 
-/* The stop id netplay_session.cpp's endSession reports, so a Live end names
-   the same failure as netplay's does. */
+/* The stop id a non-Live session reports for an end. */
 const char *recomp_live_end_stop_id(RecompLiveEnd end);
 
 /* What an end does, supplied by netplay_session.cpp: tell the other player

@@ -66,7 +66,25 @@ int main()
 
     recomp_xapi_frame_clock_set_enabled(false);
     check("disabled", !recomp_xapi_frame_clock_enabled());
-    check("host clock resumes", recomp_xapi_performance_counter() > before);
+    check("host clock resumes", recomp_xapi_performance_counter() >= before);
+
+    // On again mid-run: the frame clock starts at the real clock, never behind it.
+    const uint64_t resumed_from = recomp_xapi_performance_counter();
+    recomp_xapi_frame_clock_set_enabled(true);
+    const uint64_t resumed = recomp_xapi_performance_counter();
+    check("on resumes the real clock", recomp_xapi_frame_clock_enabled() && resumed >= resumed_from);
+    recomp_xapi_frame_clock_advance();
+    const uint64_t last_frame = recomp_xapi_performance_counter();
+    check("frames go on", last_frame > resumed);
+    recomp_xapi_frame_clock_set_enabled(false);
+    check("off keeps frame time", recomp_xapi_performance_counter() >= last_frame);
+
+    // A boot's reset starts guest time at zero again, even after real reads.
+    (void)recomp_xapi_performance_counter();
+    recomp_xapi_frame_clock_reset();
+    recomp_xapi_frame_clock_set_enabled(true);
+    check("boot starts at one frame", recomp_xapi_performance_counter() == 1000000000ull / 60u);
+    recomp_xapi_frame_clock_set_enabled(false);
 
     if (failures != 0) return 1;
     std::puts("PASS frame clock locks guest time to frame boundaries");

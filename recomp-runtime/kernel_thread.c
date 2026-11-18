@@ -179,9 +179,11 @@ static uint64_t interrupt_time(void)
 static uint64_t system_time(void)
 {
     /* Frame-locked guest time: the host wall clock differs on every replay,
-       so UTC rides the same counter as interrupt time. */
+       so UTC rides the same counter as interrupt time. The offset keeps a
+       switch into the frame clock continuous with the host clock. */
     if (recomp_xapi_frame_clock_enabled()) {
-        return 116444736000000000ull + recomp_xapi_performance_counter() / 100u;
+        return 116444736000000000ull + recomp_xapi_performance_counter() / 100u +
+            recomp_xapi_frame_clock_utc_offset();
     }
     struct timespec now;
     if (timespec_get(&now, TIME_UTC) != TIME_UTC) {
