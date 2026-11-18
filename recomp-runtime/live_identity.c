@@ -224,7 +224,11 @@ bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, co
     FILE *file = fopen(identity->servers, "rb");
     if (file != NULL) {
         size = fread(text, 1, sizeof text - 1u, file);
+        const bool failed = ferror(file) != 0;
         fclose(file);
+        if (failed) return false;
+    } else if (errno != ENOENT) {
+        return false; /* readable a moment ago: still never written over unread */
     }
     if (size != 0u && text[size - 1u] != '\n') text[size++] = '\n'; /* a last line someone left open */
     const int needed = snprintf(text + size, sizeof text - size, "%s\n", server);
