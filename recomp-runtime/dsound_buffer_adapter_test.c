@@ -506,6 +506,33 @@ static void test_real_clock_output(void)
     CHECK(CALL(0x36363c, handle, DATA + 40, 200, 0, 0) == 0);
     now = 30; wall = 80; recomp_dsound_buffers_pump();
     CHECK(output.bytes == 40 && first_sample() == 30);
+    /* A mute over 100 ms: output starts again at the guest's cursor, not a lap fraction away. */
+    recomp_dsound_buffer_set_output_suppressed(true);
+    now = 130; wall = 380; recomp_dsound_buffers_pump();
+    recomp_dsound_buffer_set_output_suppressed(false);
+    CHECK(CALL(0x3648da, handle, 0, 200, OUTPUT, OUTPUT + 4, OUTPUT + 8, OUTPUT + 12, 1) == 0);
+    CHECK(CALL(0x36363c, handle, DATA + 260, 200, 0, 0) == 0);
+    calls = output_calls;
+    recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
+    now = 140; wall = 400; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 130);
+    CHECK(CALL(0x363641, handle) == 0);
+
+    /* A one-shot whose guest cursor reaches the end first still plays its tail. */
+    fixture(1, 1, 0);
+    handle = create();
+    for (uint16_t i = 0; i < 50; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 100) == 0 && CALL(0x364802, handle, 0, 0, 0) == 0);
+    recomp_dsound_buffers_pump();
+    now = 20; wall = 20; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 0);
+    now = 60; wall = 30; recomp_dsound_buffers_pump();
+    CHECK(CALL(0x364882, handle, OUTPUT) == 0 && read32(OUTPUT) == 0); /* the guest hears it as over */
+    CHECK(output.bytes == 20 && first_sample() == 20);
+    wall = 60; recomp_dsound_buffers_pump();
+    CHECK(output.bytes == 40 && first_sample() == 30);
+    calls = output_calls;
+    wall = 80; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
     CHECK(CALL(0x363641, handle) == 0);
 
     /* A one-shot the guest finished first still plays its last span. */

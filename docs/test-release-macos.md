@@ -39,6 +39,12 @@ Build (once; lifting and compiling take several minutes):
 4. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
 
+Or build from the launcher: ./launcher.sh opens on BUILD GAME while the game
+is not built. Choose your Disc 2 ISO with DISC ISO, or drop it on the window,
+then choose BUILD. It shows the elapsed time and the latest line, keeps the
+full output in private/build.log, and asks twice before it stops a build.
+The launcher compiles on first use with the Xcode command line tools.
+
 Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
 on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the intro skip on
 MOVIES and the unlocks and free camera on GAMEPLAY, then choose START GAME.

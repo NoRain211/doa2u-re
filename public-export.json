@@ -17,6 +17,7 @@
     "launcher.sh",
     "build_game.sh",
     "build_steamdeck.sh",
+    "tools/build_linux_launcher.sh",
     "install_deps.sh",
     "public-export.json",
     "docs/reuse.md",

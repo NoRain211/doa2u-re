@@ -21,7 +21,7 @@ SUBMODULE = "tools/xboxrecomp"
 # A release holds what building and playing need; developer and agent material stays in the repository.
 DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitignore", ".gitmodules",
              "private/README.md", "tools/package_test.py", "tools/public_export.py", "tools/xbe_info.py",
-             "tools/doa2u/function_status.json", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
+             "tools/doa2u/function_status.json", "tools/build_linux_launcher.sh", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
 # Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
 WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", *(f"recomp-runtime/{name}" for name in (
@@ -35,7 +35,11 @@ POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md",
     "win32_compat.c", "win32_compat_test.c", "fiber_switch_arm64.S", "fiber_switch_x86_64.S"))}
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
-                  "linux": POSIX_ONLY | {"install_deps.sh", "tools/launcher_sdl.cpp", "tools/launcher-background.png"}}
+                  "linux": POSIX_ONLY | {"build_steamdeck.sh", "install_deps.sh", "tools/launcher_sdl.cpp",
+                                         "tools/launcher-background.png"}}
+# The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its BUILD GAME page runs on a
+# machine with no compiler (a stock Steam Deck).
+LINUX_LAUNCHER = "launcher-linux-x86_64"
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
 # and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")
@@ -122,6 +126,15 @@ def lifter_shipped(path):
     return path.startswith(LIFTER_DIRS) and not name.startswith("test_") and not name.endswith(".md")
 
 
+def executable(path):
+    """A ZIP entry for path with Unix mode 0755; ZipFile.write on Windows would drop the executable bit."""
+    info = zipfile.ZipInfo(path, time.localtime()[:6])
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.create_system = 3  # Unix, or unzip ignores the mode below
+    info.external_attr = 0o100755 << 16
+    return info
+
+
 def archive(cwd, prefix, keep):
     with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", "HEAD", cwd=cwd))) as tar:
         for member in tar.getmembers():
@@ -163,7 +176,8 @@ def main():
         raise SystemExit(f"{out} already exists")
     windows = args.platform == "windows"
     artifacts = ("extract-xiso.exe", "LICENSE.TXT", "dedication-photo.jpg")
-    missing = [a for a in artifacts if not (ARTIFACTS / a).is_file()]
+    linux = args.platform == "linux"
+    missing = [a for a in artifacts + ((LINUX_LAUNCHER,) if linux else ()) if not (ARTIFACTS / a).is_file()]
     if missing:
         raise SystemExit(f"Missing from {ARTIFACTS}: {', '.join(missing)}")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +210,8 @@ def main():
                 build_launchers(Path(launchers))
                 for exe in LAUNCHERS:
                     package.write(Path(launchers) / exe, f"{name}/{exe}")
+        if linux:
+            package.writestr(executable(f"{name}/tools/artifacts/{LINUX_LAUNCHER}"), (ARTIFACTS / LINUX_LAUNCHER).read_bytes())
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release

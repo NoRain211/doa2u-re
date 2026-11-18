@@ -683,11 +683,11 @@ static void bootGuest()
        Random CPU costumes are off online too, where both games must agree. */
     recomp_free_camera_install(online);
     recomp_cpu_costume_install(online);
-    recomp_combo_hud_install();
     installHitVoices();
     recomp_ko_replay_install(online);
     recomp_unlock_profile_reset();
     recomp_runner_assets_reset();
+    recomp_combo_hud_install();
     installPcSettings(online);
     setOnlineMode(online);
     recomp_menu_quit_install();

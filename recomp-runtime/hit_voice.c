@@ -23,7 +23,8 @@
    0x87ae31 + 0x94 s; 0xd6ad0 builds a character's file names from the
    three-letter prefix at 0x694210[0x69425c[id]], the same prefixes DOA4 uses
    for its voice banks, except Ein (kte here, ein there) and Helena (hik,
-   hel). Leon (24, sam), Tengu (17) and Hitomi (21) have no prefix in DOA2U;
+   hel), and Leon and Bayman: DOA2U's Leon (8, costume files leo*) has the
+   prefix bay, its Bayman (24, bay*) sam. Tengu (17) and Hitomi (21) have no prefix in DOA2U;
    17 and 21 follow from the save order at 0x6959dc, where Hitomi comes last.
    DOA4 calls Hitomi kor (hak is Kokoro, hyt Hayate).
 
@@ -68,8 +69,8 @@ extern void sub_0010CE60(void);
 
 static const char *const PREFIX[CHARACTERS] = {
     [0] = "zac", [1] = "tin", [2] = "jan", [3] = "ein", [4] = "ryu", [5] = "kas", [6] = "gen",
-    [7] = "hel", [8] = "bay", [9] = "bas", [12] = "lei", [13] = "aya", [17] = "tng",
-    [21] = "kor", [24] = "leo",
+    [7] = "hel", [8] = "leo", [9] = "bas", [12] = "lei", [13] = "aya", [17] = "tng",
+    [21] = "kor", [24] = "bay",
 };
 
 typedef struct Clip {

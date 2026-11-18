@@ -199,6 +199,8 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
+add_executable(recomp_game_decomp_test game_decomp.c game_decomp_test.c)
+add_test(NAME recomp-runtime-game-decomp COMMAND recomp_game_decomp_test)
 
 # WP1 Guest Xbox Live API: the guest's XOnline/XNet thunks over
 # RecompLiveBackend (live_backend.h), plus the in-memory backend for tests.
@@ -231,6 +233,11 @@ add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runne
 add_test(NAME recomp-runtime-menu-quit COMMAND recomp_menu_quit_test)
 add_executable(recomp_hit_voice_test hit_voice.c hit_voice_test.c)
 add_test(NAME recomp-runtime-hit-voice COMMAND recomp_hit_voice_test)
+add_executable(recomp_combo_hud_test combo_hud.c combo_hud_test.c)
+add_test(NAME recomp-runtime-combo-hud COMMAND recomp_combo_hud_test)
+if(NOT MSVC)
+    target_link_libraries(recomp_combo_hud_test PRIVATE m)
+endif()
 add_executable(recomp_ko_replay_test ko_replay.c ko_replay_test.c)
 add_test(NAME recomp-runtime-ko-replay COMMAND recomp_ko_replay_test)
 add_executable(recomp_pc_settings_store_test pc_settings_store.cpp settings_file.cpp pc_settings_store_test.cpp)
@@ -250,6 +257,11 @@ add_test(NAME recomp-runtime-d3d-light COMMAND recomp_d3d_light_test)
 add_executable(recomp_d3d_vertex_declaration_test
     d3d_vertex_shader_model.c d3d_vertex_shader_model_test.c)
 add_test(NAME recomp-runtime-d3d-vertex-declaration COMMAND recomp_d3d_vertex_declaration_test)
+# The draw shader's constants are shared by both presenters, so this test
+# builds the shader source without a graphics device and runs on every platform.
+add_executable(recomp_d3d_draw_shader_test d3d_draw_shader.cpp d3d_vertex_program.cpp
+    d3d_draw_model.c d3d_draw_shader_test.cpp)
+add_test(NAME recomp-runtime-d3d-draw-shader COMMAND recomp_d3d_draw_shader_test)
 if(NOT MSVC)
     target_link_libraries(recomp_manual_test PRIVATE m)
     target_link_libraries(recomp_pc_settings_test PRIVATE m)
@@ -260,6 +272,7 @@ if(NOT MSVC)
     target_link_libraries(recomp_d3d8_state_test PRIVATE m)
     target_link_libraries(recomp_d3d8_draw_test PRIVATE m)
     target_link_libraries(recomp_d3d_light_test PRIVATE m)
+    target_link_libraries(recomp_d3d_draw_shader_test PRIVATE m)
 endif()
 
 add_executable(recomp_xbox_adpcm_test xbox_adpcm.c xbox_adpcm_test.c)
@@ -714,6 +727,8 @@ if(RECOMP_PROGRAM_DIR)
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
     add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
+        game_decomp.c game_render_xform.c game_render_mesh.c game_render_state.c game_fighter_mesh.c game_fighter_pose.c game_math.c
+        game_render_draw.c game_library_hot.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
