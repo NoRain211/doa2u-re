@@ -320,6 +320,12 @@ static int draw_tests(void)
     CHECK(submitted.data.draw.has_texture && submitted.data.draw.texture_bytes == ram + 0x8000u);
     CHECK(submitted.data.draw.texture_byte_count == 64u);
     CHECK(submitted.data.draw.address_u == 1u && submitted.data.draw.address_v == 1u);
+    /* Level 0 alone still runs past the end of RAM: stop before reading it. */
+    texture.data = RECOMP_XBOX_RAM_SIZE - 32u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 28u); return 1; }
+    CHECK(strcmp(stop_reason, "d3d8:draw-texture-span") == 0);
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected stop: %s\n", stop_reason); return 1; }
+    texture.data = 0x8000u;
     texture.mip_levels = 3u;
     *recomp_memory_u32(STAGES + 20u) = 1u;
     *recomp_memory_u32(STAGES + 24u) = 0xc0000000u;
@@ -1875,7 +1881,7 @@ static int volume_tests(void)
     set_stage(0u, 28u, 0u);
     texture.data = RECOMP_XBOX_RAM_SIZE - 64u * 64u * 4u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
-    CHECK(strcmp(stop_reason, "test:guest-span") == 0);
+    CHECK(strcmp(stop_reason, "d3d8:draw-texture-span") == 0);
     texture.data = 0x8000u;
     *recomp_memory_u32(STAGES + 8u) = 4u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
