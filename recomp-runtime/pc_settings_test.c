@@ -442,6 +442,12 @@ int main(void)
     const uint32_t row2_help[3] = {19u, 2u, 0u}, row3_help[3] = {19u, 3u, 0u};
     hook(0x00091560u, row2_help, 3u);
     expect("confirm turns on", rd16(help_text + 26u) == 'i'); /* row 2 is CPU Costumes, live */
+    hook(0x00091560u, row3_help, 3u);
+    expect("online run next start", rd16(help_text + 26u) == 't'); /* row 3 is Free Camera, off as online */
+    recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, true); /* as Live logged on */
+    hook(0x00091560u, row3_help, 3u);
+    expect("leave online help", rd16(help_text + 26u) == 'w'); /* "Takes effect when you leave ..." */
+    recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, false);
     hook(0x0011cfc0u, none, 2u); /* view 3: Life Bar to KO Replay */
     hook(0x00091560u, row3_help, 3u);
     expect("combo hud live", rd16(help_text + 26u) == 'i'); /* row 3 is Combo HUD, live */

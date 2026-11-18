@@ -23,7 +23,7 @@ extern "C" {
 
    Call install at each boot. Each fighter's voices follow the player's PC
    SETTINGS row, online too: they are host audio only, and a rollback's re-run
-   frames stay silent, so a hit is voiced once. */
+   frames voice only hits no earlier run of that frame voiced. */
 void recomp_hit_voice_install(const char *directory);
 /* The PC Settings row: 0 Off, 1 Quiet, 2 Normal, 3 Loud. */
 void recomp_hit_voice_set_choice(unsigned choice);
@@ -33,9 +33,10 @@ RecompFunction recomp_hit_voice_lookup_manual(uint32_t guest_address);
 /* Once a presented frame: cries as the KO replay shows the KO, and keeps
    the clips fed. */
 void recomp_hit_voice_frame(void);
-/* The rollback runs frames again: those were already heard, so they voice
-   no hit. Set by netplay around each re-run frame. */
-void recomp_hit_voice_set_replaying(bool replaying);
+/* Set by netplay before each rollback session frame: its number, and whether
+   it runs again a frame already shown. A side's hit is voiced once per frame.
+   UINT32_MAX ends the session. */
+void recomp_hit_voice_set_rollback_frame(uint32_t frame, bool replaying);
 
 /* A fighter's tuning, voice.ini's keys in brackets. */
 typedef struct RecompHitVoiceTuning {

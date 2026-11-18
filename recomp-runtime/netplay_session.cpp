@@ -367,7 +367,7 @@ static void finishLiveSession()
     rollback.liveTailUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     rollback.active = false;
     rollback.hidden = false;
-    recomp_hit_voice_set_replaying(false);
+    recomp_hit_voice_set_rollback_frame(UINT32_MAX, false);
     rollback.stop = UINT32_MAX;
     rollback.frontier = 0u;
     rollback.checkFrame = 0u;
@@ -804,7 +804,7 @@ static void onRollbackFrame(std::uint32_t swap)
     recomp_d3d8_set_present_suppressed(rollback.hidden);
     recomp_d3d8_set_gpu_work_suppressed(rollback.hidden);
     recomp_dsound_buffer_set_output_suppressed(rollback.hidden);
-    recomp_hit_voice_set_replaying(rollback.hidden);
+    recomp_hit_voice_set_rollback_frame(s.frame, rollback.hidden);
     recomp_rollback_run(&s, &rollback.pads[rollback.player], &rollback.pads[1u - rollback.player]);
     if (rollback.mode == RollbackMode::Live &&
         recomp_live_pads_carry_stop(rollback.pads[0].buttons, rollback.pads[1].buttons)) {

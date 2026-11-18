@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import ast
+import asyncio
 import contextlib
 import hashlib
 import io
@@ -7,6 +8,7 @@ import json
 import os
 import stat
 import re
+import socket
 import struct
 import sys
 import tempfile
@@ -264,6 +266,12 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.logon(B_AT, B, tag=b"", now=2.0)[4][:7], b"PLAYER1")  # no churn
         self.assertEqual(self.logon(tag=b"AYANE", now=3.0)[4][:5], b"AYANE")  # a fallback takes a real name
         self.assertEqual(self.logon(tag=b"KASUMI", now=4.0)[4][:5], b"AYANE")  # which then stays
+
+    def test_a_digit_suffix_never_makes_a_banned_gamertag(self):
+        self.fill_accounts(8)
+        for index, tag in enumerate((b"148", b"1481", b"1482", b"1483", b"1484", b"1485", b"1486", b"1487")):
+            self.server.accounts[1 << 60 | index].gamertag = tag
+        self.assertEqual(self.logon(tag=b"148")[4][:4], b"1489")  # not 1488
 
     def test_a_logon_must_carry_the_xuid_of_its_proof(self):
         self.logon()
@@ -1600,6 +1608,13 @@ def c_strings(source, name):
     """The string literals of a C array named name, adjacent literals joined."""
     body = re.search(r"\b" + name + r"\[\]\s*=\s*\{(.*?)\};", source, re.S).group(1)
     return ast.literal_eval("[" + re.sub(r'"((?:[^"\\]|\\.)*)"', r'b"\1"', body) + "]")
+
+
+class ServeTest(unittest.TestCase):
+    def test_an_ipv6_address_is_refused_at_startup(self):
+        # A dual-stack socket would hand IPv4 clients over as ::ffff: senders that endpoint() cannot pack.
+        with self.assertRaises(socket.gaierror):
+            asyncio.run(asyncio.wait_for(mm.serve("::", 0, False, 0), 5))
 
 
 class NameCheckTest(unittest.TestCase):

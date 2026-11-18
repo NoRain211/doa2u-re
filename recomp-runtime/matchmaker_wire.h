@@ -33,6 +33,7 @@ enum {
     MATCH_BODY = MATCH_HEADER + RECOMP_NETPLAY_TOKEN_BYTES, /* after the nonce */
     MATCH_ASKED = MATCH_BODY + RECOMP_NETPLAY_TOKEN_BYTES,  /* after the cookie */
 };
+_Static_assert(LIVE_LEADERS + 1 == MATCH_LIVE_RELAY, "a Live kind added to the list takes LIVE_RELAY's number");
 
 /* Writes a packet's start and returns where its body goes. */
 static inline uint8_t *match_header(uint8_t *out, uint8_t kind, const uint8_t *nonce, const uint8_t *cookie)

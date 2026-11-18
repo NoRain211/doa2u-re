@@ -1,5 +1,6 @@
 #include "xapi_time_adapter.h"
 
+#include <chrono>
 #include <cstdio>
 
 namespace {
@@ -78,6 +79,22 @@ int main()
     check("frames go on", last_frame > resumed);
     recomp_xapi_frame_clock_set_enabled(false);
     check("off keeps frame time", recomp_xapi_performance_counter() >= last_frame);
+
+    // Frames that ran past the host's clock: off keeps the date from going back.
+    const auto host_utc = [] {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()) / 100u;
+    };
+    recomp_xapi_frame_clock_set_enabled(true);
+    for (unsigned i = 0u; i < 600u; ++i) recomp_xapi_frame_clock_advance();
+    const uint64_t frame_utc = recomp_xapi_performance_counter() / 100u + recomp_xapi_frame_clock_utc_offset();
+    recomp_xapi_frame_clock_set_enabled(false);
+    check("off keeps the date", host_utc() + recomp_xapi_host_utc_skip() >= frame_utc);
+    // On again starts the date where the skipped host clock is.
+    const uint64_t date_off = host_utc() + recomp_xapi_host_utc_skip();
+    recomp_xapi_frame_clock_set_enabled(true);
+    check("on keeps the date", recomp_xapi_performance_counter() / 100u + recomp_xapi_frame_clock_utc_offset() >= date_off);
+    recomp_xapi_frame_clock_set_enabled(false);
 
     // A boot's reset starts guest time at zero again, even after real reads.
     (void)recomp_xapi_performance_counter();

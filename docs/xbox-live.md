@@ -22,6 +22,11 @@ keeps Live off.
   the file moves the account and losing it loses the account. Anyone who
   reads the file can log on as the account. `RECOMP_LIVE_IDENTITY=<file>` uses
   another file, which is how two runners on one machine get two accounts.
+  Keep the identity file, and any `RECOMP_LIVE_IDENTITY` file, out of shared or synced
+  folders and bug reports. The runner creates a new one readable by the
+  player alone (0600) on Linux and macOS; on Windows the file takes its
+  folder's permissions. It never changes the permissions of a file that is
+  already there.
 - **Known servers.** After the first logon on a matchmaker, the runner adds
   its `host:port` as a line to `live-identity.bin.servers.txt` beside the
   identity file (the identity file's name and `.servers.txt`), and never

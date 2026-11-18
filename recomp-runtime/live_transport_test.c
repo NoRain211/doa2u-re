@@ -398,6 +398,17 @@ int main(void)
     check("bind", call(recomp_live_transport_lookup(0x00381054u), args, 3u) == 0u);
 
     uint8_t packet[1400];
+    /* Opening only stores the server: nothing binds or goes out before the
+       first request, so a player who never logs on meets no firewall prompt. */
+    recomp_live_transport_pump(netplay_now_ms());
+    check("a guest send before the first request is refused",
+        recomp_live_transport_guest_send(ina_b, port_1000, (const uint8_t *)"early", 5u) < 0 && connects == 0u);
+    uint8_t unopened[8];
+    recomp_live_transport_nonce(unopened);
+    bool unbound = true;
+    for (unsigned i = 0u; i < 8u; ++i) unbound = unbound && unopened[i] == 0u;
+    check("opening binds no socket", unbound);
+    check("opening sends nothing", read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
     uint8_t request[MATCH_ASKED + 4u];
     const size_t request_size = match_request(request, 12u, 1u);
     memcpy(request + 6u, SOCKET_NONCE, sizeof SOCKET_NONCE); /* the client writes its nonce; the transport overwrites both */

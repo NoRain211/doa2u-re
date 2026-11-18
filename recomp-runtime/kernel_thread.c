@@ -190,7 +190,7 @@ static uint64_t system_time(void)
         recomp_stop(2, "thread:system-time");
     }
     return ((uint64_t)now.tv_sec + 11644473600ull) * 10000000ull +
-        (uint64_t)now.tv_nsec / 100ull;
+        (uint64_t)now.tv_nsec / 100ull + recomp_xapi_host_utc_skip();
 }
 
 static uint64_t wait_deadline(uint32_t timeout)

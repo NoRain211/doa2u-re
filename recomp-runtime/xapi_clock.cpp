@@ -36,6 +36,9 @@ std::atomic<bool> real_clock_used{false};
 /* Added to the counter-derived UTC while the frame clock runs, so the switch
    from the host's wall clock keeps the guest's date continuous. 100 ns units. */
 std::atomic<uint64_t> frame_clock_utc_offset{0};
+/* Added to the host's wall clock while the frame clock is off: how far the
+   frame clock's date had run past it when it stopped. 100 ns units. */
+std::atomic<uint64_t> host_utc_skip{0};
 
 unsigned long long host_thread_id(void)
 {
@@ -123,7 +126,8 @@ void recomp_xapi_frame_clock_set_enabled(bool enabled)
         recomp_xapi_frame_clock_reset();
         if (resume) {
             frame_clock_base.store(now > frame_ns ? now - frame_ns : 0u, std::memory_order_relaxed);
-            frame_clock_utc_offset.store(host_utc_100ns() - now / 100u, std::memory_order_relaxed);
+            frame_clock_utc_offset.store(host_utc_100ns() + host_utc_skip.load(std::memory_order_relaxed) - now / 100u,
+                std::memory_order_relaxed);
             real_clock_used.store(true, std::memory_order_relaxed);
         }
         frame_clock_enabled.store(true, std::memory_order_relaxed);
@@ -136,6 +140,10 @@ void recomp_xapi_frame_clock_set_enabled(bool enabled)
     const uint64_t real = real_counter();
     // Wraps when guest time ran behind, as recomp_xapi_hold_time relies on.
     skipped_ns.fetch_add(displayed - real, std::memory_order_relaxed);
+    // The date must not go back either.
+    const uint64_t frame_utc = displayed / 100u + frame_clock_utc_offset.load(std::memory_order_relaxed);
+    const uint64_t host_utc = host_utc_100ns() + host_utc_skip.load(std::memory_order_relaxed);
+    if (frame_utc > host_utc) host_utc_skip.fetch_add(frame_utc - host_utc, std::memory_order_relaxed);
     frame_clock_enabled.store(false, std::memory_order_relaxed);
     frame_clock_utc_offset.store(0u, std::memory_order_relaxed);
 }
@@ -145,6 +153,11 @@ void recomp_xapi_frame_clock_set_enabled(bool enabled)
 uint64_t recomp_xapi_frame_clock_utc_offset(void)
 {
     return frame_clock_utc_offset.load(std::memory_order_relaxed);
+}
+
+uint64_t recomp_xapi_host_utc_skip(void)
+{
+    return host_utc_skip.load(std::memory_order_relaxed);
 }
 
 void recomp_xapi_frame_clock_reset(void)

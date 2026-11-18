@@ -318,9 +318,9 @@ last eight and compares the other side's newest with its own for that frame.
 A mismatch logs the frame and both hashes, writes guest RAM to
 `RECOMP_ROLLBACK_DUMP` when that is set (as of the frame that found it, a
 few frames after the checked one), sends this side's hash again so the other
-side finds the desync too, and ends the rollback session. A Live fight hands
-it back to the game's own Live code (`rollback:desync`); a Loopback run
-stops. A side stalled on the other still compares. Every 20 matching checks
+side finds the desync too, and ends the rollback session, which hands the
+fight back to the game's own Live code (`rollback:desync`). Loopback runs
+make no desync checks. A side stalled on the other still compares. Every 20 matching checks
 the log says so, with the slowest check.
 
 A Live fight hashes only the fight: the match and fighter block, the battle
