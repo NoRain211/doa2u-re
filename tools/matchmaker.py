@@ -1302,7 +1302,8 @@ class Server(asyncio.DatagramProtocol):
 async def serve(address, port, relay_only, status_seconds, store=None):
     loop = asyncio.get_running_loop()
     matchmaker = Matchmaker(relay_only=relay_only, store=store)
-    await loop.create_datagram_endpoint(lambda: Server(matchmaker), local_addr=(address, port))
+    # IPv4 only: endpoint() packs 4-byte addresses, so an IPv6 --address fails here, not on every packet.
+    await loop.create_datagram_endpoint(lambda: Server(matchmaker), local_addr=(address, port), family=socket.AF_INET)
     print(f"matchmaker: UDP {address}:{port}{' relay only' if relay_only else ''}"
           f"{' storing ' + store if store else ''}", flush=True)
     try:

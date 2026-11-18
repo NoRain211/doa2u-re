@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import ast
+import asyncio
 import contextlib
 import hashlib
 import io
@@ -7,6 +8,7 @@ import json
 import os
 import stat
 import re
+import socket
 import struct
 import sys
 import tempfile
@@ -1443,6 +1445,13 @@ def c_strings(source, name):
     """The string literals of a C array named name, adjacent literals joined."""
     body = re.search(r"\b" + name + r"\[\]\s*=\s*\{(.*?)\};", source, re.S).group(1)
     return ast.literal_eval("[" + re.sub(r'"((?:[^"\\]|\\.)*)"', r'b"\1"', body) + "]")
+
+
+class ServeTest(unittest.TestCase):
+    def test_an_ipv6_address_is_refused_at_startup(self):
+        # A dual-stack socket would hand IPv4 clients over as ::ffff: senders that endpoint() cannot pack.
+        with self.assertRaises(socket.gaierror):
+            asyncio.run(asyncio.wait_for(mm.serve("::", 0, False, 0), 5))
 
 
 class NameCheckTest(unittest.TestCase):
