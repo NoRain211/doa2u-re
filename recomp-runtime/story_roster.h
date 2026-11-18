@@ -8,7 +8,8 @@
 extern "C" {
 #endif
 
-/* Story mode's random opponents include Hitomi (story_roster.c). */
+/* Story mode's random opponents include Hitomi and Bayman once unlocked
+   (story_roster.c). */
 RecompFunction recomp_story_roster_lookup_manual(uint32_t guest_address);
 
 #ifdef __cplusplus
