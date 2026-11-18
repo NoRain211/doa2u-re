@@ -36,6 +36,11 @@ void recomp_d3d8_reset_keeping_window(void);
 void recomp_d3d8_set_present_suppressed(bool suppressed);
 /* Repeated run-ahead frames also skip draws, clears, copies and visibility tests. */
 void recomp_d3d8_set_gpu_work_suppressed(bool suppressed);
+/* A save waits for the GPU to finish a pending visibility test, so a replay
+   reads the count the first pass read; SyncTest and loopback compare it. A
+   netplay session turns the wait off: its desync checks read the counts as
+   zero, since each player's GPU reports its own. */
+void recomp_d3d8_set_save_waits_for_visibility(bool waits);
 /* Clears the main target, draws a BGRA card at level (0 black..255 full)
    and presents it. Call from recomp_d3d_present_hook, between guest frames. */
 void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t height,

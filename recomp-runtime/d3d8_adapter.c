@@ -55,6 +55,13 @@ void recomp_d3d8_set_gpu_work_suppressed(bool suppressed)
 {
     gpu_work_suppressed = suppressed;
 }
+
+static bool save_waits_for_visibility = true;
+
+void recomp_d3d8_set_save_waits_for_visibility(bool waits)
+{
+    save_waits_for_visibility = waits;
+}
 void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);
 /* Counts host draws for the first-draw log only. It stays out of the saved
    state: the F3 readout draws on shown frames alone, so SyncTest's replayed
@@ -148,8 +155,10 @@ static bool visibility_capture_pending(void)
 void recomp_d3d8_state_save(void *state)
 {
     /* A repeated run-ahead frame drops its query, so a pending result belongs to
-       the shown frame; polling resolves it later, without stalling on the GPU. */
-    if (!gpu_work_suppressed && visibility_capture_pending()) {
+       the shown frame; polling resolves it later, without stalling on the GPU.
+       A netplay session's saves leave it to the polls as well: the wait held a
+       save 2 to 3 ms for the frame's GPU work. */
+    if (!gpu_work_suppressed && visibility_capture_pending() && save_waits_for_visibility) {
         flush(true);
         (void)visibility_capture_pending();
     }

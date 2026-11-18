@@ -1704,6 +1704,9 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     if (!points && !quads && !line_strip && primitive != 2u && (primitive < 5u || primitive > 7u))
         recomp_stop(2, "d3d8:draw-primitive:%u", primitive);
     if (triangles == 0u) return;
+    /* A hidden frame drops every draw once the back buffer flags are clear,
+       whatever the target, so it need not resolve one. */
+    if (recomp_d3d8_draw_skippable(false)) { ++draw_submitted; return; }
     RecompD3dPresenterCommand command = {0};
     RecompD3dPresenterDrawCommand *draw = &command.data.draw;
     draw->fvf = *recomp_memory_u32(device + 0x798u);

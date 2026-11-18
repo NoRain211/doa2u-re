@@ -107,6 +107,7 @@ struct RollbackRun {
     std::chrono::steady_clock::time_point rerunFrom{};
     std::uint32_t rerunDepth = 0u, rerunFrames = 0u;
     double rerunMs = 0.0;
+    double rerunTotalMs = 0.0, saveMs = 0.0, loadMs = 0.0; // the session's totals for the summary
     // The last frontier wait: how late this side first saw its frame due, and how long it then lacked pads.
     double lateMs = 0.0, blockedMs = 0.0;
 };
@@ -401,9 +402,10 @@ static void finishRollback()
     closeReplay();
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - rollback.started).count();
-    std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks "
-        "(%u frames run again, %u waited, %u saves) in %.1f s\n",
-        rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, rollback.saves, seconds);
+    std::fprintf(stderr, "recomp rollback: frame %u reached after %u rollbacks loading %.0f ms "
+        "(%u frames run again in %.0f ms, %u waited, %u saves in %.0f ms) in %.1f s\n",
+        rollback.session.frame, rollback.rollbacks, rollback.loadMs, rollback.replayed, rollback.rerunTotalMs,
+        rollback.waited, rollback.saves, rollback.saveMs, seconds);
     writeDump();
     if (rollback.mode == RollbackMode::Udp) {
         // shortcut: the peer may still need our acknowledgement; repeat it briefly instead of a close handshake.
@@ -568,7 +570,10 @@ static bool saveFrame()
     const RecompRollbackSession &s = rollback.session;
     if (s.frame < s.remote_count && !isCheckFrame(s.frame)) return true;
     ++rollback.saves;
-    return recomp_rollback_ring_save(s.frame);
+    const auto began = std::chrono::steady_clock::now();
+    const bool saved = recomp_rollback_ring_save(s.frame);
+    rollback.saveMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    return saved;
 }
 
 // Only from the newest frame once its rewinds are done, so the hash already ran with every confirmed pad.
@@ -673,8 +678,11 @@ static void onRollbackFrame(std::uint32_t swap)
             rollback.paced = s.frame;
         }
         const auto entered = std::chrono::steady_clock::now();
+        if (rollback.rerunFrom != std::chrono::steady_clock::time_point{})
+            rollback.rerunTotalMs += std::chrono::duration<double, std::milli>(entered - rollback.rerunFrom).count();
         const std::uint32_t target = awaitFrontier(s.frame == rollback.stop);
         if (rollback.mode == RollbackMode::Udp) measureHitch(entered);
+        else rollback.rerunFrom = {};
         if (target != RECOMP_ROLLBACK_NONE) {
             rollback.rerunFrom = std::chrono::steady_clock::now();
             rollback.rerunDepth = rollback.frontier - target;
@@ -683,6 +691,8 @@ static void onRollbackFrame(std::uint32_t swap)
             // shortcut: a save that cannot be rewound ends the run; netplay must drop to lockstep before the game saves.
             if (!recomp_rollback_ring_load(target) || recomp_kernel_file_state_lost())
                 endSession("rollback:unrestorable");
+            rollback.loadMs += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - rollback.rerunFrom).count();
             ++rollback.rollbacks;
             rollback.replayed += rollback.frontier - target;
             const auto now = std::chrono::steady_clock::now();
@@ -1056,6 +1066,8 @@ void recomp_netplay_session_install(bool synctest)
     recomp_d3d8_set_present_suppressed(rollback.landOnVersus);
     recomp_dsound_buffer_set_output_suppressed(rollback.landOnVersus || backToVersus);
     recomp_dsound_buffer_set_frame_clock(enabled || synctest);
+    // Loopback compares whole guest RAM dumps, flare counts included; a session's checks skip them.
+    recomp_d3d8_set_save_waits_for_visibility(rollback.mode != RollbackMode::Udp);
     if (rollback.lobby) {
         const std::filesystem::path storage = host.disc / ".recomp-storage";
         if (rollback.mode == RollbackMode::Udp) {
