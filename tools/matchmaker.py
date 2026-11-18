@@ -1178,15 +1178,22 @@ class Matchmaker:
                 return loaded
             return loaded - max(0.0, wall - when)
 
+        def xuids(*values):
+            """XUIDs as ints, refusing one an answer could not carry (struct.error, a BAD_ENTRY)."""
+            values = tuple(int(value) for value in values)
+            struct.pack(f">{len(values)}Q", *values)
+            return values
+
         def pair(entry):
             if len(entry) != 2:
                 raise ValueError("not a pair")
-            return int(entry[0]), int(entry[1])
+            return xuids(entry[0], entry[1])
 
         for entry in entries("accounts"):
             try:
-                account = Account(int(entry["xuid"]), bytes.fromhex(entry["proof"])[:32],
+                account = Account(xuids(entry["xuid"])[0], bytes.fromhex(entry["proof"])[:32],
                                    printable(entry["gamertag"].encode("utf-8")) or b"PLAYER", int(entry["title"]))
+                struct.pack(">I", account.title)  # a FRIEND row carries it
                 account.seen = heard(entry.get("seen", loaded))
             except BAD_ENTRY:
                 skipped += 1
@@ -1205,7 +1212,7 @@ class Matchmaker:
             self.add_friend(first, second)
         for entry in entries("requests"):
             try:
-                source, target = int(entry[0]), int(entry[1])
+                source, target = xuids(entry[0], entry[1])
                 when = heard(entry[2]) if len(entry) > 2 else loaded
             except BAD_ENTRY:
                 skipped += 1
@@ -1215,7 +1222,7 @@ class Matchmaker:
             try:
                 invite = Invite(bytes.fromhex(entry["kid"]), entry["answer"],
                                 heard(entry["seen"]) if "seen" in entry else loaded)
-                from_xuid, to_xuid = int(entry["from"]), int(entry["to"])
+                from_xuid, to_xuid = xuids(entry["from"], entry["to"])
             except BAD_ENTRY:
                 skipped += 1
                 continue
