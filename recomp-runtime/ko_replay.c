@@ -351,8 +351,14 @@ static void what_follows(void)
 
 void recomp_ko_replay_install(bool online)
 {
-    state.online = online;
+    recomp_ko_replay_set_online(online);
     state.pending = state.nested = state.replayed = false;
+}
+
+void recomp_ko_replay_set_online(bool online)
+{
+    state.online = online;
+    if (online) state.pending = state.replayed = false;
 }
 
 void recomp_ko_replay_set_enabled(bool enabled)
@@ -363,7 +369,8 @@ void recomp_ko_replay_set_enabled(bool enabled)
 
 RecompFunction recomp_ko_replay_lookup_manual(uint32_t guest_address)
 {
-    if (state.online) return NULL;
+    /* Routed whenever it may be wanted, so a cached lookup still sees a later
+       switch; the hooks check the online state themselves. */
     switch (guest_address) {
     case PASS_STEP: return pass_step;
     case ROUND_END: return round_end;

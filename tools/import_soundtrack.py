@@ -472,13 +472,16 @@ LEVEL_DB = -17.0
 
 
 def swap_levelled(folder, scratch, track):
-    """Puts a levelled scratch file in its track's place. One that cannot be (the track is open
-    elsewhere, say) keeps its scratch file for the next import to swap in, and the rest go on."""
+    """Puts a levelled scratch file in its track's place. One that cannot be keeps its scratch file
+    for the next import to try again, and the rest go on. The scratch file sits beside its track,
+    so this fails only on the folder or the track: open elsewhere (gone next time) or read-only
+    (said again on every import until it is fixed)."""
     try:
         os.replace(scratch, track)
     except OSError as error:
-        print(f"{os.path.basename(folder)}: {os.path.basename(track)} could not be swapped in ({error}); "
-              "its levelled file is kept and the next import finishes it.")
+        print(f"warning: {os.path.basename(folder)}: {os.path.basename(track)} is still unlevelled: the "
+              f"levelled copy could not replace it ({error}). {os.path.basename(scratch)} stays beside it, "
+              "and every import tries the swap again until it works.")
 
 
 def level_album(folder, encoder):

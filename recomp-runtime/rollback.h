@@ -36,7 +36,8 @@ typedef struct RecompRollbackSession {
 /* Both sides must use the same input delay; its first frames are neutral.
    The window starts at RECOMP_ROLLBACK_WINDOW. */
 void recomp_rollback_init(RecompRollbackSession *session, uint32_t input_delay);
-/* False when the pad is too far ahead of the frame being run. */
+/* False when the pad is too far ahead of the frame being run. Values the
+   game reads as zero are stored as zero. */
 bool recomp_rollback_add_local(RecompRollbackSession *session, const RecompInputGamepad *pad);
 bool recomp_rollback_add_remote(RecompRollbackSession *session, const RecompInputGamepad *pad);
 bool recomp_rollback_can_run(const RecompRollbackSession *session);

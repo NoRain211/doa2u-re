@@ -426,6 +426,12 @@ RecompD3dPresenterError recomp_d3d_presenter_release_memory(
     auto &thread = *active_thread;
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
+    // Standing texture bytes live in every packet, and the worker may still be
+    // reading two of them; none may hand out bytes this range just released.
+    // addRelease drops the open packet, the only one this scan can skip.
+    for (size_t i = 0u; i < 3u; ++i) {
+        if (i != thread.open) thread.packets[i].dropResident(base, size);
+    }
     return thread.packets[thread.open].addRelease(base, size);
 }
 
@@ -437,6 +443,10 @@ RecompD3dPresenterError recomp_d3d_presenter_invalidate_textures(
     auto &thread = *active_thread;
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
+    // addInvalidate drops the open packet, so only the other two need this scan.
+    for (size_t i = 0u; i < 3u; ++i) {
+        if (i != thread.open) thread.packets[i].dropResident(base, size);
+    }
     return thread.packets[thread.open].addInvalidate(base, size);
 }
 

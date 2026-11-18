@@ -23,7 +23,9 @@ class PrerequisiteTests(unittest.TestCase):
         self.download = self.enterContext(mock.patch.object(
             prerequisites.urllib.request, "urlopen", side_effect=AssertionError("Unexpected download")))
         self.enterContext(mock.patch("builtins.print"))
-        self.enterContext(mock.patch.dict(os.environ, PATH="system-tools"))
+        # Absolute, as find_on_path only searches absolute PATH entries.
+        self.system_tools = str(self.root / "system-tools")
+        self.enterContext(mock.patch.dict(os.environ, PATH=self.system_tools))
 
     def llvm_mingw_zip(self):
         data = io.BytesIO()
@@ -40,7 +42,7 @@ class PrerequisiteTests(unittest.TestCase):
         self.assertEqual(clang.read_bytes(), b"clang")
         self.assertEqual(list((self.root / "private").iterdir()), [])
         self.download.assert_called_once_with(prerequisites.LLVM_MINGW_URL, timeout=60)
-        self.assertEqual(os.environ["PATH"], os.pathsep.join([str(clang.parent), "system-tools"]))
+        self.assertEqual(os.environ["PATH"], os.pathsep.join([str(clang.parent), self.system_tools]))
 
     def test_path_toolchain_with_make_is_used_without_download(self):
         bin_dir = self.root / "winget/bin"

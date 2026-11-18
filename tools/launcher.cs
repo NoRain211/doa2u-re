@@ -289,7 +289,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
-    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay; bool hitVoices; // chosen in the game's PC Settings; kept as saved
+    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay; bool hitVoices, comboHud; // chosen in the game's PC Settings; kept as saved
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
@@ -364,6 +364,7 @@ class LauncherForm : Form
         lifeBarColour = Game.Str(settings, "lifeBarColour", "default");
         lifeBarCustom = Game.Str(settings, "lifeBarCustom", "FFFFFF");
         hitVoices = Game.Bool(settings, "hitVoices", true);
+        comboHud = Game.Bool(settings, "comboHud", true);
         hitVoiceVolume = Game.Str(settings, "hitVoiceVolume", "normal");
         voiceSetting = new Row { Label = "Hit Voices", Info = "Imported DOA4 hit grunts and KO voices; offline only",
             Names = new[] { "Off", "Quiet", "Normal", "Loud" }, Default = 2,
@@ -492,7 +493,7 @@ class LauncherForm : Form
             { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
-            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
+            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "comboHud", comboHud }, { "hitVoices", voiceSetting.Index != 0 },
             { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay } };
     }
 

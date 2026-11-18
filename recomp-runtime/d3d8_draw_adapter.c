@@ -1704,11 +1704,16 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     if (!points && !quads && !line_strip && primitive != 2u && (primitive < 5u || primitive > 7u))
         recomp_stop(2, "d3d8:draw-primitive:%u", primitive);
     if (triangles == 0u) return;
+    /* A hidden frame drops every draw once the back buffer flags are clear,
+       whatever the target, so it need not resolve one. */
+    if (recomp_d3d8_draw_skippable(false)) { ++draw_submitted; return; }
     RecompD3dPresenterCommand command = {0};
     RecompD3dPresenterDrawCommand *draw = &command.data.draw;
     draw->fvf = *recomp_memory_u32(device + 0x798u);
     const bool program = (draw->fvf & 1u) != 0u;
     recomp_d3d8_target(&draw->target);
+    /* Counted like a built draw, so the scene freeze still sees the task draw. */
+    if (recomp_d3d8_draw_skippable(draw->target.offscreen)) { ++draw_submitted; return; }
     if (program) attach_program(device, draw);
     RecompD3dVertexLayout layout;
     /* The distortion pass's STR coordinate sets (TEXCOORDSIZE3 for sets 1-2). */
@@ -1857,8 +1862,6 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
             (int32_t)(viewport.x + viewport.width), (int32_t)(viewport.y + viewport.height)};
         memcpy(draw->scissor, clip, sizeof clip);
     }
-    if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
-    else recomp_d3d8_fit_3d_viewport(draw);
     const RecompD3dRenderStateModel *state = recomp_d3d8_state_model();
     const bool native_line = primitive == 2u && !program && draw->fvf == 0x42u &&
         *recomp_memory_u32(device + 0xf88u) == 0u && *recomp_memory_u32(0x3553f8u) == 0u;
@@ -1878,6 +1881,9 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
         state->cull_mode == 0x901u ? RECOMP_D3D_CULL_COUNTER_CLOCKWISE : RECOMP_D3D_CULL_NONE;
     draw->texture_factor = state->texture_factor;
     attach_texture(device, 0u, draw);
+    /* After the texture: a 2D draw of a render target is a screen effect (fit_2d_layer). */
+    if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
+    else recomp_d3d8_fit_3d_viewport(draw);
     if (draw->texture.volume_depth != 0u &&
         (program || points || draw->fvf != 0x142u ||
          *recomp_memory_u32(device + PIXEL_HANDLE) != 0u ||
