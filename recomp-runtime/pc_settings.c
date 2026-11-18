@@ -113,8 +113,8 @@ static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_COMBO_HUD] = true,
     [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
 };
-static bool live[PC_ROWS];
-enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELPS = 4 };
+static bool live[PC_ROWS], after_online[PC_ROWS];
+enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELP_LEAVE = 4, HELPS = 5 };
 _Static_assert(PER_VIEW * VIEWS == PC_ROWS, "every setting is on one view");
 
 typedef struct Language {
@@ -145,7 +145,8 @@ static const Language LANGUAGES[5] = {
        u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Off", u"On"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
      {u"Graphics, audio and gameplay settings for this PC.", u"Takes effect immediately.",
       u"Takes effect the next time the game starts.",
-      u"Left or right shows another page of settings."},
+      u"Left or right shows another page of settings.",
+      u"Takes effect when you leave DOA ONLINE."},
      u"Page"},
     {u"PARAM\u00c8TRES PC",
      {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Sortie audio",
@@ -158,7 +159,8 @@ static const Language LANGUAGES[5] = {
        u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Non", u"Oui"}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
      {u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
       u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu.",
-      u"Gauche ou droite affiche une autre page de param\u00e8tres."},
+      u"Gauche ou droite affiche une autre page de param\u00e8tres.",
+      u"Pris en compte en quittant DOA ONLINE."},
      u"Page"},
     {u"PC-EINSTELLUNGEN",
      {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Audioausgabe",
@@ -171,7 +173,8 @@ static const Language LANGUAGES[5] = {
        u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Aus", u"Ein"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
      {u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
       u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart.",
-      u"Links oder rechts zeigt eine andere Einstellungsseite."},
+      u"Links oder rechts zeigt eine andere Einstellungsseite.",
+      u"Wirkt beim Verlassen von DOA ONLINE."},
      u"Seite"},
     {u"IMPOSTAZIONI PC",
      {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Uscita audio",
@@ -184,7 +187,8 @@ static const Language LANGUAGES[5] = {
        u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"No", u"S\u00ec"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
      {u"Impostazioni grafiche, audio e di gioco di questo PC.", u"Effettivo immediatamente.",
       u"Effettivo al prossimo avvio del gioco.",
-      u"Sinistra o destra mostra un'altra pagina di impostazioni."},
+      u"Sinistra o destra mostra un'altra pagina di impostazioni.",
+      u"Effettivo all'uscita da DOA ONLINE."},
      u"Pagina"},
     {u"CONFIG. PC",
      {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Salida de audio",
@@ -197,7 +201,8 @@ static const Language LANGUAGES[5] = {
        u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"No", u"S\u00ed"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
      {u"Opciones de gr\u00e1ficos, audio y juego de este PC.", u"Se aplica de inmediato.",
       u"Se aplica la pr\u00f3xima vez que inicies el juego.",
-      u"Izquierda o derecha muestra otra p\u00e1gina de opciones."},
+      u"Izquierda o derecha muestra otra p\u00e1gina de opciones.",
+      u"Se aplica al salir de DOA ONLINE."},
      u"P\u00e1gina"},
 };
 
@@ -263,6 +268,7 @@ static uint32_t text_for(unsigned message)
 unsigned recomp_pc_settings_choices(unsigned setting) { return setting < PC_ROWS ? CHOICES[setting] : 0u; }
 bool recomp_pc_settings_applies_now(unsigned setting) { return setting < PC_ROWS && live[setting]; }
 void recomp_pc_settings_set_live(unsigned setting, bool on) { if (setting < PC_ROWS) live[setting] = on; }
+void recomp_pc_settings_set_after_online(unsigned setting, bool on) { if (setting < PC_ROWS) after_online[setting] = on; }
 uint8_t recomp_pc_settings_choice(unsigned setting)
 {
     return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;
@@ -702,7 +708,8 @@ static void help(void)
         args[1] = 0u;
         const int setting = setting_at(row);
         message = RECOMP_RUNNER_TEXT_PC + MSG_HELP +
-            (row == 0u ? HELP_PAGE : setting >= 0 && live[setting] ? HELP_NOW : HELP_NEXT);
+            (row == 0u ? HELP_PAGE : setting < 0 ? HELP_NEXT : live[setting] ? HELP_NOW :
+             after_online[setting] ? HELP_LEAVE : HELP_NEXT);
     } else {
         message = recomp_button_config_help(page, row, args);
     }

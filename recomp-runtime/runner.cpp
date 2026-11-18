@@ -406,9 +406,12 @@ static void setOnlineMode(bool online)
     recomp_free_camera_set_online(online);
     recomp_cpu_costume_set_online(online);
     recomp_ko_replay_set_online(online);
-    // Those two rows show the next-start help while online; offline they apply.
-    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA})
+    // Online, those two rows apply when Live leaves DOA ONLINE, or at the next start
+    // for a run that stays online; offline they apply at once.
+    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA}) {
         recomp_pc_settings_set_live(setting, !online);
+        recomp_pc_settings_set_after_online(setting, online && liveSwitchable);
+    }
 }
 
 static void applyOnlineSwitch()
