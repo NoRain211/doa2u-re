@@ -256,12 +256,14 @@ class ImportFailureTests(unittest.TestCase):
         doa4.assert_not_called()
 
     def test_an_ffmpeg_that_fails_its_probe_is_reported_before_the_import(self):
-        broken = subprocess.CalledProcessError(1, ["ffmpeg", "-hide_banner", "-decoders"])
-        with mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso", "--ffmpeg", "ffmpeg"]),                 mock.patch.object(soundtrack, "open_source", return_value=mock.Mock()),                 mock.patch.object(soundtrack, "detect", return_value="doa4"),                 mock.patch.object(soundtrack.subprocess, "run", side_effect=broken),                 mock.patch.object(soundtrack, "import_doa4") as doa4:
-            with self.assertRaises(SystemExit) as caught:
-                soundtrack.main()
-        self.assertIn("could not list its decoders", str(caught.exception))
-        doa4.assert_not_called()
+        for broken, message in ((subprocess.CalledProcessError(1, ["ffmpeg"]), "could not list its decoders"),
+                                (PermissionError(13, "Permission denied"), "could not be run"),
+                                (OSError(8, "Exec format error"), "could not be run")):
+            with self.subTest(broken=type(broken).__name__),                     mock.patch.object(soundtrack.sys, "argv", ["import_soundtrack.py", "disc.iso", "--ffmpeg", "ffmpeg"]),                     mock.patch.object(soundtrack, "open_source", return_value=mock.Mock()),                     mock.patch.object(soundtrack, "detect", return_value="doa4"),                     mock.patch.object(soundtrack.subprocess, "run", side_effect=broken),                     mock.patch.object(soundtrack, "import_doa4") as doa4:
+                with self.assertRaises(SystemExit) as caught:
+                    soundtrack.main()
+                self.assertIn(message, str(caught.exception))
+                doa4.assert_not_called()
 
     def test_missing_encoder_when_levelling_reports_its_path(self):
         with tempfile.TemporaryDirectory() as out:

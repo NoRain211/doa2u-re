@@ -607,6 +607,10 @@ def resolve_ffmpeg(given=None):
                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     except subprocess.CalledProcessError as error:  # a broken ffmpeg is reported, not a traceback
         raise ValueError(f"{tool} could not list its decoders (exit {error.returncode})") from error
+    except FileNotFoundError:
+        raise  # main names the missing ffmpeg itself
+    except OSError as error:  # not executable, or not a program for this machine
+        raise ValueError(f"{tool} could not be run: {error.strerror or error}") from error
     if not re.search(r"\bxma1\b", check.stdout):
         raise ValueError("FFmpeg lacks the XMA decoder required by DOA4")
     return tool
