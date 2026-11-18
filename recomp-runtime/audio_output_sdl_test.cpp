@@ -180,6 +180,8 @@ int main()
     std::fseek(mono_wav, 22, SEEK_SET);
     CHECK(std::fread(&capture_channels, sizeof capture_channels, 1, mono_wav) == 1);
     CHECK(capture_channels >= 2 && capture_channels <= 8);
+    // On a stereo master the loop below has no other speaker to look at.
+    if (capture_channels != 6) std::puts("SKIP mono routing past the fronts: the host gave no 5.1 master");
     std::fseek(mono_wav, 44, SEEK_SET);
     float speaker[8];
     int fronts = 0;
