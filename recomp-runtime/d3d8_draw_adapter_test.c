@@ -26,6 +26,14 @@ static RecompD3dRenderStateModel state;
 static RecompD3dPresenterCommand submitted;
 static uint16_t captured_indices[131070];
 static float captured_vertices[64];
+/* The first pieces of each submission: submit_pieces sends a screen-space
+   triangle list piece by piece with only its own index and vertex range. */
+typedef struct CapturedPiece {
+    uint32_t index_count, vertex_count, vertex_offset;
+    uint16_t indices[16];
+} CapturedPiece;
+static CapturedPiece pieces[16];
+static uint32_t piece_count;
 static uint32_t allocated = 0x360000u, freed, submits;
 static bool fail_allocation;
 static bool covered = true;
@@ -35,7 +43,8 @@ static char stop_reason[128];
 static RecompD3dTextureDesc texture;
 static bool inline_texture_active;
 static RecompD3dPresenterTarget target;
-void recomp_d3d8_target(RecompD3dPresenterTarget *out) { *out = target; }
+static uint32_t target_reads;
+void recomp_d3d8_target(RecompD3dPresenterTarget *out) { ++target_reads; *out = target; }
 
 void recomp_stop(int code, const char *format, ...)
 {
@@ -74,6 +83,9 @@ void recomp_kernel_free_pool(uint32_t address) { freed = address; }
 uint32_t recomp_d3d8_require_device(void) { return DEVICE; }
 static bool overlay_hidden;
 bool recomp_scene_freeze_overlay_hidden(void) { return overlay_hidden; }
+/* skippable: a hidden frame; back_buffer_kept: its back buffer flags are still set. */
+static bool skippable, back_buffer_kept;
+bool recomp_d3d8_draw_skippable(bool offscreen) { return skippable && (offscreen || !back_buffer_kept); }
 const RecompD3dRenderStateModel *recomp_d3d8_state_model(void) { return &state; }
 bool recomp_d3d8_state_set_simple(uint32_t method, uint32_t value)
 {
@@ -107,6 +119,17 @@ void recomp_d3d8_submit(const RecompD3dPresenterCommand *command)
     const size_t vertex_bytes = (size_t)command->data.draw.vertex_stride * command->data.draw.vertex_count;
     memcpy(captured_vertices, command->data.draw.vertex_bytes,
         vertex_bytes < sizeof captured_vertices ? vertex_bytes : sizeof captured_vertices);
+    if (piece_count < sizeof pieces / sizeof pieces[0]) {
+        CapturedPiece *piece = &pieces[piece_count];
+        const uintptr_t base = (uintptr_t)command->data.draw.vertex_bytes;
+        piece->index_count = command->data.draw.index_count;
+        piece->vertex_count = command->data.draw.vertex_count;
+        piece->vertex_offset = base >= (uintptr_t)ram && base < (uintptr_t)ram + sizeof ram
+            ? (uint32_t)(base - (uintptr_t)ram) : UINT32_MAX;
+        const uint32_t indices = piece->index_count < 16u ? piece->index_count : 16u;
+        memcpy(piece->indices, command->data.draw.index_bytes, indices * 2u);
+    }
+    ++piece_count;
     ++submits;
 }
 
@@ -128,6 +151,7 @@ static void initialize(void)
     recomp_d3d_render_state_reset(&state);
     inline_texture_active = false;
     submits = 0u;
+    piece_count = 0u;
     *recomp_memory_u32(DEVICE + 0x798u) = 0x144u;
     *recomp_memory_u32(DEVICE + 0x1a04u) = DEVICE + 0x1a24u;
     *recomp_memory_u32(DEVICE + 0x1a08u) = DEVICE + 0x1a6cu;
@@ -296,12 +320,33 @@ static int draw_tests(void)
     CHECK(submitted.data.draw.has_texture && submitted.data.draw.texture_bytes == ram + 0x8000u);
     CHECK(submitted.data.draw.texture_byte_count == 64u);
     CHECK(submitted.data.draw.address_u == 1u && submitted.data.draw.address_v == 1u);
+    /* Level 0 alone still runs past the end of RAM: stop before reading it. */
+    texture.data = RECOMP_XBOX_RAM_SIZE - 32u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 28u); return 1; }
+    CHECK(strcmp(stop_reason, "d3d8:draw-texture-span") == 0);
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected stop: %s\n", stop_reason); return 1; }
+    texture.data = 0x8000u;
     texture.mip_levels = 3u;
     *recomp_memory_u32(STAGES + 20u) = 1u;
     *recomp_memory_u32(STAGES + 24u) = 0xc0000000u;
     invoke(0x348240u, 5u, 3u, VERTICES, 28u);
     /* -2.0 * 256 + 0.5 truncates toward zero to -511. */
     CHECK(submitted.data.draw.point_mip_filter && submitted.data.draw.mip_lod_bias == -511.0f / 256.0f);
+    /* D3DTEXF_POINT (1) reaches the presenter per axis; LINEAR (2) leaves it clear. */
+    *recomp_memory_u32(STAGES + 12u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(submitted.data.draw.point_min_filter && !submitted.data.draw.point_mag_filter);
+    *recomp_memory_u32(STAGES + 16u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(submitted.data.draw.point_min_filter && submitted.data.draw.point_mag_filter);
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 2u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(!submitted.data.draw.point_min_filter && !submitted.data.draw.point_mag_filter);
+    /* Anisotropic (3) stays outside this path. */
+    *recomp_memory_u32(STAGES + 12u) = 3u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 28u); return 1; }
+    CHECK(strncmp(stop_reason, "d3d8:draw-texture-sampler:", 26) == 0);
+    *recomp_memory_u32(STAGES + 12u) = 2u;
     CHECK(!submitted.data.draw.alpha_kill);
     *recomp_memory_u32(STAGES + 44u) = 4u;
     invoke(0x348240u, 5u, 3u, VERTICES, 28u);
@@ -362,6 +407,21 @@ static int draw_tests(void)
     invoke(0x348240u, 2u, 2u, VERTICES, 20u);
     overlay_hidden = false;
     CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 1u);
+    /* A skippable run-ahead draw is counted but not built or submitted. */
+    skippable = true;
+    const uint32_t reads = target_reads;
+    invoke(0x348240u, 2u, 2u, VERTICES, 20u);
+    CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 2u);
+    /* With the back buffer flags clear it drops the draw before reading the target. */
+    CHECK(target_reads == reads);
+    /* Until then an offscreen draw is dropped once its target is known. */
+    back_buffer_kept = true;
+    target.offscreen = true;
+    invoke(0x348240u, 2u, 2u, VERTICES, 20u);
+    target.offscreen = false;
+    back_buffer_kept = false;
+    skippable = false;
+    CHECK(submits == quads + 4u && recomp_d3d8_draw_submitted() == counted + 3u && target_reads == reads + 1u);
     /* Width 2 widens an x-major line by one pixel above and below. */
     const float line[10] = {10.0f, 20.0f, 0.0f, 1.0f, 0.0f, 50.0f, 24.0f, 0.0f, 1.0f, 0.0f};
     const float wide = 2.0f;
@@ -804,6 +864,12 @@ static int lighting_tests(void)
         projected->projected_transforms[0][12] == 0.5f && projected->projected_transforms[0][14] == 2.0f);
     CHECK(projected->material_alpha_mode == RECOMP_D3D_MATERIAL_ALPHA_SELECT_DIFFUSE &&
         projected->material_alpha == 0.25f);
+    /* A point stage 0 keeps its sampler; the linear stage 1 on the same texture gets its own slot. */
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 24u);
+    CHECK(projected->point_min_filter && projected->point_mag_filter &&
+        projected->projected_slots[0] == 1 && projected->reflection_texture.data == projected->texture.data);
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 2u;
     /* An unbound stage-1 texture passes CURRENT through. */
     *recomp_memory_u32(DEVICE + 0xf8cu) = 0u;
     invoke(0x348240u, 5u, 3u, VERTICES, 24u);
@@ -1836,7 +1902,7 @@ static int volume_tests(void)
     set_stage(0u, 28u, 0u);
     texture.data = RECOMP_XBOX_RAM_SIZE - 64u * 64u * 4u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
-    CHECK(strcmp(stop_reason, "test:guest-span") == 0);
+    CHECK(strcmp(stop_reason, "d3d8:draw-texture-span") == 0);
     texture.data = 0x8000u;
     *recomp_memory_u32(STAGES + 8u) = 4u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 24u); return 1; }
@@ -2028,13 +2094,52 @@ static int depth_bias_tests(void)
     return 0;
 }
 
+static int split_tests(void)
+{
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected split stop: %s\n", stop_reason); return 1; }
+    initialize();
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x144u;
+    *recomp_memory_u32(DEVICE + 0xf88u) = 0x7000u;
+    /* Two quads of a sheet, each two triangles sharing its four vertices. */
+    const uint16_t glyphs[12] = {0u, 1u, 2u, 0u, 2u, 3u, 4u, 5u, 6u, 4u, 6u, 7u};
+    recomp_guest_store(INDICES, glyphs, sizeof glyphs);
+    invoke(0x348450u, 5u, 12u, INDICES, 0u);
+    CHECK(piece_count == 2u && submits == 2u);
+    CHECK(pieces[0].index_count == 6u && pieces[0].vertex_count == 4u &&
+        pieces[0].vertex_offset == VERTICES);
+    CHECK(pieces[0].indices[0] == 0u && pieces[0].indices[1] == 1u && pieces[0].indices[2] == 2u);
+    CHECK(pieces[1].index_count == 6u && pieces[1].vertex_count == 4u &&
+        pieces[1].vertex_offset == VERTICES + 4u * 28u);
+    CHECK(pieces[1].indices[0] == 0u && pieces[1].indices[1] == 1u && pieces[1].indices[5] == 3u);
+    CHECK(memcmp(ram + INDICES, glyphs, sizeof glyphs) == 0);
+    /* A non-indexed list carries identity indices, so each triangle is its own
+       piece and uploads only its three vertices instead of the whole list. */
+    const uint32_t before = piece_count;
+    invoke(0x348240u, 5u, 6u, VERTICES, 28u);
+    CHECK(piece_count == before + 2u && submits == 4u);
+    CHECK(pieces[before].index_count == 3u && pieces[before].vertex_count == 3u &&
+        pieces[before].vertex_offset == VERTICES);
+    CHECK(pieces[before + 1u].index_count == 3u && pieces[before + 1u].vertex_count == 3u &&
+        pieces[before + 1u].vertex_offset == VERTICES + 3u * 28u);
+    CHECK(pieces[before + 1u].indices[0] == 0u && pieces[before + 1u].indices[2] == 2u);
+    /* A single triangle, an untextured list and a 3D list stay one draw. */
+    const uint32_t single = piece_count;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(piece_count == single + 1u && pieces[single].vertex_count == 3u);
+    *recomp_memory_u32(DEVICE + 0xf88u) = 0u;
+    invoke(0x348240u, 5u, 6u, VERTICES, 28u);
+    CHECK(piece_count == single + 2u && pieces[single + 1u].vertex_count == 6u);
+    return 0;
+}
+
 int main(void)
 {
     initialize();
     if (pixel_tests() || draw_tests() || line_tests() || quad_tests() || point_tests() || lighting_tests() || filter_tests() || bright_tests() ||
         distortion_tests() || factor_tests() || position_texgen_tests() || effect_tests() ||
         stage1_transform_tests() || program_tests() || bump_tests() ||
-        volume_tests() || reflection_inverse_tests() || reflection_coverage_tests() || frame_buffer_tests() || depth_bias_tests()) return 1;
+        volume_tests() || reflection_inverse_tests() || reflection_coverage_tests() || frame_buffer_tests() || depth_bias_tests() ||
+        split_tests()) return 1;
     puts("PASS D3D8 pixel lifecycle/constants and semantic draw ABI/snapshots");
     return 0;
 }

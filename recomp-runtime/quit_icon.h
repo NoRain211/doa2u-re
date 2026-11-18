@@ -15,6 +15,9 @@ enum { QUIT_ICON_SIZE = 128 };
    widescreen pictures, 1 for the others). */
 void recomp_quit_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
     uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE]);
+/* The same for the Jukebox's picture: a record and a quaver. */
+void recomp_jukebox_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
+    uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE]);
 
 #ifdef __cplusplus
 }

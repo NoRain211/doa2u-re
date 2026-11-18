@@ -12,6 +12,8 @@ D3D8 5849 device, frame and state APIs to the shared semantic presenter.
 DirectSound 5849 owns native device/buffer lifetime and PCM output.
 Effects-image download owns decoded maps/state and binds native I3DL2 reverb.
 XAPI fibers run on native Windows fibers through `fiber_adapter.c`.
+XOnline and XNet bind to the Live adapter (`live_xapi.c`) unless
+`RECOMP_LIVE=0`; read `docs/xbox-live.md` before extending it.
 3D voices render through the game's HRTF tables with crosstalk bins folded to
 stereo. Recording sends and additional DSP processing remain guarded.
 Read the audio limits in `docs/bring-up.md` before extending this adapter.
@@ -47,7 +49,9 @@ ask the user to save the program (Ctrl+S) after naming.
 2. Never commit an XBE, generated game C, retail bytes, extracted assets or
    filenames, saves, BIOS data, private paths, or local run evidence.
 3. Keep all private inputs and output under `private/`; only its README is
-   tracked. New public files must be included in `public-export.json`.
+   tracked. The exceptions are the players' `mods/` and `jukebox/` folders
+   beside the launcher, which stay gitignored. New public files must be
+   included in `public-export.json`.
 4. Report observed behavior; forced state remains a hypothesis.
 5. Keep the ISO in its original location and extract it only once. After a
    build, `private/play-disc` holds the disc; `private/imported-disc` keeps

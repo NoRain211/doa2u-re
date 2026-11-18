@@ -21,10 +21,10 @@ SUBMODULE = "tools/xboxrecomp"
 # A release holds what building and playing need; developer and agent material stays in the repository.
 DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitignore", ".gitmodules",
              "private/README.md", "tools/package_test.py", "tools/public_export.py", "tools/xbe_info.py",
-             "tools/doa2u/function_status.json", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
+             "tools/doa2u/function_status.json", "tools/build_linux_launcher.sh", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
 # Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
-WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", *(f"recomp-runtime/{name}" for name in (
+WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", "tools/jukebox_editor.cs", *(f"recomp-runtime/{name}" for name in (
     "audio_output_xaudio2.cpp", "audio_output_xaudio2_test.cpp", "audio_output_xaudio2_host_test.cpp",
     "audio_xtalk_xapo.cpp", "audio_xtalk_xapo.h", "audio_capture_xapo.cpp", "audio_capture_xapo.h",
     "audio_capture_xapo_test.cpp", "xaudio2_reverb.h", "xaudio2_reverb_test.cpp",
@@ -35,7 +35,11 @@ POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md",
     "win32_compat.c", "win32_compat_test.c", "fiber_switch_arm64.S", "fiber_switch_x86_64.S"))}
 PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
-                  "linux": POSIX_ONLY | {"install_deps.sh", "tools/launcher_sdl.cpp", "tools/launcher-background.png"}}
+                  "linux": POSIX_ONLY | {"build_steamdeck.sh", "install_deps.sh", "tools/launcher_sdl.cpp",
+                                         "tools/launcher-background.png"}}
+# The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its BUILD GAME page runs on a
+# machine with no compiler (a stock Steam Deck).
+LINUX_LAUNCHER = "launcher-linux-x86_64"
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
 # and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")
@@ -69,6 +73,8 @@ PLATFORMS = {"windows": ("", "docs/test-release.md"),
 CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
 LAUNCHERS = {"Launcher.exe": ("launcher.cs", []), "DOA2U.exe": ("launcher.cs", ["/define:PLAY_ONLY"]),
              "VoiceEditor.exe": ("voice_editor.cs", [])}
+# JukeboxEditor.exe names the Jukebox's tracks and assigns them, with a preview (tools/jukebox_editor.cs).
+JUKEBOX_EDITOR = "JukeboxEditor.exe"
 # Optional private icon (fan art from issue #39 holds Tecmo's character and logo art, so it stays untracked).
 ICON = ROOT / "private" / "launcher-icon.ico"
 
@@ -83,6 +89,11 @@ def build_launchers(out_dir):
         subprocess.run([str(CSC), "/nologo", "/warnaserror", "/target:winexe", "/r:System.Web.Extensions.dll",
                         *(background if source == "launcher.cs" else []), *icon, *flags,
                         f"/out:{out_dir / exe}", str(ROOT / "tools" / source)], check=True)
+
+
+def build_jukebox_editor(out_dir):
+    subprocess.run([str(CSC), "/nologo", "/target:winexe", f"/out:{out_dir / JUKEBOX_EDITOR}",
+                    str(ROOT / "tools" / "jukebox_editor.cs")], check=True)
 
 
 def git(*args, cwd=ROOT):
@@ -122,6 +133,15 @@ def lifter_shipped(path):
     return path.startswith(LIFTER_DIRS) and not name.startswith("test_") and not name.endswith(".md")
 
 
+def executable(path):
+    """A ZIP entry for path with Unix mode 0755; ZipFile.write on Windows would drop the executable bit."""
+    info = zipfile.ZipInfo(path, time.localtime()[:6])
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.create_system = 3  # Unix, or unzip ignores the mode below
+    info.external_attr = 0o100755 << 16
+    return info
+
+
 def archive(cwd, prefix, keep):
     with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", "HEAD", cwd=cwd))) as tar:
         for member in tar.getmembers():
@@ -143,6 +163,7 @@ def main():
     args = parser.parse_args()
     if args.launchers:
         build_launchers(args.launchers)
+        build_jukebox_editor(Path(args.launchers))
         return
     if not args.version:
         parser.error("give a version, or --launchers DIR")
@@ -163,7 +184,8 @@ def main():
         raise SystemExit(f"{out} already exists")
     windows = args.platform == "windows"
     artifacts = ("extract-xiso.exe", "LICENSE.TXT", "dedication-photo.jpg")
-    missing = [a for a in artifacts if not (ARTIFACTS / a).is_file()]
+    linux = args.platform == "linux"
+    missing = [a for a in artifacts + ((LINUX_LAUNCHER,) if linux else ()) if not (ARTIFACTS / a).is_file()]
     if missing:
         raise SystemExit(f"Missing from {ARTIFACTS}: {', '.join(missing)}")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -194,8 +216,11 @@ def main():
                    skip=("aarch64-w64-mingw32/", "armv7-w64-mingw32/", "i686-w64-mingw32/", "python/"))
             with tempfile.TemporaryDirectory() as launchers:
                 build_launchers(Path(launchers))
-                for exe in LAUNCHERS:
+                build_jukebox_editor(Path(launchers))
+                for exe in (*LAUNCHERS, JUKEBOX_EDITOR):
                     package.write(Path(launchers) / exe, f"{name}/{exe}")
+        if linux:
+            package.writestr(executable(f"{name}/tools/artifacts/{LINUX_LAUNCHER}"), (ARTIFACTS / LINUX_LAUNCHER).read_bytes())
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release

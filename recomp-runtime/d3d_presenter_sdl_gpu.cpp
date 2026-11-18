@@ -147,7 +147,7 @@ struct DepthTargetEntry {
 
 struct SamplerEntry {
     SDL_GPUSamplerAddressMode u, v, w;
-    bool point_mip_filter;
+    bool point_min_filter, point_mag_filter, point_mip_filter;
     float mip_lod_bias;
     SDL_GPUSampler *sampler;
 };
@@ -779,12 +779,13 @@ SDL_GPUSamplerAddressMode hostAddressMode(uint32_t mode)
 }
 
 SDL_GPUSampler *createSampler(RecompD3dPresenter *presenter, SDL_GPUSamplerAddressMode u,
-    SDL_GPUSamplerAddressMode v, SDL_GPUSamplerAddressMode w, bool point_mip_filter, float bias,
+    SDL_GPUSamplerAddressMode v, SDL_GPUSamplerAddressMode w, bool point_min_filter,
+    bool point_mag_filter, bool point_mip_filter, float bias,
     SDL_GPUFilter filter = SDL_GPU_FILTER_LINEAR)
 {
     SDL_GPUSamplerCreateInfo info{};
-    info.min_filter = filter;
-    info.mag_filter = filter;
+    info.min_filter = point_min_filter ? SDL_GPU_FILTER_NEAREST : filter;
+    info.mag_filter = point_mag_filter ? SDL_GPU_FILTER_NEAREST : filter;
     info.mipmap_mode = point_mip_filter ? SDL_GPU_SAMPLERMIPMAPMODE_NEAREST : SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
     info.address_mode_u = u;
     info.address_mode_v = v;
@@ -796,22 +797,27 @@ SDL_GPUSampler *createSampler(RecompD3dPresenter *presenter, SDL_GPUSamplerAddre
 
 /* Zero-initialized draw commands keep the linear/wrap sampler. */
 SDL_GPUSampler *lookupDrawSampler(RecompD3dPresenter *presenter, uint32_t address_u, uint32_t address_v,
-    bool point_mip_filter, float bias, uint32_t address_w = 1u)
+    bool point_min_filter, bool point_mag_filter, bool point_mip_filter, float bias,
+    uint32_t address_w = 1u)
 {
     const SDL_GPUSamplerAddressMode u = hostAddressMode(address_u), v = hostAddressMode(address_v),
         w = hostAddressMode(address_w);
     if (u == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && v == SDL_GPU_SAMPLERADDRESSMODE_REPEAT &&
-        w == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && !point_mip_filter && bias == 0.0f) {
+        w == SDL_GPU_SAMPLERADDRESSMODE_REPEAT && !point_min_filter && !point_mag_filter &&
+        !point_mip_filter && bias == 0.0f) {
         return presenter->draw_sampler;
     }
     for (const SamplerEntry &entry : presenter->samplers) {
-        if (entry.u == u && entry.v == v && entry.w == w &&
-            entry.point_mip_filter == point_mip_filter && entry.mip_lod_bias == bias) {
+        if (entry.u == u && entry.v == v && entry.w == w && entry.point_min_filter == point_min_filter &&
+            entry.point_mag_filter == point_mag_filter && entry.point_mip_filter == point_mip_filter &&
+            entry.mip_lod_bias == bias) {
             return entry.sampler;
         }
     }
-    SDL_GPUSampler *sampler = createSampler(presenter, u, v, w, point_mip_filter, bias);
-    if (sampler != nullptr) presenter->samplers.push_back({u, v, w, point_mip_filter, bias, sampler});
+    SDL_GPUSampler *sampler = createSampler(presenter, u, v, w, point_min_filter, point_mag_filter,
+        point_mip_filter, bias);
+    if (sampler != nullptr) presenter->samplers.push_back({u, v, w, point_min_filter,
+        point_mag_filter, point_mip_filter, bias, sampler});
     return sampler;
 }
 
@@ -973,11 +979,18 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
     const bool linear_bgra = desc.format_byte == 0x12u;
     const bool compressed = desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ||
         desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 || desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5;
-    const uint32_t levels = compressed && desc.mip_levels ? desc.mip_levels : 1u;
+    uint32_t levels = compressed && desc.mip_levels ? desc.mip_levels : 1u;
     if (compressed) {
         const uint32_t span = recomp_d3d_texture_compressed_mip_span(&desc);
         if (span == 0u || span > draw.texture_byte_count ||
             desc.width > kMaxTextureSize || desc.height > kMaxTextureSize) return nullptr;
+    }
+    /* Uncompressed levels sit in one guest span, each swizzled on its own. Keep
+       them all when that span holds the chain; otherwise sample level 0 alone. */
+    if (!compressed && !volume && !linear_bgra && desc.mip_levels > 1u &&
+        (palettized || isSwizzledTextureFormat(desc.format_byte))) {
+        const uint32_t span = recomp_d3d_texture_uncompressed_mip_span(&desc);
+        if (span != 0u && span <= draw.texture_byte_count) levels = desc.mip_levels;
     }
 
     if (draw.texture_is_backbuffer) {
@@ -1058,6 +1071,38 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
     }
 
     std::vector<uint8_t> unpacked;
+    /* Decodes one guest level into host order: its texels, rows packed. */
+    const auto decodeLevel = [&](uint32_t level, std::vector<uint8_t> &texels,
+                                 uint32_t &width, uint32_t &height) {
+        RecompD3dTextureLevel guest{};
+        if (!recomp_d3d_texture_uncompressed_level(&desc, level, &guest) ||
+            static_cast<uint64_t>(guest.offset) + guest.bytes > draw.texture_byte_count) return false;
+        width = guest.width;
+        height = guest.height;
+        const auto *source = static_cast<const uint8_t *>(draw.texture_bytes) + guest.offset;
+        if (palettized) {
+            std::vector<uint8_t> indices(static_cast<size_t>(width) * height);
+            if (!recomp_d3d_texture_unswizzle(source, indices.data(), width, height, 1u)) return false;
+            texels.resize(indices.size() * 4u);
+            const auto *palette = static_cast<const uint8_t *>(draw.palette_bytes);
+            for (size_t i = 0u; i < indices.size(); ++i) {
+                /* Little-endian ARGB palette words are already BGRA bytes. */
+                std::memcpy(texels.data() + i * 4u, palette + indices[i] * 4u, 4u);
+            }
+            return true;
+        }
+        const uint32_t texel_bytes = desc.bits_per_pixel / 8u;
+        if (texel_bytes == 0u) return false;
+        texels.resize(static_cast<size_t>(width) * height * texel_bytes);
+        if (!recomp_d3d_texture_unswizzle(source, texels.data(), width, height, texel_bytes)) return false;
+        if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8) {
+            std::vector<uint8_t> white(texels.size() * 4u, 0xffu);
+            for (size_t i = 0u; i < texels.size(); ++i) white[i * 4u + 3u] = texels[i];
+            texels.swap(white);
+        }
+        return true;
+    };
+
     if (volume) {
         unpacked.resize(static_cast<size_t>(desc.width) * desc.height * desc.volume_depth * 4u);
         if (!recomp_d3d_texture_unswizzle_volume(static_cast<const uint8_t *>(draw.texture_bytes),
@@ -1071,35 +1116,15 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
                 static_cast<const uint8_t *>(draw.texture_bytes) + static_cast<size_t>(y) * desc.pitch,
                 desc.width * 4u);
         }
-    } else if (palettized) {
-        const size_t texels = static_cast<size_t>(desc.width) * desc.height;
-        if (desc.width == 0u || desc.height == 0u || desc.width > kMaxTextureSize ||
-            desc.height > kMaxTextureSize || texels > draw.texture_byte_count) return nullptr;
-        std::vector<uint8_t> indices(texels);
-        if (!recomp_d3d_texture_unswizzle(static_cast<const uint8_t *>(draw.texture_bytes),
-                indices.data(), desc.width, desc.height, 1u)) return nullptr;
-        unpacked.resize(texels * 4u);
-        const auto *palette = static_cast<const uint8_t *>(draw.palette_bytes);
-        for (size_t i = 0u; i < texels; ++i) {
-            /* Little-endian ARGB palette words are already BGRA bytes. */
-            std::memcpy(unpacked.data() + i * 4u, palette + indices[i] * 4u, 4u);
-        }
-    } else if (isSwizzledTextureFormat(desc.format_byte)) {
-        const uint32_t texel_bytes = desc.bits_per_pixel / 8u;
-        if (texel_bytes == 0u || desc.width == 0u || desc.height == 0u ||
+    } else if (!compressed) {
+        if (desc.width == 0u || desc.height == 0u ||
             desc.width > kMaxTextureSize || desc.height > kMaxTextureSize) return nullptr;
-        unpacked.resize(static_cast<size_t>(desc.width) * desc.height * texel_bytes);
-        if (!recomp_d3d_texture_unswizzle(static_cast<const uint8_t *>(draw.texture_bytes),
-                unpacked.data(), desc.width, desc.height, texel_bytes)) return nullptr;
-        if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8) {
-            std::vector<uint8_t> white(unpacked.size() * 4u, 0xffu);
-            for (size_t i = 0u; i < unpacked.size(); ++i) white[i * 4u + 3u] = unpacked[i];
-            unpacked.swap(white);
-        }
+        uint32_t level_width = 0u, level_height = 0u;
+        if (!decodeLevel(0u, unpacked, level_width, level_height)) return nullptr;
     }
 
     std::vector<uint8_t> upscaled;
-    const bool larger = scale > 1u &&
+    const bool larger = levels == 1u && scale > 1u &&
         unpacked.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
         recomp_texture_upscale(unpacked.data(), desc.width, desc.height, scale, upscaled);
     uint32_t larger_levels = 1u;
@@ -1129,6 +1154,14 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
             offset += size;
             width = width > 1u ? width / 2u : 1u;
             height = height > 1u ? height / 2u : 1u;
+        }
+    } else if (levels > 1u) {
+        for (uint32_t level = 0u; level < levels && uploaded; ++level) {
+            std::vector<uint8_t> level_texels;
+            uint32_t width = 0u, height = 0u;
+            uploaded = decodeLevel(level, level_texels, width, height) &&
+                uploadTexture(presenter, texture, level_texels.data(),
+                    static_cast<uint32_t>(level_texels.size()), level, width, height);
         }
     } else {
         uploaded = uploadTexture(presenter, texture, unpacked.data(), static_cast<uint32_t>(unpacked.size()),
@@ -2212,18 +2245,20 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     bindings.samplers[0] = draw.four_tap_filter || draw.has_alpha_mask ||
             (draw.program_count && (!draw.address_u || !draw.address_v))
         ? presenter->filter_sampler
-        : lookupDrawSampler(presenter, draw.address_u, draw.address_v, draw.point_mip_filter,
-            draw.mip_lod_bias, volume ? draw.address_w : 1u);
+        : lookupDrawSampler(presenter, draw.address_u, draw.address_v, draw.point_min_filter,
+            draw.point_mag_filter, draw.point_mip_filter, draw.mip_lod_bias,
+            volume ? draw.address_w : 1u);
     bindings.samplers[1] = draw.program_alpha_mask ? presenter->program_mask_sampler
         : draw.has_reflection || draw.distortion || draw.stage1_alpha_mask || draw.bump_env ||
             draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_address_u, draw.reflection_address_v,
-            draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
+            false, false, draw.reflection_point_mip_filter, draw.reflection_mip_lod_bias)
         : presenter->filter_sampler;
     bindings.samplers[2] = draw.reflection_stage2 || draw.projected_stage_count != 0u
         ? lookupDrawSampler(presenter, draw.reflection_stage2_address_u, draw.reflection_stage2_address_v,
-            draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
-        : draw.bump_env ? lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v, false, 0.0f)
+            false, false, draw.reflection_stage2_point_mip_filter, draw.reflection_stage2_mip_lod_bias)
+        : draw.bump_env ? lookupDrawSampler(presenter, draw.bump_address_u, draw.bump_address_v,
+            false, false, false, 0.0f)
         : presenter->filter_sampler;
     // The volume samples with the stage-0 sampler, as guest_sampler on D3D11.
     bindings.samplers[3] = bindings.samplers[0];
@@ -3130,14 +3165,15 @@ bool createResources(RecompD3dPresenter *presenter)
     if (!uploadTexture(presenter, presenter->white_texture, &white, 4u, 0u, 1u, 1u) ||
         !uploadTexture(presenter, presenter->white_volume, &white, 4u, 0u, 1u, 1u)) return false;
     presenter->draw_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, false, false, 0.0f);
     presenter->filter_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, true, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, false, false,
+        true, 0.0f);
     presenter->program_mask_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, true, 0.0f);
+        SDL_GPU_SAMPLERADDRESSMODE_REPEAT, SDL_GPU_SAMPLERADDRESSMODE_REPEAT, false, false, true, 0.0f);
     presenter->point_sampler = createSampler(presenter, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, true, 0.0f,
-        SDL_GPU_FILTER_NEAREST);
+        SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE, false, false,
+        true, 0.0f, SDL_GPU_FILTER_NEAREST);
     if (presenter->draw_sampler == nullptr || presenter->filter_sampler == nullptr ||
         presenter->program_mask_sampler == nullptr || presenter->point_sampler == nullptr) return false;
     return ensureRingCapacity(presenter, presenter->vertex_buffer, presenter->vertex_transfer,

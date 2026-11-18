@@ -8,6 +8,7 @@
 #include <CommonCrypto/CommonDigest.h>
 #endif
 
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -31,7 +32,7 @@ std::string hexLower(const std::vector<std::uint8_t>& bytes)
 }
 
 #ifdef _WIN32
-std::string hashHex(const wchar_t* algorithm, const std::uint8_t* bytes, std::size_t size)
+std::vector<std::uint8_t> hashRaw(const wchar_t* algorithm, const std::uint8_t* bytes, std::size_t size)
 {
     BCRYPT_ALG_HANDLE algorithmHandle = nullptr;
     BCRYPT_HASH_HANDLE hashHandle = nullptr;
@@ -110,7 +111,7 @@ std::string hashHex(const wchar_t* algorithm, const std::uint8_t* bytes, std::si
     }
 
     closeHash();
-    return hexLower(hash);
+    return hash;
 }
 #endif
 
@@ -124,12 +125,21 @@ std::string sha1Hex(const std::vector<std::uint8_t>& bytes)
 
 std::string sha1Hex(const std::uint8_t* bytes, std::size_t size)
 {
-    return hashHex(BCRYPT_SHA1_ALGORITHM, bytes, size);
+    return hexLower(hashRaw(BCRYPT_SHA1_ALGORITHM, bytes, size));
 }
 
 std::string sha256Hex(const std::vector<std::uint8_t>& bytes)
 {
-    return hashHex(BCRYPT_SHA256_ALGORITHM, bytes.data(), bytes.size());
+    return hexLower(hashRaw(BCRYPT_SHA256_ALGORITHM, bytes.data(), bytes.size()));
+}
+
+void sha256(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
+{
+    const std::vector<std::uint8_t> raw = hashRaw(BCRYPT_SHA256_ALGORITHM, bytes, size);
+    if (raw.size() != 32u) {
+        throw std::runtime_error("SHA-256 digest is not 32 bytes");
+    }
+    std::memcpy(digest, raw.data(), 32u);
 }
 #elif defined(__APPLE__)
 std::string sha1Hex(const std::vector<std::uint8_t>& bytes)
@@ -149,6 +159,11 @@ std::string sha256Hex(const std::vector<std::uint8_t>& bytes)
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256(bytes.data(), static_cast<CC_LONG>(bytes.size()), digest);
     return hexLower(reinterpret_cast<const std::uint8_t*>(digest), sizeof(digest));
+}
+
+void sha256(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
+{
+    CC_SHA256(bytes, static_cast<CC_LONG>(size), digest);
 }
 #else
 namespace {
@@ -299,6 +314,23 @@ std::string sha256Hex(const std::vector<std::uint8_t>& bytes)
 {
     return hexLower(computeSha256(bytes.data(), bytes.size()));
 }
+
+void sha256(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
+{
+    const std::vector<uint8_t> raw = computeSha256(bytes, size);
+    std::memcpy(digest, raw.data(), 32u);
+}
 #endif
 
 } // namespace doaxbv
+
+extern "C" bool doaxbv_sha256_digest(const std::uint8_t* bytes, std::size_t size, std::uint8_t digest[32])
+{
+    try {
+        doaxbv::sha256(bytes, size, digest);
+        return true;
+    } catch (...) {
+        std::memset(digest, 0, 32u);
+        return false;
+    }
+}

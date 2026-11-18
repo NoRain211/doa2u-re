@@ -44,9 +44,20 @@ Build (once, about 15 to 25 minutes):
 3. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
 
-Steam Deck: SteamOS has no compiler, so build inside an Ubuntu 24.04
-distrobox that shares your home folder, then play on SteamOS itself. To
-play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
+Or build from the launcher: ./launcher.sh opens on BUILD GAME while the game
+is not built. This ZIP ships a prebuilt launcher, so it needs nothing
+installed. Choose your Disc 2 ISO with DISC ISO, or drop it on the window,
+then choose BUILD. It shows the elapsed time and the latest line, keeps the
+full output in private/build.log, and asks twice before it stops a build.
+
+Steam Deck: SteamOS has no compiler, so the build runs in an Ubuntu 24.04
+distrobox that shares your home folder, then you play on SteamOS itself.
+Extract this ZIP under your home folder and, in Desktop Mode, either run
+./launcher.sh and use BUILD GAME, or run in Konsole:
+
+      ./build_steamdeck.sh "/path/to/disc2.iso"
+
+To play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
 Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
@@ -73,48 +84,30 @@ controllers SDL3 supports). The keyboard drives player 1:
     A = X    S = Y    Z = A    X = B
     Q = White    W = Black    E = Left trigger    R = Right trigger
 
-Online play (test, work in progress): choose Versus on the main menu and
-press A. LOCAL plays two controllers on one machine as before. HOST ONLINE
-opens a room: a PUBLIC room shows on FIND MATCH, a PRIVATE room only takes
-players who have your address. JOIN ONLINE takes the host's address, such
-as 203.0.113.7:47701. FIND MATCH lists open rooms with their ping; A joins
-one and Y quick-matches the nearest. In the room A readies up; when both
-players are ready the match starts at Versus character select. Fights
-follow one another there; backing out of Versus to the main menu takes
-both players back to the room. Both players need this same
-release built from the same disc, or the room shows OTHER BUILD. The other
-player sees your game profile name.
+Online play (test, work in progress): DOA ONLINE on the main menu opens the
+game's own Xbox Live pages, which run on the project's server. The first
+start writes `live-identity.bin` to the play folder's `.recomp-storage`, next
+to the saves, and the first logon makes an account from it, named after your
+game profile; losing that file loses the account. Quick Match, OptiMatch and
+the lobby have been played, and fights use rollback netcode; friends and
+rankings have only been tested without the game. Both players need this same
+release built from the same disc; players of other builds do not see each
+other's sessions. Versus is the game's own again: two controllers on one
+machine. On Windows, allow the game through the firewall when asked.
 
-The host's game asks the router to open its UDP port, 47701 unless changed
-in NETPLAY SETTINGS (UPnP). If the room says to forward it by hand, forward
-the UDP port the room shows to the host's computer, or use FIND MATCH, which
-tries a direct connection and falls back to a relay.
-NETPLAY SETTINGS sets the input delay, the port, the network display in a
-match, blocked players and the matchmaker. In a room Y mutes the other
-player and X twice blocks them. The menu hides players' IP addresses, so they
-stay off streams; while your room is empty, Y shows your address.
-Type an address from the keyboard, or with the controller (up/down changes
-a character, left/right moves). Once the other player is in the room, Enter
-or Tab opens a chat line.
-On a Steam Deck in Game Mode, the on-screen keyboard shows only while an
-address or a chat line is being typed. The clipboard works only on Windows
-for now.
+What the server sees: nothing is sent until you open DOA ONLINE. Logging on
+sends the server your IP address and port, the account's ID, the build's
+fingerprint and your profile name, which other players see as your
+gamertag. Players who join you, or ask the server to connect to you, get your
+IP address and port, as on the Xbox. To keep Live off, start the game with
+`RECOMP_LIVE=0 ./launcher.sh` (or `./run_game.sh`).
 
 Known limits: this is bring-up software. Story, Watch and the attract demo
 play in development runs on every stage, but many modes and characters
 have not been tried. A draw the port cannot render yet stops the game, and the log
-says why. DOA ONLINE finds no Xbox Live account; choosing to make one
-quits to the desktop, as the Xbox would leave for its Dashboard.
-Online play is a test: Windows, Linux and macOS players have not played
-each other yet. If FIND MATCH cannot reach the matchmaker, JOIN ONLINE by
-address still works.
-Online matches are unranked: nothing goes to a leaderboard, and each match
-plays on copies of both profiles, so your own profile never changes. If the
-two games stop matching, the match ends with DESYNC DETECTED. Every online
-match saves a replay in `private/play-disc/.recomp-storage/replays`, unless
-the log says it cannot write one. Keep it
-when you report a desync or a cheating player; it holds both players'
-profiles, so share it only privately, when a developer asks for it.
+says why. Online play is a test: two players across the internet, and players on
+different systems, have not played each other yet, and voice chat is not
+supported. If the two games stop matching, the fight ends and the game says a player left.
 MSAA stops at 8x on Linux; a higher choice falls back to 8x.
 
 This Linux build comes from @tmcleroy's port (pull request #1), which was

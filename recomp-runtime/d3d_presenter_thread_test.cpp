@@ -42,6 +42,7 @@ static ULONGLONG GetTickCount64()
 
 // d3d_vblank.cpp's guest pacing reaches the kernel; these tests use only its host sleep.
 extern "C" void recomp_kernel_wait_for_vblank(uint64_t) {}
+extern "C" uint32_t recomp_kernel_current_thread_id(void) { return 1u; }
 
 static const RecompD3dPresenterConfig config = {
     320u, 240u, RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM,
@@ -359,6 +360,187 @@ static bool testMipSampler()
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     DeleteFileA(path);
     if (passed) std::puts("PASS mip selection, interpolation, bias, sampler cache eviction, texture alpha and vertex alpha");
+    return passed;
+}
+
+/* The guest stores one swizzled surface per uncompressed mip level. A minified
+   sample must read the guest's own smaller level, not a host-generated one. */
+static bool testUncompressedMipChain()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "chain", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create mip chain", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        Vertex vertices[4] = {};
+        uint16_t indices[] = {0, 1, 2, 3};
+        // Three guest levels, a distinct solid colour each, swizzled per level
+        // and laid end to end: 16x16 red, 8x8 green, 4x4 blue.
+        std::vector<uint32_t> storage(16u * 16u + 8u * 8u + 4u * 4u);
+        const uint32_t colors[] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu};
+        const uint32_t dims[] = {16u, 8u, 4u};
+        size_t at = 0u;
+        for (unsigned i = 0u; i < 3u; ++i) {
+            uint32_t mask_x = 0u, mask_y = 0u;
+            recomp_d3d_texture_swizzle_masks(dims[i], dims[i], &mask_x, &mask_y);
+            for (uint32_t y = 0u; y < dims[i]; ++y) {
+                for (uint32_t x = 0u; x < dims[i]; ++x) {
+                    storage[at + recomp_d3d_texture_swizzle_offset(x, y, mask_x, mask_y)] = colors[i];
+                }
+            }
+            at += static_cast<size_t>(dims[i]) * dims[i];
+        }
+        const auto quad = [&](float left, float top, float size, uint32_t byte_count, float bias) {
+            const float corner[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+            for (unsigned i = 0u; i < 4u; ++i) {
+                vertices[i] = {left + corner[i][0] * size, top + corner[i][1] * size,
+                    0.25f, 1.0f, 0xffffffffu, corner[i][0], corner[i][1]};
+            }
+            RecompD3dPresenterCommand command{};
+            command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+            auto &draw = command.data.draw;
+            draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+            draw.index_count = draw.vertex_count = 4u;
+            draw.triangle_count = 2u;
+            draw.vertex_stride = sizeof(Vertex);
+            draw.fvf = 0x144u;
+            draw.vertex_bytes = vertices;
+            draw.index_bytes = indices;
+            draw.blend.color_write_mask = 15u;
+            draw.has_texture = true;
+            draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+            draw.texture.bits_per_pixel = 32u;
+            draw.texture.width = draw.texture.height = 16u;
+            draw.texture.mip_levels = 3u;
+            draw.texture.data = 0x3000u;
+            draw.texture_bytes = storage.data();
+            draw.texture_byte_count = byte_count;
+            draw.point_mip_filter = true;
+            draw.mip_lod_bias = bias;
+            return expect("mip chain draw", d3d_backend_submit(presenter, &command));
+        };
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("mip chain clear", d3d_backend_submit(presenter, &clear));
+        const uint32_t chain = static_cast<uint32_t>(storage.size() * 4u);
+        // One texel per pixel red, 2.67 per pixel green and 4 per pixel blue.
+        passed &= quad(20.0f, 20.0f, 16.0f, chain, 0.0f);
+        passed &= quad(52.0f, 20.0f, 6.0f, chain, 0.0f);
+        passed &= quad(76.0f, 20.0f, 4.0f, chain, 0.25f);
+        // A span that holds only level 0 keeps the old single-level sample.
+        passed &= quad(100.0f, 20.0f, 6.0f, 1024u, 0.0f);
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5u, 1u};
+        passed &= expect("mip chain present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy mip chain", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            struct Sample { unsigned x, y, channel; const char *name; };
+            const Sample samples[] = {
+                {28u, 28u, 2u, "level 0"}, {55u, 23u, 1u, "level 1"},
+                {78u, 22u, 0u, "level 2"}, {103u, 23u, 2u, "level 0 span"},
+            };
+            for (const Sample &sample : samples) {
+                unsigned char bgr[3]{};
+                std::fseek(file, 54 + (240 - 1 - sample.y) * 320 * 3 + sample.x * 3, SEEK_SET);
+                passed &= std::fread(bgr, 1, 3, file) == 3;
+                const bool pixel_ok = bgr[sample.channel] > 245 && bgr[(sample.channel + 1u) % 3u] < 10 &&
+                    bgr[(sample.channel + 2u) % 3u] < 10;
+                if (!pixel_ok) std::fprintf(stderr, "FAIL mip chain %s BGR=%u,%u,%u\n",
+                    sample.name, bgr[0], bgr[1], bgr[2]);
+                passed &= pixel_ok;
+            }
+            std::fclose(file);
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS uncompressed guest mip levels at minifying scales");
+    return passed;
+}
+
+static bool testPointMinMagFilter()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "point", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create point sampler", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        // A 2x2 texture, red on the left and green on the right, magnified 32x.
+        const uint32_t texels[] = {
+            0xffff0000u, 0xff00ff00u,
+            0xffff0000u, 0xff00ff00u,
+        };
+        Vertex vertices[] = {
+            {20, 20, 0.25f, 1, 0xffffffffu, 0, 0},
+            {84, 20, 0.25f, 1, 0xffffffffu, 2, 0},
+            {20, 84, 0.25f, 1, 0xffffffffu, 0, 2},
+            {84, 84, 0.25f, 1, 0xffffffffu, 2, 2},
+        };
+        uint16_t indices[] = {0, 1, 2, 3};
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("point clear", d3d_backend_submit(presenter, &clear));
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof(Vertex);
+        draw.fvf = 0x144u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.has_texture = true;
+        draw.texture.format_byte = 0x12u;
+        draw.texture.linear = true;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = draw.texture.height = 2;
+        draw.texture.pitch = 8;
+        draw.texture.data = 0x3000u;
+        draw.texture_bytes = texels;
+        draw.texture_byte_count = sizeof texels;
+        // Point mag takes the nearest texel; the same quad drawn linearly blends.
+        draw.point_mag_filter = true;
+        passed &= expect("point mag draw", d3d_backend_submit(presenter, &command));
+        for (auto &vertex : vertices) vertex.x += 64.0f;
+        draw.point_mag_filter = false;
+        passed &= expect("linear mag draw", d3d_backend_submit(presenter, &command));
+        command = {};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5, 1};
+        passed &= expect("point present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy point sampler", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            // x=51 and x=53 straddle the texel boundary at x=52; y=35 is mid-texel.
+            const unsigned samples[][2] = {{51u, 35u}, {53u, 35u}, {115u, 35u}};
+            unsigned char bgr[3][3]{};
+            for (unsigned i = 0u; i < 3u; ++i) {
+                std::fseek(file, 54 + (240 - 1 - samples[i][1]) * 320 * 3 + samples[i][0] * 3, SEEK_SET);
+                passed &= std::fread(bgr[i], 1, 3, file) == 3;
+            }
+            std::fclose(file);
+            const bool point_red = bgr[0][2] > 245 && bgr[0][1] < 10 && bgr[0][0] < 10;
+            const bool point_green = bgr[1][1] > 245 && bgr[1][0] < 10 && bgr[1][2] < 10;
+            const bool linear_blend = bgr[2][2] > 60 && bgr[2][2] < 200 &&
+                bgr[2][1] > 60 && bgr[2][1] < 200 && bgr[2][0] < 10;
+            if (!point_red) std::fprintf(stderr, "FAIL point mag left BGR=%u,%u,%u\n",
+                bgr[0][0], bgr[0][1], bgr[0][2]);
+            if (!point_green) std::fprintf(stderr, "FAIL point mag right BGR=%u,%u,%u\n",
+                bgr[1][0], bgr[1][1], bgr[1][2]);
+            if (!linear_blend) std::fprintf(stderr, "FAIL linear mag BGR=%u,%u,%u\n",
+                bgr[2][0], bgr[2][1], bgr[2][2]);
+            passed &= point_red && point_green && linear_blend;
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS point mag samples the nearest texel and linear mag still blends");
     return passed;
 }
 
@@ -3089,7 +3271,9 @@ int main()
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
-        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testLines() || !testLighting() ||
+        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
+        !testPointMinMagFilter() ||
+        !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
         !testReflectionAddress(false, false, true) || !testReflectionAddress(true, false, false, true) ||

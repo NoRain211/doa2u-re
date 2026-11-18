@@ -18,8 +18,7 @@ void recomp_program_missing(uint32_t guest_address)
 }
 
 /* Every indirect guest call resolves here, so cache hits; the chain was about
-   5% of the game thread in fights. Manual hooks depend on boot settings (the
-   room turns the intro skip on), so a reboot clears the cache and moves the
+   5% of the game thread in fights. A reset clears the cache and moves the
    generation that direct call sites (RECOMP_ABI_CALL) check. */
 static struct { uint32_t address; RecompFunction function; } cache[4096];
 uint32_t recomp_program_lookup_generation = 1u;

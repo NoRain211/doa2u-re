@@ -148,6 +148,9 @@ static RecompInputGamepad pad_with(uint16_t buttons, uint8_t a, uint8_t b)
     return pad;
 }
 
+static unsigned jukebox_opens;
+static void fake_jukebox_request(void) { ++jukebox_opens; }
+
 static bool idle(RecompInputGamepad pad) { return pad.buttons == 0u && pad.analog_buttons[0] == 0u && pad.analog_buttons[1] == 0u; }
 
 int main(void)
@@ -275,6 +278,44 @@ int main(void)
     expect("A quits", recomp_quit_prompt_filter(0u, &pad, 50u) == RECOMP_QUIT_CHOSEN);
     frame();
     expect("no cancel after quitting", cancels == 1u);
+
+    /* The Jukebox: one more entry before Quit Game, with its own pictures and
+       label; its confirm opens it, and its close brings the menu back. */
+    recomp_runner_assets_reset();
+    recomp_menu_quit_set_jukebox(fake_jukebox_request);
+    const unsigned before_jukebox = invalidated;
+    recomp_menu_quit_install();
+    expect("jukebox pictures drawn", invalidated == before_jukebox + 4u);
+    unlocked = 16u;
+    hook(0x00134330u, &none, 1u);
+    expect("count with the jukebox", *recomp_memory(COUNT, 1u) == 18u);
+    position = 16u;
+    const uint32_t jukebox_entry = hook(0x001343a0u, &position, 1u);
+    expect("jukebox entry", rd32(jukebox_entry) == 0x0au && rd32(jukebox_entry + 4u) == (0x1f0u << 16 | 5u) &&
+        rd32(jukebox_entry + 8u) == (0x1f0u << 16 | 6u) && rd32(jukebox_entry + 12u) == (0x1f0u << 16 | 7u));
+    const uint32_t jukebox_label = 0x1f0u << 16 | 5u;
+    const uint32_t jukebox_rect = hook(0x000aa970u, &jukebox_label, 1u);
+    expect("jukebox label", rd16(jukebox_rect + 4u) > 70u && rd16(jukebox_rect + 4u) <= 128u && rd16(jukebox_rect + 6u) == 24u);
+    position = 17u;
+    expect("quit after the jukebox", rd32(hook(0x001343a0u, &position, 1u)) == QUIT_MODE);
+    *recomp_memory(MENU + 0x120u, 1u) = 16u;
+    expect("jukebox mode is Options'", hook(0x001343d0u, &ctx, 1u) == 0x0au);
+    const uint32_t options_mode = 0x0au;
+    expect("jukebox help", hook(0x001345c0u, &options_mode, 1u) == RECOMP_RUNNER_TEXT_JUKEBOX);
+    const unsigned cancels_before = cancels;
+    wr32(SELECTED, 0x0au);
+    confirm_this_frame = true;
+    frame();
+    confirm_this_frame = false;
+    expect("jukebox asked for", jukebox_opens == 1u && cancels == cancels_before);
+    /* Options itself (another position, the same mode) asks for nothing. */
+    *recomp_memory(MENU + 0x120u, 1u) = 9u;
+    expect("options help", hook(0x001345c0u, &options_mode, 1u) == 0x95u);
+    confirm_this_frame = true;
+    frame();
+    confirm_this_frame = false;
+    expect("options alone", jukebox_opens == 1u);
+    recomp_menu_quit_set_jukebox(NULL);
 
     if (failures == 0) printf("menu quit: all tests passed\n");
     return failures == 0 ? 0 : 1;

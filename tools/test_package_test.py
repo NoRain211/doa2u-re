@@ -32,9 +32,17 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertFalse(shipped("build_game.sh", "windows"))
         self.assertTrue(shipped("docs/building.md", "macos"))
         self.assertFalse(shipped("tools/launcher_sdl.cpp", "macos"))
+        # The Linux launcher's builder stays in the repository; the Linux ZIP carries its output instead.
+        self.assertFalse(shipped("tools/build_linux_launcher.sh", "linux"))
+        self.assertTrue(shipped("build_steamdeck.sh", "linux"))
+        self.assertFalse(shipped("build_steamdeck.sh", "windows"))
         self.assertTrue(shipped("recomp-runtime/kernel_file.c", "linux"))
         # build_game.py --disassemble reads it.
         self.assertTrue(shipped("tools/doa2u/seed_functions.json", "windows"))
+
+    def test_prebuilt_launcher_entry_is_executable(self):
+        info = package_test.executable("DOA2U-1/tools/artifacts/launcher-linux-x86_64")
+        self.assertEqual((info.external_attr >> 16) & 0o777, 0o755)
 
     def test_developer_notes_stay_out(self):
         for path in ("AGENTS.md", "CONTEXT.md", "README.md", "docs/bring-up.md", "tools/test_run_game.py"):

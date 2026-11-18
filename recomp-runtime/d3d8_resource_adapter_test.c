@@ -189,6 +189,32 @@ int main(void)
     CHECK(invoke(0x346140u, 96u, 0u, 0u, 0u, 0u) == 0u);
     fail_allocation = false;
 
+    /* A rewind restores the table with guest RAM: a release it undoes runs
+       again, and a creation run again is listed once. */
+    const size_t state_size = recomp_d3d8_resource_state_size();
+    /* Zeroed as SyncTest allocates its blocks: the save leaves struct padding unwritten. */
+    uint8_t *saved = calloc(2u, state_size), *after = saved + state_size;
+    CHECK(saved != NULL);
+    /* Different stale bytes in each buffer: padding must not reach the compare. */
+    memset(saved, 0xa5, state_size);
+    memset(after, 0x5a, state_size);
+    vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
+    recomp_d3d8_resource_state_save(saved);
+    uint32_t frees = free_count;
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u && free_count == frees + 2u);
+    recomp_d3d8_resource_state_restore(saved);
+    put(vertex, 0x1000001u);
+    if (setjmp(stopped) != 0) { fprintf(stderr, "FAIL resource rewind: %s\n", reason); return 1; }
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u && free_count == frees + 4u);
+    recomp_d3d8_resource_state_save(saved);
+    CHECK(invoke(0x346140u, 96u, 0u, 0u, 0u, 0u) != 0u);
+    recomp_d3d8_resource_state_restore(saved);
+    vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
+    CHECK(invoke(0x347ec0u, vertex, 0u, 0u, 0u, 0u) == 0u);
+    recomp_d3d8_resource_state_save(after);
+    CHECK(memcmp(saved, after, state_size) == 0);
+    free(saved);
+
     texture(TEXTURE + 32u, 0x10001u, 0u, 0u);
     invoke(0x345700u, TEXTURE + 32u, 7u, 0u, 0u, 0u);
     CHECK(word(DEVICE + 0x7a0u) == TEXTURE + 32u && word(DEVICE + 0x1cu) == 7u);
@@ -248,6 +274,29 @@ int main(void)
     CHECK(recomp_d3d8_resource_inline_texture(3u, &desc));
     recomp_d3d8_resource_reset();
     CHECK(!recomp_d3d8_resource_inline_texture(3u, &desc));
+    /* Uncompressed levels sit end to end, one swizzled surface each, exactly as
+       the level locks above read them. */
+    RecompD3dTextureDesc chain = {0};
+    RecompD3dTextureLevel level = {0};
+    chain.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+    chain.bits_per_pixel = 32u;
+    chain.width = 8u;
+    chain.height = 8u;
+    chain.mip_levels = 4u;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 340u);
+    CHECK(recomp_d3d_texture_uncompressed_level(&chain, 2u, &level) && level.offset == 320u &&
+        level.width == 2u && level.height == 2u && level.bytes == 16u);
+    /* A level count longer than the dimensions allow keeps level 0 alone. */
+    chain.mip_levels = 5u;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 4u, &level));
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 1u, &level));
+    CHECK(recomp_d3d_texture_uncompressed_level(&chain, 0u, &level) && level.offset == 0u &&
+        level.width == 8u && level.height == 8u && level.bytes == 256u);
+    chain.mip_levels = 1u;
+    chain.linear = true;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 0u, &level));
     puts("PASS D3D8 resource ABI, mip views, bindings, retention and owned destruction");
     return 0;
 }
