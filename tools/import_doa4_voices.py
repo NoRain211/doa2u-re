@@ -66,7 +66,10 @@ def afs_entries(path):
         head = file.read(8)
         if len(head) < 8 or head[:3] != b"AFS":
             raise SystemExit(f"{path} is not an AFS archive")
-        return afs_table(head + file.read(8 * struct.unpack_from("<I", head, 4)[0]))
+        count = struct.unpack_from("<I", head, 4)[0]
+        if 8 + 8 * count > os.fstat(file.fileno()).st_size:  # read() would allocate the whole count first
+            raise SystemExit(f"{path} lists {count} AFS entries, more than the file can hold")
+        return afs_table(head + file.read(8 * count))
 
 
 def cue_waves(data):

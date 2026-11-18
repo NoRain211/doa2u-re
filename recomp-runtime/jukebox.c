@@ -13,6 +13,7 @@
 #include "utf8_text.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,7 +231,8 @@ static void lines_open(Lines *lines, const char *path)
 {
     memset(lines, 0, sizeof *lines);
     lines->file = fopen(path, "r");
-    lines->intact = true;
+    /* Absent, it is safe to create; present but unopenable, it holds lines we never read. */
+    lines->intact = lines->file != NULL || errno == ENOENT;
 }
 
 /* The next line into text, however long it is; false at the end of the file,
@@ -251,6 +253,7 @@ static bool lines_next(Lines *lines)
         if (c == '\n') break;
     }
     if (lines->size == 0u) {
+        if (ferror(lines->file)) lines->intact = false; /* getc's EOF was a read error */
         fclose(lines->file);
         lines->file = NULL;
         return false;
