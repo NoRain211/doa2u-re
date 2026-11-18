@@ -20,6 +20,11 @@ keeps Live off.
   matchmaker checks both come from it, so copying the file moves the account
   and losing it loses the account. `RECOMP_LIVE_IDENTITY=<file>` uses
   another file, which is how two runners on one machine get two accounts.
+  Anyone who can read the file can log on as the player, so keep it, and any
+  `RECOMP_LIVE_IDENTITY` file, out of shared or synced folders and bug
+  reports. The runner creates a new one readable by the player alone (0600)
+  on Linux and macOS; on Windows the file takes its folder's permissions. It
+  never changes the permissions of a file that is already there.
 - **What the server sees.** Nothing goes out until the game's first Live
   request. A logon sends the player's IP address and port, XUID, build
   digest and profile name (the gamertag). Any player who joins a host, or
