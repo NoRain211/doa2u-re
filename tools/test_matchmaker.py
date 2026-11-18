@@ -285,21 +285,17 @@ class LiveTest(unittest.TestCase):
         body = self.one(live(mm.LOGON, logon_body(req)), A_AT, 2.0, mm.LOGGED)
         self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
 
-    def test_a_resent_logon_is_answered_when_the_cache_is_full(self):
-        self.logon()  # leaves this address one cached answer, which makes room for the next
-        others = [("x", i) for i in range(mm.MAX_CACHE - len(self.server.live_cache))]
-        self.server.live_cache.update({key: ([], 1e9) for key in others})
+    def test_a_resent_logon_needs_no_room_in_the_cache(self):
+        self.logon()
+        full = {("x", i): ([], 1e9) for i in range(mm.MAX_CACHE)}
+        self.server.live_cache, self.server.cache_keys = dict(full), {}
         req, known, nonce = self.challenge(now=5.0)
         logon = live(mm.LOGON, logon_body(req, nonce=nonce))
-        for _ in range(2):  # the second has no challenge left, only the first one's answer
+        for _ in range(2):  # the second gets the first one's answer, which its nonce keeps
             self.assertEqual(mm.LOGGED_BODY.unpack(self.one(logon, A_AT, 5.0, mm.LOGGED))[1], 0)
-        # No LOGON makes room with another address's answer: not one that is refused, and
-        # not one from an address with nothing of its own to drop.
-        self.one(live(mm.LOGON, logon_body(self.next_request())), A_AT, 5.0, mm.LOGGED)
-        self.assertEqual(self.logon(B_AT, B, tag=b"AYANE", now=5.0)[1], 0)
-        self.assertEqual(len(self.server.live_cache), mm.MAX_CACHE)
-        self.assertTrue(all(key in self.server.live_cache for key in others))
-        self.assertNotIn(B_AT[0], self.server.cache_keys)
+        self.assertEqual(self.logon(B_AT, B, tag=b"AYANE", now=5.0)[1], 0)  # nor does a first logon
+        # A logon keeps nothing in the cache, so it never costs anyone a cached answer.
+        self.assertEqual((self.server.live_cache, self.server.cache_keys), (full, {}))
 
     def test_a_captured_logon_cannot_be_replayed(self):
         self.logon()
@@ -316,11 +312,11 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(replayed(C_AT, 6.0), mm.E_ACCESSDENIED)
         self.assertIs(self.server.by_endpoint[A_AT], self.server.accounts[A])
         self.assertNotIn(C_AT, self.server.by_endpoint)
-        # From its own socket a repeat gets the first answer again while that is cached, and
-        # is refused after: the challenge went with its first answer.
+        # From its own socket a repeat gets the first answer again while its nonce lasts,
+        # which logs nobody on a second time, and is refused after.
         self.assertEqual(replayed(A_AT, 6.0), 0)
         self.assertEqual(self.server.accounts[A].seen, 5.0)
-        self.assertEqual(replayed(A_AT, 5.0 + mm.CACHE_SECONDS + 1.0), mm.E_ACCESSDENIED)
+        self.assertEqual(replayed(A_AT, 5.0 + mm.CHALLENGE_SECONDS), mm.E_ACCESSDENIED)
 
     def test_a_challenge_is_answered_once_and_expires(self):
         self.logon()
@@ -330,13 +326,15 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.challenge(now=1.5, req=req)[2], nonce)  # even when no answer was kept
         body = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
         self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], 0)
-        self.assertEqual(self.server.challenges, {})
-        # The same nonce under another request id, or again once the cache forgot the first answer.
+        # The same nonce under another request id, or for another LOGON under its own: refused.
         other = self.one(live(mm.LOGON, logon_body(req + 1, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
         self.assertEqual(mm.LOGGED_BODY.unpack(other)[1], mm.E_ACCESSDENIED)
-        self.server.live_cache.clear()
-        again = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 2.0, mm.LOGGED)
-        self.assertEqual(mm.LOGGED_BODY.unpack(again)[1], mm.E_ACCESSDENIED)
+        other = self.one(live(mm.LOGON, logon_body(req, nonce=nonce, state=0x13)), A_AT, 2.0, mm.LOGGED)
+        self.assertEqual(mm.LOGGED_BODY.unpack(other)[1], mm.E_ACCESSDENIED)
+        self.assertEqual(self.server.accounts[A].state, 0)
+        # The LOGON it answered, said again, gets that answer again, with no cache to keep it.
+        self.assertEqual(self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 2.5, mm.LOGGED), body)
+        self.assertEqual(self.server.accounts[A].seen, 2.0)
         # One for another XUID does not serve this one, and one left unanswered runs out.
         req, known, nonce = self.challenge(A_AT, B, now=3.0)
         late = self.one(live(mm.LOGON, logon_body(req, nonce=nonce)), A_AT, 3.0, mm.LOGGED)
@@ -357,15 +355,16 @@ class LiveTest(unittest.TestCase):
         body = self.one(live(mm.LOGON, logon_body(99, B, nonce=first[2])), other, 1.5, mm.LOGGED)
         self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)  # its oldest went
         # A table full of other addresses' drops the oldest of all, so a flood cannot keep players out.
-        self.server.challenges = {((f"x{i}", 1), b"", b""): (A, bytes(16), 1e9) for i in range(mm.MAX_CHALLENGES)}
+        self.server.challenges = {((f"x{i}", 1), b"", b""): (A, bytes(16), 1e9, None)
+                                  for i in range(mm.MAX_CHALLENGES)}
         self.server.challenge_keys = {}
         self.assertEqual(self.logon(B_AT, B, now=3.0)[1], 0)
-        self.assertEqual(len(self.server.challenges), mm.MAX_CHALLENGES - 1)
+        self.assertEqual(len(self.server.challenges), mm.MAX_CHALLENGES)
         self.assertNotIn((("x0", 1), b"", b""), self.server.challenges)
-        self.assertNotIn(B_AT[0], self.server.challenge_keys)  # answered, so nothing is left of it
-        # What nobody answers runs out, and its address's note with it.
+        self.assertEqual(len(self.server.challenge_keys[B_AT[0]]), 1)  # kept with its answer until it ends
+        # Answered or not, a nonce runs out, and its address's note with it.
+        self.server.challenges = {key: value for key, value in self.server.challenges.items() if key[0] == B_AT}
         self.challenge(C_AT, C, now=4.0)
-        self.server.challenges = {key: value for key, value in self.server.challenges.items() if key[0] == C_AT}
         self.server.sweep(4.0 + mm.CHALLENGE_SECONDS)
         self.assertEqual((self.server.challenges, self.server.challenge_keys), ({}, {}))
 
@@ -985,11 +984,12 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(self.send(live(mm.CONNECT, connect_body(77, ina_a)), B_AT, 1.0)), 2)
 
     def test_an_answer_replaced_in_the_cache_is_counted_once(self):
-        self.logon(now=0.0)
+        self.logon(now=0.0)  # a logon caches nothing: its nonce keeps its answer
+        self.assertTrue(self.send(live(mm.FRIENDS, friends_body(1)), A_AT, 0.0))
         for key, (answers, _) in list(self.server.live_cache.items()):
             self.server.live_cache[key] = (answers, 0.0)  # expired, but no sweep has run yet
-        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)  # its LOGGED; a NONCE is not cached
-        self.assertEqual(self.logon(now=0.5, req=1)[1], 0)  # the same request, cached again
+        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)
+        self.assertTrue(self.send(live(mm.FRIENDS, friends_body(1)), A_AT, 0.5))  # the same request, cached again
         self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)
 
     def test_an_address_registers_only_a_few_accounts_a_minute(self):

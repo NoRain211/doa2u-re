@@ -46,8 +46,8 @@ XUID_TYPE = 0x0009  # the XUID's type field; the rest is the first six bytes of 
 LIVE_SECONDS = 20.0  # LOGON is the heartbeat every 5 s; this long silent is offline
 CHALLENGE_BYTES = 16
 CHALLENGE_SECONDS = 10.0  # a LOGON answers within a round trip, and its client gives up after 5 s
-MAX_CHALLENGES = 4096  # unanswered ones; past it the oldest makes room
-CHALLENGES_PER_ADDRESS = 32  # unanswered ones; past it the address's own oldest makes room
+MAX_CHALLENGES = 4096  # nonces not yet ended; past it the oldest makes room
+CHALLENGES_PER_ADDRESS = 32  # and from one address, whose own oldest makes room
 CACHE_SECONDS = 60.0  # a repeated request gets its first answer again, for this long
 MAX_CACHE = 2048  # cached answers in all
 CACHE_PER_ADDRESS = 64  # and from one address, past which answers simply are not kept
@@ -370,7 +370,8 @@ class Matchmaker:
         self.live_counts = {}  # Live packets per address since the last sweep
         self.connect_counts = {}  # CONNECTs per address since the last sweep
         self.account_counts, self.minute = {}, None  # new accounts each address registered this minute
-        self.challenges = {}  # (endpoint, socket nonce, request) -> (XUID, nonce, expires), oldest first
+        # (endpoint, socket nonce, request) -> (XUID, nonce, expires, its LOGON and the answer once it has one)
+        self.challenges = {}  # oldest first
         self.challenge_keys = {}  # address -> its challenges' keys, oldest first, so a flood drops only its own
         self.live_cache = {}  # (endpoint, nonce, request, kind) -> (answers, expires)
         self.cache_keys = {}  # address -> its cached keys, oldest first, so one address cannot fill the cache
@@ -417,7 +418,7 @@ class Matchmaker:
         self.live_counts.clear()
         self.answer_bytes.clear()
         self.connect_counts.clear()
-        for key in [key for key, (_, _, expires) in self.challenges.items() if expires <= now]:
+        for key in [key for key, pending in self.challenges.items() if pending[2] <= now]:
             self.take_challenge(key)
         if int(now // 60) != self.minute:
             self.minute = int(now // 60)
@@ -441,7 +442,12 @@ class Matchmaker:
             expired.append(key)
         self.dirty = self.dirty or bool(expired)  # the store drops them too
         for key in [key for key, (_, expires) in self.live_cache.items() if expires <= now]:
-            self.uncache(key)
+            del self.live_cache[key]
+            keys = self.cache_keys.get(key[0][0])
+            if keys is not None:
+                keys.pop(key, None)
+                if not keys:
+                    del self.cache_keys[key[0][0]]
 
     # Live. Answers start with the header and the receiver's
     # nonce; a request that repeats, as a client resends until it hears, gets its
@@ -468,9 +474,10 @@ class Matchmaker:
         answers = self.live_request(kind, body, nonce, sender, now)
         # Nothing to repeat for an empty answer: a retry may yet succeed, so it is asked again.
         # CONNECT is not cached either: it changes nothing twice, its answer must name the
-        # endpoints as they are now, and its repeats then meet the CONNECT cap. Nor is
-        # CHALLENGE: its repeat is said the same nonce from the challenges.
-        if not answers or kind in (CONNECT, CHALLENGE):
+        # endpoints as they are now, and its repeats then meet the CONNECT cap. Nor are
+        # CHALLENGE and LOGON: the challenges repeat a nonce and its LOGON's answer themselves,
+        # so a logon never depends on room in this cache.
+        if not answers or kind in (CONNECT, CHALLENGE, LOGON):
             return self.budgeted(answers, sender) + refresh
         keys = self.cache_keys.get(sender[0])
         if key not in self.live_cache:
@@ -479,23 +486,10 @@ class Matchmaker:
                 del keys[oldest]
                 self.live_cache.pop(oldest, None)
             elif len(self.live_cache) >= MAX_CACHE:
-                # A LOGON's challenge went with this answer, so its repeat has nothing else: the
-                # address's own oldest makes room for it. No address's request drops another's answer.
-                if kind != LOGON or not keys:
-                    return self.budgeted(answers, sender) + refresh
-                self.uncache(next(iter(keys)))
+                return self.budgeted(answers, sender) + refresh
         self.cache_keys.setdefault(sender[0], {})[key] = None
         self.live_cache[key] = (answers, now + CACHE_SECONDS)
         return self.budgeted(answers, sender) + refresh
-
-    def uncache(self, key):
-        """Forgets one cached answer, with its address's note of it."""
-        self.live_cache.pop(key, None)
-        keys = self.cache_keys.get(key[0][0])
-        if keys is not None:
-            keys.pop(key, None)
-            if not keys:
-                del self.cache_keys[key[0][0]]
 
     def budgeted(self, answers, sender):
         """The answers, or none once they would take the address past its answer bytes this second.
@@ -642,9 +636,9 @@ class Matchmaker:
                 self.take_challenge(next(iter(mine)))
             elif len(self.challenges) >= MAX_CHALLENGES:
                 self.take_challenge(next(iter(self.challenges)))
-            pending = self.challenges[key] = (xuid, self.random_bytes(CHALLENGE_BYTES), now + CHALLENGE_SECONDS)
+            pending = self.challenges[key] = (xuid, self.random_bytes(CHALLENGE_BYTES), now + CHALLENGE_SECONDS, None)
             self.challenge_keys.setdefault(sender[0], {})[key] = None
-        # A repeat while it is unanswered says the same nonce, so a resend never outdates an answer on its way.
+        # A repeat says the same nonce while it lasts, so a resend never outdates an answer on its way.
         return [(header(NONCE) + nonce + NONCE_BODY.pack(req, xuid in self.accounts, pending[1]), sender)]
 
     def take_challenge(self, key):
@@ -659,17 +653,26 @@ class Matchmaker:
     def live_logon(self, body, nonce, sender, now):
         req, xuid, answer, digest, title, state, kid, length, tag = LOGON_BODY.unpack(body)
 
+        key, used = (sender, nonce, body[:4]), None
+
         def logged(hresult, ina=bytes(4), given=bytes(0)):
-            return [(header(LOGGED) + nonce +
-                     LOGGED_BODY.pack(req, hresult, ina_bytes(ina), len(given), padded(given, 15)), sender)]
+            answers = [(header(LOGGED) + nonce +
+                        LOGGED_BODY.pack(req, hresult, ina_bytes(ina), len(given), padded(given, 15)), sender)]
+            if used is not None:
+                self.challenges[key] = used + ((body, answers),)  # the one LOGON this nonce answers
+            return answers
 
         if xuid == 0 or length > 15:
             return logged(E_INVALIDARG)
-        # A challenge is answered once: it goes whatever comes of this LOGON, so a
-        # captured LOGON is worth nothing afterwards, from this socket or any other.
-        asked, issued, expires = self.take_challenge((sender, nonce, body[:4])) or (0, b"", 0.0)
+        asked, issued, expires, first = self.challenges.get(key) or (0, b"", 0.0, None)
         if asked != xuid or expires <= now:
             return logged(E_ACCESSDENIED)  # no challenge, as from a client that sends its proof unasked
+        if first is not None:
+            # A challenge is answered once, whatever came of its LOGON. That LOGON said again, as
+            # a client does until it hears, gets the same answer while the nonce lasts; any other
+            # is refused, so a captured LOGON is worth nothing from this socket or any other.
+            return first[1] if first[0] == body else logged(E_ACCESSDENIED)
+        used = (asked, issued, expires)
         wanted = printable(tag[:length])
         if not wanted or name_banned(wanted):
             wanted = b"PLAYER"

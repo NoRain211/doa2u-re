@@ -187,10 +187,13 @@ A logon is two requests under one request id:
    and whether it has an account for that XUID. The nonce belongs to that
    socket (its address and its nonce, as a cookie belongs to an address),
    that request id and that XUID, and lasts 10 s. A CHALLENGE said again
-   while its nonce is unanswered gets the same nonce.
+   while its nonce lasts gets the same nonce.
 2. LOGON answers the nonce. The first LOGON that names a nonce uses it up,
    whatever the result, so a LOGON without a challenge, or with one that is
-   used, expired or another socket's, is refused with access denied.
+   used, expired or another socket's, is refused with access denied. The
+   server keeps that first LOGON's answer with the nonce: the same LOGON
+   said again, as a client does until it hears, gets the same answer while
+   the nonce lasts, and changes nothing.
 
 For an XUID with an account, the 32-byte answer is HMAC-SHA256, keyed by the
 account's key, of the nonce, the kind byte (12) and every other field of the
@@ -231,8 +234,8 @@ What a reader of the wire, or of the store, can do:
 - A CHALLENGE, a NONCE, and the LOGON of an account that exists give nothing
   that logs anyone on. The answer fits one nonce, which only its own socket
   can use and which is gone once it is answered. Sent again from its own
-  socket, the LOGON gets its first answer again for 60 s (see
-  [Caps](#caps)), which changes nothing, and access denied after that.
+  socket, the LOGON gets its first answer again while the nonce lasts,
+  which changes nothing, and access denied after that.
 - The LOGON that registers an XUID carries the proof. Whoever reads that one
   packet can make the key and log on as that account from then on. The
   client sends it when a NONCE says the XUID has no account, and only to a
@@ -388,13 +391,14 @@ answers (a request is small and its answer may be 100 rows of stats; past
 that the answer is dropped and the client's resend gets it later), and
 registers 4 new accounts a minute and 16 a day (the day counts accounts
 made, not refused attempts); a player's requests are 2 a second at most, so
-only a flood meets those. A nonce is kept until its LOGON or for 10 s: 32
-for an address, whose oldest makes room for a new one, and 4,096 in all,
-where the oldest of all makes room. A LOGON whose nonce went that way is
-refused, and a heartbeat refused signs its player out, so the share of an
-address keeps a flood's cost with the addresses that flood: filling the
-table takes 128 of them, and it then drops their own nonces first, since a
-player's is answered within a round trip. A LIVE_RELAY is not one of those
+only a flood meets those. A nonce is kept for its 10 s, with its LOGON's
+answer once it has one: 32 for an address, whose oldest makes room for a new
+one, and 4,096 in all, where the oldest of all makes room. A heartbeat every
+5 s keeps two of a player's, so both caps are well past what players need. A
+LOGON whose nonce went that way is refused, and a heartbeat refused signs its
+player out, so the share of an address keeps a flood's cost with the
+addresses that flood: filling the table takes 128 of them, and the oldest it
+then drops are mostly nonces already answered. A LIVE_RELAY is not one of those
 100: it has the relay's caps, 250 a second for a pair direction and 500 for
 an address, and an address may open 16 pairs. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
@@ -418,15 +422,12 @@ socket and nonce gets its first answer again for 60 s, which is what makes a
 resent SESSION_PUT one session and a resent FEEDBACK one count. At most
 2,048 answers are cached, 64 of them from one address, whose oldest answer
 makes room for its newest; past the total a request is answered but not
-kept, so a resend past it is applied again. A LOGON's answer is kept past the
-total too, in place of its address's own oldest: its challenge is gone, so
-without the answer a resend would be refused. That is what happens to an
-address with no answer of its own to drop, and no request drops another
-address's answer. An empty answer is never cached,
+kept, so a resend past it is applied again. An empty answer is never cached,
 so its resend is tried afresh, and neither is CONNECT: applying it twice
 changes nothing, its LPEERs must name the endpoints as they are now, and its
-resends then meet the CONNECT cap. Nor is CHALLENGE, whose resend is said
-the same nonce while it is unanswered.
+resends then meet the CONNECT cap. Nor are CHALLENGE and LOGON: a nonce's
+own entry repeats it and its LOGON's answer, so a logon never depends on
+room in this cache.
 
 ### What Live stores
 
