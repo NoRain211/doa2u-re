@@ -191,6 +191,16 @@ height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output
 and shared depth after capability fallback.
 
+Planned graphics work keeps the authentic look and stays presenter-only (see
+`GLOSSARY.md`), one PR each, in this order: restore the mip levels that
+uncompressed textures lose on the host; accept point min/mag filtering, which
+currently stops the runner; 16x anisotropic filtering behind an
+environment variable, its default chosen from in-game frame dumps; give the 16:9 mirror projection the
+screen's shape outside netplay and replays; scale depthless effect targets
+(shadow map, bloom, heat haze) with the main scale on SDL_GPU, correcting
+filter radii. The first three are accuracy fixes in both presenters. Above-60
+fps rendering and SDL_GPU parity (VRR, MSAA above 8x) are separate work.
+
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
 both selectors retain the presenter's shared frame-buffer flag. Constant-alpha
