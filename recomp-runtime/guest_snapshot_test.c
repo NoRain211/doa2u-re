@@ -183,8 +183,32 @@ static int run(uint8_t *ram, bool write_watch, const char *mode)
     return 0;
 }
 
+#ifdef _WIN32
+/* A failed save marks every page for hashing; with fewer pages than its
+   bitmap has bits, only real pages are hashed. GetWriteWatch fails on RAM
+   allocated without MEM_WRITE_WATCH, which fails the save. */
+static int failed_save_hash(void)
+{
+    enum { SMALL_SIZE = 3 * PAGE };
+    static uint8_t ram[SMALL_SIZE];
+    RecompGuestSnapshots s = {0}, t = {0};
+    uint64_t hash = 0u, fresh = 1u;
+    bool ok = recomp_snapshots_init(&s, ram, SMALL_SIZE, true, 1u) && recomp_snapshots_hash(&s, NULL, 0u, &hash);
+    ram[PAGE] = 1u;
+    ok = ok && !recomp_snapshots_save(&s) && recomp_snapshots_hash(&s, NULL, 0u, &hash) &&
+        recomp_snapshots_init(&t, ram, SMALL_SIZE, false, 1u) && recomp_snapshots_hash(&t, NULL, 0u, &fresh) &&
+        hash == fresh;
+    recomp_snapshots_free(&s);
+    recomp_snapshots_free(&t);
+    return ok ? 0 : fail("failed save", "hash after a failed save of three pages");
+}
+#endif
+
 int main(void)
 {
+#ifdef _WIN32
+    if (failed_save_hash() != 0) return 1;
+#endif
     bool write_watch = false;
     uint8_t *ram = recomp_guest_ram_allocate(RAM_SIZE, &write_watch);
     if (ram == NULL) return fail("allocate", "guest RAM");
