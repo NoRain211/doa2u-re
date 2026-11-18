@@ -93,7 +93,9 @@ class UpdateTest(unittest.TestCase):
             chmod.assert_called_once_with(0o755)
 
     def test_unpack_outside_windows_leaves_no_partial_file_when_a_write_fails(self):
-        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()),                 mock.patch.object(update.sys, "platform", "linux"),                 mock.patch.object(Path, "replace", side_effect=OSError("disk full")):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(update, "ROOT", Path(folder).resolve()), \
+                mock.patch.object(update.sys, "platform", "linux"), \
+                mock.patch.object(Path, "replace", side_effect=OSError("disk full")):
             (update.ROOT / "build_game.sh").write_text("old")
             data = io.BytesIO()
             with zipfile.ZipFile(data, "w") as writer:
