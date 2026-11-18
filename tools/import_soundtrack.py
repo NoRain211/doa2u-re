@@ -475,8 +475,10 @@ def level_album(folder, encoder):
     then says #level. Without the encoder (build the game first) it leaves them as they are.
     Every track is levelled into a scratch file beside it first, and only a run where they all
     succeeded replaces the tracks: a failure leaves the album exactly as it was, so a rerun levels
-    the same input rather than levelling the tracks that worked a second time. Returns how many
-    tracks it levelled successfully."""
+    the same input rather than levelling the tracks that worked a second time. Once they all
+    succeeded, the #level mark is written first and the scratch files then replace the tracks: if
+    a replace fails (a track open elsewhere), the rest stay as scratch files and a rerun finishes
+    swapping them in rather than levelling again. Returns how many tracks it levelled successfully."""
     path = os.path.join(folder, "tracks.txt")
     try:
         with open(path, encoding="utf-8") as file:
@@ -485,11 +487,17 @@ def level_album(folder, encoder):
         return 0
     mark = f"#level\t{LEVEL_DB}"
     if mark in lines:
+        for line in lines:  # finish a swap that a failed replace cut short
+            parts = line.split("\t")
+            if not line.startswith("#") and len(parts) >= 4:
+                track = os.path.join(folder, track_name(parts[0]))
+                if os.path.exists(track + ".level"):
+                    os.replace(track + ".level", track)
         return 0
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
         return 0
-    levelled, failed = [], False
+    levelled, failed, committed = [], False, False
     try:
         for line in lines:
             parts = line.split("\t")
@@ -509,15 +517,16 @@ def level_album(folder, encoder):
         if failed:
             print(f"{os.path.basename(folder)}: not every track was levelled; the album is as it was.")
             return len(levelled)
-        for scratch, track in levelled:
-            os.replace(scratch, track)
         at = 1 if lines and lines[0].startswith("#title") else 0
         lines.insert(at, mark)
         atomic_text(path, "\n".join(lines) + "\n")
+        committed = True  # from here a scratch file left behind is levelled audio a rerun swaps in
+        for scratch, track in levelled:
+            os.replace(scratch, track)
         return len(levelled)
     finally:
         for scratch, _track in levelled:
-            if os.path.exists(scratch):
+            if not committed and os.path.exists(scratch):
                 os.remove(scratch)
 
 
