@@ -7,7 +7,7 @@
    nothing here opens a second one.
 
    Reused from netplay.c: recomp_netplay_listen
-   opens and randomizes the socket, recomp_netplay_match_server resolves the
+   opens and randomizes the socket, recomp_netplay_resolve looks up the
    server, netplay_send_raw sends, netplay_now_ms reads the clock, and the
    matchmaker's cookie/nonce framing is matchmaker_wire.h's, shared with
    netplay.c. Punching repeats
@@ -21,12 +21,19 @@
    The transport is one instance per runner process; the test pairs it with a
    scripted peer and matchmaker on loopback.
    Everything runs on the frame thread: recomp_live_transport_pump once per
-   frame, and from the guest's recvfrom, which never blocks. */
+   frame, and from the guest's recvfrom, which never blocks. The one exception
+   is the matchmaker's name lookup (LiveLookup), which blocks and so has a
+   thread of its own. */
 
 #include "live_transport.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <stdatomic.h>
+#endif
 
 #include "kernel_abi.h"
 #include "live_backend.h"
@@ -148,12 +155,29 @@ typedef struct LivePeer {
     LiveQueued queue[LIVE_PEER_QUEUE];
 } LivePeer;
 
+/* The matchmaker's name lookup. getaddrinfo blocks, for seconds on a slow
+   resolver, and every request comes from the frame thread, so the lookup runs
+   on a thread of its own. The transport may close while it runs, so the
+   lookup belongs to both: whichever lets go of it second frees it. */
+enum { LOOKUP_RUNNING, LOOKUP_FOUND, LOOKUP_FAILED, LOOKUP_DROPPED };
+typedef struct LiveLookup {
+    char host[256];
+    RecompLiveResolver resolve;
+    uint32_t address; /* network order, once the state is LOOKUP_FOUND */
+#ifdef _WIN32
+    volatile LONG state;
+#else
+    atomic_int state;
+#endif
+} LiveLookup;
+
 static struct {
     bool started; /* recomp_live_transport_open ran; the socket waits for the first request */
     bool open; /* the socket is up and the server resolved */
     char server_host[256];
     uint16_t server_port;
-    uint64_t retry_ms; /* when a socket that failed to open is tried again */
+    uint64_t retry_ms; /* when a lookup or socket that failed is tried again */
+    LiveLookup *lookup; /* the server's name, being looked up */
     RecompNetplay net; /* the socket, its nonce, cookie and the relay framing */
     uint32_t last_error;
     uint32_t local_ina; /* this player's virtual address, once logged on */
@@ -644,24 +668,113 @@ bool recomp_live_transport_open(const char *server_host, uint16_t server_port)
     return true;
 }
 
-/* Opens the socket and resolves the server on the first request, so a player
-   who never logs on sends no lookup and meets no firewall prompt. A failure is
-   tried again 5 s later, when the client's resend comes. */
+static RecompLiveResolver resolver = recomp_netplay_resolve;
+
+void recomp_live_transport_set_resolver(RecompLiveResolver replacement)
+{
+    resolver = replacement != NULL ? replacement : recomp_netplay_resolve;
+}
+
+/* Moves a lookup on from running, or reads its state with to = LOOKUP_RUNNING.
+   Returns the state it had. */
+static int lookup_leave(LiveLookup *lookup, int to)
+{
+#ifdef _WIN32
+    return (int)InterlockedCompareExchange(&lookup->state, to, LOOKUP_RUNNING);
+#else
+    int was = LOOKUP_RUNNING;
+    atomic_compare_exchange_strong(&lookup->state, &was, to);
+    return was;
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI lookup_thread(void *context)
+#else
+static void *lookup_thread(void *context)
+#endif
+{
+    LiveLookup *lookup = context;
+    const bool found = lookup->resolve(lookup->host, &lookup->address);
+    /* The transport closed meanwhile: nobody else will free it. */
+    if (lookup_leave(lookup, found ? LOOKUP_FOUND : LOOKUP_FAILED) == LOOKUP_DROPPED) free(lookup);
+    return 0;
+}
+
+static LiveLookup *lookup_start(const char *host)
+{
+    LiveLookup *lookup = calloc(1u, sizeof *lookup); /* zeroed: LOOKUP_RUNNING */
+    if (lookup == NULL) return NULL;
+    memcpy(lookup->host, host, strlen(host) + 1u);
+    lookup->resolve = resolver;
+#ifdef _WIN32
+    const HANDLE thread = CreateThread(NULL, 0u, lookup_thread, lookup, 0u, NULL);
+    if (thread != NULL) {
+        CloseHandle(thread);
+        return lookup;
+    }
+#else
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, lookup_thread, lookup) == 0) {
+        pthread_detach(thread);
+        return lookup;
+    }
+#endif
+    free(lookup);
+    return NULL;
+}
+
+/* An address needs no lookup. */
+static bool literal_address(const char *host, uint32_t *address)
+{
+    unsigned part[4];
+    uint8_t bytes[4];
+    char rest;
+    if (sscanf(host, "%3u.%3u.%3u.%3u%c", &part[0], &part[1], &part[2], &part[3], &rest) != 4) return false;
+    for (unsigned i = 0u; i < 4u; ++i) {
+        if (part[i] > 255u) return false;
+        bytes[i] = (uint8_t)part[i];
+    }
+    memcpy(address, bytes, sizeof bytes);
+    return true;
+}
+
+/* Looks the server up and opens the socket from the first request on, so a
+   player who never logs on sends no lookup and meets no firewall prompt. The
+   lookup never holds a request: it runs on its own thread, and the request
+   that finds it done opens the socket and goes out, which is the client's
+   resend 500 ms later. A failure is tried again 5 s after it began. */
 static bool live_socket_up(void)
 {
     if (live.open) return true;
-    const uint64_t now = netplay_now_ms();
-    if (!live.started || now < live.retry_ms) return false;
-    live.retry_ms = now + 5000u;
+    if (!live.started) return false;
+    uint32_t address = 0u;
+    if (live.lookup != NULL) {
+        const int state = lookup_leave(live.lookup, LOOKUP_RUNNING);
+        if (state == LOOKUP_RUNNING) return false;
+        address = live.lookup->address;
+        free(live.lookup);
+        live.lookup = NULL;
+        if (state != LOOKUP_FOUND) {
+            fprintf(stderr, "recomp live: cannot resolve the matchmaker %s\n", live.server_host);
+            return false;
+        }
+    } else {
+        const uint64_t now = netplay_now_ms();
+        if (now < live.retry_ms) return false;
+        live.retry_ms = now + 5000u;
+        if (!literal_address(live.server_host, &address)) {
+            live.lookup = lookup_start(live.server_host);
+            if (live.lookup == NULL) fprintf(stderr, "recomp live: cannot start the matchmaker lookup\n");
+            return false;
+        }
+    }
     if (!recomp_netplay_listen(&live.net, 0u)) {
         fprintf(stderr, "recomp live: cannot open the socket\n");
         return false;
     }
-    if (!recomp_netplay_match_server(&live.net, live.server_host, live.server_port)) {
-        fprintf(stderr, "recomp live: cannot resolve the matchmaker %s\n", live.server_host);
-        recomp_netplay_close(&live.net);
-        return false;
-    }
+    live.net.match.server_address = address;
+    live.net.match.server_port = htons(live.server_port);
     live.open = true;
     return true;
 }
@@ -670,6 +783,8 @@ void recomp_live_transport_close(void)
 {
     recomp_live_transport_unbind_rollback();
     if (live.open) recomp_netplay_close(&live.net);
+    /* A lookup still running is left to its thread, which frees it. */
+    if (live.lookup != NULL && lookup_leave(live.lookup, LOOKUP_DROPPED) != LOOKUP_RUNNING) free(live.lookup);
     memset(&live, 0, sizeof live);
 }
 

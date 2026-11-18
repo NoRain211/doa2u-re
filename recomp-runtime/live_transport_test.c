@@ -180,6 +180,23 @@ static void send_socket(SOCKET handle, const struct sockaddr_in *to, const uint8
     (void)sendto(handle, (const char *)packet, (int)size, 0, (const struct sockaddr *)to, sizeof *to);
 }
 
+/* The matchmaker's name lookup, made slow: 300 ms, then loopback or a failure. */
+static volatile int lookups;
+static bool lookup_fails;
+
+static bool slow_resolver(const char *host, uint32_t *address)
+{
+    (void)host;
+#ifdef _WIN32
+    Sleep(300);
+#else
+    usleep(300000);
+#endif
+    *address = htonl(0x7f000001u);
+    ++lookups;
+    return !lookup_fails;
+}
+
 /* Lets the transport's millisecond clock move on, so two sends are told apart. */
 static void spin_ms(uint64_t milliseconds)
 {
@@ -904,6 +921,45 @@ int main(void)
 
     recomp_live_transport_close();
     check("a closed transport receives nothing", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
+
+    /* --- the matchmaker's name is looked up off the frame thread --- */
+    while (read_socket(server_socket, packet, sizeof packet, &client_endpoint, 20u) >= 0) {
+    }
+    const uint16_t server_port = ntohs(server_address.sin_port);
+    const size_t named_size = match_request(request, 12u, 9u);
+    recomp_live_transport_set_resolver(slow_resolver);
+    check("a named server opens", recomp_live_transport_open("matchmaker.test", server_port));
+    const uint64_t asked_at = netplay_now_ms();
+    recomp_live_transport_send_server(request, named_size);
+    check("a request does not wait for the lookup", netplay_now_ms() - asked_at < 100u);
+    recomp_live_transport_send_server(request, named_size);
+    check("and none goes out before the name is found", lookups == 0 &&
+        read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
+    spin_ms(600u);
+    recomp_live_transport_send_server(request, named_size); /* the client's resend */
+    size = read_socket(server_socket, packet, sizeof packet, &client_endpoint, 1000u);
+    check("the resend after it goes out", lookups == 1 && size == (int)named_size &&
+        memcmp(packet, "D2MM", 4u) == 0 && packet[MATCH_ASKED + 3u] == 9u);
+
+    /* A name that does not resolve is not asked again at once. */
+    lookup_fails = true;
+    check("a server that will not resolve opens", recomp_live_transport_open("matchmaker.test", server_port));
+    recomp_live_transport_send_server(request, named_size);
+    spin_ms(600u);
+    recomp_live_transport_send_server(request, named_size);
+    recomp_live_transport_send_server(request, named_size);
+    check("a failed lookup sends nothing and is not repeated at once", lookups == 2 &&
+        read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
+
+    /* Closing while a lookup runs leaves it to its thread. */
+    lookup_fails = false;
+    check("the server opens again", recomp_live_transport_open("matchmaker.test", server_port));
+    recomp_live_transport_send_server(request, named_size);
+    recomp_live_transport_close();
+    spin_ms(600u);
+    check("a lookup outlives the close that dropped it", lookups == 3 &&
+        read_socket(server_socket, packet, sizeof packet, &client_endpoint, 50u) < 0);
+    recomp_live_transport_set_resolver(NULL);
 
     if (server_socket != INVALID_SOCKET) closesocket(server_socket);
     if (peer_socket != INVALID_SOCKET) closesocket(peer_socket);

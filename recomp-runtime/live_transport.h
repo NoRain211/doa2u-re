@@ -29,9 +29,15 @@ typedef struct RecompLivePeerIntro {
     uint8_t token[8];          /* the pair's token, which both sides' punches carry */
 } RecompLivePeerIntro;
 
-/* Keeps the server; the socket opens and the server resolves on the first
-   request (recomp_live_transport_send_server). False for a bad server. */
+/* Keeps the server; the first request (recomp_live_transport_send_server)
+   starts the server's name lookup on a thread of its own, and the socket opens
+   once the name is found, so a request goes out from the first one sent after
+   that. No request waits for the lookup. False for a bad server. */
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port);
+/* How a name is looked up: recomp_netplay_resolve unless the test makes it
+   slow. NULL restores it. */
+typedef bool (*RecompLiveResolver)(const char *host, uint32_t *address);
+void recomp_live_transport_set_resolver(RecompLiveResolver resolver);
 void recomp_live_transport_close(void);
 /* Reads every queued packet and demuxes it; resends punches. Called once per
    frame and from the guest's recvfrom. */

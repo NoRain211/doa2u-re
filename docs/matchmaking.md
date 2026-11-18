@@ -364,9 +364,13 @@ names), and the name of the newest game profile, cut to 15 bytes, or
 `PLAYER` when that name fails the same check as profile names. The server is
 the built-in one; `RECOMP_LIVE_SERVER=host:port` overrides it, with host
 names allowed, and a bare `host` keeps the built-in server's port. The
-socket opens and the server's name resolves with the game's first request,
-not at start, so a player who never opens DOA ONLINE sends nothing; a
-failure is tried again 5 s later.
+server's name is looked up from the game's first request on, not at start,
+so a player who never opens DOA ONLINE sends nothing. The lookup runs on a
+thread of its own, because it can take seconds and requests come from the
+frame thread: the first request starts it, and the socket opens and a
+request goes out with the first one sent after the name is found, which is
+the client's resend 500 ms later. A lookup that fails is tried again 5 s
+after it began. An address in place of a name needs no lookup.
 
 ## Not done yet
 
