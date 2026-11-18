@@ -302,6 +302,21 @@ static int draw_tests(void)
     invoke(0x348240u, 5u, 3u, VERTICES, 28u);
     /* -2.0 * 256 + 0.5 truncates toward zero to -511. */
     CHECK(submitted.data.draw.point_mip_filter && submitted.data.draw.mip_lod_bias == -511.0f / 256.0f);
+    /* D3DTEXF_POINT (1) reaches the presenter per axis; LINEAR (2) leaves it clear. */
+    *recomp_memory_u32(STAGES + 12u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(submitted.data.draw.point_min_filter && !submitted.data.draw.point_mag_filter);
+    *recomp_memory_u32(STAGES + 16u) = 1u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(submitted.data.draw.point_min_filter && submitted.data.draw.point_mag_filter);
+    *recomp_memory_u32(STAGES + 12u) = *recomp_memory_u32(STAGES + 16u) = 2u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(!submitted.data.draw.point_min_filter && !submitted.data.draw.point_mag_filter);
+    /* Anisotropic (3) stays outside this path. */
+    *recomp_memory_u32(STAGES + 12u) = 3u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 28u); return 1; }
+    CHECK(strncmp(stop_reason, "d3d8:draw-texture-sampler:", 26) == 0);
+    *recomp_memory_u32(STAGES + 12u) = 2u;
     CHECK(!submitted.data.draw.alpha_kill);
     *recomp_memory_u32(STAGES + 44u) = 4u;
     invoke(0x348240u, 5u, 3u, VERTICES, 28u);

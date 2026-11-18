@@ -362,6 +362,89 @@ static bool testMipSampler()
     return passed;
 }
 
+static bool testPointMinMagFilter()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "point", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create point sampler", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        // A 2x2 texture, red on the left and green on the right, magnified 32x.
+        const uint32_t texels[] = {
+            0xffff0000u, 0xff00ff00u,
+            0xffff0000u, 0xff00ff00u,
+        };
+        Vertex vertices[] = {
+            {20, 20, 0.25f, 1, 0xffffffffu, 0, 0},
+            {84, 20, 0.25f, 1, 0xffffffffu, 2, 0},
+            {20, 84, 0.25f, 1, 0xffffffffu, 0, 2},
+            {84, 84, 0.25f, 1, 0xffffffffu, 2, 2},
+        };
+        uint16_t indices[] = {0, 1, 2, 3};
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("point clear", d3d_backend_submit(presenter, &clear));
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof(Vertex);
+        draw.fvf = 0x144u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.has_texture = true;
+        draw.texture.format_byte = 0x12u;
+        draw.texture.linear = true;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = draw.texture.height = 2;
+        draw.texture.pitch = 8;
+        draw.texture.data = 0x3000u;
+        draw.texture_bytes = texels;
+        draw.texture_byte_count = sizeof texels;
+        // Point mag takes the nearest texel; the same quad drawn linearly blends.
+        draw.point_mag_filter = true;
+        passed &= expect("point mag draw", d3d_backend_submit(presenter, &command));
+        for (auto &vertex : vertices) vertex.x += 64.0f;
+        draw.point_mag_filter = false;
+        passed &= expect("linear mag draw", d3d_backend_submit(presenter, &command));
+        command = {};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5, 1};
+        passed &= expect("point present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy point sampler", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            // x=51 and x=53 straddle the texel boundary at x=52; y=35 is mid-texel.
+            const unsigned samples[][2] = {{51u, 35u}, {53u, 35u}, {115u, 35u}};
+            unsigned char bgr[3][3]{};
+            for (unsigned i = 0u; i < 3u; ++i) {
+                std::fseek(file, 54 + (240 - 1 - samples[i][1]) * 320 * 3 + samples[i][0] * 3, SEEK_SET);
+                passed &= std::fread(bgr[i], 1, 3, file) == 3;
+            }
+            std::fclose(file);
+            const bool point_red = bgr[0][2] > 245 && bgr[0][1] < 10 && bgr[0][0] < 10;
+            const bool point_green = bgr[1][1] > 245 && bgr[1][0] < 10 && bgr[1][2] < 10;
+            const bool linear_blend = bgr[2][2] > 60 && bgr[2][2] < 200 &&
+                bgr[2][1] > 60 && bgr[2][1] < 200 && bgr[2][0] < 10;
+            if (!point_red) std::fprintf(stderr, "FAIL point mag left BGR=%u,%u,%u\n",
+                bgr[0][0], bgr[0][1], bgr[0][2]);
+            if (!point_green) std::fprintf(stderr, "FAIL point mag right BGR=%u,%u,%u\n",
+                bgr[1][0], bgr[1][1], bgr[1][2]);
+            if (!linear_blend) std::fprintf(stderr, "FAIL linear mag BGR=%u,%u,%u\n",
+                bgr[2][0], bgr[2][1], bgr[2][2]);
+            passed &= point_red && point_green && linear_blend;
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS point mag samples the nearest texel and linear mag still blends");
+    return passed;
+}
+
 static bool testLines()
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -3089,7 +3172,8 @@ int main()
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
-        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testLines() || !testLighting() ||
+        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testPointMinMagFilter() ||
+        !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
         !testReflectionAddress(false, false, true) || !testReflectionAddress(true, false, false, true) ||

@@ -276,16 +276,18 @@ uncompressed volume's full span: width x height x depth per level, each
 axis halving to 1. Stage-0 fixed-function FVF 0x142 draws can sample a
 single-level A8R8G8B8 volume through a native D3D11 Texture3D. The upload
 unswizzles all three axes; UV0 supplies S/T, with R zero unless COUNT3's
-texture matrix supplies it. U/V/W addressing and linear filtering apply.
-Other volume formats, mip chains, coordinate generators, locks and views
-remain guarded.
+texture matrix supplies it. U/V/W addressing and point or linear min/mag
+filtering apply. Other volume formats, mip chains, coordinate generators, locks
+and views remain guarded.
 
 `d3d8_draw_adapter.c` binds DrawVertices, DrawVerticesUP and
 DrawIndexedVertices to the existing D3D11 presenter. It snapshots fixed-function
 layouts, transforms, viewport, depth/blend state, stage-0 texture and palette.
 Supported combinations include texture/diffuse modulation, white diffuse alpha
-selection, texture alpha selection and texture factors. Linear min/mag filters
-support point or linear mip selection with LOD bias encoded as the lazy
+selection, texture alpha selection and texture factors. Stage-0 min and mag
+filters reach the host sampler independently, so point requests stay point and
+linear requests stay linear; anisotropic stays on its own four-tap paths. Point
+or linear mip selection is supported, with LOD bias encoded as the lazy
 texture-state upload (0x34f400) does: 1/256 steps, truncated after +0.5 and
 clamped to the 13-bit field, so NaN and out-of-range biases clamp to -16 or
 15.99 (D3D11's maximum).
