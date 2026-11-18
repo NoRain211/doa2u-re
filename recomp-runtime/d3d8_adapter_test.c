@@ -360,6 +360,31 @@ static int create_wide(float aspect)
     return create();
 }
 
+/* A 200-pixel-wide 2D layer in a 720x480 target, from top to bottom, so a fit
+   case differs only in its height band and its stage-0 texture. */
+static RecompD3dPresenterDrawCommand layer_band(float top, float bottom, bool has_texture,
+    bool render_target, float vertices[4][4])
+{
+    const float corners[4][2] = {{100.0f, top}, {300.0f, top}, {100.0f, bottom}, {300.0f, bottom}};
+    const int32_t full[4] = {0, 0, 720, 480};
+    RecompD3dPresenterDrawCommand draw = {0};
+
+    for (uint32_t i = 0u; i < 4u; ++i) {
+        memcpy(vertices[i], corners[i], sizeof corners[i]);
+        vertices[i][3] = 1.0f;
+    }
+    draw.vertex_bytes = vertices;
+    draw.vertex_stride = sizeof *vertices;
+    draw.vertex_count = 4u;
+    draw.target.color.width = 720u;
+    draw.target.color.height = 480u;
+    draw.has_texture = has_texture;
+    draw.texture.render_target = render_target;
+    draw.has_scissor = true;
+    memcpy(draw.scissor, full, sizeof full);
+    return draw;
+}
+
 /* Another screen shape fits the 16:9 HUD layer, scissor included; an indexed
    draw's bounds come from the vertices it uses. */
 static int fit_tests(void)
@@ -394,6 +419,49 @@ static int fit_tests(void)
         draw.layer_scale[0] == 1.0f && fabsf(draw.layer_scale[1] - 0.9f) < 1e-5f && draw.scissor[0] == 0 &&
         draw.scissor[1] >= 23 && draw.scissor[1] <= 24 && draw.scissor[2] == 720 &&
         draw.scissor[3] >= 456 && draw.scissor[3] <= 457);
+    /* A 2D layer of one of the game's own render targets covering the whole
+       target height is a screen effect, so it keeps its size; a picture in a
+       panel, an ordinary texture or no texture still fits like the HUD. */
+    float effect_vertices[4][4];
+    passed &= create_wide(32.0f / 9.0f);
+    RecompD3dPresenterDrawCommand effect = layer_band(0.0f, 480.0f, true, true, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a full-height render-target effect keeps its size and scissor",
+        effect.layer_scale[0] == 0.0f && effect.layer_scale[1] == 0.0f && effect.scissor[0] == 0 &&
+        effect.scissor[1] == 0 && effect.scissor[2] == 720 && effect.scissor[3] == 480);
+    effect = layer_band(0.5f, 479.5f, true, true, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("half-pixel edges still cover the whole height",
+        effect.layer_scale[0] == 0.0f && effect.layer_scale[1] == 0.0f && effect.scissor[2] == 720);
+    effect = layer_band(100.0f, 480.0f, true, true, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a render-target picture short at the top fits",
+        effect.layer_scale[0] == 0.5f && effect.layer_scale[1] == 1.0f && effect.scissor[0] == 180 &&
+        effect.scissor[2] == 540);
+    effect = layer_band(100.0f, 300.0f, true, true, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a shorter render-target picture fits",
+        effect.layer_scale[0] == 0.5f && effect.scissor[0] == 180 && effect.scissor[2] == 540);
+    effect = layer_band(0.0f, 480.0f, true, false, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a full-height draw of an ordinary texture fits",
+        effect.layer_scale[0] == 0.5f && effect.scissor[0] == 180 && effect.scissor[2] == 540);
+    effect = layer_band(0.0f, 480.0f, false, false, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a full-height draw with no texture fits",
+        effect.layer_scale[0] == 0.5f && effect.scissor[0] == 180 && effect.scissor[2] == 540);
+    effect = layer_band(0.0f, 480.0f, true, true, effect_vertices);
+    effect.target.offscreen = true;
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("an offscreen render-target draw stays as it is",
+        effect.layer_scale[0] == 0.0f && effect.scissor[2] == 720);
+    /* 16:10 letterboxes the HUD layer, but a screen effect still fills it. */
+    passed &= create_wide(1.6f);
+    effect = layer_band(0.0f, 480.0f, true, true, effect_vertices);
+    recomp_d3d8_fit_2d_layer(&effect);
+    passed &= expect("a full-height render-target effect keeps its height at 16:10",
+        effect.layer_scale[0] == 0.0f && effect.layer_scale[1] == 0.0f && effect.scissor[1] == 0 &&
+        effect.scissor[3] == 480);
     /* A 3D view in a menu panel moves with the panel and keeps its size. */
     RecompD3dPresenterDrawCommand view = {0};
     view.target.color.width = 720u;
