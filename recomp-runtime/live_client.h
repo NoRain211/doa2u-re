@@ -28,9 +28,12 @@ enum {
 /* The backend over a transport that is already open. gamertag is the name
    the game shows for this player (the netplay profile's), digest the
    runner build's 64 hex characters; the server answers the gamertag it
-   actually gave, which may carry a digit. The test calls this directly. */
+   actually gave, which may carry a digit. server is the matchmaker's
+   "host:port" as the runner has it, kept in lowercase: after a logon there
+   the identity's list names it, and it is never sent the proof again. NULL
+   remembers no server. The test calls this directly. */
 const RecompLiveBackend *recomp_live_client_attach(const RecompLiveIdentity *identity, const char *gamertag,
-    const char *digest);
+    const char *digest, const char *server);
 /* Drops the backend and the transport's server handler; the transport stays open. */
 void recomp_live_client_detach(void);
 bool recomp_live_client_attached(void);
@@ -38,8 +41,9 @@ bool recomp_live_client_attached(void);
 void recomp_live_client_tick(uint64_t now_ms);
 
 /* The runner's version (live_bridge.cpp, which reads the netplay side): the
-   identity in <storage>/live-identity.bin, the gamertag from the player's
-   profile, and the matchmaker from NETPLAY SETTINGS, or the built-in one.
+   identity in <storage>/live-identity.bin and its server list beside it, the
+   gamertag from the player's profile, and the matchmaker from NETPLAY
+   SETTINGS, or the built-in one.
    RECOMP_LIVE_SERVER=host:port overrides both; a bare host keeps the port
    MATCHMAKER names (or the built-in server's). It opens the transport and
    returns the backend to give recomp_live_backend_set, or NULL. */

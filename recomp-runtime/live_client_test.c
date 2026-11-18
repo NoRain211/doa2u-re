@@ -560,7 +560,7 @@ static void checkPushSlots(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the push test", backend != NULL);
     recomp_live_client_tick(1000u);
     unsigned answered = 0u;
@@ -588,7 +588,7 @@ static void checkHeartbeat(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the heartbeat test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -640,7 +640,7 @@ static void checkStatTypes(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the stat test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -673,7 +673,7 @@ static void checkGroupChildren(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the group test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -710,7 +710,7 @@ static void checkInviteNeedsEverySlot(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the short-table invite test", backend != NULL);
     recomp_live_client_tick(1000u);
     /* Ten mutes hold ten of the sixteen slots, so six are free. */
@@ -742,7 +742,7 @@ static void checkRetriesAndTimeout(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the timing test", backend != NULL);
     recomp_live_client_tick(1000u); /* the runner's frame clock has run by now */
     captured_count = 0u;
@@ -776,7 +776,7 @@ static void checkPushAfterTimeout(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the timed-out push test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -802,7 +802,7 @@ static void checkConnectRetry(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the connect test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -893,7 +893,7 @@ static void checkHeartbeatRefused(const RecompLiveIdentity *identity)
 {
     static RecompLiveIdentity copy;
     copy = *identity;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the refused heartbeat test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -919,7 +919,7 @@ static void checkCookie(const RecompLiveIdentity *identity)
     copy = *identity;
     memset(test_cookie, 0, sizeof test_cookie);
     asked_size = 0u;
-    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the cookie test", backend != NULL);
     recomp_live_client_tick(1000u);
     captured_count = 0u;
@@ -962,6 +962,129 @@ static bool writeFile(const char *path, const uint8_t *bytes, size_t size)
     return wrote;
 }
 
+/* The NONCE the matchmaker, or someone sending as it, answers the client's
+   last CHALLENGE with. */
+static void answer_challenge(bool registered)
+{
+    uint8_t nonce[21];
+    memset(nonce, 0x5a, sizeof nonce);
+    memcpy(nonce, captured[captured_count - 1u] + MATCH_ASKED, 4u);
+    nonce[4] = registered ? 1u : 0u;
+    feed_body(LIVE_NONCE, nonce, sizeof nonce);
+}
+
+/* Whether the server list holds exactly these bytes. */
+static bool serversHold(const char *path, const char *text)
+{
+    char held[256] = {0};
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) return text == NULL;
+    const size_t got = fread(held, 1, sizeof held - 1u, file);
+    fclose(file);
+    return text != NULL && got == strlen(text) && memcmp(held, text, got) == 0;
+}
+
+/* The proof registers an account with a matchmaker once. A NONCE that says
+   "no account" from a matchmaker this account has logged on to is not
+   believed: forged from the server's address, it would have the client hand
+   over the proof, and with it the account. */
+static void checkDowngradeGuard(const RecompLiveIdentity *identity)
+{
+    static RecompLiveIdentity copy;
+    const char *list = "live-servers-test.txt";
+    uint32_t hresult = 0u;
+    copy = *identity;
+    snprintf(copy.servers, sizeof copy.servers, "%s", list);
+    remove(list);
+
+    /* No list yet: the account registers, and the server is then remembered. */
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "Example.Test:47700");
+    check("attach for the guard test", backend != NULL);
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    RecompLiveRequest request = backend->logon(backend->self);
+    check("a missing list holds no server", !recomp_live_identity_knows_server(&copy, "example.test:47700"));
+    answer_logon(false, 0u, 0x0a010009u);
+    check("an unremembered server is sent the proof", captured_count == 2u && captured[1][5] == LIVE_LOGON &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) == 0 && done(request));
+    check("and is remembered in lowercase", serversHold(list, "example.test:47700\n"));
+    backend->release(backend->self, request);
+
+    /* Its heartbeat is a logon too, and the one a forger has every 5 s. */
+    const unsigned before = forget_calls;
+    captured_count = 0u;
+    recomp_live_client_tick(6000u);
+    check("the guarded heartbeat asks for a challenge", captured_count == 1u && captured[0][5] == LIVE_CHALLENGE);
+    answer_challenge(false);
+    recomp_live_client_tick(6500u);
+    check("a heartbeat withholds the proof", captured_kind(LIVE_LOGON) == 0u);
+    check("and signs the account out", forget_calls == before + 1u && local_ina == 0u);
+    recomp_live_client_detach();
+
+    /* The next run reads the list: the game's own logon fails as a refused one does. */
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "example.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_challenge(false);
+    recomp_live_client_tick(1500u);
+    check("a remembered server is not sent the proof", captured_count == 1u && captured_kind(LIVE_LOGON) == 0u);
+    check("and that logon fails", backend->poll(backend->self, request, &hresult) == RECOMP_LIVE_FAILED &&
+        hresult == 0x80070005u && local_ina == 0u);
+    backend->release(backend->self, request);
+    /* The account it does have still logs on there, with the key. */
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_logon(true, 0u, 0x0a010009u);
+    check("a remembered server still logs the account on", captured_count == 2u && captured[1][5] == LIVE_LOGON &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) != 0 && done(request));
+    check("and is listed once", serversHold(list, "example.test:47700\n"));
+    backend->release(backend->self, request);
+    recomp_live_client_detach();
+
+    /* Another matchmaker is not in the list, so it registers and joins it. */
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "other.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_logon(false, 0u, 0x0a010009u);
+    check("another server is sent the proof", captured_count == 2u &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) == 0 && done(request));
+    check("and joins the list", serversHold(list, "example.test:47700\nother.test:47700\n"));
+    backend->release(backend->self, request);
+    recomp_live_client_detach();
+
+    /* An account the matchmaker already has logs on with its key, and that
+       logon records the server too. */
+    remove(list);
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "example.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_logon(true, 0u, 0x0a010009u);
+    check("an account that exists logs on without the proof", captured_count == 2u &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) != 0 && done(request));
+    check("and records the server", serversHold(list, "example.test:47700\n"));
+    backend->release(backend->self, request);
+    recomp_live_client_detach();
+
+    /* A list that is not one holds no server: the account registers, and the
+       server's line goes after what was there. */
+    static const char garbage[] = "\377\200\r\177 not a list";
+    check("a garbage list is written", writeFile(list, (const uint8_t *)garbage, sizeof garbage)); /* its NUL too */
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "example.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_logon(false, 0u, 0x0a010009u);
+    check("a garbage list holds no server", captured_count == 2u &&
+        memcmp(captured[1] + MATCH_ASKED + 12u, copy.proof, sizeof copy.proof) == 0 && done(request));
+    check("and the server is remembered after it", recomp_live_identity_knows_server(&copy, "example.test:47700"));
+    backend->release(backend->self, request);
+    recomp_live_client_detach();
+    remove(list);
+}
+
 static void checkIdentityFile(void)
 {
     const char *path = "live-identity-test.bin";
@@ -972,9 +1095,17 @@ static void checkIdentityFile(void)
     setenv("RECOMP_LIVE_IDENTITY", path, 1);
 #endif
     RecompLiveIdentity first, second;
+    /* A list the account before this one left: the new account has logged on nowhere. */
+    const char *list = "live-identity-test.bin.servers.txt";
+    check("a stale server list is written", writeFile(list, (const uint8_t *)"example.test:47700\n", 19u));
     check("a first load makes a secret", recomp_live_identity_load(NULL, &first) && first.xuid != 0u);
+    check("the server list is beside the identity", strcmp(first.servers, list) == 0);
+    check("a new secret drops the old server list", !recomp_live_identity_knows_server(&first, "example.test:47700"));
+    check("an account remembers a server", recomp_live_identity_remember_server(&first, "example.test:47700"));
     check("the secret is kept", recomp_live_identity_load(NULL, &second) &&
         memcmp(first.secret, second.secret, sizeof first.secret) == 0 && first.xuid == second.xuid);
+    check("and so is its server list", recomp_live_identity_knows_server(&second, "example.test:47700"));
+    remove(list);
     uint8_t short_file[31] = {0u};
     check("a short file is written", writeFile(path, short_file, sizeof short_file));
     check("a damaged file is refused", !recomp_live_identity_load(NULL, &second));
@@ -1101,7 +1232,7 @@ int main(int argc, char **argv)
     check("the vectors carry a digest",
         readString(document, "digest", transcript_digest, sizeof transcript_digest) == 64u);
     check("the vectors carry a gamertag", readString(document, "gamertag", transcript_tag, sizeof transcript_tag) != 0u);
-    backend = recomp_live_client_attach(&mine, transcript_tag, transcript_digest);
+    backend = recomp_live_client_attach(&mine, transcript_tag, transcript_digest, NULL);
     check("attach", backend != NULL);
     check("the backend is attached", recomp_live_client_attached());
 
@@ -1129,6 +1260,7 @@ int main(int argc, char **argv)
     checkStatTypes(&mine);
     checkGroupChildren(&mine);
     checkInviteNeedsEverySlot(&mine);
+    checkDowngradeGuard(&mine);
     checkIdentityFile();
     checkLocalBackend();
 

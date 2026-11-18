@@ -23,6 +23,13 @@ line. When Live is off, the Live pages report no account, as before.
   the file moves the account and losing it loses the account. Anyone who
   reads the file can log on as the account. `RECOMP_LIVE_IDENTITY=<file>` uses
   another file, which is how two runners on one machine get two accounts.
+- **Known servers.** After the first logon on a matchmaker, the runner adds
+  its `host:port` as a line to `live-identity.bin.servers.txt` beside the
+  identity file (the identity file's name and `.servers.txt`), and never
+  sends that server the proof again. Keep the list with the identity file
+  when you move the account. If a matchmaker lost its accounts, the logon
+  fails and stderr names the line to remove from that file to register
+  again; that registration sends the proof once more.
 
 ## How it fits
 

@@ -27,6 +27,7 @@ enum {
     RECOMP_LIVE_HMAC_MESSAGE_BYTES = 192, /* the longest message recomp_live_hmac takes */
     /* The high 16 bits of an Xbox Live XUID; the low 48 come from SHA-256(proof). */
     RECOMP_LIVE_XUID_TYPE = 0x0009u,
+    RECOMP_LIVE_IDENTITY_PATH_BYTES = 1024,
 };
 
 typedef struct RecompLiveIdentity {
@@ -34,11 +35,16 @@ typedef struct RecompLiveIdentity {
     uint64_t xuid;
     uint8_t proof[RECOMP_LIVE_IDENTITY_PROOF_BYTES];
     uint8_t key[RECOMP_LIVE_IDENTITY_KEY_BYTES];
+    /* The file that lists the matchmakers this account has logged on to: the
+       identity file's name and ".servers.txt". Empty for an identity made from
+       a bare secret, which remembers none. */
+    char servers[RECOMP_LIVE_IDENTITY_PATH_BYTES];
 } RecompLiveIdentity;
 
 /* Reads <storage>/live-identity.bin, or the file RECOMP_LIVE_IDENTITY names,
-   and makes a random secret there on first use. False when the file is
-   damaged, cannot be written, or no secret or digest can be made. */
+   and makes a random secret there on first use, which also removes a server
+   list left beside it: a new account has logged on nowhere. False when the
+   file is damaged, cannot be written, or no secret or digest can be made. */
 bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity);
 
 /* The XUID, proof and key a secret gives: SHA-256("doa2u-live" || secret) is
@@ -55,6 +61,16 @@ bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_
    be made. */
 bool recomp_live_hmac(const uint8_t key[RECOMP_LIVE_IDENTITY_KEY_BYTES], const uint8_t *message, size_t size,
     uint8_t mac[RECOMP_LIVE_HMAC_BYTES]);
+
+/* The matchmakers this account has logged on to, one "host:port" a line in
+   identity->servers. The proof registers the account with a matchmaker once,
+   so one in this list is never sent it again (live_client.c). A list that is
+   missing or cannot be read holds no server. */
+bool recomp_live_identity_knows_server(const RecompLiveIdentity *identity, const char *server);
+/* Adds a server to that list, replacing the file whole as the secret is
+   written. False when the list could not be written; true when the server is
+   in it, or when the identity keeps no list. */
+bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, const char *server);
 
 #ifdef __cplusplus
 }

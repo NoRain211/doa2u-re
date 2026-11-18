@@ -4,6 +4,7 @@
 #include "live_transport.h"
 #include "matchmaker_wire.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -138,6 +139,7 @@ typedef struct LiveClient {
     RecompLiveBackend backend;
     bool attached;
     RecompLiveIdentity identity;
+    char server[256]; /* the matchmaker as "host:port" in lowercase, which the identity's list names it by */
     char digest[LIVE_DIGEST_BYTES];
     RecompLiveUser user;
     bool logged_on;
@@ -721,6 +723,8 @@ static uint32_t refused_request(uint8_t kind, uint32_t hresult)
 
 /* --- answers --- */
 
+static void sign_out(void);
+
 /* The matchmaker's nonce for a logon: its LOGON takes the CHALLENGE's place in
    the slot, inside the same 5 s. */
 static void handle_nonce(LiveRequestState *slot, const uint8_t *body, size_t size)
@@ -733,7 +737,20 @@ static void handle_nonce(LiveRequestState *slot, const uint8_t *body, size_t siz
         finish_request(slot, LIVE_HRESULT_FAIL);
         return;
     }
-    if (!build_logon(packet, slot->id, body[4] != 0u, body + 5u)) {
+    const bool registered = body[4] != 0u;
+    if (!registered && recomp_live_identity_knows_server(&live.identity, live.server)) {
+        /* This account registered with this matchmaker before, so the proof
+           stays here: a NONCE forged from the server's address says "no
+           account" to be sent it. The logon ends as a refused one does, and a
+           heartbeat signs the account out as its refusal would. */
+        fprintf(stderr, "recomp live: %s says this account does not exist, but it has logged on there before. "
+            "Its proof was withheld to protect the account. If that server lost its accounts, remove the line "
+            "\"%s\" from %s to register again\n", live.server, live.server, live.identity.servers);
+        if (slot->owned) sign_out();
+        finish_request(slot, LIVE_HRESULT_ACCESSDENIED);
+        return;
+    }
+    if (!build_logon(packet, slot->id, registered, body + 5u)) {
         finish_request(slot, LIVE_HRESULT_FAIL);
         return;
     }
@@ -767,6 +784,10 @@ static void handle_logged(LiveRequestState *slot, const uint8_t *body, size_t si
             fill_address(&live.user);
         }
         recomp_live_transport_set_local(live.virtual_ina);
+        /* From here on this matchmaker has the account, and is never sent the proof again. */
+        if (!recomp_live_identity_remember_server(&live.identity, live.server))
+            fprintf(stderr, "recomp live: cannot write %s, so %s is not remembered and an answer forged as its "
+                "own can still ask for this account's proof\n", live.identity.servers, live.server);
     }
     finish_request(slot, hresult);
 }
@@ -1408,11 +1429,13 @@ bool recomp_live_client_attached(void)
 }
 
 const RecompLiveBackend *recomp_live_client_attach(const RecompLiveIdentity *identity, const char *gamertag,
-    const char *digest)
+    const char *digest, const char *server)
 {
     if (identity == NULL || identity->xuid == 0u) return NULL;
     memset(&live, 0, sizeof live);
     live.identity = *identity;
+    for (size_t i = 0u; server != NULL && server[i] != '\0' && i + 1u < sizeof live.server; ++i)
+        live.server[i] = (char)tolower((unsigned char)server[i]);
     memset(live.digest, '0', sizeof live.digest);
     if (digest != NULL) {
         size_t length = 0u;

@@ -298,6 +298,15 @@ proof's SHA-256 as its key, its gamertag and the build digest. Search results
 carry XUIDs, so this check keeps one player from claiming another's account
 by guessing.
 
+The client sends the proof to a server only until its first successful logon
+there. After a LOGGED with success it adds the server, as `host:port` in
+lowercase, to a list beside its identity file ([In the game](#in-the-game)).
+When a NONCE from a listed server says the XUID has no account, the client
+does not answer it: the logon fails with access denied, a heartbeat also
+signs the player out, and one line on stderr names the server, the list and
+the line to remove. A server that did lose the account is registered with
+again only after the player removes its line from the list.
+
 A heartbeat is a whole logon every 5 s, the CHALLENGE and the LOGON both;
 20 s without one means the player is offline and their sessions leave the
 search. The other design was a key agreed at the first logon that signs the
@@ -318,12 +327,20 @@ What a reader of the wire, or of the store, can do:
   socket, the LOGON gets its first answer again for 60 s (see
   [Caps](#caps)), which changes nothing, and access denied after that.
 - The LOGON that registers an XUID carries the proof. Whoever reads that one
-  packet can make the key and log on as that account from then on. It is
-  sent once for an account on a server, and again only when the server no
-  longer has the account: after an eviction, a lost store, or a restart
-  without `--store`. The client sends it when a NONCE says the XUID has no
-  account, so someone who can read the client's packets and also send it one
-  as the server can ask for it.
+  packet can make the key and log on as that account from then on. The
+  client sends it when a NONCE says the XUID has no account, and only to a
+  server that is not in its list, so the first registration with a server
+  stays exposed to a reader of that packet.
+- Someone who can read the client's packets and send it a NONCE as the
+  server can say "no account" to be sent the proof. That works until the
+  client's first successful logon on that server and not after it: the
+  client withholds the proof from a listed server. The list names a server
+  as the runner is configured, so the same server under another name or
+  port is a new one until its first logon there.
+- A server that no longer has an account (after an eviction, a lost store,
+  or a restart without `--store`) looks the same to the client as that
+  forged NONCE, so the logon fails until the player removes the server's
+  line. The registration that follows shows the proof once more.
 - The server holds each account's key, in memory and in the store. Whoever
   reads the store can log on as every account in it. The key does not give
   the proof or the secret.
@@ -530,7 +547,12 @@ from the XBE certificate (VA `0x10184` + 8), so a friend row names the title a
 friend logged on with. It logs on with `recomp-runtime/live_identity.c`'s
 secret, `<storage>/live-identity.bin` (or the file `RECOMP_LIVE_IDENTITY`
 names), and the gamertag of the netplay profile, cut to 15 bytes and refused
-like a room name when it fails the same check. The server is MATCHMAKER in
+like a room name when it fails the same check. The servers that account has
+logged on to are listed in the same folder, in a text file with the identity
+file's name and `.servers.txt` after it (`live-identity.bin.servers.txt`),
+one `host:port` a line; a server in it is never sent the proof again
+([Accounts](#accounts)), and making a new identity removes the list. The
+server is MATCHMAKER in
 NETPLAY SETTINGS, or the built-in one when that is empty;
 `RECOMP_LIVE_SERVER=host:port` overrides it, and a bare `host` keeps the port
 MATCHMAKER names (or the built-in server's) rather than a fixed one.
@@ -640,6 +662,11 @@ the ping estimate from both round trips.
   new identity. A signature made with a private key, with only the public
   key registered and stored, would close all three; it needs a signature
   scheme that neither side has without a new dependency.
+- The client withholds the proof from a server it has logged on to, so a
+  forged "no account" NONCE gets the proof only at a first registration.
+  The client cannot tell that forgery from a server that lost its accounts:
+  the player must remove the server's line from the list beside the identity
+  file to register again, and that registration is exposed like the first.
 - Only the logon is authenticated. Each later request is tied to its socket
   by the address and the cookie, and nothing is encrypted. Someone who can
   read a logged-on player's packets and send from that player's address can

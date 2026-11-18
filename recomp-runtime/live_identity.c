@@ -30,6 +30,7 @@
 bool doaxbv_sha256_digest(const uint8_t *bytes, size_t size, uint8_t digest[32]);
 
 static const char identity_file[] = "live-identity.bin";
+static const char servers_suffix[] = ".servers.txt";
 static const char proof_prefix[] = "doa2u-live";
 
 static bool random_secret(uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES])
@@ -63,9 +64,12 @@ static int create_exclusive(const char *path)
 #endif
 }
 
-static bool write_secret(const char *path, const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES])
+/* Writes a whole file under a temporary name and renames it into place, so a
+   reader sees the old file or the new one. The secret is only ever made new;
+   the server list is replaced, which a Windows rename does not do. */
+static bool write_file(const char *path, const void *bytes, size_t size, bool replace)
 {
-    char temporary[1024];
+    char temporary[RECOMP_LIVE_IDENTITY_PATH_BYTES + 8];
     const int needed = snprintf(temporary, sizeof temporary, "%s.tmp", path);
     if (needed < 0 || (size_t)needed >= sizeof temporary) return false;
     int fd = create_exclusive(temporary);
@@ -91,20 +95,24 @@ static bool write_secret(const char *path, const uint8_t secret[RECOMP_LIVE_IDEN
 #endif
         return false;
     }
-    const bool written = fwrite(secret, 1, RECOMP_LIVE_IDENTITY_SECRET_BYTES, file) ==
-        RECOMP_LIVE_IDENTITY_SECRET_BYTES;
+    const bool written = fwrite(bytes, 1, size, file) == size;
     const bool closed = fclose(file) == 0;
-    if (!written || !closed || rename(temporary, path) != 0) {
-        remove(temporary);
-        return false;
-    }
-    return true;
+#ifdef _WIN32
+    const bool moved = written && closed && (replace ?
+        MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING) != 0 : rename(temporary, path) == 0);
+#else
+    (void)replace;
+    const bool moved = written && closed && rename(temporary, path) == 0;
+#endif
+    if (!moved) remove(temporary);
+    return moved;
 }
 
 bool recomp_live_identity_from_secret(const uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES],
     RecompLiveIdentity *identity)
 {
     uint8_t material[sizeof proof_prefix - 1u + RECOMP_LIVE_IDENTITY_SECRET_BYTES];
+    identity->servers[0] = '\0';
     memcpy(identity->secret, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
     memcpy(material, proof_prefix, sizeof proof_prefix - 1u);
     memcpy(material + sizeof proof_prefix - 1u, secret, RECOMP_LIVE_IDENTITY_SECRET_BYTES);
@@ -150,7 +158,7 @@ bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity
 {
     if (identity == NULL) return false;
     memset(identity, 0, sizeof *identity);
-    char path[1024];
+    char path[RECOMP_LIVE_IDENTITY_PATH_BYTES], servers[RECOMP_LIVE_IDENTITY_PATH_BYTES];
     const char *override = getenv("RECOMP_LIVE_IDENTITY");
     if (override != NULL && override[0] != '\0') {
         const int needed = snprintf(path, sizeof path, "%s", override);
@@ -160,6 +168,8 @@ bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity
         const int needed = snprintf(path, sizeof path, "%s/%s", storage, identity_file);
         if (needed < 0 || (size_t)needed >= sizeof path) return false;
     }
+    const int listed = snprintf(servers, sizeof servers, "%s%s", path, servers_suffix);
+    if (listed < 0 || (size_t)listed >= sizeof servers) return false;
     uint8_t secret[RECOMP_LIVE_IDENTITY_SECRET_BYTES];
     FILE *file = fopen(path, "rb");
     if (file != NULL) {
@@ -167,11 +177,49 @@ bool recomp_live_identity_load(const char *storage, RecompLiveIdentity *identity
         const int extra = fgetc(file);
         fclose(file);
         if (got != sizeof secret || extra != EOF) return false; /* a damaged file is not replaced */
-    } else if (errno != ENOENT || !random_secret(secret) || !write_secret(path, secret)) {
+    } else if (errno != ENOENT || !random_secret(secret) || !write_file(path, secret, sizeof secret, false)) {
         /* Only a missing file is a first use: one that is there but cannot be
            opened (permissions, a sharing lock) keeps its account. */
         return false;
+    } else {
+        /* A list left by the account this one replaces would keep the new
+           account from registering with those servers. */
+        remove(servers);
     }
     if (!recomp_live_identity_from_secret(secret, identity)) return false;
+    memcpy(identity->servers, servers, (size_t)listed + 1u);
     return identity->xuid != 0u;
+}
+
+bool recomp_live_identity_knows_server(const RecompLiveIdentity *identity, const char *server)
+{
+    char line[512];
+    bool known = false;
+    if (identity == NULL || server == NULL || server[0] == '\0' || identity->servers[0] == '\0') return false;
+    FILE *file = fopen(identity->servers, "rb");
+    if (file == NULL) return false;
+    while (!known && fgets(line, sizeof line, file) != NULL) {
+        line[strcspn(line, "\r\n")] = '\0';
+        known = strcmp(line, server) == 0;
+    }
+    fclose(file);
+    return known;
+}
+
+bool recomp_live_identity_remember_server(const RecompLiveIdentity *identity, const char *server)
+{
+    /* shortcut: a list over 4 KB (some 150 servers) takes no more, raise it when a player has that many */
+    char text[4096];
+    size_t size = 0u;
+    if (identity == NULL || server == NULL || server[0] == '\0' || identity->servers[0] == '\0') return true;
+    if (recomp_live_identity_knows_server(identity, server)) return true;
+    FILE *file = fopen(identity->servers, "rb");
+    if (file != NULL) {
+        size = fread(text, 1, sizeof text - 1u, file);
+        fclose(file);
+    }
+    if (size != 0u && text[size - 1u] != '\n') text[size++] = '\n'; /* a last line someone left open */
+    const int needed = snprintf(text + size, sizeof text - size, "%s\n", server);
+    if (needed < 0 || (size_t)needed >= sizeof text - size) return false;
+    return write_file(identity->servers, text, size + (size_t)needed, true);
 }

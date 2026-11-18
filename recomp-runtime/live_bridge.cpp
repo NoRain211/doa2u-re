@@ -104,7 +104,8 @@ const RecompLiveBackend *recomp_live_client_start(const char *storage, const cha
         return nullptr;
     }
     const std::string gamertag = ownGamertag(folder);
-    const RecompLiveBackend *backend = recomp_live_client_attach(&identity, gamertag.c_str(), digest);
+    const std::string named = host + ":" + std::to_string(port);
+    const RecompLiveBackend *backend = recomp_live_client_attach(&identity, gamertag.c_str(), digest, named.c_str());
     if (backend == nullptr) recomp_live_transport_close();
     return backend;
 }
