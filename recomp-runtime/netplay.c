@@ -416,6 +416,7 @@ void netplay_relay_on(RecompNetplay *net, const char *why)
     if (m->relay) return;
     m->relay = true;
     m->punching = false;
+    m->direct6 = false; /* netplay_send_to tries IPv6 first, so a kept flag would bypass the relay */
     /* Without an endpoint the server's own stands for the peer; wrapped packets ignore it. */
     if (net->peer_port == 0u) {
         net->peer_address = m->server_address;
