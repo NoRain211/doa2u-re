@@ -22,6 +22,19 @@ from the sister projects
 [doaxbv-re](https://github.com/NoRain211/doaxbv-re) and
 [doa3-re](https://github.com/NoRain211/doa3-re).
 
+## Build from the launcher
+
+`./launcher.sh` opens on its BUILD GAME page while the game is not built. Choose
+your Disc 2 ISO with DISC ISO, or drop it on the window, and choose BUILD. The
+page shows the elapsed time and the build's latest line, and keeps the full
+output in `private/build.log`; leaving while it runs asks twice, then stops it.
+When it finishes, choose START GAME.
+
+The Linux package ships a prebuilt launcher, so this page needs nothing
+installed. The build it starts still needs the tools below; on SteamOS it runs
+`build_steamdeck.sh`, which sets up its own container. On macOS the launcher
+compiles on first use and needs the Xcode command line tools.
+
 ## macOS
 
 Install CMake, Ninja, SDL3, the shader tools and Python 3.12 or newer:
@@ -148,9 +161,8 @@ that shortcut.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
-- `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV, and the
-  reverb return beside it as `<file>.wet.wav`. It does not stop after
-  60 seconds.
+- `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
+  stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
 
 ## Runtime tests

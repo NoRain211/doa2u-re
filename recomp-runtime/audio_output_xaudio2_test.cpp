@@ -628,7 +628,7 @@ int main()
 
     /* Five point one: the master grows to six channels, source dry matrices
        and the stereo reverb return are explicit, and unrouted voices stay on
-       front left/right. */
+       front left/right; mono feeds both. */
     attempted = summary_printed = false;
     critical_error = S_OK;
     fake_surround = "1";
@@ -648,6 +648,9 @@ int main()
     recomp_audio_output_submit(31, pcm, sizeof pcm, 8000, 2, 16, 0);
     check(voices[31].source->matrices[master] == std::vector<float>(
         {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+    recomp_audio_output_submit(RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT, pcm, sizeof pcm, 8000, 1, 16, 0);
+    check(voices[RECOMP_AUDIO_OUTPUT_HIT_VOICE_SLOT].source->matrices[master] ==
+        std::vector<float>({1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
     recomp_audio_output_shutdown();
     check(!engine && !reverb_voice && effect_balance == 0 && allocations.empty());
     fake_surround = "0";

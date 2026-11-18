@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from extract_iso import sha256
+from extract_iso import find_on_path, sha256
 
 LLVM_MINGW_URL = ("https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/"
                   "llvm-mingw-20261006-ucrt-x86_64.zip")
@@ -99,7 +99,7 @@ def llvm_mingw(root):
     clang = root / LLVM_MINGW / "bin/clang.exe"
     if not clang.is_file():
         # shortcut: a PATH toolchain skips the pin and SHA-256 check; it must ship mingw32-make like llvm-mingw does.
-        found = shutil.which("clang.exe") if sys.platform == "win32" else None
+        found = find_on_path("clang.exe") if sys.platform == "win32" else None
         if found and (Path(found).parent / "mingw32-make.exe").is_file():
             clang = Path(found)
     if not clang.is_file():
@@ -113,7 +113,7 @@ def llvm_mingw(root):
 
 def extract_xiso(root):
     """Return the extract-xiso to run: the one on PATH, else on x86-64 glibc Linux the pinned upstream build."""
-    if shutil.which("extract-xiso") or not runs_upstream_linux_binary():
+    if find_on_path("extract-xiso") or not runs_upstream_linux_binary():
         return "extract-xiso"
     # Keyed by the pin, so a new pin downloads a new binary.
     tool = root / f"private/extract-xiso-{EXTRACT_XISO_SHA256[:12]}"

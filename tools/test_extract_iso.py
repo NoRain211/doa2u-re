@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from extract_iso import check_path, extract, listing_files, read_listing, run_logged, sha256
+from extract_iso import check_path, extract, find_on_path, listing_files, read_listing, run_logged, sha256
 
 
 def listing(entries, count=1):
@@ -66,6 +66,28 @@ class ExtractionTests(unittest.TestCase):
                 text = read_listing(path)
             self.assertTrue(text.endswith("新しいフォルダー.iso total 3 bytes\n"))
             self.assertEqual(listing_files(text), {"sub/a.txt": 3})
+
+    def test_find_on_path_ignores_the_working_directory(self):
+        name = "tool.exe" if sys.platform == "win32" else "tool"
+        with tempfile.TemporaryDirectory() as folder:
+            here, system = Path(folder) / "here", Path(folder) / "system"
+            for directory in (here, here / "bin", system):
+                directory.mkdir()
+                (directory / name).write_bytes(b"")
+                (directory / name).chmod(0o755)
+            previous = os.getcwd()
+            os.chdir(here)
+            try:
+                # Planted in the working directory, reached directly or through a relative PATH entry.
+                for path in ("", ".", "bin", str(here)):
+                    with self.subTest(path=path), patch.dict(os.environ, PATH=path):
+                        self.assertIsNone(find_on_path("tool"))
+                with patch.dict(os.environ, PATH=os.pathsep.join([".", str(system)])):
+                    # Windows' default: shutil.which would search the working directory first.
+                    os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
+                    self.assertEqual(Path(find_on_path("tool")).parent, system)
+            finally:
+                os.chdir(previous)
 
     def test_paths_the_extractor_cannot_name(self):
         with patch("extract_iso.narrow_encoding", return_value="ascii"):

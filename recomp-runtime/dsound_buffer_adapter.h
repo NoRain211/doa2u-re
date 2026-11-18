@@ -24,9 +24,10 @@ void recomp_dsound_buffer_state_restore(const void *state);
 void recomp_dsound_buffer_set_output_suppressed(bool suppressed);
 /* Muted voices keep playing at zero volume (the Jukebox over the game). */
 void recomp_dsound_buffer_set_output_muted(bool muted);
-/* The guest reads play cursors that pumping advances, so a session that must
-   match another runner or a replay pumps only from the game thread. */
-void recomp_dsound_buffer_set_game_thread_pump(bool only);
+/* A session that must match another runner or a replay reads play cursors on
+   the frame-locked guest clock; host output then keeps its own place on the
+   real clock, and the pump thread moves only that. */
+void recomp_dsound_buffer_set_frame_clock(bool locked);
 #ifdef __cplusplus
 }
 #endif

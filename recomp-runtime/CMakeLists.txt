@@ -199,8 +199,25 @@ add_test(NAME recomp-runtime-models COMMAND recomp_model_test)
 
 add_executable(recomp_manual_test program_manual.c program_manual_test.c)
 add_test(NAME recomp-runtime-unbound-lookups COMMAND recomp_manual_test)
-add_executable(recomp_netplay_guest_test netplay_guest.c netplay_guest_test.c)
-add_test(NAME recomp-runtime-netplay-guest COMMAND recomp_netplay_guest_test)
+add_executable(recomp_game_decomp_test game_decomp.c game_decomp_test.c)
+add_test(NAME recomp-runtime-game-decomp COMMAND recomp_game_decomp_test)
+
+# WP1 Guest Xbox Live API: the guest's XOnline/XNet thunks over
+# RecompLiveBackend (live_backend.h), plus the in-memory backend for tests.
+# The transport work package adds live_transport.c and the real
+# recomp_live_transport_lookup; live_xapi.c carries a fallback until then.
+add_executable(recomp_live_xapi_test live_xapi.c live_backend.c live_backend_local.c
+    live_xapi_test.c)
+add_test(NAME recomp-runtime-live-xapi COMMAND recomp_live_xapi_test)
+if(WIN32)
+    # XNetRandom asks BCryptGenRandom for OS entropy, as live_identity.c does.
+    target_link_libraries(recomp_live_xapi_test PRIVATE bcrypt)
+    target_link_libraries(recomp_manual_test PRIVATE bcrypt)
+endif()
+# program_manual.c binds the Live guest API first, so the unbound-lookup test
+# links the same sources; its stub for the kernel host's pool allocator lives in
+# program_manual_test.c.
+target_sources(recomp_manual_test PRIVATE live_xapi.c live_backend.c live_backend_local.c)
 
 add_executable(recomp_d3d8_adapter_test d3d8_adapter.c d3d8_adapter_test.c xapi_clock.cpp
     d3d_device_model.c d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c d3d_card_model.c)
@@ -216,6 +233,11 @@ add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runne
 add_test(NAME recomp-runtime-menu-quit COMMAND recomp_menu_quit_test)
 add_executable(recomp_hit_voice_test hit_voice.c hit_voice_test.c)
 add_test(NAME recomp-runtime-hit-voice COMMAND recomp_hit_voice_test)
+add_executable(recomp_combo_hud_test combo_hud.c combo_hud_test.c)
+add_test(NAME recomp-runtime-combo-hud COMMAND recomp_combo_hud_test)
+if(NOT MSVC)
+    target_link_libraries(recomp_combo_hud_test PRIVATE m)
+endif()
 add_executable(recomp_ko_replay_test ko_replay.c ko_replay_test.c)
 add_test(NAME recomp-runtime-ko-replay COMMAND recomp_ko_replay_test)
 add_executable(recomp_pc_settings_store_test pc_settings_store.cpp settings_file.cpp pc_settings_store_test.cpp)
@@ -235,6 +257,11 @@ add_test(NAME recomp-runtime-d3d-light COMMAND recomp_d3d_light_test)
 add_executable(recomp_d3d_vertex_declaration_test
     d3d_vertex_shader_model.c d3d_vertex_shader_model_test.c)
 add_test(NAME recomp-runtime-d3d-vertex-declaration COMMAND recomp_d3d_vertex_declaration_test)
+# The draw shader's constants are shared by both presenters, so this test
+# builds the shader source without a graphics device and runs on every platform.
+add_executable(recomp_d3d_draw_shader_test d3d_draw_shader.cpp d3d_vertex_program.cpp
+    d3d_draw_model.c d3d_draw_shader_test.cpp)
+add_test(NAME recomp-runtime-d3d-draw-shader COMMAND recomp_d3d_draw_shader_test)
 if(NOT MSVC)
     target_link_libraries(recomp_manual_test PRIVATE m)
     target_link_libraries(recomp_pc_settings_test PRIVATE m)
@@ -245,6 +272,7 @@ if(NOT MSVC)
     target_link_libraries(recomp_d3d8_state_test PRIVATE m)
     target_link_libraries(recomp_d3d8_draw_test PRIVATE m)
     target_link_libraries(recomp_d3d_light_test PRIVATE m)
+    target_link_libraries(recomp_d3d_draw_shader_test PRIVATE m)
 endif()
 
 add_executable(recomp_xbox_adpcm_test xbox_adpcm.c xbox_adpcm_test.c)
@@ -381,23 +409,52 @@ add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
 add_test(NAME recomp-runtime-synctest COMMAND recomp_synctest_test)
 add_executable(recomp_rollback_test rollback.c rollback_test.c)
 add_test(NAME recomp-runtime-rollback COMMAND recomp_rollback_test)
-add_executable(recomp_replay_test replay.c replay_test.c)
-add_test(NAME recomp-runtime-replay COMMAND recomp_replay_test)
-add_executable(recomp_netplay_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_test.c)
+add_executable(recomp_netplay_test netplay.c netplay_names.c rollback.c netplay_test.c)
 if(WIN32)
     target_link_libraries(recomp_netplay_test PRIVATE ws2_32)
 endif()
 add_test(NAME recomp-runtime-netplay COMMAND recomp_netplay_test)
-add_executable(recomp_netplay_lobby_test netplay.c netplay_room.c netplay_names.c rollback.c netplay_lobby_test.cpp)
-if(WIN32)
-    target_link_libraries(recomp_netplay_lobby_test PRIVATE ws2_32)
-endif()
-add_test(NAME recomp-runtime-netplay-lobby COMMAND recomp_netplay_lobby_test)
-add_executable(recomp_netplay_settings_test netplay_settings.cpp netplay_settings_test.cpp)
-add_test(NAME recomp-runtime-netplay-settings COMMAND recomp_netplay_settings_test)
 add_executable(recomp_netplay_profile_test netplay_profile.cpp netplay_profile_test.cpp)
 target_link_libraries(recomp_netplay_profile_test PRIVATE recomp_xbe)
 add_test(NAME recomp-runtime-netplay-profile COMMAND recomp_netplay_profile_test)
+
+# Native Xbox Live's transport: the game's socket, the matchmaker and every
+# peer share one socket, and a bound rollback session rides the same route.
+add_executable(recomp_live_transport_test netplay.c rollback.c live_transport.c
+    live_transport_test.c)
+if(WIN32)
+    target_link_libraries(recomp_live_transport_test PRIVATE ws2_32)
+endif()
+add_test(NAME recomp-runtime-live-transport COMMAND recomp_live_transport_test)
+
+# The Live identity: the secret file, the proof and XUID it gives, and a name
+# left in the storage folder by an interrupted run.
+add_executable(recomp_live_identity_test live_identity.c live_identity_test.c ../xbe/sha.cpp)
+target_include_directories(recomp_live_identity_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../xbe")
+if(WIN32)
+    target_link_libraries(recomp_live_identity_test PRIVATE bcrypt)
+endif()
+add_test(NAME recomp-runtime-live-identity COMMAND recomp_live_identity_test)
+
+# WP3: the Live matchmaker client (tools/matchmaker.py's kinds 12..33) and the
+# identity it logs on with. The transport is WP2's; this test stands in for it
+# and checks every kind against tools/live_vectors.json, which the Python
+# tests hold to the same bytes. The in-memory backend (live_backend.h's vtable)
+# is compiled here too, so its leader pages and session bookkeeping stay built
+# and checked before live_xapi.c links them.
+add_executable(recomp_live_client_test live_client.c live_identity.c
+    live_backend.c live_backend_local.c live_client_test.c)
+target_include_directories(recomp_live_client_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../xbe")
+target_link_libraries(recomp_live_client_test PRIVATE recomp_xbe)
+add_test(NAME recomp-runtime-live-client COMMAND recomp_live_client_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/live_vectors.json")
+
+# WP4, rollback for Live fights: the stop bit, the fight-only hash ranges, the
+# player index and the fight hooks, over fake guest pages. netplay_session.cpp
+# and the game's own bodies are stubbed inside the test.
+add_executable(recomp_live_fight_test live_fight_rules.c live_fight.c game_state.c live_fight_test.c)
+add_test(NAME recomp-runtime-live-fight COMMAND recomp_live_fight_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c
@@ -682,23 +739,15 @@ if(RECOMP_PROGRAM_DIR)
     else()
         message(STATUS "Reused the fail-loud stubs for this authenticated program")
     endif()
-    # The netplay host forwards its UDP port through the router with UPnP.
-    set(UPNPC_BUILD_SHARED OFF CACHE INTERNAL "")
-    set(UPNPC_BUILD_TESTS OFF CACHE INTERNAL "")
-    set(UPNPC_BUILD_SAMPLE OFF CACHE INTERNAL "")
-    set(UPNPC_NO_INSTALL ON CACHE INTERNAL "")
-    FetchContent_Declare(miniupnpc
-        URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_2_3_3.tar.gz
-        URL_HASH SHA256=8cf2c833b3e76fc4893ff29c2a376e3394962449e5970e373c0a91421724d222
-        SOURCE_SUBDIR miniupnpc)
-    FetchContent_MakeAvailable(miniupnpc)
     # The generated chunks are most of the build. As an object library with no
     # target dependencies they compile while the runtime libraries do; inside the
     # runner, the Makefile generator would start them only after every library.
     add_library(recomp_program_objects OBJECT "${_missing_source}" ${_program_sources})
     target_include_directories(recomp_program_objects PRIVATE "${_derived_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
     # Both Windows renderers link these once-compiled runner objects.
-    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c netplay_guest.c
+    add_library(recomp_runner_objects OBJECT runner.cpp program_adapters.c program_manual.c
+        game_decomp.c game_render_xform.c game_render_mesh.c game_render_state.c game_fighter_mesh.c game_fighter_pose.c game_math.c
+        game_render_draw.c game_library_hot.c
         d3d8_adapter.c d3d8_state_adapter.c d3d8_resource_adapter.c d3d8_draw_adapter.c
         d3d_device_model.c d3d_light_model.c d3d_render_state_model.c d3d_card_model.c
         d3d_frame_model.c d3d_tile_model.c d3d_vertex_shader_model.c perf_overlay.c
@@ -706,13 +755,14 @@ if(RECOMP_PROGRAM_DIR)
         dsound_buffer_model.c dsound_effects_adapter.c dsound_effects_image.c dsound_mix_model.c
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
-        synctest.c synctest_modules.c rollback.c replay.c netplay.c netplay_room.c netplay_names.c netplay_upnp.c netplay_menu.cpp
-        netplay_menu_room.cpp netplay_menu_find.cpp rebind.cpp cpu_costume.c combo_hud.c hit_voice.c ko_replay.c
+        synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c rebind.cpp cpu_costume.c combo_hud.c
+        hit_voice.c ko_replay.c
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c jukebox.c
-        netplay_settings.cpp netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
+        live_client.c live_identity.c live_bridge.cpp
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c
-        host_diagnostics.cpp)
+        host_diagnostics.cpp live_fight.c live_fight_rules.c)
     # Netplay pairs runners of one release (VERSION) or commit and one program,
     # whatever the host; a runner's own bytes differ by platform and compiler.
     set(RECOMP_NETPLAY_VERSION "" CACHE STRING "Release or commit netplay pairs on; empty reads VERSION or Git")
@@ -760,7 +810,7 @@ if(RECOMP_PROGRAM_DIR)
         # The lifter writes conditions as if ((a == b)); clang would warn on every one.
         set_source_files_properties(${_program_sources} PROPERTIES COMPILE_OPTIONS -Wno-parentheses-equality)
     endif()
-    set(_runner_libraries recomp_kernel recomp_xbe recomp_audio recomp_portable_math libminiupnpc-static)
+    set(_runner_libraries recomp_kernel recomp_xbe recomp_audio recomp_portable_math)
     if(WIN32)
         list(APPEND _runner_libraries dbghelp user32 winmm ws2_32)
     endif()
@@ -797,4 +847,8 @@ if(RECOMP_PROGRAM_DIR)
         add_executable(recomp_launcher ../tools/launcher_sdl.cpp)
         recomp_use_sdl3(recomp_launcher)
     endif()
+
+    # Xbox Live: the guest XOnline/XNet API and the one socket it shares with
+    # the matchmaker and every peer (live_transport.c).
+    target_sources(recomp_runner_objects PRIVATE live_xapi.c live_backend.c live_backend_local.c live_transport.c)
 endif()

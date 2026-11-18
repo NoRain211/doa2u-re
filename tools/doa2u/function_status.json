@@ -11,6 +11,20 @@
     "status": "decompiled"
   },
   {
+    "start": "0x0001FE30",
+    "name": "mt_reload",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0001FEF0",
+    "name": "mt_next_u32",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_pose.c",
+    "symbol": "mt_next_u32"
+  },
+  {
     "start": "0x0001FF90",
     "name": "mt19937_construct",
     "tag": "GAME",
@@ -59,8 +73,28 @@
     "status": "decompiled"
   },
   {
+    "start": "0x0002E040",
+    "name": "segment_triangle_crossing",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0002E1C0",
+    "name": "fighter_segment_triangle_score",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_pose.c",
+    "symbol": "fighter_segment_triangle_score"
+  },
+  {
     "start": "0x0004BA60",
     "name": "noop",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0004BDE0",
+    "name": "fighter_segment_keep_off_ground",
     "tag": "GAME",
     "status": "decompiled"
   },
@@ -71,9 +105,91 @@
     "status": "decompiled"
   },
   {
+    "start": "0x0004BFE0",
+    "name": "fighter_pose_constraints_apply",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_pose.c",
+    "symbol": "fighter_pose_constraints_apply"
+  },
+  {
+    "start": "0x0004C4D0",
+    "name": "pose_circle_constraint",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_pose.c",
+    "symbol": "pose_circle_constraint"
+  },
+  {
+    "start": "0x0004FD00",
+    "name": "fighter_vertex_chain_constrain",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_mesh.c",
+    "symbol": "fighter_vertex_chain_constrain"
+  },
+  {
+    "start": "0x00050100",
+    "name": "fighter_strand_draw_models",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00050510",
+    "name": "fighter_strand_skin_chain",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_fighter_mesh.c",
+    "symbol": "fighter_strand_skin_chain"
+  },
+  {
+    "start": "0x00051F20",
+    "name": "fighter_cloth_strand_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x000591A0",
+    "name": "fighter_strand_update",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0005A740",
+    "name": "fighter_render_task",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
     "start": "0x0005D5E0",
     "name": "_rand",
     "tag": "GAME"
+  },
+  {
+    "start": "0x00063510",
+    "name": "build_bone_basis",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00063630",
+    "name": "world_matrix_orthonormalize",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x000636D0",
+    "name": "node_matrix_transform",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_math.c",
+    "symbol": "node_transform_apply"
+  },
+  {
+    "start": "0x00063780",
+    "name": "node_list_transform",
+    "tag": "GAME",
+    "status": "decompiled"
   },
   {
     "start": "0x00069180",
@@ -1043,6 +1159,23 @@
     "status": "decompiled"
   },
   {
+    "start": "0x00144940",
+    "name": "bone_segment_distance",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00146920",
+    "name": "stage_ground_height_query",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0014A6C0",
+    "name": "sweep_triangle_callback",
+    "status": "decompiled"
+  },
+  {
     "start": "0x001A7520",
     "name": "_rand",
     "tag": "GAME"
@@ -1123,6 +1256,12 @@
     "tag": "GAME"
   },
   {
+    "start": "0x0026BB80",
+    "name": "fighter_strand_offset_query",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
     "start": "0x00281E00",
     "name": "frame_clear",
     "tag": "GAME"
@@ -1136,6 +1275,222 @@
     "start": "0x00282940",
     "name": "frame_swap",
     "tag": "GAME"
+  },
+  {
+    "start": "0x00282EF0",
+    "name": "render_fast_sqrt",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_fast_sqrt"
+  },
+  {
+    "start": "0x00282F50",
+    "name": "render_fast_rsqrt",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_fast_rsqrt"
+  },
+  {
+    "start": "0x00283840",
+    "name": "render_vec3_normalize",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_vec3_normalize"
+  },
+  {
+    "start": "0x00283AA0",
+    "name": "render_vec3_dot",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_vec3_dot"
+  },
+  {
+    "start": "0x00283AC0",
+    "name": "render_vec3_cross",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_vec3_cross"
+  },
+  {
+    "start": "0x00283B80",
+    "name": "render_vec3_set_length",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_vec3_set_length"
+  },
+  {
+    "start": "0x00283C60",
+    "name": "render_vec4_remove_axis",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_mesh.c",
+    "symbol": "render_vec4_remove_axis"
+  },
+  {
+    "start": "0x00283EA0",
+    "name": "matrix_stack_load",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_stack_load"
+  },
+  {
+    "start": "0x00283FC0",
+    "name": "matrix_stack_translate_local",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_stack_translate_local"
+  },
+  {
+    "start": "0x00284070",
+    "name": "matrix_stack_translate_vector",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00284260",
+    "name": "matrix_stack_transform_point_in_place",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_stack_transform_point_in_place"
+  },
+  {
+    "start": "0x002842C0",
+    "name": "matrix_stack_transform_point",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_stack_transform_point"
+  },
+  {
+    "start": "0x00284370",
+    "name": "matrix_stack_transform_direction",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00284480",
+    "name": "matrix_transform_point",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_transform_point"
+  },
+  {
+    "start": "0x00284520",
+    "name": "matrix_transform_direction",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_transform_direction"
+  },
+  {
+    "start": "0x002847F0",
+    "name": "matrix_stack_invert",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_xform.c",
+    "symbol": "matrix_stack_invert"
+  },
+  {
+    "start": "0x00286790",
+    "name": "sphere_in_view_cone",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_state.c",
+    "symbol": "sphere_in_view_cone"
+  },
+  {
+    "start": "0x00286B70",
+    "name": "render_promote_near_blocks",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00286C00",
+    "name": "bind_material",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_state.c",
+    "symbol": "bind_material"
+  },
+  {
+    "start": "0x00286D30",
+    "name": "bind_material_stages",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_state.c",
+    "symbol": "bind_material_stages"
+  },
+  {
+    "start": "0x00287000",
+    "name": "draw_mesh_chunk",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_state.c",
+    "symbol": "draw_mesh_chunk"
+  },
+  {
+    "start": "0x002871C0",
+    "name": "render_queue_block",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00287440",
+    "name": "render_queue_block_deferred",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00287640",
+    "name": "render_apply_queued_state",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00288900",
+    "name": "render_submit_sorted_list",
+    "tag": "GAME",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x00288A00",
+    "name": "render_draw_flush_lists",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_draw.c",
+    "symbol": "render_draw_flush_lists"
+  },
+  {
+    "start": "0x00288AA0",
+    "name": "render_draw_model",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_draw.c",
+    "symbol": "render_draw_model"
+  },
+  {
+    "start": "0x00288E40",
+    "name": "render_draw_model_faded",
+    "tag": "GAME",
+    "status": "bound",
+    "source": "recomp-runtime/game_render_draw.c",
+    "symbol": "render_draw_model_faded"
+  },
+  {
+    "start": "0x00289500",
+    "name": "render_sort_list_by_depth",
+    "tag": "GAME",
+    "status": "decompiled"
   },
   {
     "start": "0x00293570",
@@ -2550,6 +2905,14 @@
     "tag": "SDK_XAPI_CRT"
   },
   {
+    "start": "0x002BFFBA",
+    "name": "matrix_4x4_multiply",
+    "tag": "SDK_XAPI_CRT",
+    "status": "bound",
+    "source": "recomp-runtime/game_library_hot.c",
+    "symbol": "matrix_4x4_multiply"
+  },
+  {
     "start": "0x002F9E3D",
     "name": "XNetGetEthernetLinkStatus",
     "tag": "SDK_XAPI_CRT"
@@ -2693,6 +3056,28 @@
     "start": "0x003047D0",
     "name": "return_zero",
     "tag": "CRI_MIDDLEWARE"
+  },
+  {
+    "start": "0x0030BC30",
+    "name": "adx_decode_stereo_frames_mono_mix",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "decompiled"
+  },
+  {
+    "start": "0x0030BF90",
+    "name": "adx_decode_stereo_frames",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/game_library_hot.c",
+    "symbol": "adx_decode_stereo_frames"
+  },
+  {
+    "start": "0x0030C280",
+    "name": "adx_decode_frames",
+    "tag": "CRI_MIDDLEWARE",
+    "status": "bound",
+    "source": "recomp-runtime/game_library_hot.c",
+    "symbol": "adx_decode_frames"
   },
   {
     "start": "0x0030C680",

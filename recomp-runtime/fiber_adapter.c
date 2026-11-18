@@ -127,7 +127,10 @@ void recomp_fiber_adapter_state_save(void *state)
 {
     FiberAdapterState *out = state;
     RecompHostFiber *running = current_host_fiber;
-    memset(out, 0, sizeof *out);
+    /* Each slot's 64 KB stack copy is written only up to its used bytes. */
+    memset(out, 0, offsetof(FiberAdapterState, hosts));
+    for (size_t i = 0u; i < RECOMP_FIBER_MAX_COUNT; ++i)
+        memset(&out->hosts[i], 0, offsetof(FiberHostState, native.stack));
     out->model = fiber_model;
     out->current_host_handle = running != NULL ? running->guest_handle : 0u;
     out->converted_thread = converted_thread;
