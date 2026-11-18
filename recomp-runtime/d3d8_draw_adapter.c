@@ -162,9 +162,11 @@ static uint32_t stream_vertices(uint32_t first, uint32_t *stride)
 }
 
 /* Grow-only buffers. Slots: 0 indices, 1 packed vertices, 2 widened lines or
-   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2. */
-static uint8_t *draw_scratch[4];
-static size_t draw_scratch_size[4];
+   point sprites, 3 distortion vertices; a draw can chain 1 -> 3 and 0 -> 2.
+   Pieces use their own slot 4 so their index copy cannot clobber a widened
+   line's vertices. */
+static uint8_t *draw_scratch[5];
+static size_t draw_scratch_size[5];
 
 static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDrawCommand *draw);
 
@@ -1616,6 +1618,64 @@ static bool projected_add_stages(uint32_t device)
 }
 
 static uint32_t draw_submitted;
+
+/* 2D art at a larger size: the presenter keeps a draw's samples inside its
+   texcoords' box (d3d_draw_shader.cpp), which only works when the draw is one
+   piece. A screen-space triangle list of separate pieces (a string's letters,
+   a banner's tiles: "Counter Hit") is sent piece by piece, each a run of
+   triangles sharing vertices, so each piece samples only its own art. Each
+   piece also uploads only the vertex range its indices use: a non-indexed list
+   carries identity indices, so every triangle is its own piece and the whole
+   list would otherwise be re-uploaded once per triangle. */
+static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_art)
+{
+    const RecompD3dPresenterDrawCommand *draw = &command->data.draw;
+    const uint32_t triangles = draw->index_count / 3u;
+    if (!screen_art || draw->primitive_type != 5u || !draw->has_texture || draw->index_bytes == NULL ||
+        triangles < 2u || triangles > 512u || draw->index_count != triangles * 3u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    const uint16_t *index = draw->index_bytes;
+    static uint32_t tags[65536], generation;
+    uint32_t pieces = 0u;
+    uint32_t starts[513], low[513], high[513];
+    for (uint32_t t = 0u; t < triangles; ++t) {
+        bool shared = t != 0u && (tags[index[t * 3u]] == generation ||
+            tags[index[t * 3u + 1u]] == generation || tags[index[t * 3u + 2u]] == generation);
+        if (!shared) {
+            starts[pieces] = t;
+            low[pieces] = 0xffffffffu;
+            high[pieces] = 0u;
+            ++pieces;
+            if (++generation == 0u) { memset(tags, 0, sizeof tags); ++generation; }
+        }
+        for (uint32_t b = 0u; b < 3u; ++b) {
+            const uint16_t v = index[t * 3u + b];
+            tags[v] = generation;
+            if (v < low[pieces - 1u]) low[pieces - 1u] = v;
+            if (v > high[pieces - 1u]) high[pieces - 1u] = v;
+        }
+    }
+    if (pieces < 2u) {
+        recomp_d3d8_submit(command);
+        return;
+    }
+    starts[pieces] = triangles;
+    RecompD3dPresenterCommand piece = *command;
+    for (uint32_t p = 0u; p < pieces; ++p) {
+        const uint32_t first = starts[p] * 3u, count = (starts[p + 1u] - starts[p]) * 3u;
+        uint16_t *rebased = (uint16_t *)(void *)scratch(4u, (size_t)count * sizeof *rebased);
+        for (uint32_t i = 0u; i < count; ++i) rebased[i] = (uint16_t)(index[first + i] - low[p]);
+        piece.data.draw.index_bytes = rebased;
+        piece.data.draw.index_count = count;
+        piece.data.draw.triangle_count = count / 3u;
+        piece.data.draw.vertex_bytes =
+            (const uint8_t *)draw->vertex_bytes + (size_t)low[p] * draw->vertex_stride;
+        piece.data.draw.vertex_count = high[p] - low[p] + 1u;
+        recomp_d3d8_submit(&piece);
+    }
+}
 /* Shared identity indices for non-indexed draws (count is at most 65536). */
 static uint16_t draw_indices[65536u];
 
@@ -1859,7 +1919,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
        tasks does not change. */
     if (!(layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u &&
             recomp_scene_freeze_overlay_hidden()))
-        recomp_d3d8_submit(&command);
+        submit_pieces(&command, layout.pretransformed && !program && *recomp_memory_u32(device + PIXEL_HANDLE) == 0u);
     ++draw_submitted;
 }
 

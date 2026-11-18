@@ -240,6 +240,11 @@ add_test(NAME recomp-runtime-d3d-light COMMAND recomp_d3d_light_test)
 add_executable(recomp_d3d_vertex_declaration_test
     d3d_vertex_shader_model.c d3d_vertex_shader_model_test.c)
 add_test(NAME recomp-runtime-d3d-vertex-declaration COMMAND recomp_d3d_vertex_declaration_test)
+# The draw shader's constants are shared by both presenters, so this test
+# builds the shader source without a graphics device and runs on every platform.
+add_executable(recomp_d3d_draw_shader_test d3d_draw_shader.cpp d3d_vertex_program.cpp
+    d3d_draw_model.c d3d_draw_shader_test.cpp)
+add_test(NAME recomp-runtime-d3d-draw-shader COMMAND recomp_d3d_draw_shader_test)
 if(NOT MSVC)
     target_link_libraries(recomp_manual_test PRIVATE m)
     target_link_libraries(recomp_pc_settings_test PRIVATE m)
@@ -250,6 +255,7 @@ if(NOT MSVC)
     target_link_libraries(recomp_d3d8_state_test PRIVATE m)
     target_link_libraries(recomp_d3d8_draw_test PRIVATE m)
     target_link_libraries(recomp_d3d_light_test PRIVATE m)
+    target_link_libraries(recomp_d3d_draw_shader_test PRIVATE m)
 endif()
 
 add_executable(recomp_xbox_adpcm_test xbox_adpcm.c xbox_adpcm_test.c)
