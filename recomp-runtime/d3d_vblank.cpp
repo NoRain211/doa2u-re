@@ -131,7 +131,9 @@ void recomp_d3d_vblank_state_restore(const uint64_t *state)
     presented_vblank = Clock::time_point(std::chrono::nanoseconds(state[1]));
 }
 
-void recomp_d3d_wait_vblank(void)
+// Present's wait for a pending flip passes catch_up false: a missed refresh
+// is already past, so it would queue a second frame on the pending flip.
+static void waitVblank(bool catch_up)
 {
     const auto wait_start = Clock::now();
     // Every waiter in this refresh interval observes the same vblank.
@@ -151,7 +153,7 @@ void recomp_d3d_wait_vblank(void)
         }
         if (waiter != nullptr) {
             const auto missed = waiter->seen + interval;
-            if (waiter->thread == thread && missed < deadline && deadline - missed <= interval * max_catch_up)
+            if (catch_up && waiter->thread == thread && missed < deadline && deadline - missed <= interval * max_catch_up)
                 deadline = missed;
             *waiter = {thread, deadline};
         }
@@ -170,13 +172,18 @@ void recomp_d3d_wait_vblank(void)
         std::chrono::duration<double, std::milli>(Clock::now() - wait_start).count();
 }
 
+void recomp_d3d_wait_vblank(void)
+{
+    waitVblank(true);
+}
+
 void recomp_d3d_wait_present(void)
 {
     // Like Swap on hardware: block only while the previous flip is pending, then
     // queue this one for the next refresh. Waiting for that refresh here made a
     // guest that presented just before it miss the next one in its own wait.
     if (presented_vblank > guest_now()) {
-        recomp_d3d_wait_vblank();
+        waitVblank(false);
         ++present_waits;
     }
     const auto now = guest_now();

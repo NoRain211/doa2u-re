@@ -137,5 +137,16 @@ int main()
         std::fprintf(stderr, "vblank: a long stall replayed its missed refreshes\n");
         return 1;
     }
+    // Present's wait for a pending flip never takes a missed refresh.
+    std::this_thread::sleep_for(35ms);  // two or three refreshes
+    recomp_d3d_wait_present();
+    uint64_t pending[2];
+    recomp_d3d_vblank_state_save(pending);
+    waits = 0;
+    recomp_d3d_wait_present();
+    if (waits != 1u || last_deadline < pending[1]) {
+        std::fprintf(stderr, "vblank: Present queued a flip on a pending refresh\n");
+        return 1;
+    }
     return 0;
 }
