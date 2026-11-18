@@ -228,6 +228,7 @@ final class LauncherView: NSView {
               (path as NSString).pathExtension.lowercased() == "iso" else {
             notice = "Choose your Disc 2 .iso image"
             tab = LauncherView.buildPage
+            inPage = false // the row may be past the Build page's two
             return
         }
         gameSource = path
@@ -312,6 +313,7 @@ final class LauncherView: NSView {
             let tail = logTail()
             notice = tail.hasPrefix("Build failed") ? tail : "Build failed: " + tail
             tab = LauncherView.buildPage
+            inPage = false
         }
         needsDisplay = true
     }
