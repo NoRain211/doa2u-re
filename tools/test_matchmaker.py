@@ -579,6 +579,16 @@ class LiveTest(unittest.TestCase):
         body = self.one(live(mm.LOGON, logon_body(req)), A_AT, 2.0, mm.LOGGED)
         self.assertEqual(mm.LOGGED_BODY.unpack(body)[1], mm.E_ACCESSDENIED)
 
+    def test_a_resent_logon_is_answered_when_the_cache_is_full(self):
+        self.logon()
+        self.server.cache_keys = {}
+        self.server.live_cache = {("x", i): ([], 1e9) for i in range(mm.MAX_CACHE)}
+        req, known, nonce = self.challenge(now=5.0)
+        logon = live(mm.LOGON, logon_body(req, nonce=nonce))
+        for _ in range(2):  # the second has no challenge left, only the first one's answer
+            self.assertEqual(mm.LOGGED_BODY.unpack(self.one(logon, A_AT, 5.0, mm.LOGGED))[1], 0)
+        self.assertEqual(len(self.server.live_cache), mm.MAX_CACHE)
+
     def test_a_captured_logon_cannot_be_replayed(self):
         self.logon()
         req, known, nonce = self.challenge(now=5.0)
@@ -1254,9 +1264,9 @@ class LiveTest(unittest.TestCase):
         self.logon(now=0.0)
         for key, (answers, _) in list(self.server.live_cache.items()):
             self.server.live_cache[key] = (answers, 0.0)  # expired, but no sweep has run yet
-        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 2)  # its NONCE and its LOGGED
-        self.assertEqual(self.logon(now=0.5, req=1)[1], 0)  # the same requests, cached again
-        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 2)
+        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)  # its LOGGED; a NONCE is not cached
+        self.assertEqual(self.logon(now=0.5, req=1)[1], 0)  # the same request, cached again
+        self.assertEqual(len(self.server.cache_keys[A_AT[0]]), 1)
 
     def test_an_address_registers_only_a_few_accounts_a_minute(self):
         identities = [(xuid_for(proof_for(bytes((10 + index,)) * 32)), proof_for(bytes((10 + index,)) * 32))

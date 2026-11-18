@@ -558,12 +558,7 @@ class Matchmaker:
             expired.append(key)
         self.dirty = self.dirty or bool(expired)  # the store drops them too
         for key in [key for key, (_, expires) in self.live_cache.items() if expires <= now]:
-            del self.live_cache[key]
-            keys = self.cache_keys.get(key[0][0])
-            if keys is not None:
-                keys.pop(key, None)
-                if not keys:
-                    del self.cache_keys[key[0][0]]
+            self.uncache(key)
 
     def status(self, now):
         """One log line of counts, without addresses; the join and relay counts restart after it."""
@@ -599,8 +594,9 @@ class Matchmaker:
         answers = self.live_request(kind, body, nonce, sender, now)
         # Nothing to repeat for an empty answer: a retry may yet succeed, so it is asked again.
         # CONNECT is not cached either: it changes nothing twice, its answer must name the
-        # endpoints as they are now, and its repeats then meet the CONNECT cap.
-        if not answers or kind == CONNECT:
+        # endpoints as they are now, and its repeats then meet the CONNECT cap. Nor is
+        # CHALLENGE: its repeat is said the same nonce from the challenges.
+        if not answers or kind in (CONNECT, CHALLENGE):
             return self.budgeted(answers, sender) + refresh
         keys = self.cache_keys.get(sender[0])
         if key not in self.live_cache:
@@ -609,10 +605,23 @@ class Matchmaker:
                 del keys[oldest]
                 self.live_cache.pop(oldest, None)
             elif len(self.live_cache) >= MAX_CACHE:
-                return self.budgeted(answers, sender) + refresh
+                if kind != LOGON:
+                    return self.budgeted(answers, sender) + refresh
+                # A LOGON's challenge went with this answer, so its repeat has nothing else:
+                # the oldest answer of all makes room, the one nearest its end.
+                self.uncache(next(iter(self.live_cache)))
         self.cache_keys.setdefault(sender[0], {})[key] = None
         self.live_cache[key] = (answers, now + CACHE_SECONDS)
         return self.budgeted(answers, sender) + refresh
+
+    def uncache(self, key):
+        """Forgets one cached answer, with its address's note of it."""
+        self.live_cache.pop(key, None)
+        keys = self.cache_keys.get(key[0][0])
+        if keys is not None:
+            keys.pop(key, None)
+            if not keys:
+                del self.cache_keys[key[0][0]]
 
     def budgeted(self, answers, sender):
         """The answers, or none once they would take the address past its answer bytes this second.
