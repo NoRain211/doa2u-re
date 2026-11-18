@@ -126,6 +126,7 @@ static void fighter_costume(void)
 
 RecompFunction recomp_cpu_costume_lookup_manual(uint32_t guest_address)
 {
-    /* Routed whenever it may be wanted, so a cached lookup still sees a later switch. */
-    return !online_session && guest_address == FIGHTER_COSTUME ? fighter_costume : NULL;
+    /* Routed for every boot, so a cached lookup sees a later online switch;
+       fighter_costume checks the state itself. */
+    return guest_address == FIGHTER_COSTUME ? fighter_costume : NULL;
 }
