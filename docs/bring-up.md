@@ -852,7 +852,7 @@ menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
 switch ignores. Its confirm opens the runner's quit prompt; keeping on plays
 the cancel sound and runs the menu's own transition cancel (`0x135ae0`).
 
-Both features' guest data lives in the runner's asset area (128 KiB at
+Both features' guest data lives in the runner's asset area (144 KiB at
 `0x03f00000`, below the startup stack), which `runner_assets.c` hands out at
 each boot. It also owns their sprites, a group past the game's `0x1a5`
 (`0xaa970` rectangle, `0xaa9b0` texture and palette), and their message text
