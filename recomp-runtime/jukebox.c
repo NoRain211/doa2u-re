@@ -1076,6 +1076,18 @@ void recomp_jukebox_install(bool online)
     if (online) assigning = false;
 }
 
+void recomp_jukebox_set_online(bool online)
+{
+    /* Slots off play every entry's own track and keep the assignments, so
+       logoff brings them back as they were. shortcut: an assigned track
+       playing at logon jumps to the game's own at its next read, mid-track;
+       both games then read the same bytes at once. Finish the track first if
+       that jump is heard and the menus can tolerate the difference. */
+    if (online) stop();
+    recomp_mod_loader_enable_slots(!online);
+    assigning = !online && target_count > 0u && targets[0].entry >= 0;
+}
+
 void recomp_jukebox_request_page(void) { page.requested = true; }
 
 bool recomp_jukebox_take_request(void)
