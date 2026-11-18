@@ -1,5 +1,7 @@
 # Private inputs and generated game output
 private/**
+# Players' mods (README: Mods) hold their own and the game's content.
+/mods/
 !private/README.md
 orig/
 dump/
