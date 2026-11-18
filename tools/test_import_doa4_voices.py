@@ -68,5 +68,18 @@ class CueTests(unittest.TestCase):
                 voices.cue_waves(sound_bank_image([(name, 3)]))
 
 
+class AfsTests(unittest.TestCase):
+    def test_an_entry_count_larger_than_the_file_raises_before_reading(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "snd.afs")
+            with open(path, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<I", 0xFFFFFFFF) + bytes(8))
+            with self.assertRaises(SystemExit):
+                voices.afs_entries(path)
+            with open(path, "wb") as file:
+                file.write(b"AFS\0" + struct.pack("<III", 1, 16, 4))
+            self.assertEqual(voices.afs_entries(path), [(16, 4)])
+
+
 if __name__ == "__main__":
     unittest.main()
