@@ -195,6 +195,9 @@ int main(void)
     /* Zeroed as SyncTest allocates its blocks: the save leaves struct padding unwritten. */
     uint8_t *saved = calloc(2u, state_size), *after = saved + state_size;
     CHECK(saved != NULL);
+    /* Different stale bytes in each buffer: padding must not reach the compare. */
+    memset(saved, 0xa5, state_size);
+    memset(after, 0x5a, state_size);
     vertex = invoke(0x346140u, 96u, 0u, 0u, 0u, 0u);
     recomp_d3d8_resource_state_save(saved);
     uint32_t frees = free_count;

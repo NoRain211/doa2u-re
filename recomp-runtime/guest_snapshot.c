@@ -91,7 +91,10 @@ bool recomp_snapshots_init(RecompGuestSnapshots *s, uint8_t *ram, size_t size,
     const size_t page_count = size / PAGE;
     s->ram = ram;
     s->size = size;
+#ifdef _WIN32
     s->write_watch = write_watch;
+#endif
+    write_watch = s->write_watch; /* only Windows fills watch_addresses */
     s->slot_count = slot_count;
     s->newest = slot_count - 1u;
     s->shadow = malloc(size);

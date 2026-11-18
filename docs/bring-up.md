@@ -1173,6 +1173,58 @@ whose guest thread could not be rewound.
 and rewinds it on mispredicted input; `docs/rollback-netcode.md` describes
 the run. It uses the frame clock and synchronous reads as SyncTest does.
 
+## Decompiled game functions
+
+The hottest lifted game functions of a rollback re-run frame have
+hand-decompiled replacements in `recomp-runtime/game_*.c`, one file per
+group. `recomp_lookup_manual()` binds them through
+`recomp_game_decomp_lookup_manual()`. `RECOMP_DECOMP` selects the groups:
+unset binds all, `none` binds none (the lifted reference), and a comma list
+binds only the named groups. `tools/doa2u/function_status.json` lists each
+bound function with its source and symbol.
+
+A replacement must leave guest RAM identical to the lifted body, or rollback
+peers diverge. Each group, and all groups together, gave the same guest RAM
+as `RECOMP_DECOMP=none` after the scripted boot, menus and a Story fight
+(loopback, frame 600). A lag 4 loopback run with all groups bound also
+matched. With all groups bound, a SyncTest loop matched 12,028 frames (601
+to 12,933) with no mismatch. Two netplay sessions paired a lifted runner with
+a runner that had all groups bound, once as host and once as joiner, at 40 ms
+delay. Each ran 3,600 frames with no desync over 5 guest RAM checks.
+
+Exactness covers more than the result:
+
+- Game code reads leftover stack. Light setup copies a word that an earlier
+  call left in the argument area, and `render_vec4_remove_axis` (`0x283c60`)
+  reloads 16 bytes over a 12-byte scratch, so its fourth lane is old stack.
+  A replacement makes its pushes, spills and guest calls at the original's
+  stack depth, and writes the final frame image the original leaves.
+- `kernel_call_guest` pushes 0 as the return address. Where that word
+  survives below ESP, push the original CALL's return address instead.
+  `game_render_state.c` does this; without it a netplay session from boot
+  desynced at frame 600, which the scripted check did not reach.
+- `fighter_strand_update` (`0x591a0`) reads EAX left by an earlier callee.
+  A replacement keeps every register a caller reads.
+- SSE math is single precision in the original order; x87 math is double,
+  rounded where the original stores.
+
+`game_library_hot.c` is a temporary exception to replacing library code
+wholesale: it holds exact copies of the CRI ADX decoder (`0x30bf90`,
+`0x30c280`) and the SDK matrix multiply (`0x2bffba`) until native
+replacements exist, because both are hot in rollback re-runs.
+
+These functions stay lifted:
+
+- `world_matrix_orthonormalize` (`0x63630`) and `node_list_transform`
+  (`0x63780`): the leftover-stack lane above reaches `g_matrix_current`.
+- `bone_segment_distance` (`0x144940`) and `sweep_triangle_callback`
+  (`0x14a6c0`): not yet exact; no replacement is kept.
+- `fighter_cloth_strand_update` (`0x51f20`) and `fighter_strand_update`
+  (`0x591a0`): not yet decompiled.
+
+In three interleaved lag 4 loopback runs, a re-run frame took 3.7 to 4.8 ms
+lifted and 2.9 to 3.1 ms with all groups bound.
+
 
 ## Remaining work
 
