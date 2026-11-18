@@ -66,6 +66,15 @@ void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const c
     recomp_runtime.registers.eax = address == 0x000fa170u ? finished : 0u;
 }
 
+/* program_manual.c now binds the Live guest API first. This test installs no
+   backend, so no Live path runs; this one stands in for the kernel host's pool
+   allocator, which the QoS and search scratch would use. */
+uint32_t recomp_kernel_allocate_pool(uint32_t size)
+{
+    (void)size;
+    return 0u;
+}
+
 RecompFunction recomp_d3d8_lookup_manual(uint32_t address)
 {
     (void)address;
@@ -96,7 +105,7 @@ RecompFunction recomp_dsound_api_lookup_manual(uint32_t address)
     return NULL;
 }
 
-RecompFunction recomp_netplay_guest_lookup_manual(uint32_t address)
+RecompFunction recomp_live_fight_lookup(uint32_t address)
 {
     (void)address;
     return NULL;
