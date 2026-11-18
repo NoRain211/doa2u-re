@@ -1083,6 +1083,23 @@ static void checkDowngradeGuard(const RecompLiveIdentity *identity)
     backend->release(backend->self, request);
     recomp_live_client_detach();
     remove(list);
+
+    /* A list that cannot be written still guards the run that logged on. */
+    snprintf(copy.servers, sizeof copy.servers, "%s", "no-such-folder/live-servers-test.txt");
+    backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "example.test:47700");
+    recomp_live_client_tick(1000u);
+    captured_count = 0u;
+    request = backend->logon(backend->self);
+    answer_logon(false, 0u, 0x0a010009u);
+    check("a list that cannot be written still registers", done(request) &&
+        !recomp_live_identity_knows_server(&copy, "example.test:47700"));
+    backend->release(backend->self, request);
+    captured_count = 0u;
+    recomp_live_client_tick(6000u);
+    answer_challenge(false);
+    recomp_live_client_tick(6500u);
+    check("and its run still withholds the proof", captured_kind(LIVE_LOGON) == 0u);
+    recomp_live_client_detach();
 }
 
 static void checkIdentityFile(void)

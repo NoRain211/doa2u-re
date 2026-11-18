@@ -140,6 +140,7 @@ typedef struct LiveClient {
     bool attached;
     RecompLiveIdentity identity;
     char server[256]; /* the matchmaker as "host:port" in lowercase, which the identity's list names it by */
+    bool server_known; /* logged on there in this run, whatever came of writing the list */
     char digest[LIVE_DIGEST_BYTES];
     RecompLiveUser user;
     bool logged_on;
@@ -738,7 +739,7 @@ static void handle_nonce(LiveRequestState *slot, const uint8_t *body, size_t siz
         return;
     }
     const bool registered = body[4] != 0u;
-    if (!registered && recomp_live_identity_knows_server(&live.identity, live.server)) {
+    if (!registered && (live.server_known || recomp_live_identity_knows_server(&live.identity, live.server))) {
         /* This account registered with this matchmaker before, so the proof
            stays here: a NONCE forged from the server's address says "no
            account" to be sent it. The logon ends as a refused one does, and a
@@ -785,9 +786,11 @@ static void handle_logged(LiveRequestState *slot, const uint8_t *body, size_t si
         }
         recomp_live_transport_set_local(live.virtual_ina);
         /* From here on this matchmaker has the account, and is never sent the proof again. */
+        live.server_known = true;
         if (!recomp_live_identity_remember_server(&live.identity, live.server))
-            fprintf(stderr, "recomp live: cannot write %s, so %s is not remembered and an answer forged as its "
-                "own can still ask for this account's proof\n", live.identity.servers, live.server);
+            fprintf(stderr, "recomp live: cannot write %s, so %s is remembered only until the game closes: after "
+                "that an answer forged as its own can still ask for this account's proof\n",
+                live.identity.servers, live.server);
     }
     finish_request(slot, hresult);
 }
