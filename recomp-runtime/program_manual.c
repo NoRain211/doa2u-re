@@ -158,7 +158,12 @@ static void camera_query(void)
 }
 static void with_mirror_shape(void (*body)(void))
 {
-    with_screen_float(0x00877ea0u, recomp_kernel_widescreen_aspect(), !recomp_netplay_online(), body);
+    /* Online at every shape: a SyncTest or a command-line session never pins the aspect to 16:9. */
+    if (recomp_netplay_online()) {
+        body();
+        return;
+    }
+    with_screen_float(0x00877ea0u, recomp_kernel_widescreen_aspect(), true, body);
 }
 static void water_mirror_camera(void) { with_mirror_shape(sub_0026C2E0); }
 static void floor_mirror_camera(void) { with_mirror_shape(sub_00279D60); }

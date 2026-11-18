@@ -210,14 +210,17 @@ static int test_culling_shape(void)
             if (seen_reflection != cases[i].reflection || back_buffer_shape != 1.5f) return 0;
         }
     }
-    /* Online the same 16:9 screen keeps the game's 1.5 in every mirror. */
+    /* Online every screen shape keeps the game's 1.5 in every mirror. */
     online = true;
     video_flags = 0x004f0000u;
-    screen_aspect = 16.0f / 9.0f;
-    for (unsigned j = 0u; j < sizeof mirrors / sizeof mirrors[0]; ++j) {
-        seen_reflection = 0.0f;
-        recomp_lookup_manual(mirrors[j])();
-        if (seen_reflection != 1.5f || back_buffer_shape != 1.5f) return 0;
+    const float online_shapes[] = {16.0f / 9.0f, 21.0f / 9.0f, 32.0f / 9.0f};
+    for (unsigned i = 0u; i < sizeof online_shapes / sizeof online_shapes[0]; ++i) {
+        screen_aspect = online_shapes[i];
+        for (unsigned j = 0u; j < sizeof mirrors / sizeof mirrors[0]; ++j) {
+            seen_reflection = 0.0f;
+            recomp_lookup_manual(mirrors[j])();
+            if (seen_reflection != 1.5f || back_buffer_shape != 1.5f) return 0;
+        }
     }
     online = false;
     video_flags = 0u;
