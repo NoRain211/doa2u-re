@@ -101,7 +101,7 @@ bool jsonValue(const std::string &text, const char *key, std::string &value)
     return true;
 }
 
-// A string value, with its backslash escapes undone.
+// A string value, with its backslash, quote and slash escapes undone; false on any other escape.
 bool jsonText(const std::string &text, const char *key, std::string &value)
 {
     const auto at = text.find(std::string("\"") + key + "\"");
@@ -112,7 +112,11 @@ bool jsonText(const std::string &text, const char *key, std::string &value)
     if (i == std::string::npos || text[i] != '"') return false;
     value.clear();
     for (++i; i < text.size() && text[i] != '"'; ++i) {
-        if (text[i] == '\x5c' && i + 1 < text.size()) ++i;
+        if (text[i] == '\x5c' && i + 1 < text.size()) {
+            ++i;
+            // Ignored rather than misread (\n or \u00e9 would lose its backslash), so a save keeps the raw value.
+            if (text[i] != '\x5c' && text[i] != '"' && text[i] != '/') { value.clear(); return false; }
+        }
         value += text[i];
     }
     return true;
