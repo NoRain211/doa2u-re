@@ -347,6 +347,8 @@ final class LauncherView: NSView {
     // Checks for a newer release, or installs the one found. A quiet check says nothing unless it finds one.
     func update(quiet: Bool) {
         if updating { return }
+        // An install rewrites the scripts and tools a running build reads.
+        if pending != nil && buildProcess != nil { notice = "Wait for the build to finish"; return }
         installing = pending != nil
         updating = true
         updateRow.names = ["Working"]

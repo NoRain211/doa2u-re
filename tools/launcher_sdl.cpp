@@ -338,6 +338,8 @@ struct Launcher {
     void startUpdate(bool quietly)
     {
         if (update != nullptr) return;
+        // An install rewrites the scripts and tools a running build reads.
+        if (!pending.empty() && build != nullptr) { status = "Wait for the build to finish"; return; }
         installing = !pending.empty();
         quiet = quietly;
         const std::string script = root + "/tools/update.py";
