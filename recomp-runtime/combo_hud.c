@@ -81,6 +81,7 @@ extern void sub_000B8810(void);
 extern void sub_000B11E0(void);
 
 static bool online_session;
+static unsigned hud_choice = RECOMP_FIGHT_HUD_BOTH; /* PC Settings' Fight HUD */
 static uint32_t life_rgb;            /* 0: the game's own colours */
 static bool hud_moved;               /* the popups are moved down this frame */
 static unsigned latched_damage[2];
@@ -96,6 +97,11 @@ static bool fight_hud(void)
     const uint8_t mode = *recomp_memory(BATTLE_MODE, 1u);
     return !online_session && mode != 9u && mode != 10u;
 }
+
+static bool damage_on(void) { return (hud_choice & RECOMP_FIGHT_HUD_DAMAGE) != 0u && fight_hud(); }
+static bool stun_on(void) { return (hud_choice & RECOMP_FIGHT_HUD_STUN) != 0u && fight_hud(); }
+
+void recomp_combo_hud_set_choice(unsigned choice) { hud_choice = choice <= RECOMP_FIGHT_HUD_BOTH ? choice : RECOMP_FIGHT_HUD_BOTH; }
 
 static unsigned counter_hits(unsigned side)
 {
@@ -118,7 +124,7 @@ static void note_attack_damage(void)
     for (unsigned d = 0u; d < 2u; ++d) before[d] = *recomp_memory_u16(LIFE + SIDE_STRIDE * d + 2u);
     sub_001159F0();
     /* Only where the line is drawn: Sparring and Training never clear it. */
-    if (!fight_hud()) return;
+    if (!damage_on()) return;
     for (unsigned d = 0u; d < 2u; ++d) {
         const uint16_t after = *recomp_memory_u16(LIFE + SIDE_STRIDE * d + 2u);
         if (after > before[d]) attack_damage[d] += after - before[d];
@@ -292,7 +298,7 @@ static void draw_damage(uint32_t scratch, unsigned side)
 
 static void popups_first(void)
 {
-    hud_moved = fight_hud() && (counter_shown(0u) || counter_shown(1u));
+    hud_moved = damage_on() && (counter_shown(0u) || counter_shown(1u));
     if (hud_moved) put32(HUD_Y, *recomp_memory_u32(HUD_Y) + LINE);
     sub_000B8AE0();
 }
@@ -303,7 +309,7 @@ static void popups_last(void)
     recomp_hit_voice_pump(); /* keeps a KO cry fed after the life stops changing */
     if (hud_moved) put32(HUD_Y, *recomp_memory_u32(HUD_Y) - LINE);
     hud_moved = false;
-    if (!fight_hud()) {
+    if (!damage_on()) {
         memset(attack_damage, 0, sizeof attack_damage);
         memset(single_frames, 0, sizeof single_frames);
         return;
@@ -423,7 +429,7 @@ static void sprite_draw(void)
     const bool life = !online_session && record != 0u && *recomp_memory_u32(record + 4u) == LIFE_SPRITE;
     if (life) colour_life_texture();
     sub_000B11E0();
-    if (life && fight_hud()) {
+    if (life && stun_on()) {
         const uint32_t result = recomp_runtime.registers.eax;
         critical_segment(record);
         recomp_runtime.registers.eax = result;

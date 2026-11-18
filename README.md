@@ -122,6 +122,10 @@ keeps running.
   Offline only.
 - **Quit Game.** The main menu ends with a **QUIT GAME** entry, lettered and
   drawn like the game's own, that asks before it closes the game.
+- **Fight HUD.** PC Settings' **Fight HUD** row picks the in-fight additions:
+  **Both** (the combo's damage under the hit counter and Sparring's
+  critical-stun segment on the life bars), **Damage**, **Stun Meter**, or
+  **Original** for the base game's HUD.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
   shown, so it stays smooth at high resolutions; the Vulkan renderer also

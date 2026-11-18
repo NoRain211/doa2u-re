@@ -81,6 +81,8 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_HIT_VOICES] = !boolean(entries, "hitVoices", true) ? 0u
         : volume == "quiet" ? 1u : volume == "loud" ? 3u : 2u;
     choices[RECOMP_PC_KO_REPLAY] = text(entries, "koReplay", "dynamic") == "original" ? 0u : 1u;
+    const std::string hud = text(entries, "fightHud", "both");
+    choices[RECOMP_PC_FIGHT_HUD] = hud == "original" ? 0u : hud == "damage" ? 1u : hud == "stun" ? 2u : 3u;
 }
 
 void put(Entries *entries, const char *key, std::string value)
@@ -158,6 +160,8 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     if (choices[RECOMP_PC_HIT_VOICES] != 0u && choices[RECOMP_PC_HIT_VOICES] < 4u)
         put(&entries, "hitVoiceVolume", std::string("\"") + VOLUMES[choices[RECOMP_PC_HIT_VOICES]] + "\"");
     put(&entries, "koReplay", choices[RECOMP_PC_KO_REPLAY] == 0u ? "\"original\"" : "\"dynamic\"");
+    static const char *const HUDS[4] = {"original", "damage", "stun", "both"};
+    put(&entries, "fightHud", std::string("\"") + HUDS[choices[RECOMP_PC_FIGHT_HUD] & 3u] + "\"");
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;

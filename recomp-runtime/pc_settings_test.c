@@ -284,20 +284,20 @@ int main(void)
 {
     recomp_runtime.registers.esp = STACK;
     make_layout();
-    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1};
+    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 3};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
     const RecompButtonConfigHost rebind = {host_bound, host_listen, host_listening, host_reset, host_rebind_closed};
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
     recomp_button_config_install(&rebind);
-    /* The layout: 6 row records (Page and a view's five), 6 value records, then the end word. */
+    /* The layout: 5 row records (Page and a view's four), 5 value records, then the end word. */
     uint32_t page = 19u;
     const uint32_t layout = hook(0x00090ad0u, &page, 1u);
-    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 5u * 28u) == ((0x5du + 130u) << 16 | 0x10au));
-    expect("layout values", rd32(layout + 6u * 28u) == (0x5du << 16 | 0x1e0u) &&
-        rd32(layout + 6u * 28u + 0x14u) == 0x40001u && rd32(layout + 11u * 28u + 0x18u) == 0x883ec0u);
-    expect("layout end", rd32(layout + 12u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
-        layout + 12u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
+    expect("layout rows", rd32(layout) == (0x5du << 16 | 0x10au) && rd32(layout + 4u * 28u) == ((0x5du + 104u) << 16 | 0x10au));
+    expect("layout values", rd32(layout + 5u * 28u) == (0x5du << 16 | 0x1e0u) &&
+        rd32(layout + 5u * 28u + 0x14u) == 0x40001u && rd32(layout + 9u * 28u + 0x18u) == 0x883ec0u);
+    expect("layout end", rd32(layout + 10u * 28u) == 0u && layout >= XBOX_RUNNER_ASSET_BASE &&
+        layout + 10u * 28u + 4u <= XBOX_RUNNER_ASSET_BASE + XBOX_RUNNER_ASSET_SIZE);
     expect("page tables", rd32(0x0067af50u + 4u * 19u) != 0u && rd32(0x0067aff0u + 4u * 19u) != 0u &&
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
@@ -306,18 +306,19 @@ int main(void)
     expect("choice counts", recomp_pc_settings_choices(RECOMP_PC_MSAA) == 6u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
+        !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
     recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
     expect("renderer rows", recomp_pc_settings_applies_now(RECOMP_PC_MSAA) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) && recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
 
-    /* Row counts: the top list has eight rows, page 19 six (Page and five), others the game's. */
+    /* Row counts: the top list has eight rows, page 19 five (Page and four), others the game's. */
     page = 0u;
     expect("top rows", hook(0x0011ac90u, &page, 1u) == 8u && hook(0x0011ad10u, &page, 1u) == 8u);
     page = 19u;
-    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 6u);
+    expect("pc rows", hook(0x0011ac90u, &page, 1u) == 5u);
     page = 8u;
     expect("game rows", hook(0x0011ac90u, &page, 1u) == 4u);
 
@@ -375,7 +376,7 @@ int main(void)
     /* The preview of the selected row's page, and the help line. */
     wr16(CURSORS, 5u);
     hook(0x00095a10u, &context, 1u);
-    expect("pc preview", preview_count == 6u && rd16(CURSORS) == 5u);
+    expect("pc preview", preview_count == 5u && rd16(CURSORS) == 5u);
     wr16(CURSORS, 7u);
     hook(0x00095a10u, &context, 1u);
     expect("exit preview", preview_count == 4u); /* the game's page 7 */
@@ -425,27 +426,28 @@ int main(void)
     hook(0x0011cfc0u, none, 2u);
     expect("other pages", original_update == 1u);
 
-    /* Page 19: the Page row turns to the second view, a value there changes,
-       confirm on the Page row turns on to the third and back to the first, then leave. */
+    /* Page 19: the Page row turns on to the third view, a value there changes,
+       confirm on the Page row turns on to the fourth and round to the first, then leave. */
     wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     expect("page turns", changed_setting == 99u);
-    wr16(CURSORS + 2u, 3u); nav_delta = 1; /* down to row 4, Unlocks */
+    hook(0x0011cfc0u, none, 2u);
+    wr16(CURSORS + 2u, 0u); nav_delta = 1; /* down to row 1 of view 3: Unlocks */
     hook(0x0011cfc0u, none, 2u);
     expect("pc change", changed_setting == RECOMP_PC_UNLOCKS && changed_choice == 1u &&
         recomp_pc_settings_choice(RECOMP_PC_UNLOCKS) == 1u);
-    const uint32_t unlocks_help[3] = {19u, 4u, 0u};
+    const uint32_t unlocks_help[3] = {19u, 1u, 0u};
     hook(0x00091560u, unlocks_help, 3u);
     expect("live help", ascii(help_text) == 'T' && rd16(help_text + 26u) == 'i'); /* "Takes effect immediately." */
     wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 0; confirm_pressed = 1u;
     hook(0x0011cfc0u, none, 2u);
-    const uint32_t row3_help[3] = {19u, 3u, 0u};
-    hook(0x00091560u, row3_help, 3u);
-    expect("confirm turns on", rd16(help_text + 26u) == 'i'); /* row 3 is Life Bar, live */
+    const uint32_t row1_help[3] = {19u, 1u, 0u};
+    hook(0x00091560u, row1_help, 3u);
+    expect("confirm turns on", rd16(help_text + 26u) == 'i'); /* row 1 of view 4 is Life Bar, live */
     hook(0x0011cfc0u, none, 2u);
     confirm_pressed = 0u;
-    hook(0x00091560u, row3_help, 3u);
-    expect("confirm wraps", rd16(help_text + 26u) == 't'); /* row 3 is SMAA again */
+    hook(0x00091560u, row1_help, 3u);
+    expect("confirm wraps", rd16(help_text + 26u) == 't'); /* row 1 is Resolution again */
     back_pressed = 1u;
     hook(0x0011cfc0u, none, 2u);
     expect("pc close", closed == 1u && rd16(DEPTH) == 0u && rd16(PAGE) == 0u);
@@ -456,32 +458,40 @@ int main(void)
     wr16(CURSORS + 2u, 3u);
     const uint32_t draw = rd32(0x0067aff0u + 4u * 19u);
     hook(draw, &context, 1u);
-    expect("labels", label_count == 6u && ascii(labels[0]) == 'P' && ascii(labels[1]) == 'R' && ascii(labels[4]) == 'S');
-    expect("values", value_count == 6u && ascii(values[0]) == '1' && ascii(values[1u + RECOMP_PC_SCREEN]) == '3'); /* 32:9 */
-    expect("cursor mark", cursor_marks == 1u && layout_walked == 12u && cursor_visible == 1u);
+    expect("labels", label_count == 5u && ascii(labels[0]) == 'P' && ascii(labels[1]) == 'R' && ascii(labels[4]) == 'S');
+    expect("values", value_count == 5u && ascii(values[0]) == '1' && ascii(values[1u + RECOMP_PC_SCREEN]) == '3'); /* 32:9 */
+    expect("cursor mark", cursor_marks == 1u && layout_walked == 10u && cursor_visible == 1u);
     expect("sprites intact", rd32(rd32(hook(0x000aa9b0u, &white_id, 1u)) + 12u) == 0x05810b2au);
     language = 3u; /* German */
     hook(draw, &context, 1u);
     expect("german", ascii(labels[0]) == 'S' && ascii(labels[1]) == 'A' && rd16(labels[1] + 8u) == 0xf6u); /* "Aufl\u00f6sung" */
-    /* The second view: VRR to CPU Costumes. */
+    /* The second view: Renderer to Intro Movies. */
     wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("second view", ascii(labels[1]) == 'V' && ascii(values[0]) == '2' &&
-        ascii(values[1u + RECOMP_PC_UNLOCKS - 5u]) == 'E' && rd16(values[1u + RECOMP_PC_UNLOCKS - 5u] + 2u) == 'r'); /* Erspielen */
-    /* The third view: Free Camera to KO Replay. */
+    expect("second view", ascii(labels[1]) == 'R' && ascii(labels[2]) == 'V' && ascii(values[0]) == '2' &&
+        ascii(values[1u + RECOMP_PC_VRR - 4u]) == 'A' && rd16(values[1u + RECOMP_PC_VRR - 4u] + 2u) == 'u'); /* Aus */
+    /* The third view: Unlocks to Dedication. */
     step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("third view", ascii(labels[1]) == 'F' && ascii(labels[2]) == 'W' && ascii(values[0]) == '3' &&
-        label_count == 6u); /* Freie Kamera, Widmung */
+    expect("third view", ascii(labels[1]) == 'F' && ascii(labels[4]) == 'W' && ascii(values[0]) == '3' &&
+        ascii(values[1u + RECOMP_PC_UNLOCKS - 8u]) == 'E' && rd16(values[1u + RECOMP_PC_UNLOCKS - 8u] + 2u) == 'r' &&
+        label_count == 5u); /* Freischaltungen (Erspielen), Widmung */
+    /* The fourth view: Life Bar to Fight HUD. */
+    step_delta = 1;
+    hook(0x0011cfc0u, none, 2u);
+    step_delta = 0;
+    hook(draw, &context, 1u);
+    expect("fourth view", ascii(labels[1]) == 'L' && ascii(labels[4]) == 'K' && ascii(values[0]) == '4' &&
+        ascii(values[4]) == 'B' && label_count == 5u); /* Lebensleiste, Kampfanzeige: Beides */
     expect("leave draw", rd32(0x0067afa0u + 4u * 19u) != draw);
     const uint32_t key[2] = {19u, 0u};
     expect("labels only while drawing", hook(0x000910a0u, key, 2u) == 0x9900u);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
-    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 11u * 28u + 0xcu) == 0u);
+    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 9u * 28u + 0xcu) == 0u);
 
     /* The Controller page (4): Rebind is row 3, before Default. */
     language = 1u;
