@@ -31,7 +31,8 @@ enum {
    actually gave, which may carry a digit. server is the matchmaker's
    "host:port" as the runner has it, kept in lowercase: after a logon there
    the identity's list names it, and it is never sent the proof again. NULL
-   remembers no server. The test calls this directly. */
+   remembers no server, and is refused for an identity that keeps a list, as
+   is a name of 256 bytes or more. The test calls this directly. */
 const RecompLiveBackend *recomp_live_client_attach(const RecompLiveIdentity *identity, const char *gamertag,
     const char *digest, const char *server);
 /* Drops the backend and the transport's server handler; the transport stays open. */

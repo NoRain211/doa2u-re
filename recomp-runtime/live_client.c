@@ -1436,6 +1436,15 @@ const RecompLiveBackend *recomp_live_client_attach(const RecompLiveIdentity *ide
     const char *digest, const char *server)
 {
     if (identity == NULL || identity->xuid == 0u) return NULL;
+    /* The server list names a server by this string, so an identity that
+       keeps one never logs on without it, or with it cut short: the guard
+       against a forged "no account" NONCE would not find the server. */
+    const size_t named = server != NULL ? strlen(server) : 0u;
+    if (named >= sizeof live.server || (named == 0u && identity->servers[0] != '\0')) {
+        fprintf(stderr, "recomp live: the matchmaker's name is %s, so this account's server list cannot "
+            "name it\n", named == 0u ? "missing" : "too long");
+        return NULL;
+    }
     memset(&live, 0, sizeof live);
     live.identity = *identity;
     for (size_t i = 0u; server != NULL && server[i] != '\0' && i + 1u < sizeof live.server; ++i)

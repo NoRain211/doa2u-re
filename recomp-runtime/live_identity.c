@@ -64,6 +64,21 @@ static int create_exclusive(const char *path)
 #endif
 }
 
+#ifndef _WIN32
+/* Makes a rename into the file's folder last; a folder that cannot be opened is left as it is. */
+static void sync_folder(const char *path)
+{
+    char folder[RECOMP_LIVE_IDENTITY_PATH_BYTES];
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL) snprintf(folder, sizeof folder, ".");
+    else snprintf(folder, sizeof folder, "%.*s", slash == path ? 1 : (int)(slash - path), path);
+    const int fd = open(folder, O_RDONLY);
+    if (fd < 0) return;
+    (void)fsync(fd);
+    close(fd);
+}
+#endif
+
 /* Writes a whole file under a temporary name and renames it into place, so a
    reader sees the old file or the new one. The secret is only ever made new;
    the server list is replaced, which a Windows rename does not do. */
@@ -95,7 +110,15 @@ static bool write_file(const char *path, const void *bytes, size_t size, bool re
 #endif
         return false;
     }
-    const bool written = fwrite(bytes, 1, size, file) == size;
+    /* On disk before the rename: after a power loss the new name could
+       otherwise hold an empty file, and an empty server list lets a forged
+       NONCE have the proof again. */
+    bool written = fwrite(bytes, 1, size, file) == size && fflush(file) == 0;
+#ifdef _WIN32
+    written = written && _commit(_fileno(file)) == 0;
+#else
+    written = written && fsync(fileno(file)) == 0;
+#endif
     const bool closed = fclose(file) == 0;
 #ifdef _WIN32
     const bool moved = written && closed && (replace ?
@@ -103,6 +126,7 @@ static bool write_file(const char *path, const void *bytes, size_t size, bool re
 #else
     (void)replace;
     const bool moved = written && closed && rename(temporary, path) == 0;
+    if (moved) sync_folder(path);
 #endif
     if (!moved) remove(temporary);
     return moved;

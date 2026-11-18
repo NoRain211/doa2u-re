@@ -1001,6 +1001,15 @@ static void checkDowngradeGuard(const RecompLiveIdentity *identity)
     snprintf(copy.servers, sizeof copy.servers, "%s", list);
     remove(list);
 
+    /* The list names a server by its name, so one is needed, whole. */
+    char long_name[300];
+    memset(long_name, 'a', sizeof long_name - 1u);
+    long_name[sizeof long_name - 1u] = '\0';
+    check("an account with a list needs the server's name",
+        recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL) == NULL &&
+        recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "") == NULL);
+    check("and the whole of it", recomp_live_client_attach(&copy, "PLAYER", transcript_digest, long_name) == NULL);
+
     /* No list yet: the account registers, and the server is then remembered. */
     backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, "Example.Test:47700");
     check("attach for the guard test", backend != NULL);
