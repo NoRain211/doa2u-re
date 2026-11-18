@@ -203,7 +203,7 @@ static int test_culling_shape(void)
 {
     const struct { uint32_t flags; float aspect, seen, reflection; } cases[] = {
         {0x004e0000u, 32.0f / 9.0f, 0.5625f, 1.5f},     /* 4:3 mode reads 3/4 elsewhere */
-        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 1.5f},
+        {0x004f0000u, 16.0f / 9.0f, 0.5625f, 16.0f / 9.0f},
         {0x004f0000u, 32.0f / 9.0f, 9.0f / 32.0f, 32.0f / 9.0f},
     };
     const uint32_t wrapped[] = {0x00034e10u, 0x00036490u};

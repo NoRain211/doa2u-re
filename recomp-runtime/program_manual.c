@@ -136,23 +136,31 @@ extern void sub_00280460(void);
    0x27a070, 0x27a430, 0x280460, every reader of 0x877ea0) build their
    projection and cone from the back buffer's 720/480 there instead. At 32:9
    Koku An's mirrored floor covered only the middle 42% and smeared its edge
-   texels over the rest (issue #139), so they get the shape too; 16:9 keeps
-   the game's 1.5. */
-static void with_screen_float(uint32_t address, float shaped, void (*body)(void))
+   texels over the rest (issue #139), so they get the shape too, 16:9
+   included: there the game's 1.5 smeared its outer 8%. A Live fight's desync
+   check does not hash the projections, so online keeps the shape too. */
+static void with_screen_float(uint32_t address, float shaped, bool at_16_9, void (*body)(void))
 {
     uint8_t *slot = recomp_memory(address, sizeof(float));
     float saved;
     memcpy(&saved, slot, sizeof saved);
-    if ((recomp_kernel_video_flags() & 0x00010000u) != 0u && recomp_kernel_widescreen_aspect() != 16.0f / 9.0f)
+    if ((recomp_kernel_video_flags() & 0x00010000u) != 0u &&
+        (at_16_9 || recomp_kernel_widescreen_aspect() != 16.0f / 9.0f))
         memcpy(slot, &shaped, sizeof shaped);
     body();
     memcpy(slot, &saved, sizeof saved);
 }
-static void camera_setup(void) { with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), sub_00034E10); }
-static void camera_query(void) { with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), sub_00036490); }
+static void camera_setup(void)
+{
+    with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), false, sub_00034E10);
+}
+static void camera_query(void)
+{
+    with_screen_float(0x003c2cecu, 1.0f / recomp_kernel_widescreen_aspect(), false, sub_00036490);
+}
 static void with_mirror_shape(void (*body)(void))
 {
-    with_screen_float(0x00877ea0u, recomp_kernel_widescreen_aspect(), body);
+    with_screen_float(0x00877ea0u, recomp_kernel_widescreen_aspect(), true, body);
 }
 static void water_mirror_camera(void) { with_mirror_shape(sub_0026C2E0); }
 static void floor_mirror_camera(void) { with_mirror_shape(sub_00279D60); }

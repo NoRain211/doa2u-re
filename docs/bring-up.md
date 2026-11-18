@@ -168,7 +168,8 @@ same matrix. With 1.5 the mirror covered the middle 42% of a 32:9 view, and
 the floor smeared its clamped edge texels over the rest, flickering as the
 camera moved (issue #139). Every reader of 0x877EA0, including the water
 mirror (0x26C2E0) and a plane mirror (0x280460), gets the shape for its call
-only. 16:9 keeps the game's 1.5, so its outer 8% still shows the smear. The D3D8
+only, 16:9 included: at the game's 1.5 its outer 8% showed the same smear.
+The D3D8
 adapter scales on-screen pretransformed draws narrower than the target, the
 game's 16:9 HUD and menus, about the viewport center into the screen's
 largest 16:9 area, scissor included; quads as wide as the target (fades,
