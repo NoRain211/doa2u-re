@@ -341,6 +341,15 @@ What a reader of the wire, or of the store, can do:
   or a restart without `--store`) looks the same to the client as that
   forged NONCE, so the logon fails until the player removes the server's
   line. The registration that follows shows the proof once more.
+- That same person can pass a logon on. They ask for a challenge from their
+  own socket under the player's request id and XUID, send the player its
+  nonce as the server before the server's own arrives, and send the
+  player's answer from their own socket. The answer fits the nonce and
+  names no socket, so the server logs them on as the player and refuses the
+  player's own LOGON. It gives no key: each logon and heartbeat takes
+  another answer from the player. The client has nothing to check a NONCE
+  against, so only a NONCE the server signs would close it
+  ([Not done yet](#not-done-yet)).
 - The server holds each account's key, in memory and in the store. Whoever
   reads the store can log on as every account in it. The key does not give
   the proof or the secret.
@@ -496,10 +505,13 @@ socket and nonce gets its first answer again for 60 s, which is what makes a
 resent SESSION_PUT one session and a resent FEEDBACK one count. At most
 2,048 answers are cached, 64 of them from one address, whose oldest answer
 makes room for its newest; past the total a request is answered but not
-kept, so a resend past it is applied again. An empty answer is never cached,
+kept, so a resend past it is applied again. A LOGON's answer is always kept,
+in place of the oldest of all: its challenge is gone, so without the answer
+a resend would be refused. An empty answer is never cached,
 so its resend is tried afresh, and neither is CONNECT: applying it twice
 changes nothing, its LPEERs must name the endpoints as they are now, and its
-resends then meet the CONNECT cap.
+resends then meet the CONNECT cap. Nor is CHALLENGE, whose resend is said
+the same nonce while it is unanswered.
 
 ### What Live stores
 
@@ -667,6 +679,12 @@ the ping estimate from both round trips.
   The client cannot tell that forgery from a server that lost its accounts:
   the player must remove the server's line from the list beside the identity
   file to register again, and that registration is exposed like the first.
+- The client cannot tell the server's NONCE from a forged one. Someone who
+  reads a player's packets and answers before the server can have the
+  player answer a nonce the server gave them, and is logged on as the
+  player for the 20 s a logon lasts ([Accounts](#accounts)). A NONCE
+  signed by the server, with a key the client keeps from its first logon
+  there, would close it; it needs the same signature scheme.
 - Only the logon is authenticated. Each later request is tied to its socket
   by the address and the cookie, and nothing is encrypted. Someone who can
   read a logged-on player's packets and send from that player's address can
