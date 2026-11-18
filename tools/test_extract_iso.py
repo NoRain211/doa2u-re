@@ -83,6 +83,8 @@ class ExtractionTests(unittest.TestCase):
                     with self.subTest(path=path), patch.dict(os.environ, PATH=path):
                         self.assertIsNone(find_on_path("tool"))
                 with patch.dict(os.environ, PATH=os.pathsep.join([".", str(system)])):
+                    # Windows' default: shutil.which would search the working directory first.
+                    os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
                     self.assertEqual(Path(find_on_path("tool")).parent, system)
             finally:
                 os.chdir(previous)

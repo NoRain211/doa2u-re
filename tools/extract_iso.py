@@ -27,16 +27,17 @@ def sha256(path):
 
 
 def find_on_path(name):
-    """shutil.which over absolute PATH entries only, refusing a result in the working directory."""
-    # On Windows shutil.which prepends the working directory itself, and a relative PATH entry
-    # resolves against it, so a planted executable there would be found and run.
-    path = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(entry)]
-    found = shutil.which(name, path=os.pathsep.join(path))
-    if found is None:
-        return None
-    if os.path.normcase(os.path.dirname(os.path.abspath(found))) == os.path.normcase(os.path.abspath(os.curdir)):
-        return None
-    return found
+    """shutil.which over absolute PATH entries only, skipping the working directory."""
+    # Each entry is searched as a directory of its own: given a bare name, shutil.which on Windows
+    # searches the working directory first, so a file planted there would hide a real one.
+    here = os.path.normcase(os.path.abspath(os.curdir))
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not os.path.isabs(entry) or os.path.normcase(os.path.abspath(entry)) == here:
+            continue
+        found = shutil.which(os.path.join(entry, name))
+        if found is not None:
+            return found
+    return None
 
 
 def private_pattern(home, user):
