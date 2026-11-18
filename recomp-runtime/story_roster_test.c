@@ -36,8 +36,9 @@ static void expect(const char *name, bool ok)
     }
 }
 
-static const uint8_t DISC[0x14] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0c, 0x0d,
-                                   0xff, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03};
+/* A stand-in pool: twelve ids starting with 0, the marker and its padding,
+   then the start of the next list. */
+static uint8_t start[0x14];
 
 static bool setup_ends(bool hitomi, bool bayman, const uint8_t want[4])
 {
@@ -45,14 +46,17 @@ static bool setup_ends(bool hitomi, bool bayman, const uint8_t want[4])
     flags[0] = bayman ? 1u : 0u;
     const unsigned before = setups;
     recomp_story_roster_lookup_manual(0x000c6d40u)();
-    return setups == before + 1u && memcmp(&pool[12], want, 4u) == 0 && memcmp(pool, DISC, 12u) == 0
-        && memcmp(&pool[16], &DISC[16], 4u) == 0;
+    return setups == before + 1u && memcmp(&pool[12], want, 4u) == 0 && memcmp(pool, start, 12u) == 0
+        && memcmp(&pool[16], &start[16], 4u) == 0;
 }
 
 int main(void)
 {
     expect("other addresses", recomp_story_roster_lookup_manual(0x000c6d41u) == NULL);
-    memcpy(pool, DISC, sizeof pool);
+    for (unsigned i = 1u; i < 12u; ++i) start[i] = (uint8_t)(0x30u + i);
+    start[12] = 0xffu;
+    for (unsigned i = 16u; i < sizeof start; ++i) start[i] = (uint8_t)(0x40u + i);
+    memcpy(pool, start, sizeof pool);
     game_data = DATA;
     expect("both locked", setup_ends(false, false, (const uint8_t[4]){0xff, 0, 0, 0}));
     expect("Hitomi", setup_ends(true, false, (const uint8_t[4]){0x15, 0xff, 0, 0}));
