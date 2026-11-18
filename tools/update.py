@@ -207,10 +207,14 @@ def write(files):
             # Overwriting a running program (the Linux launcher runs this script) fails with "text file busy";
             # a rename over it does not.
             partial = target.with_name(target.name + ".part")
-            partial.write_bytes(data)
-            if mode:
-                partial.chmod(mode)
-            partial.replace(target)
+            try:
+                partial.write_bytes(data)
+                if mode:
+                    partial.chmod(mode)
+                partial.replace(target)
+            except OSError:
+                partial.unlink(missing_ok=True)
+                raise
             continue
         if swap:
             target.replace(old)
