@@ -362,6 +362,104 @@ static bool testMipSampler()
     return passed;
 }
 
+/* The guest stores one swizzled surface per uncompressed mip level. A minified
+   sample must read the guest's own smaller level, not a host-generated one. */
+static bool testUncompressedMipChain()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "chain", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create mip chain", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        Vertex vertices[4] = {};
+        uint16_t indices[] = {0, 1, 2, 3};
+        // Three guest levels, a distinct solid colour each, swizzled per level
+        // and laid end to end: 16x16 red, 8x8 green, 4x4 blue.
+        std::vector<uint32_t> storage(16u * 16u + 8u * 8u + 4u * 4u);
+        const uint32_t colors[] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu};
+        const uint32_t dims[] = {16u, 8u, 4u};
+        size_t at = 0u;
+        for (unsigned i = 0u; i < 3u; ++i) {
+            uint32_t mask_x = 0u, mask_y = 0u;
+            recomp_d3d_texture_swizzle_masks(dims[i], dims[i], &mask_x, &mask_y);
+            for (uint32_t y = 0u; y < dims[i]; ++y) {
+                for (uint32_t x = 0u; x < dims[i]; ++x) {
+                    storage[at + recomp_d3d_texture_swizzle_offset(x, y, mask_x, mask_y)] = colors[i];
+                }
+            }
+            at += static_cast<size_t>(dims[i]) * dims[i];
+        }
+        const auto quad = [&](float left, float top, float size, uint32_t byte_count, float bias) {
+            const float corner[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+            for (unsigned i = 0u; i < 4u; ++i) {
+                vertices[i] = {left + corner[i][0] * size, top + corner[i][1] * size,
+                    0.25f, 1.0f, 0xffffffffu, corner[i][0], corner[i][1]};
+            }
+            RecompD3dPresenterCommand command{};
+            command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+            auto &draw = command.data.draw;
+            draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+            draw.index_count = draw.vertex_count = 4u;
+            draw.triangle_count = 2u;
+            draw.vertex_stride = sizeof(Vertex);
+            draw.fvf = 0x144u;
+            draw.vertex_bytes = vertices;
+            draw.index_bytes = indices;
+            draw.blend.color_write_mask = 15u;
+            draw.has_texture = true;
+            draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+            draw.texture.bits_per_pixel = 32u;
+            draw.texture.width = draw.texture.height = 16u;
+            draw.texture.mip_levels = 3u;
+            draw.texture.data = 0x3000u;
+            draw.texture_bytes = storage.data();
+            draw.texture_byte_count = byte_count;
+            draw.point_mip_filter = true;
+            draw.mip_lod_bias = bias;
+            return expect("mip chain draw", d3d_backend_submit(presenter, &command));
+        };
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("mip chain clear", d3d_backend_submit(presenter, &clear));
+        const uint32_t chain = static_cast<uint32_t>(storage.size() * 4u);
+        // One texel per pixel red, 2.67 per pixel green and 4 per pixel blue.
+        passed &= quad(20.0f, 20.0f, 16.0f, chain, 0.0f);
+        passed &= quad(52.0f, 20.0f, 6.0f, chain, 0.0f);
+        passed &= quad(76.0f, 20.0f, 4.0f, chain, 0.25f);
+        // A span that holds only level 0 keeps the old single-level sample.
+        passed &= quad(100.0f, 20.0f, 6.0f, 1024u, 0.0f);
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5u, 1u};
+        passed &= expect("mip chain present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy mip chain", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            struct Sample { unsigned x, y, channel; const char *name; };
+            const Sample samples[] = {
+                {28u, 28u, 2u, "level 0"}, {55u, 23u, 1u, "level 1"},
+                {78u, 22u, 0u, "level 2"}, {103u, 23u, 2u, "level 0 span"},
+            };
+            for (const Sample &sample : samples) {
+                unsigned char bgr[3]{};
+                std::fseek(file, 54 + (240 - 1 - sample.y) * 320 * 3 + sample.x * 3, SEEK_SET);
+                passed &= std::fread(bgr, 1, 3, file) == 3;
+                const bool pixel_ok = bgr[sample.channel] > 245 && bgr[(sample.channel + 1u) % 3u] < 10 &&
+                    bgr[(sample.channel + 2u) % 3u] < 10;
+                if (!pixel_ok) std::fprintf(stderr, "FAIL mip chain %s BGR=%u,%u,%u\n",
+                    sample.name, bgr[0], bgr[1], bgr[2]);
+                passed &= pixel_ok;
+            }
+            std::fclose(file);
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS uncompressed guest mip levels at minifying scales");
+    return passed;
+}
+
 static bool testLines()
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -3089,7 +3187,8 @@ int main()
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
-        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testLines() || !testLighting() ||
+        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
+        !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
         !testReflectionAddress(false, false, true) || !testReflectionAddress(true, false, false, true) ||

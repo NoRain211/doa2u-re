@@ -248,6 +248,26 @@ int main(void)
     CHECK(recomp_d3d8_resource_inline_texture(3u, &desc));
     recomp_d3d8_resource_reset();
     CHECK(!recomp_d3d8_resource_inline_texture(3u, &desc));
+    /* Uncompressed levels sit end to end, one swizzled surface each, exactly as
+       the level locks above read them. */
+    RecompD3dTextureDesc chain = {0};
+    RecompD3dTextureLevel level = {0};
+    chain.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+    chain.bits_per_pixel = 32u;
+    chain.width = 8u;
+    chain.height = 8u;
+    chain.mip_levels = 4u;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 340u);
+    CHECK(recomp_d3d_texture_uncompressed_level(&chain, 2u, &level) && level.offset == 320u &&
+        level.width == 2u && level.height == 2u && level.bytes == 16u);
+    /* A level count longer than the dimensions allow keeps no chain at all. */
+    chain.mip_levels = 5u;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 4u, &level));
+    chain.mip_levels = 1u;
+    chain.linear = true;
+    CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 0u, &level));
     puts("PASS D3D8 resource ABI, mip views, bindings, retention and owned destruction");
     return 0;
 }

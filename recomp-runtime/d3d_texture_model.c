@@ -72,6 +72,18 @@ static bool is_power_of_two(uint32_t value)
     return value != 0u && (value & (value - 1u)) == 0u;
 }
 
+static uint32_t mip_level_count(uint32_t width, uint32_t height)
+{
+    uint32_t max_dim = width > height ? width : height;
+    uint32_t levels = 1u;
+
+    while (max_dim > 1u) {
+        max_dim >>= 1u;
+        ++levels;
+    }
+    return levels;
+}
+
 bool recomp_d3d_texture_unswizzle(
     const uint8_t *source,
     uint8_t *destination,
@@ -279,6 +291,70 @@ uint32_t recomp_d3d_texture_compressed_mip_span(
         }
     }
     return (uint32_t)total;
+}
+
+/* The guest stores one swizzled surface per uncompressed level, laid end to
+   end, so a level starts after every earlier level's width * height * bytes
+   per texel. The resource adapter's lock views already read a level that way. */
+bool recomp_d3d_texture_uncompressed_level(
+    const RecompD3dTextureDesc *desc,
+    uint32_t level,
+    RecompD3dTextureLevel *out)
+{
+    RecompD3dTextureLevel info = {0};
+    uint64_t offset = 0u;
+    uint32_t levels;
+    uint32_t width;
+    uint32_t height;
+    uint32_t bytes_per_texel;
+
+    if (desc == NULL || out == NULL || desc->linear || desc->depth ||
+        desc->volume_depth != 0u || !is_power_of_two(desc->width) ||
+        !is_power_of_two(desc->height) || desc->bits_per_pixel == 0u ||
+        desc->bits_per_pixel % 8u != 0u) {
+        return false;
+    }
+    levels = desc->mip_levels == 0u ? 1u : desc->mip_levels;
+    if (level >= levels || levels > mip_level_count(desc->width, desc->height)) {
+        return false;
+    }
+    width = desc->width;
+    height = desc->height;
+    bytes_per_texel = desc->bits_per_pixel / 8u;
+    for (uint32_t i = 0u; i < level; ++i) {
+        offset += (uint64_t)width * height * bytes_per_texel;
+        if (offset > UINT32_MAX) {
+            return false;
+        }
+        width = width > 1u ? width >> 1u : 1u;
+        height = height > 1u ? height >> 1u : 1u;
+    }
+    info.offset = (uint32_t)offset;
+    info.width = width;
+    info.height = height;
+    const uint64_t level_bytes = (uint64_t)width * height * bytes_per_texel;
+    if (level_bytes == 0u || level_bytes > UINT32_MAX) {
+        return false;
+    }
+    info.bytes = (uint32_t)level_bytes;
+    *out = info;
+    return true;
+}
+
+uint32_t recomp_d3d_texture_uncompressed_mip_span(
+    const RecompD3dTextureDesc *desc)
+{
+    RecompD3dTextureLevel last;
+    uint32_t levels;
+
+    if (desc == NULL) {
+        return 0u;
+    }
+    levels = desc->mip_levels == 0u ? 1u : desc->mip_levels;
+    if (!recomp_d3d_texture_uncompressed_level(desc, levels - 1u, &last)) {
+        return 0u;
+    }
+    return last.offset + last.bytes;
 }
 
 static bool texture_desc_equal(

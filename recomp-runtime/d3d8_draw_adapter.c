@@ -254,14 +254,20 @@ static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDr
     if (desc->volume_depth != 0u && stage != 0u)
         recomp_stop(2, "d3d8:volume-texture-stage:%u", stage);
     uint64_t bytes = recomp_d3d_texture_compressed_mip_span(desc);
-    if (bytes == 0u) bytes = desc->linear ? (uint64_t)desc->pitch * desc->height :
+    const uint64_t level0 = desc->linear ? (uint64_t)desc->pitch * desc->height :
         (uint64_t)desc->width * desc->height * (desc->volume_depth ? desc->volume_depth : 1u) *
             desc->bits_per_pixel / 8u;
+    /* Uncompressed textures store their levels in the same span, so hand the
+       presenter every level the guest wrote. */
+    if (bytes == 0u) bytes = recomp_d3d_texture_uncompressed_mip_span(desc);
+    if (bytes == 0u) bytes = level0;
     if (bytes == 0u || bytes > RECOMP_XBOX_RAM_SIZE)
         recomp_stop(2, "d3d8:draw-texture-span");
     uint32_t address;
     if (!recomp_d3d_texture_resolve_cpu_address(desc->data, &address))
         recomp_stop(2, "d3d8:draw-texture-address");
+    /* A chain that runs past RAM keeps level 0, as it did before. */
+    if (bytes > RECOMP_XBOX_RAM_SIZE - address) bytes = level0;
     draw->texture_bytes = recomp_memory(address, (size_t)bytes);
     draw->texture_byte_count = (uint32_t)bytes;
     draw->has_texture = true;
