@@ -181,5 +181,15 @@ class CueTests(unittest.TestCase):
                     voices.cue_waves(sound_bank_image([(name, 0)]))
 
 
+class AfsTests(unittest.TestCase):
+    def test_an_entry_count_larger_than_the_file_raises_before_reading(self):
+        def entries(image):
+            return voices.read_afs_entries(voices.ArchiveView(io.BytesIO(image), 0, len(image)))
+
+        with self.assertRaises(ValueError):
+            entries(b"AFS\0" + struct.pack("<I", 0xFFFFFFFF) + bytes(8))
+        self.assertEqual(entries(b"AFS\0" + struct.pack("<III", 1, 16, 4) + bytes(4)), [(16, 4)])
+
+
 if __name__ == "__main__":
     unittest.main()

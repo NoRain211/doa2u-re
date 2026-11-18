@@ -165,6 +165,38 @@ class ImportFailureTests(unittest.TestCase):
                 self.assertEqual(Path(folder, name).read_bytes(), b"levelled")
             self.assertIn("#level", Path(folder, "tracks.txt").read_text())
 
+    def test_a_replace_cut_short_is_finished_by_the_rerun_not_levelled_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One"), ("two.adx", -1, -1, "Two")])
+            for name in ("one.adx", "two.adx"):
+                Path(folder, name).write_bytes(b"original")
+
+            def encode(args, **kwargs):
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            replace = os.replace
+
+            def locked(source, target):
+                if source.endswith("two.adx.level"):
+                    raise PermissionError("open elsewhere")
+                replace(source, target)
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode), \
+                    mock.patch.object(soundtrack.os, "replace", side_effect=locked):
+                with self.assertRaises(PermissionError):
+                    soundtrack.level_album(folder, "encoder")
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
+            self.assertEqual(Path(folder, "two.adx").read_bytes(), b"original")
+            self.assertIn("#level", Path(folder, "tracks.txt").read_text())
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            for name in ("one.adx", "two.adx"):
+                self.assertEqual(Path(folder, name).read_bytes(), b"levelled")
+            self.assertEqual(sorted(path.name for path in Path(folder).iterdir()),
+                             ["one.adx", "tracks.txt", "two.adx"])
+
     def test_import_rejects_negative_wave_indices_and_sanitizes_cue_files(self):
         sound = b"KBDSbgm_stream" + bytes(100)
         source = mock.Mock()
