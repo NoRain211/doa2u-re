@@ -180,8 +180,6 @@ int main()
     std::fseek(mono_wav, 22, SEEK_SET);
     CHECK(std::fread(&capture_channels, sizeof capture_channels, 1, mono_wav) == 1);
     CHECK(capture_channels >= 2 && capture_channels <= 8);
-    // On a stereo master the loop below has no other speaker to look at; the fronts are still checked.
-    if (capture_channels == 2) std::puts("SKIP mono routing past the fronts: the host gave only a stereo master");
     std::fseek(mono_wav, 44, SEEK_SET);
     float speaker[8];
     int fronts = 0;
@@ -193,7 +191,9 @@ int main()
     std::fclose(mono_wav);
     unlink(mono_capture);
     CHECK(fronts > 1000);
-    CHECK(!elsewhere);
+    // A stereo master has no speaker past the fronts to look at.
+    if (capture_channels == 2) std::puts("SKIP mono routing past the fronts: the host gave only a stereo master");
+    else CHECK(!elsewhere);
 
     // The ramp eases linearly over its quantum however the chunks split it,
     // and a change mid-ramp restarts from the level it had reached.
