@@ -875,6 +875,8 @@ typedef struct Target {
 static Target targets[MAX_MUSIC_ENTRIES];
 static unsigned target_count;
 static bool assigning;          /* bgm.afs has slots: assignments work */
+static bool installed_online;   /* this boot was online from the start: it stays so */
+static bool online_now;         /* slots off and no previews */
 
 static int find_album(const char *tab)
 {
@@ -1045,6 +1047,7 @@ uint64_t recomp_jukebox_prepare(const char *disc, const char *private_dir)
 void recomp_jukebox_install(bool online)
 {
     stop();
+    installed_online = online_now = online;
     const unsigned album = page.album, track = page.track, target = page.target;
     memset(&page, 0, sizeof page);
     page.album = album;
@@ -1082,10 +1085,13 @@ void recomp_jukebox_set_online(bool online)
        logoff brings them back as they were. shortcut: an assigned track
        playing at logon jumps to the game's own at its next read, mid-track;
        both games then read the same bytes at once. Finish the track first if
-       that jump is heard and the menus can tolerate the difference. */
-    if (online) stop();
-    recomp_mod_loader_enable_slots(!online);
-    assigning = !online && target_count > 0u && targets[0].entry >= 0;
+       that jump is heard and the menus can tolerate the difference.
+       A boot installed online never loaded its assignments, and the archive
+       it opened is the disc's own, so it stays online whatever comes after. */
+    online_now = online || installed_online;
+    if (online_now) stop();
+    recomp_mod_loader_enable_slots(!online_now);
+    assigning = !online_now && target_count > 0u && targets[0].entry >= 0;
 }
 
 void recomp_jukebox_request_page(void) { page.requested = true; }
@@ -1184,6 +1190,10 @@ void recomp_jukebox_confirm(unsigned row)
     case ROW_ALBUM:
     case ROW_TRACK:
         if (album->count == 0u) break;
+        if (online_now) {
+            snprintf(page.note, sizeof page.note, "Music is off while online.");
+            break;
+        }
         if (player.playing && player.album == page.album && player.track == page.track) stop();
         else play(page.album, page.track);
         break;
