@@ -315,7 +315,9 @@ bool recomp_d3d_texture_uncompressed_level(
         return false;
     }
     levels = desc->mip_levels == 0u ? 1u : desc->mip_levels;
-    if (level >= levels || levels > mip_level_count(desc->width, desc->height)) {
+    /* A level count the dimensions cannot hold still leaves level 0 usable. */
+    if (level >= levels ||
+        (level > 0u && levels > mip_level_count(desc->width, desc->height))) {
         return false;
     }
     width = desc->width;
@@ -351,7 +353,8 @@ uint32_t recomp_d3d_texture_uncompressed_mip_span(
         return 0u;
     }
     levels = desc->mip_levels == 0u ? 1u : desc->mip_levels;
-    if (!recomp_d3d_texture_uncompressed_level(desc, levels - 1u, &last)) {
+    if (levels > mip_level_count(desc->width, desc->height) ||
+        !recomp_d3d_texture_uncompressed_level(desc, levels - 1u, &last)) {
         return 0u;
     }
     return last.offset + last.bytes;

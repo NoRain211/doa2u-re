@@ -260,10 +260,13 @@ int main(void)
     CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 340u);
     CHECK(recomp_d3d_texture_uncompressed_level(&chain, 2u, &level) && level.offset == 320u &&
         level.width == 2u && level.height == 2u && level.bytes == 16u);
-    /* A level count longer than the dimensions allow keeps no chain at all. */
+    /* A level count longer than the dimensions allow keeps level 0 alone. */
     chain.mip_levels = 5u;
     CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);
     CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 4u, &level));
+    CHECK(!recomp_d3d_texture_uncompressed_level(&chain, 1u, &level));
+    CHECK(recomp_d3d_texture_uncompressed_level(&chain, 0u, &level) && level.offset == 0u &&
+        level.width == 8u && level.height == 8u && level.bytes == 256u);
     chain.mip_levels = 1u;
     chain.linear = true;
     CHECK(recomp_d3d_texture_uncompressed_mip_span(&chain) == 0u);

@@ -292,7 +292,8 @@ clamped to the 13-bit field, so NaN and out-of-range biases clamp to -16 or
 Uncompressed textures keep every guest mip level: each level is unswizzled from
 its own guest surface, laid end to end as the level locks read them, so a
 minified sample reads the level the game stored. A level count or span that
-disagrees with that storage keeps level 0 alone.
+disagrees with that storage keeps level 0 alone. Mipped 2D art keeps the
+guest's levels and is not upscaled: only single-level art gets the larger copy.
 Pixel-shader creation, deletion, binding and
 constants retain the 5849 layout; native custom shading supports the sister
 presenter's four-tap filter in its doubled and identity-scale variants, with

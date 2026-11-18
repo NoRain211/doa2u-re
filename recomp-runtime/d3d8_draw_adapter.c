@@ -267,7 +267,9 @@ static void attach_texture(uint32_t device, uint32_t stage, RecompD3dPresenterDr
     if (!recomp_d3d_texture_resolve_cpu_address(desc->data, &address))
         recomp_stop(2, "d3d8:draw-texture-address");
     /* A chain that runs past RAM keeps level 0, as it did before. */
+    if (address >= RECOMP_XBOX_RAM_SIZE) recomp_stop(2, "d3d8:draw-texture-address");
     if (bytes > RECOMP_XBOX_RAM_SIZE - address) bytes = level0;
+    if (bytes > RECOMP_XBOX_RAM_SIZE - address) recomp_stop(2, "d3d8:draw-texture-span");
     draw->texture_bytes = recomp_memory(address, (size_t)bytes);
     draw->texture_byte_count = (uint32_t)bytes;
     draw->has_texture = true;
