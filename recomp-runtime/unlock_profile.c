@@ -8,7 +8,10 @@
    0x12118-byte save slot. It holds one costume byte per character at +0x2ed8,
    in the 15-character order from 0x6959dc mapped through 0x6959c0, and the
    hidden-character flags at +0x2ed2 to +0x2ed4; unlocked, each costume byte
-   is its count from 0x6e0f08 and each flag is 1.
+   is its count from 0x6e0f08 and each flag is 1. Two more flags gate main
+   menu entries (0x134330 skips them while 0): +0x2ed5, the item collection
+   (0xb), is 3 when complete; +0x2ed6, the CG Gallery (0x17, and 0x15), is 1.
+   The game's award sets them only after earning, so unlocked they are set.
 
    Every save of a slot goes through 0x21b50 or 0x21bb0 (cdecl name, slot),
    every load through 0x21d90 or 0x21de0 (the same arguments), and every
@@ -26,7 +29,8 @@ enum {
     COSTUMES = 0x2ed8u,
     FLAGS = 0x2ed2u,
     CHARACTERS = 15u,
-    VALUES = CHARACTERS + 3u,
+    FLAG_COUNT = 5u,
+    VALUES = CHARACTERS + FLAG_COUNT,
     SLOT_SIZE = 0x12118u,
     SAVE = 0x00021b50u,
     SAVE_OTHER = 0x00021bb0u,
@@ -67,7 +71,8 @@ static void unlocked_values(uint8_t values[VALUES])
         const uint8_t character = *recomp_memory(CHARACTER_ORDER + i, 1u);
         values[i] = *recomp_memory(COSTUME_COUNT + character, 1u);
     }
-    memset(values + CHARACTERS, 1, 3u);
+    memset(values + CHARACTERS, 1, FLAG_COUNT);
+    values[CHARACTERS + 3u] = 3u;
 }
 
 static uint32_t *record_data(unsigned record)
