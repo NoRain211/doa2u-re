@@ -150,7 +150,7 @@ final class LauncherView: NSView {
     var buildProcess: Process?
     var buildTimer: Timer?
     var buildStart = Date()
-    var stopArmed = false
+    var stopDeadline = Date.distantPast // a quit during a build asks for a second one before this
     // A held Down that entered a page waits for release before it changes a value.
     var downEntered = false
     // The newer version a check found, and whether a check or install is running.
@@ -275,12 +275,12 @@ final class LauncherView: NSView {
         }
         do { try process.run() } catch { notice = "Cannot start the build: \(error.localizedDescription)"; return }
         buildProcess = process
-        stopArmed = false
+        stopDeadline = .distantPast
         buildStart = Date()
         buildRow.names = ["Working"]
         notice = "Starting the build"
         buildTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self = self, self.buildProcess != nil, !self.stopArmed else { return }
+            guard let self = self, self.buildProcess != nil, Date() >= self.stopDeadline else { return }
             let seconds = Int(Date().timeIntervalSince(self.buildStart))
             self.notice = String(format: "BUILDING %02d:%02d  ", seconds / 60, seconds % 60) + self.logTail()
             self.needsDisplay = true
@@ -334,8 +334,8 @@ final class LauncherView: NSView {
     func exitBlocked() -> Bool {
         if waitForInstall() { return true }
         guard buildProcess != nil else { return false }
-        if stopArmed { stopBuild(); return false }
-        stopArmed = true
+        if Date() < stopDeadline { stopBuild(); return false }
+        stopDeadline = Date().addingTimeInterval(3)
         tab = LauncherView.buildPage
         inPage = false
         notice = "A build is running. Quit again to stop it"

@@ -301,7 +301,7 @@ struct Launcher {
     std::string game_source, build_info, play_info;
     SDL_Process *build = nullptr;
     int build_pid = 0;
-    bool stop_armed = false; // the first exit request during a build asks for a second
+    bool stop_armed = false; // the first exit request during a build asks for a second, for 3 seconds
     Uint64 build_start = 0, next_log = 0;
     // tools/update.py runs as a child process. pending is the newer version a check found.
     std::string root, pending, status;
@@ -489,7 +489,8 @@ struct Launcher {
         int code = 0;
         if (!SDL_WaitProcess(build, false, &code)) {
             const Uint64 now = SDL_GetTicks();
-            if (now >= next_log && !stop_armed) {
+            if (now >= next_log) {
+                stop_armed = false;
                 next_log = now + 500;
                 const Uint64 seconds = (now - build_start) / 1000;
                 char clock[16];
@@ -541,6 +542,7 @@ struct Launcher {
         if (waitForInstall()) return -1;
         if (build != nullptr && !stop_armed) {
             stop_armed = true;
+            next_log = SDL_GetTicks() + 3000; // keeps the question up until the confirmation expires
             menu = kBuildPage;
             in_page = false;
             build_info = "A build is running. Exit again to stop it";
