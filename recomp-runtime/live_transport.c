@@ -9,7 +9,8 @@
    Reused from netplay.c: recomp_netplay_listen
    opens and randomizes the socket, recomp_netplay_match_server resolves the
    server, netplay_send_raw sends, netplay_now_ms reads the clock, and the
-   matchmaker's cookie/nonce framing is its MATCH_* layout. Punching repeats
+   matchmaker's cookie/nonce framing is matchmaker_wire.h's, shared with
+   netplay.c. Punching repeats
    to both endpoints the matchmaker gave, carries the pair token the LPEER
    handed both players so only a peer in this pairing sets the path, the first
    checked answer becomes it, and after 5 s the packets go through the
@@ -30,6 +31,7 @@
 #include "kernel_abi.h"
 #include "live_backend.h"
 #include "live_session.h"
+#include "matchmaker_wire.h"
 #include "netplay_wire.h"
 
 /* live_xapi.h declares this with the rest of the guest's thunks; it is
@@ -78,21 +80,6 @@ enum {
        whole request of LIVE_MATCH_BYTES, and the addressee and this header
        come out of it first. */
     LIVE_RELAY_BYTES = LIVE_MATCH_BYTES - 4u - GUEST_HEADER,
-};
-
-/* The matchmaker's header (tools/matchmaker.py): "D2MM", version, kind, the
-   client socket's nonce, then the server's cookie, then the body. */
-static const uint8_t MATCH_MAGIC[4] = {'D', '2', 'M', 'M'};
-enum {
-    MATCH_VERSION = 2u,
-    MATCH_RELAY = 9u,      /* the server forwards a paired peer's datagram */
-    MATCH_LIVE_RELAY = 34u, /* this client asks for one addressee */
-    MATCH_COOKIE = 10u,
-    MATCH_HEADER = 6u,
-    MATCH_NONCE = MATCH_HEADER,
-    MATCH_BODY = MATCH_NONCE + RECOMP_NETPLAY_TOKEN_BYTES,
-    MATCH_COOKIE_AT = MATCH_BODY,
-    MATCH_ASKED = MATCH_COOKIE_AT + RECOMP_NETPLAY_TOKEN_BYTES,
 };
 
 /* Winsock's error numbers, which the guest reads whatever the host platform. */
@@ -343,12 +330,7 @@ static void send_relay(uint32_t destination_ina, uint16_t guest_port, uint8_t ki
         said_too_big = true;
         return;
     }
-    memcpy(packet, MATCH_MAGIC, sizeof MATCH_MAGIC);
-    packet[4] = MATCH_VERSION;
-    packet[5] = MATCH_LIVE_RELAY;
-    memcpy(packet + MATCH_NONCE, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
-    memcpy(packet + MATCH_COOKIE_AT, live.net.match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
-    uint8_t *body = packet + MATCH_ASKED;
+    uint8_t *body = match_header(packet, MATCH_LIVE_RELAY, live.net.match.nonce, live.net.match.cookie);
     put_ina(body, destination_ina);
     body += 4u;
     memcpy(body, GUEST_MAGIC, sizeof GUEST_MAGIC);
@@ -546,17 +528,17 @@ static void server_packet(const uint8_t *raw, size_t size)
         return;
     /* Anyone can send from the server's address; only the server knows this
        socket's nonce, so a forged answer is dropped. */
-    if (memcmp(raw + MATCH_NONCE, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES) != 0) return;
+    if (memcmp(raw + MATCH_HEADER, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES) != 0) return;
     if (raw[5] == MATCH_COOKIE) {
         if (size != MATCH_ASKED) return;
-        memcpy(live.net.match.cookie, raw + MATCH_COOKIE_AT, RECOMP_NETPLAY_TOKEN_BYTES);
+        memcpy(live.net.match.cookie, raw + MATCH_BODY, RECOMP_NETPLAY_TOKEN_BYTES);
         /* The server dropped a recent request for want of this cookie, or took
            it and sent a newer one; say the last request again with it. */
         if (live.asked_size != 0u && netplay_now_ms() - live.asked_ms < 2000u) {
             uint8_t again[sizeof live.asked];
             memcpy(again, live.asked, live.asked_size);
-            memcpy(again + MATCH_NONCE, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
-            memcpy(again + MATCH_COOKIE_AT, live.net.match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
+            memcpy(again + MATCH_HEADER, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
+            memcpy(again + MATCH_BODY, live.net.match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
             netplay_send_raw(&live.net, live.net.match.server_address, live.net.match.server_port, again,
                 live.asked_size);
         }
@@ -645,7 +627,14 @@ void recomp_live_transport_pump(uint64_t now_ms)
 
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port)
 {
+    /* The matchmaker handler and this player's virtual address are the
+       caller's settings, not socket state: a caller may register them before
+       it opens, so opening keeps them. */
+    const RecompLiveServerHandler handler = live.handler;
+    const uint32_t local_ina = live.local_ina;
     recomp_live_transport_close();
+    live.handler = handler;
+    live.local_ina = local_ina;
     if (server_host == NULL || server_port == 0u || strlen(server_host) >= sizeof live.server_host) return false;
     memcpy(live.server_host, server_host, strlen(server_host) + 1u);
     live.server_port = server_port;
@@ -699,8 +688,8 @@ void recomp_live_transport_send_server(const uint8_t *packet, size_t size)
     if (size < MATCH_ASKED || size > LIVE_MATCH_BYTES || size > sizeof live.asked) return;
     if (memcmp(packet, MATCH_MAGIC, sizeof MATCH_MAGIC) != 0 || packet[4] != MATCH_VERSION) return;
     memcpy(live.asked, packet, size);
-    memcpy(live.asked + MATCH_NONCE, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
-    memcpy(live.asked + MATCH_COOKIE_AT, live.net.match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
+    memcpy(live.asked + MATCH_HEADER, live.net.match.nonce, RECOMP_NETPLAY_TOKEN_BYTES);
+    memcpy(live.asked + MATCH_BODY, live.net.match.cookie, RECOMP_NETPLAY_TOKEN_BYTES);
     live.asked_size = size;
     live.asked_ms = netplay_now_ms();
     netplay_send_raw(&live.net, live.net.match.server_address, live.net.match.server_port, live.asked, size);

@@ -181,7 +181,15 @@ the build digest. A client's proof is SHA-256 of `doa2u-live` and its
 six bytes of the SHA-256 of that proof. A LOGON whose XUID is not the one its
 proof gives is refused with access denied, as is another proof for an
 existing XUID, and the game shows a logon error. Search results carry XUIDs,
-so this check keeps one player from claiming another's account. A gamertag is
+so this check keeps one player from claiming another's account by guessing,
+but it is not authentication against an observer: LOGON carries the proof
+itself, unchanged, and the heartbeat repeats it every 5 s over plain UDP, so
+anyone who can read one packet can send that proof from their own socket and
+be logged on as that XUID, answering its invites, writing its stats and
+CONNECTing as it. The cookie only proves a source address that the packet
+already shows. Closing that needs a nonce the server issues and an answer
+over it, with the store keeping a verifier; today the proof is an identity
+claim from a secret no one else holds. A gamertag is
 unique among accounts:
 the server gives a taken one a digit, 1 to 9, and past those the XUID's own
 hex digits, so every player who sends the default name gets one; LOGGED
@@ -276,35 +284,40 @@ gamertag, so the client fills those two from the row's fields.
 
 A Live packet over 1,200 bytes, a body whose length fields do not match and
 an unknown kind get no answer; a LIVE_RELAY's body may be 1,200 bytes, as a
-RELAY's is, so that packet is 1,222 at most. Per address the server takes 100
-Live packets between its once-a-second sweeps and sends 256 KiB of answers (a
-request is small and its answer may be 100 rows of stats; past that the
-answer is dropped and the client's resend gets it later), and registers 4 new
-accounts a minute and 16 a day (the day counts accounts made, not refused
-attempts); a player's requests are 2 a second at most, so only a flood meets
-those. A LIVE_RELAY is not one of those 100: it has the relay's caps, 250 a
-second for a pair direction and 500 for an address, and an address may open
-16 pairs. The rest are per entry: 4,096 accounts, 4 sessions per account and
-4,096 sessions, 672-byte attributes, 512-byte filters, 25 search results, 100
-friends and pending requests, 250 mutes (147 fit one MUTELIST packet, so it
-is cut there), 32 boards per account, 256 board rankings cached (the oldest
-makes room), 16 feedback types per target, 64 stats per write and 64 per
-account and board (a full group-7 write is 61; the game reads back its 62
-entries, the last a rank the client makes from the row), 100 XUIDs per read,
-100 leader rows. An invite lasts 10 minutes and an unanswered friend request
-a week. When the account table is full, a new XUID drops the account that has
-been offline longest, those without stats or friends first, with everything
-that names it: friendships in both directions, pending requests and invites,
-stats rows, feedback, mutes, Live pairings and cached rankings. If every
-account is online, the new account is refused. A repeated request id from the
-same socket and nonce gets its first answer again for 60 s, which is what
-makes a resent SESSION_PUT one session and a resent FEEDBACK one count. At
-most 2,048 answers are cached, 64 of them from one address, whose oldest
-answer makes room for its newest; past the total a request is answered but
-not kept, so a resend past it is applied again. An empty answer is never
-cached, so its resend is tried afresh, and neither is CONNECT: applying it
-twice changes nothing, its LPEERs must name the endpoints as they are now,
-and its resends then meet the CONNECT cap.
+RELAY's is, so that packet is 1,222 at most. Per address the server
+takes 100 Live packets between its once-a-second sweeps and sends 256 KiB of
+answers (a request is small and its answer may be 100 rows of stats; past
+that the answer is dropped and the client's resend gets it later), and
+registers 4 new accounts a minute and 16 a day (the day counts accounts
+made, not refused attempts); a player's requests are 2 a second at most, so
+only a flood meets those. A LIVE_RELAY is not one of those 100: it has the relay's
+caps, 250 a second for a pair direction and 500 for an address, and an address may
+open 16 pairs. The rest are
+per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
+672-byte attributes, 512-byte filters, 25 search results, 100 friends and
+pending requests, 250 mutes (147 fit one MUTELIST packet, so it is cut
+there), 32 boards per account, 256 board rankings cached (the oldest makes
+room), 16 feedback types per target, 64 stats per write and 64 per account
+and board (a full group-7 write is 61; the game reads back its
+62 entries, the last a rank the client makes from the row), 100 XUIDs per
+read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
+request a week. When the account table is full, a new XUID drops the
+account that has been offline longest, those without stats or friends first,
+with everything that names it:
+friendships in both directions, pending requests and invites, stats rows,
+feedback, mutes, Live pairings and cached rankings. If every account is
+online, the new account is refused. Those caps are per address, so filling
+the table takes 256 addresses at the daily cap, or 256 days from one;
+a flood that gets there costs the evicted players the data the file held for
+them. A repeated request id from the same
+socket and nonce gets its first answer again for 60 s, which is what makes a
+resent SESSION_PUT one session and a resent FEEDBACK one count. At most
+2,048 answers are cached, 64 of them from one address, whose oldest answer
+makes room for its newest; past the total a request is answered but not
+kept, so a resend past it is applied again. An empty answer is never cached,
+so its resend is tried afresh, and neither is CONNECT: applying it twice
+changes nothing, its LPEERs must name the endpoints as they are now, and its
+resends then meet the CONNECT cap.
 
 ### What Live stores
 
@@ -325,9 +338,13 @@ Without `--store` everything is in memory and a restart forgets it. With
 
 Sessions, addresses, keys, presence, feedback, Live pairings and the CONNECT
 times that allow writing another player's stats are not written. The file is
-written to `PATH.tmp` and renamed over `PATH`, at most every 30 s and at
-exit, so a crash leaves the last good file. A missing file is no error; a
-damaged one is reported on stderr and left alone.
+written to a fresh temporary file beside it at most every 30 s and at exit,
+flushed and synced to the disk there, and renamed over `PATH`, so a crash
+leaves the last good file; a write that fails is reported on stderr and
+removes its temporary file, and the last good file stays. On POSIX systems
+the new file is owner-only (`0600`), so a store the server did not create
+that way is narrowed on its next save. A missing file is no error; a damaged
+one is reported on stderr and left alone.
 
 ### In the game
 
@@ -358,6 +375,17 @@ failure is tried again 5 s later.
 - Punching has only been tested on one machine, not through real routers.
 - The server listens on IPv4 only, so a player who has IPv6 alone (NAT64)
   cannot reach it.
+- A LOGON carries its proof in the clear, and the server accepts that same
+  value for the life of the account, so a player who reads one packet can
+  act as another XUID. The identity check stops a player from claiming a
+  found XUID by guessing, not an observer from replaying; a nonce the
+  server issues and an answer over it, kept as a verifier in the store, is
+  the fix.
+- A flood from many addresses can fill the 4,096-account table, and a new
+  account then evicts the player offline longest with their friends, stats
+  and mutes. The caps are per address, so it takes at least 256 of them,
+  and eviction prefers accounts with no stats or friends; a global cap or
+  keeping evicted rows would close it.
 - The Live pages have not been run against this server in the game yet: the
   client is tested against the shared byte vectors
   ([tools/live_vectors.json](../tools/live_vectors.json)), not end to end.

@@ -116,7 +116,7 @@ game's own lockstep works.
 ## Testing
 
 The Live unit tests are the ctest entries `recomp-runtime-live-xapi`,
-`-live-transport`, `-live-client` and `-live-fight`, and
+`-live-transport`, `-live-identity`, `-live-client` and `-live-fight`, and
 `tools/test_matchmaker.py`. The client test and the
 Python test share the byte transcript in `tools/live_vectors.json`.
 

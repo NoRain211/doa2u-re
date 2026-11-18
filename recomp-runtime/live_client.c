@@ -2,45 +2,34 @@
 #include "live_client.h"
 
 #include "live_transport.h"
+#include "matchmaker_wire.h"
 
 #include <stdio.h>
 #include <string.h>
 
-/* tools/matchmaker.py and docs/matchmaking.md: "D2MM", version, kind, this
-   socket's nonce, then for a request the server's cookie, then a body whose
-   numbers are big endian. An answer starts its body after the nonce. The
-   request that goes out is a header and a body here: the transport owns the
-   nonce, the cookie and the retry the server's COOKIE answer asks for, and
-   fills those bytes in. */
-static const uint8_t live_magic[4] = {'D', '2', 'M', 'M'};
+/* tools/matchmaker.py and docs/matchmaking.md: matchmaker_wire.h frames a
+   packet as "D2MM", a version, a kind, this socket's nonce, then for a request
+   the server's cookie, then a body whose numbers are big endian. An answer
+   starts its body after the nonce. The transport owns the nonce, the cookie and
+   the retry the server's COOKIE answer asks for, and fills those bytes in. */
 
 enum {
-    LIVE_VERSION = 2u,
-    LIVE_TOKEN = 8u,
-    LIVE_HEADER = 6u,
-    LIVE_ANSWER = LIVE_HEADER + LIVE_TOKEN, /* an answer's body starts after its nonce */
-    LIVE_ASKED = LIVE_ANSWER + LIVE_TOKEN,  /* a request's body starts after its nonce and cookie */
-
-    LIVE_LOGON = 12u, LIVE_LOGGED, LIVE_SESSION_PUT, LIVE_SESSION_OK, LIVE_SESSION_DEL, LIVE_SEARCH,
-    LIVE_RESULT, LIVE_FIND, LIVE_CONNECT, LIVE_LPEER, LIVE_FRIENDS, LIVE_FRIEND, LIVE_FRIEND_OP, LIVE_DONE,
-    LIVE_PUSH, LIVE_MUTES, LIVE_MUTELIST, LIVE_FEEDBACK, LIVE_STAT_WRITE, LIVE_STAT_READ, LIVE_STATROW,
-    LIVE_LEADERS,
     LIVE_DIGEST_BYTES = 64u,
 
     /* Request sizes. SESSION_PUT, SEARCH, STAT_WRITE and STAT_READ add their list. */
-    LIVE_LOGON_BYTES = LIVE_ASKED + 4u + 8u + 32u + 64u + 4u + 4u + 8u + 1u + 15u,
-    LIVE_SESSION_PUT_BYTES = LIVE_ASKED + 4u + 8u + 16u + 2u,
-    LIVE_SESSION_DEL_BYTES = LIVE_ASKED + 4u + 8u,
-    LIVE_SEARCH_BYTES = LIVE_ASKED + 4u + 4u + 2u,
-    LIVE_FIND_BYTES = LIVE_ASKED + 4u + 8u,
-    LIVE_CONNECT_BYTES = LIVE_ASKED + 4u + 4u,
-    LIVE_QUERY_BYTES = LIVE_ASKED + 4u, /* FRIENDS and MUTES */
-    LIVE_FRIEND_OP_BYTES = LIVE_ASKED + 4u + 1u + 8u + 1u + 8u,
-    LIVE_FEEDBACK_BYTES = LIVE_ASKED + 4u + 8u + 4u,
-    LIVE_STAT_WRITE_BYTES = LIVE_ASKED + 4u + 4u + 8u + 1u,
+    LIVE_LOGON_BYTES = MATCH_ASKED + 4u + 8u + 32u + 64u + 4u + 4u + 8u + 1u + 15u,
+    LIVE_SESSION_PUT_BYTES = MATCH_ASKED + 4u + 8u + 16u + 2u,
+    LIVE_SESSION_DEL_BYTES = MATCH_ASKED + 4u + 8u,
+    LIVE_SEARCH_BYTES = MATCH_ASKED + 4u + 4u + 2u,
+    LIVE_FIND_BYTES = MATCH_ASKED + 4u + 8u,
+    LIVE_CONNECT_BYTES = MATCH_ASKED + 4u + 4u,
+    LIVE_QUERY_BYTES = MATCH_ASKED + 4u, /* FRIENDS and MUTES */
+    LIVE_FRIEND_OP_BYTES = MATCH_ASKED + 4u + 1u + 8u + 1u + 8u,
+    LIVE_FEEDBACK_BYTES = MATCH_ASKED + 4u + 8u + 4u,
+    LIVE_STAT_WRITE_BYTES = MATCH_ASKED + 4u + 4u + 8u + 1u,
     LIVE_STAT_ITEM_BYTES = 11u,
-    LIVE_STAT_READ_BYTES = LIVE_ASKED + 4u + 4u + 1u,
-    LIVE_LEADERS_BYTES = LIVE_ASKED + 4u + 4u + 8u + 4u + 1u,
+    LIVE_STAT_READ_BYTES = MATCH_ASKED + 4u + 4u + 1u,
+    LIVE_LEADERS_BYTES = MATCH_ASKED + 4u + 4u + 8u + 4u + 1u,
     LIVE_GROUP_BYTES = LIVE_FRIEND_OP_BYTES,
 
     /* Answer body sizes, after the header and nonce. */
@@ -84,7 +73,7 @@ enum {
    1,200-byte packet cap, so neither is split. */
 _Static_assert(LIVE_STAT_WRITE_BYTES + RECOMP_LIVE_MAX_STAT_ATTRS * LIVE_STAT_ITEM_BYTES <= RECOMP_LIVE_PACKET_BYTES,
     "a full STAT_WRITE must fit one packet");
-_Static_assert(LIVE_ANSWER + LIVE_STATROW_BYTES + RECOMP_LIVE_MAX_STAT_ATTRS * LIVE_STAT_BYTES <=
+_Static_assert(MATCH_BODY + LIVE_STATROW_BYTES + RECOMP_LIVE_MAX_STAT_ATTRS * LIVE_STAT_BYTES <=
     RECOMP_LIVE_PACKET_BYTES, "a full STATROW must fit one packet");
 
 /* What the client itself decides, as the HRESULT its poll reports. */
@@ -183,11 +172,6 @@ static void put16be(uint8_t *out, uint16_t value)
     out[1] = (uint8_t)value;
 }
 
-static void put32be(uint8_t *out, uint32_t value)
-{
-    for (unsigned i = 0u; i < 4u; ++i) out[i] = (uint8_t)(value >> (24u - 8u * i));
-}
-
 static void put64be(uint8_t *out, uint64_t value)
 {
     for (unsigned i = 0u; i < 8u; ++i) out[i] = (uint8_t)(value >> (56u - 8u * i));
@@ -196,11 +180,6 @@ static void put64be(uint8_t *out, uint64_t value)
 static uint16_t get16be(const uint8_t *in)
 {
     return (uint16_t)((uint16_t)in[0] << 8 | in[1]);
-}
-
-static uint32_t get32be(const uint8_t *in)
-{
-    return (uint32_t)in[0] << 24 | (uint32_t)in[1] << 16 | (uint32_t)in[2] << 8 | in[3];
 }
 
 static uint64_t get64be(const uint8_t *in)
@@ -250,16 +229,14 @@ static void send_packet(const uint8_t *packet, size_t size)
 /* Starts a request packet and returns where its body goes, or NULL when it does not fit. */
 static uint8_t *begin_request(uint8_t kind, uint32_t id, uint8_t *packet, size_t capacity, size_t size)
 {
+    static const uint8_t zero_token[RECOMP_NETPLAY_TOKEN_BYTES] = {0u};
     if (packet == NULL || capacity < size) return NULL;
-    memcpy(packet, live_magic, sizeof live_magic);
-    packet[4] = LIVE_VERSION;
-    packet[5] = kind;
-    /* Bytes 6..21 are the transport's nonce and the server's cookie: it writes
-       them when this packet goes out, and writes them again on a resend. */
-    memset(packet + LIVE_HEADER, 0, 2u * LIVE_TOKEN);
-    put32be(packet + LIVE_ASKED, id);
-    memset(packet + LIVE_ASKED + 4u, 0, size - LIVE_ASKED - 4u);
-    return packet + LIVE_ASKED + 4u;
+    /* The nonce and the cookie are the transport's: it writes them when this
+       packet goes out, and writes them again on a resend. */
+    uint8_t *at = match_header(packet, kind, zero_token, zero_token);
+    put32be(at, id);
+    memset(at + 4u, 0, size - MATCH_ASKED - 4u);
+    return at + 4u;
 }
 
 static LiveRequestState *new_request(uint8_t kind, uint32_t *id)
@@ -296,12 +273,8 @@ static uint32_t slot_index(const LiveRequestState *slot)
     return (uint32_t)(slot - live.requests);
 }
 
-static void fail_request(LiveRequestState *slot, uint32_t hresult)
-{
-    slot->status = RECOMP_LIVE_FAILED;
-    slot->hresult = hresult;
-}
-
+/* Every terminal transition of a request ends here, so the flag a push's friend
+   ask set is freed whichever way it ends: an answer, a refusal or a timeout. */
 static void finish_request(LiveRequestState *slot, uint32_t hresult)
 {
     slot->status = hresult == 0u ? RECOMP_LIVE_DONE : RECOMP_LIVE_FAILED;
@@ -418,7 +391,7 @@ static void settle_group(uint32_t head_index)
         finish_request(head, 0u);
         return;
     }
-    fail_request(head, hresult != 0u ? hresult : LIVE_HRESULT_FAIL);
+    finish_request(head, hresult != 0u ? hresult : LIVE_HRESULT_FAIL);
 }
 
 static bool mark_row(LiveRequestState *slot, uint32_t index)
@@ -723,7 +696,7 @@ static uint32_t refused_request(uint8_t kind, uint32_t hresult)
 {
     uint32_t id;
     LiveRequestState *slot = new_request(kind, &id);
-    if (slot != NULL) fail_request(slot, hresult);
+    if (slot != NULL) finish_request(slot, hresult);
     return id;
 }
 
@@ -1012,9 +985,9 @@ static void handle_answer(uint8_t kind, const uint8_t *body, size_t size)
    itself, so only the Live kinds are left. */
 static void on_server_packet(const uint8_t *packet, size_t size)
 {
-    if (!live.attached || packet == NULL || size < LIVE_ANSWER) return;
-    if (memcmp(packet, live_magic, sizeof live_magic) != 0 || packet[4] != LIVE_VERSION) return;
-    handle_answer(packet[5], packet + LIVE_ANSWER, size - LIVE_ANSWER);
+    if (!live.attached || packet == NULL || size < MATCH_BODY) return;
+    if (memcmp(packet, MATCH_MAGIC, sizeof MATCH_MAGIC) != 0 || packet[4] != MATCH_VERSION) return;
+    handle_answer(packet[5], packet + MATCH_BODY, size - MATCH_BODY);
 }
 
 /* --- the backend --- */
@@ -1165,6 +1138,12 @@ static RecompLiveRequest client_invite_group(void *self, uint8_t op, const uint8
     if (kid == NULL || xuids == NULL || count == 0u)
         return refused_request(LIVE_FRIEND_OP, LIVE_HRESULT_INVALIDARG);
     if (count > LIVE_GROUP_CHILDREN) return refused_request(LIVE_FRIEND_OP, LIVE_HRESULT_INVALIDARG);
+    /* The invite is all or nothing: with a slot short, the friends that fit
+       would be invited while the game is told the whole group went. */
+    uint32_t free_slots = 0u;
+    for (uint32_t i = 0u; i < LIVE_REQUEST_SLOTS; ++i)
+        if (live.requests[i].id == 0u) ++free_slots;
+    if (free_slots < count) return 0u;
     LiveRequestState *head = NULL;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t id = build_friend_op(packet, sizeof packet, op, xuids[i], 0u, kid, 0u);
@@ -1344,13 +1323,13 @@ void recomp_live_client_tick(uint64_t now_ms)
                 slot->own_hresult = LIVE_HRESULT_TIMEOUT;
                 settle_group(i);
             } else {
-                fail_request(slot, LIVE_HRESULT_TIMEOUT);
+                finish_request(slot, LIVE_HRESULT_TIMEOUT);
             }
             if (slot->head != 0u) settle_group(slot->head - 1u);
             drop_owned(slot);
             continue;
         }
-        if (now_ms - slot->last_ms < LIVE_RETRY_MS || slot->size < LIVE_ASKED) continue;
+        if (now_ms - slot->last_ms < LIVE_RETRY_MS || slot->size < MATCH_ASKED) continue;
         send_packet(slot->packet, slot->size);
         slot->last_ms = now_ms;
     }

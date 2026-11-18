@@ -498,6 +498,29 @@ static void startLiveSession(std::uint32_t swap)
     rollback.liveStopPending = false;
     rollback.liveLockstepStopped = false;
     rollback.liveAbandon = false;
+    /* Live is the first mode where one runner plays several sessions in a row, so the
+       match starts with its own counters, desync checks and pacing: a check frame that
+       equals the last match's final comparison still compares, and the match's summary
+       and its stall grace count only this match. */
+    rollback.compared = rollback.matched = 0u;
+    rollback.paced = UINT32_MAX;
+    rollback.rollbacks = rollback.replayed = rollback.waited = rollback.saves = 0u;
+    rollback.advantage = 0;
+    rollback.interrupted = false;
+    rollback.contact = std::chrono::steady_clock::time_point{};
+    rollback.slowestHashMs = 0.0;
+    rollback.next_frame = std::chrono::steady_clock::time_point{};
+    // The last match's part second of hitch measurements must not print at this one's start.
+    rollback.hitchSince = rollback.frameLeft = rollback.rerunFrom = std::chrono::steady_clock::time_point{};
+    rollback.hitchFrom = rollback.heldBack = rollback.rerunFrames = 0u;
+    rollback.peerWaitMs = rollback.longestWaitMs = rollback.slowestFrameMs = rollback.rerunMs = 0.0;
+    rollback.lateMs = rollback.blockedMs = 0.0;
+    // A check hashed but never confirmed and the last frame's wait belong to the last match:
+    // this one confirms only its own checks and paces only its own frames. The end of a
+    // session clears these too, so whichever side of the gap the match starts from agrees.
+    rollback.checkFrame = 0u;
+    rollback.checkHash = 0u;
+    rollback.wait = 0u;
     // A later match counts its frames from 0 again, so the last session's packets must not
     // reach it: drop what the route still holds, then start the counters fresh.
     recomp_live_transport_session_begin();
