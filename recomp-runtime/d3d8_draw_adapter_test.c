@@ -1564,6 +1564,22 @@ static int distortion_tests(void)
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 56u); return 1; }
     CHECK(submits == 2u && strcmp(stop_reason, "d3d8:distortion-filter:3,2") == 0);
     *recomp_memory_u32(STAGES + 256u + 12u) = 2u;
+    /* The normal map (stage 0) samples linearly only. */
+    *recomp_memory_u32(STAGES + 12u) = 1u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 56u); return 1; }
+    CHECK(submits == 2u && strcmp(stop_reason, "d3d8:distortion-normal-filter:1,2,0") == 0);
+    *recomp_memory_u32(STAGES + 12u) = 2u;
+    /* With mips, either stage's mip filter takes point or linear only; one level ignores it. */
+    texture.mip_levels = 2u;
+    *recomp_memory_u32(STAGES + 20u) = 2u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 56u); return 1; }
+    CHECK(submits == 2u && strcmp(stop_reason, "d3d8:distortion-mip:0") == 0);
+    *recomp_memory_u32(STAGES + 256u + 20u) = 1u;
+    *recomp_memory_u32(STAGES + 20u) = 0u;
+    if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 56u); return 1; }
+    CHECK(submits == 2u && strcmp(stop_reason, "d3d8:distortion-normal-filter:2,2,0") == 0);
+    texture.mip_levels = 1u;
+    *recomp_memory_u32(STAGES + 256u + 20u) = 0u;
     /* Fog changes the SDK's final combiner. */
     *recomp_memory_u32(0x3553d0u) = 1u;
     if (setjmp(stopped) == 0) { invoke(0x348240u, 5u, 3u, VERTICES, 56u); return 1; }
