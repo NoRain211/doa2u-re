@@ -325,7 +325,8 @@ int main(void)
     expect("choice counts", recomp_pc_settings_choices(RECOMP_PC_MSAA) == 6u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
+        !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
     recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
