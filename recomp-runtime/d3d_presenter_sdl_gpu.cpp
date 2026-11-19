@@ -274,8 +274,8 @@ struct RecompD3dPresenter {
     SDL_GPUShaderFormat shader_format = SDL_GPU_SHADERFORMAT_SPIRV;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
     bool close_requested = false;
-    // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
-    SDL_GPUFence *present_fences[2] = {};
+    // The last present's GPU work: Swap waits for it, so one frame is in flight.
+    SDL_GPUFence *present_fence = nullptr;
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;
@@ -3015,9 +3015,8 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     SDL_GPUFence *fence = presenter->command_buffer != nullptr
         ? SDL_SubmitGPUCommandBufferAndAcquireFence(presenter->command_buffer) : nullptr;
     presenter->command_buffer = nullptr;
-    if (presenter->present_fences[0] != nullptr) SDL_ReleaseGPUFence(presenter->device, presenter->present_fences[0]);
-    presenter->present_fences[0] = presenter->present_fences[1];
-    presenter->present_fences[1] = fence;
+    if (presenter->present_fence != nullptr) SDL_ReleaseGPUFence(presenter->device, presenter->present_fence);
+    presenter->present_fence = fence;
     ++presenter->present_count;
     if (presenter->draw_log_trigger != nullptr && !presenter->draw_log_active &&
         fileExists(presenter->draw_log_trigger)) {
@@ -3080,9 +3079,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     flushSegment(presenter);
     submitCommands(presenter);
     SDL_WaitForGPUIdle(presenter->device);
-    for (SDL_GPUFence *fence : presenter->present_fences) {
-        if (fence != nullptr) SDL_ReleaseGPUFence(presenter->device, fence);
-    }
+    if (presenter->present_fence != nullptr) SDL_ReleaseGPUFence(presenter->device, presenter->present_fence);
     recomp_overlay_sdl_gpu_shutdown();
     releaseQuery(presenter, presenter->visibility_active);
     for (VisibilityQuery &query : presenter->visibility_pending) releaseQuery(presenter, query);
@@ -3454,6 +3451,8 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     if (created->window == nullptr) return fail("window");
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
+    // Swap's guest wait already holds one frame in flight; this holds it under the frame clock too.
+    SDL_SetGPUAllowedFramesInFlight(created->device, 1u);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
             SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
@@ -3777,8 +3776,8 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
 {
-    return presenter->present_fences[0] == nullptr ||
-        SDL_QueryGPUFence(presenter->device, presenter->present_fences[0]);
+    return presenter->present_fence == nullptr ||
+        SDL_QueryGPUFence(presenter->device, presenter->present_fence);
 }
 
 void d3d_backend_report_draw_textures()

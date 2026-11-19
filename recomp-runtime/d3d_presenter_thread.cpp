@@ -322,10 +322,11 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     thread.queue_wait_ms = 0.0;
 }
 
-/* Caller holds thread.mutex. Both publish and Swap's guest wait use this test. */
+/* Caller holds thread.mutex. Both publish and Swap's guest wait use this test.
+   One frame in flight: the next packet waits until the worker has run the last. */
 bool canPublish(const PresenterThread &thread, bool destroying)
 {
-    return thread.pending < 2 || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
+    return thread.pending == 0 || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
 }
 
 RecompD3dPresenterError publish(PresenterThread &thread, bool destroying)
@@ -427,7 +428,7 @@ RecompD3dPresenterError recomp_d3d_presenter_release_memory(
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     // Standing texture bytes live in every packet, and the worker may still be
-    // reading two of them; none may hand out bytes this range just released.
+    // reading one of them; none may hand out bytes this range just released.
     // addRelease drops the open packet, the only one this scan can skip.
     for (size_t i = 0u; i < 3u; ++i) {
         if (i != thread.open) thread.packets[i].dropResident(base, size);
