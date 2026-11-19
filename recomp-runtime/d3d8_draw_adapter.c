@@ -491,8 +491,10 @@ static void distortion(uint32_t device, uint32_t stride, RecompD3dPresenterDrawC
     draw->texture_byte_count = scene->texture_byte_count;
     draw->address_u = scene->address_u;
     draw->address_v = scene->address_v;
-    draw->point_min_filter = *recomp_memory_u32(STAGES + 256u + 12u) == 1u;
-    draw->point_mag_filter = *recomp_memory_u32(STAGES + 256u + 16u) == 1u;
+    const uint32_t min = *recomp_memory_u32(STAGES + 256u + 12u), mag = *recomp_memory_u32(STAGES + 256u + 16u);
+    if (min < 1u || min > 2u || mag < 1u || mag > 2u) recomp_stop(2, "d3d8:distortion-filter:%u,%u", min, mag);
+    draw->point_min_filter = min == 1u;
+    draw->point_mag_filter = mag == 1u;
     draw->point_mip_filter = *recomp_memory_u32(STAGES + 256u + 20u) == 1u;
     draw->mip_lod_bias = lod_bias(*recomp_memory_u32(STAGES + 256u + 24u));
     draw->texture_is_backbuffer = scene->texture_is_backbuffer;
