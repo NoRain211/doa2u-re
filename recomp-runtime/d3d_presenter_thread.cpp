@@ -1,6 +1,7 @@
 #include "d3d_presenter_capture.h"
 #include "d3d_presenter_backend.h"
 #include "d3d_vblank.h"
+#include "xapi_time_adapter.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -417,8 +418,10 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     if (thread.pacing && command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT)
         recomp_d3d_submit_mb = thread.packets[thread.open].bytes() / 1048576.0;
+    /* Under the frame clock Swap skips its guest wait, so this publish blocks
+       the host: the spare queued frame absorbs a slow one and keeps netplay at speed. */
     return command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT
-        ? publish(thread, false) : RECOMP_D3D_PRESENTER_OK;
+        ? publish(thread, false, recomp_xapi_frame_clock_enabled() ? 2u : 1u) : RECOMP_D3D_PRESENTER_OK;
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_release_memory(
