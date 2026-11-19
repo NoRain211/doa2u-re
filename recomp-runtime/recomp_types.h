@@ -753,8 +753,9 @@ static inline int32_t MMX_CVT_F2I(float v, int truncate)
    fight logic (issue #199). Intel's result is 1/x or 1/sqrt(x) at the middle
    of the interval that the top 11 bits select (RCPSS: mantissa; RSQRTSS:
    exponent parity and mantissa), rounded to 12 fraction bits. Computing it
-   gives every host the guest's bits; AMD's instruction and the exact quotient
-   differ. Zeros and denormals give infinity; tiny results flush to zero. */
+   gives every host the same bits; AMD's instruction and the exact quotient
+   differ. They are taken to be the Xbox CPU's, unmeasured on a console.
+   Zeros and denormals give infinity; tiny results flush to zero. */
 static inline float recomp_rcpss(float x)
 {
     union { float f; uint32_t u; } value = { x };
