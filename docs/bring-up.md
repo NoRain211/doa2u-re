@@ -136,6 +136,18 @@ internal special-value dispatch branches such as `0x338e10`. Numeric results
 include NaN for domain errors; guest CRT errno, math-error callbacks and
 unmasked floating-point exceptions are not implemented by this seam.
 
+`RCPSS` and `RSQRTSS` return Intel's estimate on every host: the result at
+the middle of the interval that the operand's top 11 bits select, rounded to
+12 fraction bits (`recomp_types.h`). The game's square root (`0x282ef0`, 230
+call sites) and reciprocal square root (`0x282f50`) refine that estimate with
+one Newton step, so its low bits reach fight positions. With the exact
+quotient, the Tina and Bass attract demo left the console's path at the
+cliff: Bass's ledge throw (motion 353) did not start, and the camera circled
+until the demo timed out (issue #199). With the estimate the throw starts,
+both fall to the lower level and the demo ends on Tina's win, as reported
+from a console. The formula reproduces Bochs's tables for the two
+instructions; it is not measured on the Xbox CPU.
+
 ## Graphics API contract
 
 `RECOMP_D3D_WIDESCREEN=1` supplies XC_VIDEO 0x004f0000 (widescreen, no

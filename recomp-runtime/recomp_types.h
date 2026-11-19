@@ -731,20 +731,6 @@ static inline uint32_t XMM_MOVEMASK(RecompXmm a)
 }
 
 #if RECOMP_HOST_X86
-#ifndef RECOMP_PORTABLE_MATH
-/* RCPSS/RSQRTSS are table approximations; the host instruction gives the
-   guest's bits on Intel, where exact division would not. AMD's table differs. */
-static inline float recomp_rcpss(float x)
-{
-    return _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(x)));
-}
-
-static inline float recomp_rsqrtss(float x)
-{
-    return _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(x)));
-}
-#endif
-
 /* CVTSS2SI rounds under MXCSR (host default: nearest); CVTTSS2SI chops.
    Out of range and NaN give the integer indefinite 0x80000000. */
 static inline int32_t MMX_CVT_F2I(float v, int truncate)
@@ -762,20 +748,52 @@ static inline int32_t MMX_CVT_F2I(float v, int truncate)
 }
 #endif
 
-#if !RECOMP_HOST_X86 || defined(RECOMP_PORTABLE_MATH)
-/* Only Intel's table gives the guest's bits; AMD's differs and other hosts
-   have none. Non-x86 hosts and netplay builds, which must match on every
-   host, use the exact quotient, within Intel's documented 1.5 * 2^-12 error. */
+/* RCPSS and RSQRTSS are estimates, and the game's own square root (0x282ef0)
+   refines one with a single Newton step, so the estimate's low bits reach
+   fight logic (issue #199). Intel's result is 1/x or 1/sqrt(x) at the middle
+   of the interval that the top 11 bits select (RCPSS: mantissa; RSQRTSS:
+   exponent parity and mantissa), rounded to 12 fraction bits. Computing it
+   gives every host the guest's bits; AMD's instruction and the exact quotient
+   differ. Zeros and denormals give infinity; tiny results flush to zero. */
 static inline float recomp_rcpss(float x)
 {
-    return 1.0f / x;
+    union { float f; uint32_t u; } value = { x };
+    const uint32_t sign = value.u & 0x80000000u;
+    const uint32_t exponent = (value.u >> 23) & 0xffu;
+    const uint32_t divisor = 4097u + 2u * ((value.u >> 12) & 0x7ffu);
+
+    if (exponent == 0xffu && (value.u & 0x7fffffu) != 0u) return x + x;
+    if (exponent == 0u) {
+        value.u = sign | 0x7f800000u;
+    } else if (exponent >= 253u) {
+        value.u = sign;
+    } else {
+        value.u = sign | ((253u - exponent) << 23) |
+            (((0x4000000u + divisor) / (2u * divisor) - 4096u) << 11);
+    }
+    return value.f;
 }
 
 static inline float recomp_rsqrtss(float x)
 {
-    return 1.0f / sqrtf(x);
+    union { float f; uint32_t u; } value = { x };
+    const uint32_t exponent = (value.u >> 23) & 0xffu;
+    double midpoint = (2049u + 2u * ((value.u >> 13) & 0x3ffu)) / 2048.0;
+
+    if (exponent == 0xffu && (value.u & 0x7fffffu) != 0u) return x + x;
+    if (exponent == 0u) {
+        value.u = (value.u & 0x80000000u) | 0x7f800000u;
+    } else if ((value.u & 0x80000000u) != 0u) {
+        value.u = 0xffc00000u;
+    } else if (exponent == 0xffu) {
+        value.u = 0u;
+    } else {
+        if ((exponent & 1u) == 0u) midpoint *= 2.0;
+        value.u = ((190u - ((exponent + 1u) >> 1)) << 23) |
+            ((uint32_t)(4096.0 * (2.0 / sqrt(midpoint) - 1.0) + 0.5) << 11);
+    }
+    return value.f;
 }
-#endif
 
 /* ── MMX ────────────────────────────────────────────────────────────────
    The register file lives in runtime.h. Use SSE2's low 64 bits so packed
