@@ -3816,6 +3816,9 @@ bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
        its slot (the scheduler polls host waits each millisecond); the frame's
        draws render meanwhile. */
     if (presenter->vrr) {
+        // Queue the draws still batched, or they would wait for submitPresent.
+        flushSegment(presenter);
+        resolveMain(presenter);
         submitCommands(presenter);
         const long long now = steadyNs();
         if (recomp_d3d_vrr_slot(presenter->vrr_slot_ns, now) - now > 2000000) return false;
