@@ -55,9 +55,9 @@ keeps running.
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
-  60 fps, including heavy rain-stage fights at 4K. On Windows, **VRR: On** is
-  for G-SYNC or FreeSync displays and tears on fixed-refresh ones; it is not
-  yet verified on a VRR monitor.
+  60 fps, including heavy rain-stage fights at 4K. **VRR: On** is for G-SYNC
+  or FreeSync displays and tears on fixed-refresh ones; it is not yet verified
+  on a VRR monitor.
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
   own 5.1 surround mix. The intro and story movies play.
@@ -204,7 +204,7 @@ keeps running.
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
 | Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
-| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
+| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |

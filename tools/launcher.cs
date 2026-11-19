@@ -353,7 +353,7 @@ class LauncherForm : Form
             Names = Screens, Index = savedScreen >= 0 ? savedScreen : 3, Default = 1 };
         savedShape = savedScreen >= 0 ? null : Game.ScreenShape(settings);
         renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
-        vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
+        vrr = Choice("VRR", "For G-SYNC and FreeSync displays; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only what the profile has earned; Everything is never saved to it", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);

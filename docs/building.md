@@ -160,7 +160,9 @@ that shortcut.
 - Depth is 32-bit float with 8-bit stencil, as Apple and AMD GPUs lack D24S8.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
-- `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
+- `RECOMP_D3D_PRESENT_LOG` is a Direct3D 11 feature. `RECOMP_D3D_VRR` needs
+  the immediate present mode; without it the game logs `vrr unsupported` and
+  keeps vsync.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
