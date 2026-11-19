@@ -323,17 +323,19 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
 }
 
 /* Caller holds thread.mutex. Both publish and Swap's guest wait use this test.
-   One frame in flight: the next packet waits until the worker has run the last. */
-bool canPublish(const PresenterThread &thread, bool destroying)
+   One frame in flight: a frame waits until the worker has run the last packet.
+   A mid-frame flush may queue behind it: the game's visibility polls flush
+   in a loop, and a host wait there blocked every guest thread. */
+bool canPublish(const PresenterThread &thread, bool destroying, unsigned limit = 1u)
 {
-    return thread.pending == 0 || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
+    return thread.pending < limit || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
 }
 
-RecompD3dPresenterError publish(PresenterThread &thread, bool destroying)
+RecompD3dPresenterError publish(PresenterThread &thread, bool destroying, unsigned limit = 1u)
 {
     const double wait_start_ms = thread.pacing ? clock_ms() : 0.0;
     std::unique_lock<std::mutex> lock(thread.mutex);
-    thread.changed.wait(lock, [&] { return canPublish(thread, destroying); });
+    thread.changed.wait(lock, [&] { return canPublish(thread, destroying, limit); });
     if (thread.pacing) notePacing(thread, wait_start_ms, clock_ms());
     if (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK) return thread.status;
     thread.packets[thread.open].seal();
@@ -459,7 +461,7 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     if (thread.packets[thread.open].count() != 0u) {
-        error = publish(thread, false);
+        error = publish(thread, false, 2u);
         if (error != RECOMP_D3D_PRESENTER_OK) return error;
     }
     if (!wait) return RECOMP_D3D_PRESENTER_OK;
