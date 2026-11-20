@@ -530,7 +530,6 @@ int main(int argc, char **argv)
 {
     recomp_install_host_diagnostics();
     recomp_d3d_frame_breakdown = recomp_kernel_thread_times;
-    recomp_kernel_idle_hook = recomp_d3d8_idle;
     std::string xbePath, discRoot, expectStop, milestoneLog;
     recomp_rebind_load(); // before the first pad sample
     recomp_input_pulse_source_init(&inputPulses, recomp_input_host_sample, 0u);

@@ -51,6 +51,7 @@ struct PresenterThread {
     double busy_total_ms = 0.0;
     unsigned frames = 0u;
     double queue_wait_ms = 0.0;
+    double flush_wait_ms = 0.0;  // guest waits in flush(wait): coverage and wait-idle
     ULONGLONG pacing_start = 0u;
 
     ~PresenterThread() { if (wake != nullptr) CloseHandle(wake); }
@@ -260,6 +261,9 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
     EnumThreadWindows(GetCurrentThreadId(), findPresenterWindow, reinterpret_cast<LPARAM>(&window));
     if (window != nullptr) SetTimer(window, 1, USER_TIMER_MINIMUM, drawDuringModalLoop);
     bool &querying = timer_querying;
+    // Frame generation's in-between presents wake the worker on their own schedule.
+    HANDLE handles[2] = {thread.wake, CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS)};
     for (;;) {
         pump(thread);
         if (runPacket(thread, backend, querying)) continue;
@@ -270,11 +274,21 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         }
         // Resolve queries off the GPU while idle, polling until none remain.
         if (querying) querying = resolveVisibility(thread, backend);
-        if (MsgWaitForMultipleObjects(1, &thread.wake, FALSE,
-                querying ? 1u : INFINITE, QS_ALLINPUT) == WAIT_FAILED) {
+        const uint64_t until = status(thread) == RECOMP_D3D_PRESENTER_OK
+            ? d3d_backend_idle(backend) : UINT64_MAX;
+        if (until == 0u) continue;
+        DWORD count = 1u, wait_ms = querying ? 1u : INFINITE;
+        if (until != UINT64_MAX) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -static_cast<LONGLONG>(until);
+            if (handles[1] != nullptr && SetWaitableTimer(handles[1], &due, 0, nullptr, nullptr, FALSE)) count = 2u;
+            else wait_ms = (std::min)(wait_ms, static_cast<DWORD>((until + 9999u) / 10000u));
+        }
+        if (MsgWaitForMultipleObjects(count, handles, FALSE, wait_ms, QS_ALLINPUT) == WAIT_FAILED) {
             fail(thread, RECOMP_D3D_PRESENTER_HOST_FAILURE);
         }
     }
+    if (handles[1] != nullptr) CloseHandle(handles[1]);
     if (window != nullptr && IsWindow(window)) KillTimer(window, 1);
     thread.destroyed = d3d_backend_destroy(&backend);
     std::fprintf(stderr, "recomp d3d presenter thread: draw declines=%u\n",
@@ -310,9 +324,9 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     const ULONGLONG now = GetTickCount64();
     if (thread.pacing_start == 0u) thread.pacing_start = now;
     if (now - thread.pacing_start < 1000u) return;
-    std::fprintf(stderr, "recomp pacing: tick_ms=%llu tick_max_ms=%.1f queue_wait_ms=%.1f "
+    std::fprintf(stderr, "recomp pacing: tick_ms=%llu tick_max_ms=%.1f queue_wait_ms=%.1f flush_wait_ms=%.1f "
         "busy_avg_ms=%.1f busy_max_ms=%.1f\n",
-        static_cast<unsigned long long>(now), thread.frame_max_ms, thread.queue_wait_ms,
+        static_cast<unsigned long long>(now), thread.frame_max_ms, thread.queue_wait_ms, thread.flush_wait_ms,
         thread.frames != 0u ? thread.busy_total_ms / thread.frames : 0.0, thread.busy_max_ms);
     thread.pacing_start = now;
     thread.frame_max_ms = 0.0;
@@ -320,6 +334,7 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     thread.busy_total_ms = 0.0;
     thread.frames = 0u;
     thread.queue_wait_ms = 0.0;
+    thread.flush_wait_ms = 0.0;
 }
 
 /* Caller holds thread.mutex. Both publish and Swap's guest wait use this test. */
@@ -462,10 +477,12 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
         if (error != RECOMP_D3D_PRESENTER_OK) return error;
     }
     if (!wait) return RECOMP_D3D_PRESENTER_OK;
+    const double wait_start_ms = thread.pacing ? clock_ms() : 0.0;
     std::unique_lock<std::mutex> lock(thread.mutex);
     thread.changed.wait(lock, [&] { return (thread.pending == 0u &&
         thread.visibility_outstanding == 0u) ||
         thread.status != RECOMP_D3D_PRESENTER_OK; });
+    if (thread.pacing) thread.flush_wait_ms += clock_ms() - wait_start_ms;
     return thread.status;
 }
 

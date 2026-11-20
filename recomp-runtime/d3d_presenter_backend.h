@@ -39,7 +39,8 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(
 /* Inline backends only: true when the next swapchain acquire would not wait
    for the GPU to finish an earlier frame. */
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
-/* Inline backends only: recomp_d3d_presenter_idle. */
+/* Host presents between real frames (frame generation), run by the worker
+   while it waits; the 100 ns ticks until its next one, or UINT64_MAX. */
 uint64_t d3d_backend_idle(RecompD3dPresenter *presenter);
 
 #endif
