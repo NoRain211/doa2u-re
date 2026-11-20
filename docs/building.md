@@ -166,7 +166,8 @@ that shortcut.
   it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
   frame, so the picture is up to one guest frame later. The generated frames
-  are copies of the nearer real frame for now. The presenter worker presents
+  are a crossfade of the last two real frames for now, so moving objects
+  ghost. The presenter worker presents
   each one when it is due, also between the draws of the next real frame, and
   skips one it would show late; real frames are never delayed. Any other
   refresh, and macOS and Linux, log `framegen unsupported` and run as before.

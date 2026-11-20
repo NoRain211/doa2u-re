@@ -293,6 +293,8 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *previous_frame = nullptr;     // GetBackBuffer(-1)
     // RECOMP_D3D_FRAMEGEN: real frames N-1 and N before gamma, and an in-between picture.
     SDL_GPUTexture *fg_prev = nullptr, *fg_cur = nullptr, *fg_out = nullptr;
+    SDL_GPUGraphicsPipeline *fg_blend = nullptr;  // crossfades fg_prev and fg_cur into fg_out
+    bool fg_blend_failed = false;
     bool copy_mips = false;
     SDL_GPUTexture *white_texture = nullptr;
     SDL_GPUTexture *white_volume = nullptr;
@@ -3045,6 +3047,47 @@ bool framegenActive(const RecompD3dPresenter *presenter)
         (SDL_GetWindowFlags(presenter->window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0;
 }
 
+/* Frame generation's crossfade blends the stored UNORM values before gamma,
+   the space the game's own pixels and alpha blends live in, so a generated
+   frame matches what the game would draw for a fade between the two. */
+const char kFramegenBlendShader[] =
+    "[[vk::binding(0, 2)]] Texture2D previous : register(t0);\n"
+    "[[vk::binding(0, 2)]] SamplerState previous_sampler : register(s0);\n"
+    "[[vk::binding(1, 2)]] Texture2D current : register(t1);\n"
+    "[[vk::binding(1, 2)]] SamplerState current_sampler : register(s1);\n"
+    "[[vk::binding(0, RECOMP_UNIFORM_SET)]] cbuffer Blend : register(b0) { float4 weight; };\n"
+    "float4 vs_main(uint id : SV_VertexID) : SV_Position {\n"
+    " float2 p = float2((id << 1) & 2, id & 2);\n"
+    " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n"
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " int3 at = int3(p.xy, 0);\n"
+    " return lerp(previous.Load(at), current.Load(at), weight.x); }\n";
+
+// Without it, framegenGenerate shows the nearer real frame; a failure is logged once.
+void createFramegenBlend(RecompD3dPresenter *presenter)
+{
+    SDL_GPUShader *vertex = createShader(presenter, kFramegenBlendShader, true, {}, 0u, 0u);
+    SDL_GPUShader *fragment = vertex ? createShader(presenter, kFramegenBlendShader, false, {}, 2u, 1u) : nullptr;
+    if (fragment != nullptr) {
+        SDL_GPUColorTargetDescription color{};
+        color.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+        SDL_GPUGraphicsPipelineCreateInfo info{};
+        info.vertex_shader = vertex;
+        info.fragment_shader = fragment;
+        info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        info.target_info.color_target_descriptions = &color;
+        info.target_info.num_color_targets = 1u;
+        presenter->fg_blend = SDL_CreateGPUGraphicsPipeline(presenter->device, &info);
+    }
+    if (presenter->fg_blend == nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen crossfade unavailable, showing the nearer real frame: %s\n",
+            SDL_GetError());
+        presenter->fg_blend_failed = true;
+    }
+    if (vertex != nullptr) SDL_ReleaseGPUShader(presenter->device, vertex);
+    if (fragment != nullptr) SDL_ReleaseGPUShader(presenter->device, fragment);
+}
+
 void framegenCopy(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
     SDL_GPUTexture *source, SDL_GPUTexture *destination)
 {
@@ -3080,6 +3123,7 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
             presenter->fg_k = 0u;
             return false;
         }
+        if (!presenter->fg_blend_failed) createFramegenBlend(presenter);
     }
     std::swap(presenter->fg_prev, presenter->fg_cur);
     framegenCopy(presenter, commands, shown, presenter->fg_cur);
@@ -3091,12 +3135,31 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
     return true;
 }
 
-/* The in-between picture t of the way from real frame N-1 to N, in fg_out.
-   shortcut: shows the nearer real frame, the low-confidence fallback; replace
-   with interpolation. */
+/* The in-between picture t of the way from real frame N-1 to N, in fg_out: a
+   crossfade, or the nearer real frame (the low-confidence fallback) without
+   the crossfade's pipeline.
+   shortcut: a crossfade ghosts moving objects; replace with motion-compensated
+   interpolation. */
 SDL_GPUTexture *framegenGenerate(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, float t)
 {
-    framegenCopy(presenter, commands, t < 0.5f ? presenter->fg_prev : presenter->fg_cur, presenter->fg_out);
+    if (presenter->fg_blend == nullptr) {
+        framegenCopy(presenter, commands, t < 0.5f ? presenter->fg_prev : presenter->fg_cur, presenter->fg_out);
+        return presenter->fg_out;
+    }
+    SDL_GPUColorTargetInfo target{};
+    target.texture = presenter->fg_out;
+    target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+    if (SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr)) {
+        SDL_BindGPUGraphicsPipeline(pass, presenter->fg_blend);
+        const SDL_GPUTextureSamplerBinding frames[2] = {
+            {presenter->fg_prev, presenter->point_sampler}, {presenter->fg_cur, presenter->point_sampler}};
+        SDL_BindGPUFragmentSamplers(pass, 0u, frames, 2u);
+        const float weight[4] = {t, 0.0f, 0.0f, 0.0f};
+        SDL_PushGPUFragmentUniformData(commands, 0u, weight, sizeof weight);
+        SDL_DrawGPUPrimitives(pass, 3u, 1u, 0u, 0u);
+        SDL_EndGPURenderPass(pass);
+    }
     return presenter->fg_out;
 }
 
@@ -3340,6 +3403,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
         if (sampler != nullptr) SDL_ReleaseGPUSampler(presenter->device, sampler);
     }
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
+    if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     for (SDL_GPUGraphicsPipeline *pipeline : presenter->smaa_pipelines) {
         if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
     }
@@ -3589,6 +3653,8 @@ void applyQuality(RecompD3dPresenter *presenter)
         if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
         *texture = nullptr;
     }
+    if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
+    presenter->fg_blend = nullptr;
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     presenter->gamma_pipeline = nullptr;
     if (presenter->gamma_enabled && !ensureGammaPass(presenter)) presenter->gamma_enabled = false;
@@ -4012,6 +4078,40 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
 uint64_t d3d_backend_idle(RecompD3dPresenter *presenter)
 {
     return checkOwner(presenter) == RECOMP_D3D_PRESENTER_OK ? framegenIdle(presenter) : UINT64_MAX;
+}
+
+unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot, uint32_t pixels[3])
+{
+    if (checkOwner(presenter) != RECOMP_D3D_PRESENTER_OK || !presenter->fg_history || slot + 1u >= presenter->fg_k)
+        return 0u;
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, 12u, 0};
+    SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    SDL_GPUCommandBuffer *commands = download ? SDL_AcquireGPUCommandBuffer(presenter->device) : nullptr;
+    bool read = false;
+    if (commands != nullptr) {
+        SDL_GPUTexture *const textures[3] = {presenter->fg_prev, presenter->fg_cur,
+            framegenGenerate(presenter, commands, static_cast<float>(slot + 1u) / presenter->fg_k)};
+        if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+            for (unsigned i = 0u; i < 3u; ++i) {
+                const SDL_GPUTextureRegion region{textures[i], 0u, 0u,
+                    mainWidth(presenter) / 2u, mainHeight(presenter) / 2u, 0u, 1u, 1u, 1u};
+                const SDL_GPUTextureTransferInfo destination{download, i * 4u, 0u, 0u};
+                SDL_DownloadFromGPUTexture(pass, &region, &destination);
+            }
+            SDL_EndGPUCopyPass(pass);
+        }
+        if (SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands)) {
+            SDL_WaitForGPUFences(presenter->device, true, &fence, 1u);
+            SDL_ReleaseGPUFence(presenter->device, fence);
+            if (const void *mapped = SDL_MapGPUTransferBuffer(presenter->device, download, false)) {
+                std::memcpy(pixels, mapped, 12u);
+                SDL_UnmapGPUTransferBuffer(presenter->device, download);
+                read = true;
+            }
+        }
+    }
+    if (download != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, download);
+    return read ? presenter->fg_k : 0u;
 }
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
