@@ -289,7 +289,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
-    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay; bool hitVoices, comboHud; // chosen in the game's PC Settings; kept as saved
+    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay, fightHud; bool hitVoices; // chosen in the game's PC Settings; kept as saved
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
@@ -364,12 +364,12 @@ class LauncherForm : Form
         lifeBarColour = Game.Str(settings, "lifeBarColour", "default");
         lifeBarCustom = Game.Str(settings, "lifeBarCustom", "FFFFFF");
         hitVoices = Game.Bool(settings, "hitVoices", true);
-        comboHud = Game.Bool(settings, "comboHud", true);
         hitVoiceVolume = Game.Str(settings, "hitVoiceVolume", "normal");
         voiceSetting = new Row { Label = "Hit Voices", Info = "Imported DOA4 hit grunts and KO voices; offline only",
             Names = new[] { "Off", "Quiet", "Normal", "Loud" }, Default = 2,
             Index = !hitVoices ? 0 : hitVoiceVolume == "quiet" ? 1 : hitVoiceVolume == "loud" ? 3 : 2 };
         koReplay = Game.Str(settings, "koReplay", "dynamic");
+        fightHud = Game.Str(settings, "fightHud", Game.Bool(settings, "comboHud", true) ? "both" : "original"); // comboHud came first
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
@@ -493,8 +493,8 @@ class LauncherForm : Form
             { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
-            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "comboHud", comboHud }, { "hitVoices", voiceSetting.Index != 0 },
-            { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay } };
+            { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
+            { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay }, { "fightHud", fightHud } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }

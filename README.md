@@ -78,15 +78,16 @@ keeps running.
   rows, with the launcher's settings over four pages: the top **Page** row
   (left, right or confirm) turns between the display, audio, gameplay and
   HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
-  **Dedication**, **Life Bar**, **Combo HUD**, **Hit Voices** and
+  **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
   **KO Replay** change at once, and so do **Resolution**, **MSAA** and
   **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
-  breaks, as Sparring's bar does. **Combo HUD** turns both off or on, online
-  too; neither changes the fight's state or timing.
+  breaks, as Sparring's bar does. **Fight HUD** picks **Both**, **Damage**,
+  **Stun Meter** or **Original** (the base game's HUD), online too; neither
+  addition changes the fight's state or timing.
 - **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
