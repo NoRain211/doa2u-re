@@ -2959,17 +2959,12 @@ SDL_GPUTexture *applyGamma(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *
     return picture;
 }
 
-/* Blits the picture to the window in the game's aspect and draws the overlay
-   over it. wait=false never waits for the GPU; false when no image was ready. */
-bool showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown,
-    float aspect, bool wait)
+/* Blits the picture to the window's acquired image in the game's aspect and
+   draws the overlay over it. */
+void showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown,
+    float aspect, SDL_GPUTexture *swapchain, Uint32 swap_width, Uint32 swap_height)
 {
-    SDL_GPUTexture *swapchain = nullptr;
-    Uint32 swap_width = 0u, swap_height = 0u;
-    const bool acquired = wait
-        ? SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height)
-        : SDL_AcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height);
-    if (acquired && swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
+    if (swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
         // The picture keeps the game's aspect, which a netplay session may set apart from the window's.
         const float source_aspect = aspect > 0.0f ? aspect
             : presenter->widescreen ? static_cast<float>(presenter->aspect_w) / presenter->aspect_h : 4.0f / 3.0f;
@@ -2999,9 +2994,7 @@ bool showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, 
         recomp_overlay_take(&overlay);
         recomp_overlay_sdl_gpu_draw(presenter->device, presenter->window, commands,
             swapchain, swap_width, swap_height, &overlay);
-        return true;
     }
-    return false;
 }
 
 int64_t steadyNs()
@@ -3146,18 +3139,27 @@ void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t
 /* Shows slot's picture through gamma, the aspect blit and the overlay, in its
    own command buffer, so the next real frame's open one is untouched. The
    acquire never waits; the submit may block the worker while VSYNC's queue is
-   full, never the guest thread. */
+   full, never the guest thread. The window's image is taken first: with none
+   ready, nothing is drawn, as a real slot retries every 0.5 ms. */
 bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
 {
     SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(presenter->device);
     if (commands == nullptr) return false;
     const bool real = slot + 1u == presenter->fg_k;
-    SDL_GPUTexture *picture = real ? presenter->fg_cur
-        : framegenGenerate(presenter, commands, static_cast<float>(slot + 1u) / presenter->fg_k);
-    picture = applyGamma(presenter, commands, picture);
     const int64_t start = steadyNs();
-    const bool shown = showPicture(presenter, commands, picture, presenter->fg_aspect, false);
-    SDL_SubmitGPUCommandBuffer(commands);
+    SDL_GPUTexture *swapchain = nullptr;
+    Uint32 swap_width = 0u, swap_height = 0u;
+    const bool shown = SDL_AcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width,
+        &swap_height) && swapchain != nullptr;
+    if (shown) {
+        SDL_GPUTexture *picture = real ? presenter->fg_cur
+            : framegenGenerate(presenter, commands, static_cast<float>(slot + 1u) / presenter->fg_k);
+        showPicture(presenter, commands, applyGamma(presenter, commands, picture), presenter->fg_aspect,
+            swapchain, swap_width, swap_height);
+        SDL_SubmitGPUCommandBuffer(commands);
+    } else {
+        SDL_CancelGPUCommandBuffer(commands);
+    }
     if (presenter->performance_counter) framegenCount(presenter, shown, real, start, steadyNs());
     return shown;
 }
@@ -3207,7 +3209,13 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
     const bool generated = framegenRecord(presenter, commands, shown, present.aspect);
     shown = applyGamma(presenter, commands, shown);
-    if (!generated) showPicture(presenter, commands, shown, present.aspect, true);
+    if (!generated) {
+        SDL_GPUTexture *swapchain = nullptr;
+        Uint32 swap_width = 0u, swap_height = 0u;
+        if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height)) {
+            showPicture(presenter, commands, shown, present.aspect, swapchain, swap_width, swap_height);
+        }
+    }
     if (recomp_screenshot_take_request()) saveScreenshot(presenter, shown);
     // Capture what the window shows, at the main target size, as the D3D11 backend does.
     char burst[1024];
