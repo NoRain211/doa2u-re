@@ -3494,8 +3494,10 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
             presentMode(created)) && created->vrr) {
         // The VRR pacing must not run on top of a blocking present.
         created->vrr = false;
-        SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
-            presentMode(created));
+        if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+                presentMode(created))) {
+            std::fprintf(stderr, "recomp d3d presenter: swapchain parameters failed: %s\n", SDL_GetError());
+        }
     }
     if (want_vrr) std::fprintf(stderr, "recomp d3d presenter: vrr %s\n", created->vrr ? "on" : "unsupported");
     if (!createResources(created)) return fail("presenter resources");
