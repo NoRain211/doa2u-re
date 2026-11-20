@@ -3138,7 +3138,10 @@ void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t
 }
 
 /* Shows slot's picture through gamma, the aspect blit and the overlay, in its
-   own command buffer, so the guest's open one is untouched. */
+   own command buffer, so the guest's open one is untouched.
+   shortcut: the acquire never waits, but the submit's vkQueuePresentKHR still
+   blocks the guest thread while VSYNC's queue is full (seen up to tens of ms
+   at 240 Hz); upgrade when the owner decides on a presenter worker thread. */
 bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
 {
     SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(presenter->device);
