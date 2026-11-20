@@ -404,8 +404,8 @@ final class LauncherView: NSView {
 
     // Q/E, PageUp/PageDown, or Left/Right on the tabs; a focused list starts at its first row.
     func switchPage(_ delta: Int) {
-        tab = min(max(tab + delta, 0), pages.count - 1)
-        row = 0
+        let m = min(max(tab + delta, 0), pages.count - 1)
+        if m != tab { tab = m; row = 0 }
     }
 
     // From the tabs, enters the list; on a row, runs its action. Value rows change only with Left/Right.

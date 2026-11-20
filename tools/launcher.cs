@@ -1016,7 +1016,7 @@ class LauncherForm : Form
         if (m >= 0) { menu = m; inPage = false; Invalidate(); return; }
         if (i < 0) return;
         inPage = true; row = i;
-        if (Rows[i].Action != null) { Accept(); return; }
+        if (Rows[i].Action != null) { Accept(); Invalidate(); return; }
         // The value's left half steps back, its right half forward.
         RectangleF value = values != null && i < values.Length ? values[i] : RectangleF.Empty;
         if (value.Contains(e.X, e.Y)) ChangeValue(e.X < value.X + value.Width / 2 ? -1 : 1);

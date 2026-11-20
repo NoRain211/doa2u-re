@@ -654,8 +654,8 @@ struct Launcher {
     // LB/RB, Q/E and Page Up/Down switch pages from anywhere; in the rows the cursor starts at the top.
     void switchPage(int step)
     {
-        menu = std::clamp(menu + step, 0, kPageCount - 1);
-        row = 0;
+        const int m = std::clamp(menu + step, 0, kPageCount - 1);
+        if (m != menu) { menu = m; row = 0; }
     }
 
     void fill(const SDL_FRect &rect, Color color, Uint8 alpha = 255)
