@@ -20,6 +20,17 @@ A host change that makes the image match what the game asks the hardware for,
 such as filtering or mip levels it requested and the host ignored.
 _Avoid_: Bug fix, enhancement
 
+**Real frame**:
+A frame the game drew and presented. Guest-visible counters, the previous
+frame the game reads back, frame dumps, screenshots and draw logs count only
+these.
+_Avoid_: Native frame, source frame
+
+**Generated frame**:
+A frame the presenter makes between two real frames and shows on the window
+only. It never reaches guest state.
+_Avoid_: Fake frame, interpolated frame
+
 **Presenter-only**:
 Describes an enhancement that changes only the host image and never guest
 state, so peers with different settings stay in sync in netplay and replays.

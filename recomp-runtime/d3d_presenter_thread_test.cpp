@@ -3252,6 +3252,121 @@ static bool testResampledMsaaTarget()
     return passed;
 }
 
+#ifndef RECOMP_TEST_D3D11
+/* Four real frames that each blend the previous one (GetBackBuffer(-1)) over
+   a new color, through a gamma ramp, with frame generation's slots presented
+   between them.
+   Returns false on an error; engaged reports frame generation's schedule. */
+static bool framegenFrames(bool framegen, const char *path, bool &engaged)
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", framegen ? "1" : "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_COUNT", "4");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen", d3d_backend_create(&config, &presenter));
+    engaged = false;
+    if (passed) {
+        RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
+        for (auto &channel : gamma.data.gamma)
+            for (unsigned i = 0u; i < 256u; ++i) channel[i] = static_cast<uint8_t>((i * i + 127u) / 255u);
+        passed &= expect("framegen gamma", d3d_backend_submit(presenter, &gamma));
+        const uint16_t indices[] = {0,1,2,3};
+        const float quad[4][7] = {{0,0,0,1,0,0,0}, {320,0,0,1,0,320,0},
+            {0,240,0,1,0,0,240}, {320,240,0,1,0,320,240}};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.fvf = 0x144u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof quad[0];
+        draw.vertex_bytes = quad;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.blend.blend_enable = true;
+        draw.blend.src_factor = RECOMP_D3D_BLEND_CONSTANT_ALPHA;
+        draw.blend.dst_factor = RECOMP_D3D_BLEND_INV_CONSTANT_ALPHA;
+        draw.blend.op = RECOMP_D3D_BLEND_OP_ADD;
+        draw.blend.constant_color = 0x80000000u;
+        draw.has_texture = draw.texture_is_backbuffer = draw.texture_is_front_buffer = true;
+        draw.texture.format_byte = 0x12u;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = 320; draw.texture.height = 240; draw.texture.pitch = 1280;
+        draw.texture.linear = true;
+        draw.address_u = draw.address_v = 3;
+        draw.directional.stage_mode = true;
+        draw.directional.stage[0] = draw.directional.stage[3] = 1;
+        const uint32_t colors[4] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffffffu};
+        for (uint32_t frame = 1u; frame <= 4u && passed; ++frame) {
+            auto clear = clearCommand();
+            clear.data.clear.color = colors[frame - 1u];
+            passed &= expect("framegen clear", d3d_backend_submit(presenter, &clear));
+            passed &= expect("framegen previous frame", d3d_backend_submit(presenter, &command));
+            RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+            present.data.present = {5u, frame};
+            passed &= expect("framegen present", d3d_backend_submit(presenter, &present));
+            // Present due slots until the next frame, as the worker does while it waits.
+            const auto next = std::chrono::steady_clock::now() + std::chrono::microseconds(16667);
+            for (bool first = true; std::chrono::steady_clock::now() < next; first = false) {
+                const uint64_t until = d3d_backend_idle(presenter);
+                if (first && until != UINT64_MAX) engaged = true;
+                std::this_thread::sleep_for(std::chrono::microseconds(until == UINT64_MAX ? 1000u
+                    : static_cast<unsigned>((std::min)(until / 10u, uint64_t{1000u}))));
+            }
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_COUNT", "");
+    return passed;
+}
+
+static std::vector<char> readFile(const std::string &path)
+{
+    std::vector<char> bytes;
+    if (FILE *file = std::fopen(path.c_str(), "rb")) {
+        char buffer[4096];
+        for (size_t got; (got = std::fread(buffer, 1, sizeof buffer, file)) != 0u;) bytes.insert(bytes.end(), buffer, buffer + got);
+        std::fclose(file);
+    }
+    return bytes;
+}
+
+// Frame generation must leave the real frames and the previous frame the guest samples unchanged.
+static bool testFramegenKeepsRealFrames()
+{
+    char folder[MAX_PATH], off[MAX_PATH], on[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "fg0", 0, off) ||
+        !GetTempFileNameA(folder, "fg1", 0, on)) return false;
+    bool engaged_off = false, engaged = false;
+    bool passed = framegenFrames(false, off, engaged_off) && framegenFrames(true, on, engaged);
+    passed &= !engaged_off;
+    for (unsigned i = 0u; i < 4u && passed; ++i) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof suffix, ".%03u.bmp", i);
+        const std::vector<char> a = readFile(off + std::string(suffix)), b = readFile(on + std::string(suffix));
+        if (a.empty() || a != b) {
+            std::fprintf(stderr, "FAIL framegen real frame %u differs (%zu and %zu bytes)\n", i + 1u, a.size(), b.size());
+            passed = false;
+        }
+    }
+    for (unsigned i = 0u; i < 4u; ++i) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof suffix, ".%03u.bmp", i);
+        DeleteFileA((off + std::string(suffix)).c_str());
+        DeleteFileA((on + std::string(suffix)).c_str());
+    }
+    DeleteFileA(off);
+    DeleteFileA(on);
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation keeps real frames and the previous frame\n"
+            : "PASS frame generation off matches; SKIP its schedule, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+#endif
+
 int main()
 {
 #if defined(_WIN32) && !defined(RECOMP_TEST_D3D11)
@@ -3294,6 +3409,9 @@ int main()
         !testVisibility() ||
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
+#ifndef RECOMP_TEST_D3D11
+    if (!testFramegenKeepsRealFrames()) return 1;
+#endif
     std::puts("PASS presenter render thread");
     return 0;
 }

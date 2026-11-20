@@ -161,6 +161,18 @@ that shortcut.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
+- `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows Vulkan
+  runner. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
+  it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
+  generated frames between the last two real frames, then the newer real
+  frame, so the picture is up to one guest frame later. The generated frames
+  are copies of the nearer real frame for now. The presenter worker presents
+  each one when it is due, also between the draws of the next real frame, and
+  skips one it would show late; real frames are never delayed. Any other
+  refresh, and macOS and Linux, log `framegen unsupported` and run as before.
+  It is off while the window is hidden or minimized, in an unpaced or
+  fast-forwarded run and under the frame clock (netplay and synctest). With
+  `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.

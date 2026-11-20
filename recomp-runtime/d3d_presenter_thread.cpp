@@ -162,6 +162,8 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
             fail(thread, error);
         }
+        // A frame's draws take milliseconds; frame generation's due slots go between them.
+        if (status(thread) == RECOMP_D3D_PRESENTER_OK) (void)d3d_backend_idle(backend);
     }
 }
 
@@ -260,6 +262,9 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
     EnumThreadWindows(GetCurrentThreadId(), findPresenterWindow, reinterpret_cast<LPARAM>(&window));
     if (window != nullptr) SetTimer(window, 1, USER_TIMER_MINIMUM, drawDuringModalLoop);
     bool &querying = timer_querying;
+    // Frame generation's in-between presents wake the worker on their own schedule.
+    HANDLE handles[2] = {thread.wake, CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS)};
     for (;;) {
         pump(thread);
         if (runPacket(thread, backend, querying)) continue;
@@ -270,11 +275,21 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         }
         // Resolve queries off the GPU while idle, polling until none remain.
         if (querying) querying = resolveVisibility(thread, backend);
-        if (MsgWaitForMultipleObjects(1, &thread.wake, FALSE,
-                querying ? 1u : INFINITE, QS_ALLINPUT) == WAIT_FAILED) {
+        const uint64_t until = status(thread) == RECOMP_D3D_PRESENTER_OK
+            ? d3d_backend_idle(backend) : UINT64_MAX;
+        if (until == 0u) continue;
+        DWORD count = 1u, wait_ms = querying ? 1u : INFINITE;
+        if (until != UINT64_MAX) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -static_cast<LONGLONG>(until);
+            if (handles[1] != nullptr && SetWaitableTimer(handles[1], &due, 0, nullptr, nullptr, FALSE)) count = 2u;
+            else wait_ms = (std::min)(wait_ms, static_cast<DWORD>((until + 9999u) / 10000u));
+        }
+        if (MsgWaitForMultipleObjects(count, handles, FALSE, wait_ms, QS_ALLINPUT) == WAIT_FAILED) {
             fail(thread, RECOMP_D3D_PRESENTER_HOST_FAILURE);
         }
     }
+    if (handles[1] != nullptr) CloseHandle(handles[1]);
     if (window != nullptr && IsWindow(window)) KillTimer(window, 1);
     thread.destroyed = d3d_backend_destroy(&backend);
     std::fprintf(stderr, "recomp d3d presenter thread: draw declines=%u\n",
