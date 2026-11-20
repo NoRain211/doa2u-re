@@ -31,8 +31,8 @@ Play: open Launcher.exe, pick resolution, MSAA, SMAA, widescreen, the
 renderer and VRR on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the
 intro skip on MOVIES and the unlocks and free camera on GAMEPLAY, then
 choose START GAME. Direct3D 11 is the default renderer; Vulkan is an
-alternative to try if it stutters. VRR works with Direct3D 11 only; turn it
-on only for a G-SYNC or FreeSync display. A controller, the keyboard
+alternative to try if it stutters. Turn VRR on only for a G-SYNC or FreeSync
+display. A controller, the keyboard
 (arrows, Enter, Esc) or the
 mouse all work. It remembers your choices, and DOA2U.exe plays with the same
 choices. Widescreen
