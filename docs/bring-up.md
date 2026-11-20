@@ -195,17 +195,17 @@ and shared depth after capability fallback.
 Graphics work keeps the authentic look (see `GLOSSARY.md`), one PR each.
 Two accuracy fixes have landed in both presenters: uncompressed textures keep
 their guest mip levels, and point min/mag filtering no longer stops the
-runner. The 16:9 mirror projection now has the screen's shape outside
-netplay, replays and synctest. It is the only change that is not
-presenter-only: the projection is in guest RAM, so netplay and replays keep
-the game's 1.5. 16x anisotropic filtering is shelved. In in-game frame dumps,
-stage floors were bit-identical with and without it in both presenters. A
-possible cause, not confirmed: the stages request point mip filtering, and
-that turns anisotropy off. Scaling the depthless effect targets (shadow map,
-bloom, heat haze) with the main scale on SDL_GPU remains open but has low
-priority. At 2160 lines only the fighters' shadows look soft; bloom looks the
-same as at 480. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA above
-8x) are separate work.
+runner. The 16:9 mirror projection now has the screen's shape whenever
+widescreen is on, Live fights included. It is the only change that is not
+presenter-only: the projection is in guest RAM, outside the ranges a Live
+fight's desync check hashes. 16x anisotropic filtering is shelved. In in-game
+frame dumps, stage floors were bit-identical with and without it in both
+presenters. A possible cause, not confirmed: the stages request point mip
+filtering, and that turns anisotropy off. Scaling the depthless effect targets
+(shadow map, bloom, heat haze) with the main scale on SDL_GPU remains open but
+has low priority. At 2160 lines only the fighters' shadows look soft; bloom
+looks the same as at 480. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA
+above 8x) are separate work.
 
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
