@@ -2236,10 +2236,11 @@ static bool testVisibility()
         passed &= expect("reuse end", recomp_d3d_presenter_submit(presenter, &end));
     }
     passed &= expect("publish reused visibility", recomp_d3d_presenter_flush(presenter, true));
+    const ULONGLONG reuse_deadline = GetTickCount64() + 5000u;
     for (uint32_t index = 7u; index < 12u && passed; ++index) {
         uint32_t counted = 0u;
         complete = false;
-        while (passed && !complete && GetTickCount64() < deadline) {
+        while (passed && !complete && GetTickCount64() < reuse_deadline) {
             passed &= expect("poll reused visibility", recomp_d3d_presenter_visibility_result(
                 presenter, index, &complete, &counted));
         }
