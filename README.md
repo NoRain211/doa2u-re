@@ -92,7 +92,7 @@ keeps running.
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
   of Dead or Alive 4, drop its ISO on the launcher (or choose it with
-  AUDIO SETTINGS' **Import DOA4 Voices**): it imports the disc's music for
+  **Import DOA4 Voices** on its **AUDIO** page): it imports the disc's music for
   the Jukebox, then the voices, and turns Hit Voices on. No extraction is
   needed; on Windows it fetches the ffmpeg it needs the first time. By hand,
   `python tools/import_doa4_voices.py <DOA4 ISO, extracted disc or snd.afs>`
@@ -239,13 +239,13 @@ SHA-256 check.
    [latest release](https://github.com/NoRain211/doa2u-re/releases/latest) and
    extract it into a new folder with a short path, such as `C:\DOA2U`.
 2. Open `Launcher.exe` and drag your Disc 2 ISO onto it (or choose it on the
-   **BUILD GAME** page); the build starts at once. Wait for **Build complete**
+   **GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen, the renderer and VRR on **VIDEO SETTINGS**, stereo or
-   5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
-   **GAMEPLAY** to leave unlocks to play, then choose
-   **START GAME**. A controller, the keyboard or the mouse all work. Your
+3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR and the intro skip on
+   **VIDEO**, stereo or 5.1 on **AUDIO** and **Earn** on **GAMEPLAY** to
+   leave unlocks to play, then choose **Start Game** on the **GAME** page.
+   A controller, the keyboard or the mouse all work. Your
    choices are remembered, and `DOA2U.exe` plays with them later.
 
 The first launch copies about 700 MB of the game's disc archives into its
