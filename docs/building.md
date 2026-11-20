@@ -166,9 +166,9 @@ that shortcut.
   60 frames per guest frame on VSYNC: k - 1 generated frames between the last
   two real frames, then the newer real frame, so the picture is up to one guest
   frame later. The generated frames are copies of the nearer real frame for
-  now. They are presented while the guest thread waits, and a slot it misses
-  is skipped. Any other refresh logs `framegen unsupported` and runs as
-  before. It is off while the window is hidden or minimized, in an unpaced or
+  now. The presenter worker presents them on time, also between the draws of
+  the next frame, and a slot it misses is skipped. Any other refresh logs
+  `framegen unsupported` and runs as before. It is off while the window is hidden or minimized, in an unpaced or
   fast-forwarded run and under the frame clock (netplay and synctest). With
   `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not

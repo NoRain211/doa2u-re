@@ -163,6 +163,8 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
             fail(thread, error);
         }
+        // A frame's draws take milliseconds; frame generation's due slots go between them.
+        if (status(thread) == RECOMP_D3D_PRESENTER_OK) (void)d3d_backend_idle(backend);
     }
 }
 
