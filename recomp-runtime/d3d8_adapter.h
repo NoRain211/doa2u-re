@@ -50,6 +50,8 @@ void recomp_d3d8_present_card(const uint32_t *pixels, uint32_t width, uint32_t h
 void recomp_d3d8_present_overlay(void (*draw)(const RecompD3dPresenterTarget *target));
 /* Swaps presented so far (the guest's frame counter). */
 uint32_t recomp_d3d8_swap_counter(void);
+/* The device's recomp_d3d_presenter_idle, for recomp_kernel_idle_hook. */
+uint64_t recomp_d3d8_idle(void);
 /* Optional host hook run once per Swap, after the frame counter updates. */
 extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
 /* Optional host hooks that draw over a shown frame, into target, just

@@ -213,6 +213,11 @@ uint32_t recomp_d3d8_swap_counter(void)
     return frame_state.swap_counter;
 }
 
+uint64_t recomp_d3d8_idle(void)
+{
+    return presenter != NULL ? recomp_d3d_presenter_idle(presenter) : UINT64_MAX;
+}
+
 uint32_t recomp_d3d8_require_device(void)
 {
     if (!device_state.created || *recomp_memory_u32(DEVICE_GLOBAL) != DEVICE) {

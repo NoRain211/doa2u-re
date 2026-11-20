@@ -364,6 +364,10 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(
 /* True when a PRESENT would not wait for the host to finish earlier frames.
    Errors report true, so the PRESENT itself returns them. Never waits. */
 bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter);
+/* Host presents for the guest thread's idle time, such as frame generation's
+   in-between frames. Returns the 100 ns ticks until it next wants to run, or
+   UINT64_MAX. Never waits for the host. */
+uint64_t recomp_d3d_presenter_idle(RecompD3dPresenter *presenter);
 
 /* Synchronous, write-free raster coverage of fixed-function triangles. Ignores
    shading and depth/stencil rejection; zero means no fragment can consume them. */

@@ -123,6 +123,10 @@ void recomp_kernel_wait_for_vblank(uint64_t deadline_ns);
    other guest threads meanwhile. done runs on the guest thread. Returns false
    without waiting before the scheduler starts. */
 bool recomp_kernel_wait_host(bool (*done)(void *context), void *context);
+/* Host work for the guest thread's idle time: the scheduler calls it while no
+   guest thread is runnable, and it returns the 100 ns ticks until it next
+   wants to run, or UINT64_MAX. It must not run guest code. */
+extern uint64_t (*recomp_kernel_idle_hook)(void);
 /* Offer a scheduler slice while any recomp_kernel_wait_host is pending. */
 void recomp_kernel_poll_host_waits(void);
 /* Threads blocked on host work. A host read worker may still be writing guest

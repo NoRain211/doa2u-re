@@ -476,6 +476,13 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
     return canPublish(*active_thread, false);
 }
 
+/* Direct3D 11 has no idle-time presents. */
+uint64_t recomp_d3d_presenter_idle(RecompD3dPresenter *presenter)
+{
+    (void)presenter;
+    return UINT64_MAX;
+}
+
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
     RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand *draw, bool *covered)
 {

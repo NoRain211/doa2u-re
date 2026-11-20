@@ -403,6 +403,8 @@ else()
 endif()
 add_executable(recomp_d3d_vblank_test d3d_vblank.cpp xapi_clock.cpp d3d_vblank_test.cpp)
 add_test(NAME recomp-runtime-d3d-vblank COMMAND recomp_d3d_vblank_test)
+add_executable(recomp_d3d_framegen_schedule_test d3d_framegen_schedule.c d3d_framegen_schedule_test.c)
+add_test(NAME recomp-runtime-d3d-framegen-schedule COMMAND recomp_d3d_framegen_schedule_test)
 add_executable(recomp_xapi_clock_test xapi_clock.cpp xapi_clock_test.cpp)
 add_test(NAME recomp-runtime-xapi-clock COMMAND recomp_xapi_clock_test)
 add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
@@ -495,6 +497,7 @@ else()
 endif()
 add_library(${_sdl_gpu_presenter} STATIC
     d3d_presenter_sdl_gpu.cpp ${_sdl_gpu_wrapper} d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
+    d3d_framegen_schedule.c
     ${RECOMP_PRESENTER_SHARED})
 target_include_directories(${_sdl_gpu_presenter} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_keyboard)

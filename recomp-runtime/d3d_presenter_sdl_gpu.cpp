@@ -10,6 +10,7 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
+#include "d3d_framegen_schedule.h"
 #include "d3d_shader_compiler.h"
 #include "d3d_texture_model.h"
 #include "d3d_vblank.h"
@@ -18,6 +19,7 @@
 #include "screenshot.h"
 #include "texture_upscale.h"
 #include "widescreen.h"
+#include "xapi_time_adapter.h"
 
 #include <SDL3/SDL.h>
 
@@ -289,6 +291,8 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *present_texture = nullptr;  // main picture with mips, for a smaller window
     SDL_GPUTexture *back_buffer_copy = nullptr;   // GetBackBuffer(0) snapshots
     SDL_GPUTexture *previous_frame = nullptr;     // GetBackBuffer(-1)
+    // RECOMP_D3D_FRAMEGEN: real frames N-1 and N before gamma, and an in-between picture.
+    SDL_GPUTexture *fg_prev = nullptr, *fg_cur = nullptr, *fg_out = nullptr;
     bool copy_mips = false;
     SDL_GPUTexture *white_texture = nullptr;
     SDL_GPUTexture *white_volume = nullptr;
@@ -353,12 +357,25 @@ struct RecompD3dPresenter {
     const char *draw_log_trigger = nullptr;
     bool draw_log_active = false;
     unsigned draw_log_index = 0u;
+
+    // Frame generation's schedule (framegenIdle). fg_k is 0 when it is off.
+    unsigned fg_k = 0u;
+    bool fg_history = false;     // fg_prev and fg_cur hold real frames
+    unsigned fg_next_slot = 0u;  // first slot of real frame N neither shown nor skipped
+    int64_t fg_present_ns = 0;   // when N arrived
+    float fg_aspect = 0.0f;
+    // RECOMP_PERF_COUNTER: this second's window presents under frame generation.
+    std::vector<double> fg_intervals;
+    int64_t fg_last_window_ns = 0, fg_second_ns = 0;
+    unsigned fg_real = 0u, fg_generated = 0u, fg_late = 0u, fg_not_ready = 0u, fg_unshown = 0u;
+    double fg_window_max_ms = 0.0;
 };
 
 namespace {
 
 RecompD3dPresenter *active_presenter;
 bool immediate_present;
+bool framegen_vsync;  // frame generation paces its presents on VSYNC
 
 /* PC Settings' quality, set from the game thread and applied by the
    presenter after a present (applyQuality). */
@@ -418,6 +435,7 @@ uint32_t sampleCount(SDL_GPUSampleCount samples)
 // MAILBOX presents without a second wait for the swapchain.
 bool preferMailbox(bool immediate)
 {
+    if (framegen_vsync && !immediate) return false;
 #ifdef __linux__
     (void)immediate;
     return true;
@@ -2919,24 +2937,10 @@ void reportPerformance(RecompD3dPresenter *presenter)
     presenter->draw_count = 0u;
 }
 
-RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const RecompD3dPresenterPresentCommand &present)
+/* Keeps guest pixels uncorrected: gamma is display state and must not feed
+   back into later draws or compound when a frame is presented twice. */
+SDL_GPUTexture *applyGamma(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *picture)
 {
-    if (present.effective_flags != 5u || present.swap_counter == 0u) {
-        return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
-    }
-    pumpEvents(presenter);
-    if (presenter->close_requested) return RECOMP_D3D_PRESENTER_CLOSED;
-    flushSegment(presenter);
-    resolveMain(presenter);
-    SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
-    if (commands == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-    /* Keep guest pixels uncorrected: gamma is display state and must not feed
-       back into later draws or compound when a frame is presented twice. */
-    SDL_GPUTexture *shown = presenter->main_resolve;
-    if (presenter->smaa && presenter->smaa_pipelines[0] == nullptr && !createSmaa(presenter)) {
-        presenter->smaa = false;
-    }
-    if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
     if (presenter->gamma_enabled) {
         SDL_GPUColorTargetInfo target{};
         target.texture = presenter->gamma_target;
@@ -2944,20 +2948,30 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
         target.store_op = SDL_GPU_STOREOP_STORE;
         if (SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr)) {
             SDL_BindGPUGraphicsPipeline(pass, presenter->gamma_pipeline);
-            const SDL_GPUTextureSamplerBinding pixels{shown, presenter->point_sampler};
+            const SDL_GPUTextureSamplerBinding pixels{picture, presenter->point_sampler};
             SDL_BindGPUFragmentSamplers(pass, 0u, &pixels, 1u);
             SDL_PushGPUFragmentUniformData(commands, 0u, presenter->gamma_ramp, sizeof presenter->gamma_ramp);
             SDL_DrawGPUPrimitives(pass, 3u, 1u, 0u, 0u);
             SDL_EndGPURenderPass(pass);
-            shown = presenter->gamma_target;
+            picture = presenter->gamma_target;
         }
     }
+    return picture;
+}
+
+/* Blits the picture to the window in the game's aspect and draws the overlay
+   over it. wait=false never waits for the GPU; false when no image was ready. */
+bool showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown,
+    float aspect, bool wait)
+{
     SDL_GPUTexture *swapchain = nullptr;
     Uint32 swap_width = 0u, swap_height = 0u;
-    if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height) &&
-        swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
+    const bool acquired = wait
+        ? SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height)
+        : SDL_AcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height);
+    if (acquired && swapchain != nullptr && swap_width != 0u && swap_height != 0u) {
         // The picture keeps the game's aspect, which a netplay session may set apart from the window's.
-        const float source_aspect = present.aspect > 0.0f ? present.aspect
+        const float source_aspect = aspect > 0.0f ? aspect
             : presenter->widescreen ? static_cast<float>(presenter->aspect_w) / presenter->aspect_h : 4.0f / 3.0f;
         int x = 0, y = 0, width = static_cast<int>(swap_width), height = static_cast<int>(swap_height);
         if (static_cast<float>(swap_width) / swap_height > source_aspect) {
@@ -2985,7 +2999,207 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
         recomp_overlay_take(&overlay);
         recomp_overlay_sdl_gpu_draw(presenter->device, presenter->window, commands,
             swapchain, swap_width, swap_height, &overlay);
+        return true;
     }
+    return false;
+}
+
+int64_t steadyNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+/* RECOMP_D3D_FRAMEGEN=1: window presents per guest frame, k = the display's
+   refresh / 60, or 0. Frame generation presents on VSYNC with three frames in
+   flight, which also asks for three swapchain images: an acquire one refresh
+   after a present then finds a free image while one is shown and one queued.
+   shortcut: k is read once at startup; a window moved to another display keeps it. */
+unsigned framegenPresents(RecompD3dPresenter *presenter)
+{
+    if (!envFlag("RECOMP_D3D_FRAMEGEN")) return 0u;
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(presenter->window));
+    const float refresh = mode != nullptr ? mode->refresh_rate : 0.0f;
+    const unsigned k = static_cast<unsigned>(refresh / 60.0f + 0.5f);
+    const char *reason = unpacedRun() ? "unpaced run"
+        : refresh <= 0.0f ? "unknown refresh"
+        : k < 2u ? "the refresh is below 120 Hz"
+        : std::fabs(refresh - 60.0f * k) > 0.005f * refresh ? "the refresh is not a whole multiple of 60 Hz"
+        : nullptr;
+    if (reason != nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen unsupported: %s (%.2f Hz)\n", reason, refresh);
+        return 0u;
+    }
+    framegen_vsync = true;
+    if (!SDL_SetGPUAllowedFramesInFlight(presenter->device, 3u)) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen frames in flight: %s\n", SDL_GetError());
+    }
+    std::fprintf(stderr, "recomp d3d presenter: framegen k=%u at %.2f Hz\n", k, refresh);
+    return k;
+}
+
+// It runs while host time paces the guest and the window shows.
+bool framegenActive(const RecompD3dPresenter *presenter)
+{
+    return presenter->fg_k != 0u && !immediate_present && !recomp_xapi_frame_clock_enabled() &&
+        !(recomp_xapi_fast_forward != nullptr && recomp_xapi_fast_forward()) &&
+        (SDL_GetWindowFlags(presenter->window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0;
+}
+
+void framegenCopy(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
+    SDL_GPUTexture *source, SDL_GPUTexture *destination)
+{
+    if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+        const SDL_GPUTextureLocation from{source, 0u, 0u, 0u, 0u, 0u};
+        const SDL_GPUTextureLocation to{destination, 0u, 0u, 0u, 0u, 0u};
+        SDL_CopyGPUTextureToTexture(pass, &from, &to, mainWidth(presenter), mainHeight(presenter), 1u, false);
+        SDL_EndGPUCopyPass(pass);
+    }
+}
+
+/* Keeps real frame N's picture before gamma in fg_cur and N-1's in fg_prev,
+   and starts N's slots. False while frame generation is off. */
+bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown, float aspect)
+{
+    if (presenter->fg_history && presenter->fg_next_slot < presenter->fg_k) {
+        presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
+        ++presenter->fg_unshown;
+    }
+    if (!framegenActive(presenter)) {
+        presenter->fg_history = false;
+        return false;
+    }
+    if (presenter->fg_prev == nullptr) {
+        for (SDL_GPUTexture **texture : {&presenter->fg_prev, &presenter->fg_cur, &presenter->fg_out}) {
+            *texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+                mainWidth(presenter), mainHeight(presenter));
+        }
+        presenter->fg_history = false;
+        if (presenter->fg_prev == nullptr || presenter->fg_cur == nullptr || presenter->fg_out == nullptr) {
+            std::fprintf(stderr, "recomp d3d presenter: framegen off, no history textures: %s\n", SDL_GetError());
+            presenter->fg_k = 0u;
+            return false;
+        }
+    }
+    std::swap(presenter->fg_prev, presenter->fg_cur);
+    framegenCopy(presenter, commands, shown, presenter->fg_cur);
+    if (!presenter->fg_history) framegenCopy(presenter, commands, shown, presenter->fg_prev);
+    presenter->fg_history = true;
+    presenter->fg_aspect = aspect;
+    presenter->fg_present_ns = steadyNs();
+    presenter->fg_next_slot = 0u;
+    return true;
+}
+
+/* The in-between picture t of the way from real frame N-1 to N, in fg_out.
+   shortcut: shows the nearer real frame, the low-confidence fallback; replace
+   with interpolation. */
+SDL_GPUTexture *framegenGenerate(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, float t)
+{
+    framegenCopy(presenter, commands, t < 0.5f ? presenter->fg_prev : presenter->fg_cur, presenter->fg_out);
+    return presenter->fg_out;
+}
+
+/* RECOMP_PERF_COUNTER: one line a second about frame generation's window presents. */
+void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t start, int64_t end)
+{
+    presenter->fg_window_max_ms = (std::max)(presenter->fg_window_max_ms, (end - start) / 1e6);
+    if (shown) {
+        ++(real ? presenter->fg_real : presenter->fg_generated);
+        if (presenter->fg_last_window_ns != 0) presenter->fg_intervals.push_back((end - presenter->fg_last_window_ns) / 1e6);
+        presenter->fg_last_window_ns = end;
+    } else if (!real) {
+        ++presenter->fg_not_ready;
+    }
+    if (presenter->fg_second_ns == 0) presenter->fg_second_ns = end;
+    if (end - presenter->fg_second_ns < 1000000000) return;
+    std::vector<double> &intervals = presenter->fg_intervals;
+    std::sort(intervals.begin(), intervals.end());
+    const auto at = [&](double q) {
+        return intervals.empty() ? 0.0 : intervals[(std::min)(intervals.size() - 1u, static_cast<size_t>(q * intervals.size()))];
+    };
+    // Intervals within a quarter refresh of one refresh, of two, and the rest.
+    const double refresh_ms = 1000.0 / (60.0 * presenter->fg_k);
+    unsigned one = 0u, two = 0u;
+    for (const double ms : intervals) {
+        one += std::fabs(ms - refresh_ms) <= refresh_ms / 4.0;
+        two += std::fabs(ms - 2.0 * refresh_ms) <= refresh_ms / 4.0;
+    }
+    std::fprintf(stderr, "recomp framegen: k=%u real=%u generated=%u late=%u not_ready=%u real_unshown=%u "
+        "interval_ms p1=%.2f p50=%.2f p99=%.2f max=%.2f refreshes 1=%u 2=%u other=%zu window_max_ms=%.2f\n",
+        presenter->fg_k, presenter->fg_real, presenter->fg_generated, presenter->fg_late, presenter->fg_not_ready,
+        presenter->fg_unshown, at(0.01), at(0.5), at(0.99), at(1.0), one, two, intervals.size() - one - two,
+        presenter->fg_window_max_ms);
+    intervals.clear();
+    presenter->fg_second_ns = end;
+    presenter->fg_real = presenter->fg_generated = presenter->fg_late = presenter->fg_not_ready = presenter->fg_unshown = 0u;
+    presenter->fg_window_max_ms = 0.0;
+}
+
+/* Shows slot's picture through gamma, the aspect blit and the overlay, in its
+   own command buffer, so the guest's open one is untouched. */
+bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
+{
+    SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(presenter->device);
+    if (commands == nullptr) return false;
+    const bool real = slot + 1u == presenter->fg_k;
+    SDL_GPUTexture *picture = real ? presenter->fg_cur
+        : framegenGenerate(presenter, commands, static_cast<float>(slot + 1u) / presenter->fg_k);
+    picture = applyGamma(presenter, commands, picture);
+    const int64_t start = steadyNs();
+    const bool shown = showPicture(presenter, commands, picture, presenter->fg_aspect, false);
+    SDL_SubmitGPUCommandBuffer(commands);
+    if (presenter->performance_counter) framegenCount(presenter, shown, real, start, steadyNs());
+    return shown;
+}
+
+/* Presents real frame N's due slot and returns the 100 ns ticks until its
+   next one, or UINT64_MAX once N is shown. An in-between whose slot passed or
+   whose swapchain image was not ready is skipped; N waits for an image until
+   N+1 arrives. */
+uint64_t framegenIdle(RecompD3dPresenter *presenter)
+{
+    if (!presenter->fg_history || presenter->fg_cur == nullptr || presenter->fg_next_slot >= presenter->fg_k)
+        return UINT64_MAX;
+    if (!framegenActive(presenter)) {
+        presenter->fg_history = false;
+        return UINT64_MAX;
+    }
+    const RecompFramegenDue due = recomp_framegen_due(presenter->fg_k, presenter->fg_present_ns, steadyNs(),
+        presenter->fg_next_slot);
+    presenter->fg_late += due.missed;
+    presenter->fg_next_slot += due.missed;
+    if (due.slot >= 0) {
+        const unsigned slot = static_cast<unsigned>(due.slot);
+        if (!framegenPresent(presenter, slot) && slot + 1u == presenter->fg_k) return 5000u;
+        presenter->fg_next_slot = slot + 1u;
+    }
+    if (presenter->fg_next_slot >= presenter->fg_k) return UINT64_MAX;
+    const int64_t until = recomp_framegen_until(presenter->fg_k, presenter->fg_present_ns, steadyNs(),
+        presenter->fg_next_slot);
+    return static_cast<uint64_t>(until + 99) / 100u;
+}
+
+RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const RecompD3dPresenterPresentCommand &present)
+{
+    if (present.effective_flags != 5u || present.swap_counter == 0u) {
+        return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+    }
+    pumpEvents(presenter);
+    if (presenter->close_requested) return RECOMP_D3D_PRESENTER_CLOSED;
+    flushSegment(presenter);
+    resolveMain(presenter);
+    SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
+    if (commands == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    SDL_GPUTexture *shown = presenter->main_resolve;
+    if (presenter->smaa && presenter->smaa_pipelines[0] == nullptr && !createSmaa(presenter)) {
+        presenter->smaa = false;
+    }
+    if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
+    const bool generated = framegenRecord(presenter, commands, shown, present.aspect);
+    shown = applyGamma(presenter, commands, shown);
+    if (!generated) showPicture(presenter, commands, shown, present.aspect, true);
     if (recomp_screenshot_take_request()) saveScreenshot(presenter, shown);
     // Capture what the window shows, at the main target size, as the D3D11 backend does.
     char burst[1024];
@@ -3026,6 +3240,7 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
         std::fprintf(stderr, "recomp draw log: begin present=%u\n", presenter->present_count + 1u);
     }
     if (presenter->performance_counter) reportPerformance(presenter);
+    if (generated) (void)framegenIdle(presenter);  // slot 0 is due now
     applyQuality(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
@@ -3117,6 +3332,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     }
     for (SDL_GPUTexture *texture : {presenter->gamma_target, presenter->present_texture,
             presenter->back_buffer_copy, presenter->previous_frame, presenter->white_texture,
+            presenter->fg_prev, presenter->fg_cur, presenter->fg_out,
             presenter->white_volume, presenter->main_depth}) {
         if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
     }
@@ -3352,7 +3568,8 @@ void applyQuality(RecompD3dPresenter *presenter)
         }
     }
     for (SDL_GPUTexture **texture : {&presenter->back_buffer_copy, &presenter->previous_frame,
-            &presenter->gamma_target, &presenter->present_texture}) {
+            &presenter->gamma_target, &presenter->present_texture,
+            &presenter->fg_prev, &presenter->fg_cur, &presenter->fg_out}) {
         if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
         *texture = nullptr;
     }
@@ -3455,6 +3672,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
+    created->fg_k = framegenPresents(created);
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
             SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
         ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
@@ -3773,6 +3991,11 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
     releaseQuery(presenter, front);
     presenter->visibility_pending.erase(presenter->visibility_pending.begin());
     return D3D_BACKEND_VISIBILITY_READY;
+}
+
+uint64_t d3d_backend_idle(RecompD3dPresenter *presenter)
+{
+    return checkOwner(presenter) == RECOMP_D3D_PRESENTER_OK ? framegenIdle(presenter) : UINT64_MAX;
 }
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)

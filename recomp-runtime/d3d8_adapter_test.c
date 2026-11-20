@@ -129,6 +129,11 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
 {
     return presenter == &mock_presenter && present_ready;
 }
+uint64_t recomp_d3d_presenter_idle(RecompD3dPresenter *presenter)
+{
+    (void)presenter;
+    return UINT64_MAX;
+}
 /* Swap must wait as a guest until the presenter can take its frame. */
 bool recomp_kernel_wait_host(bool (*done)(void *context), void *context)
 {
