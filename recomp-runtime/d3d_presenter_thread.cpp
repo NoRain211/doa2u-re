@@ -51,7 +51,6 @@ struct PresenterThread {
     double busy_total_ms = 0.0;
     unsigned frames = 0u;
     double queue_wait_ms = 0.0;
-    double flush_wait_ms = 0.0;  // guest waits in flush(wait): coverage and wait-idle
     ULONGLONG pacing_start = 0u;
 
     ~PresenterThread() { if (wake != nullptr) CloseHandle(wake); }
@@ -326,9 +325,9 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     const ULONGLONG now = GetTickCount64();
     if (thread.pacing_start == 0u) thread.pacing_start = now;
     if (now - thread.pacing_start < 1000u) return;
-    std::fprintf(stderr, "recomp pacing: tick_ms=%llu tick_max_ms=%.1f queue_wait_ms=%.1f flush_wait_ms=%.1f "
+    std::fprintf(stderr, "recomp pacing: tick_ms=%llu tick_max_ms=%.1f queue_wait_ms=%.1f "
         "busy_avg_ms=%.1f busy_max_ms=%.1f\n",
-        static_cast<unsigned long long>(now), thread.frame_max_ms, thread.queue_wait_ms, thread.flush_wait_ms,
+        static_cast<unsigned long long>(now), thread.frame_max_ms, thread.queue_wait_ms,
         thread.frames != 0u ? thread.busy_total_ms / thread.frames : 0.0, thread.busy_max_ms);
     thread.pacing_start = now;
     thread.frame_max_ms = 0.0;
@@ -336,7 +335,6 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     thread.busy_total_ms = 0.0;
     thread.frames = 0u;
     thread.queue_wait_ms = 0.0;
-    thread.flush_wait_ms = 0.0;
 }
 
 /* Caller holds thread.mutex. Both publish and Swap's guest wait use this test. */
@@ -479,12 +477,10 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
         if (error != RECOMP_D3D_PRESENTER_OK) return error;
     }
     if (!wait) return RECOMP_D3D_PRESENTER_OK;
-    const double wait_start_ms = thread.pacing ? clock_ms() : 0.0;
     std::unique_lock<std::mutex> lock(thread.mutex);
     thread.changed.wait(lock, [&] { return (thread.pending == 0u &&
         thread.visibility_outstanding == 0u) ||
         thread.status != RECOMP_D3D_PRESENTER_OK; });
-    if (thread.pacing) thread.flush_wait_ms += clock_ms() - wait_start_ms;
     return thread.status;
 }
 
@@ -493,13 +489,6 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
     if (validate(presenter) != RECOMP_D3D_PRESENTER_OK) return true;
     std::lock_guard<std::mutex> lock(active_thread->mutex);
     return canPublish(*active_thread, false);
-}
-
-/* Direct3D 11 has no idle-time presents. */
-uint64_t recomp_d3d_presenter_idle(RecompD3dPresenter *presenter)
-{
-    (void)presenter;
-    return UINT64_MAX;
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(

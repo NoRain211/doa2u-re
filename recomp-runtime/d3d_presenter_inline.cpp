@@ -130,11 +130,6 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
     return validate(presenter) != RECOMP_D3D_PRESENTER_OK || d3d_backend_present_ready(active->backend);
 }
 
-uint64_t recomp_d3d_presenter_idle(RecompD3dPresenter *presenter)
-{
-    return validate(presenter) == RECOMP_D3D_PRESENTER_OK ? d3d_backend_idle(active->backend) : UINT64_MAX;
-}
-
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
     RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand *draw, bool *covered)
 {

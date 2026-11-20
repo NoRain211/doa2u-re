@@ -3254,7 +3254,8 @@ static bool testResampledMsaaTarget()
 
 #ifndef RECOMP_TEST_D3D11
 /* Four real frames that each blend the previous one (GetBackBuffer(-1)) over
-   a new color, through a gamma ramp, with the idle hook run between them.
+   a new color, through a gamma ramp, with frame generation's slots presented
+   between them.
    Returns false on an error; engaged reports frame generation's schedule. */
 static bool framegenFrames(bool framegen, const char *path, bool &engaged)
 {
@@ -3304,7 +3305,7 @@ static bool framegenFrames(bool framegen, const char *path, bool &engaged)
             RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
             present.data.present = {5u, frame};
             passed &= expect("framegen present", d3d_backend_submit(presenter, &present));
-            // The guest's idle time until the next frame, as the kernel scheduler gives it.
+            // Present due slots until the next frame, as the worker does while it waits.
             const auto next = std::chrono::steady_clock::now() + std::chrono::microseconds(16667);
             for (bool first = true; std::chrono::steady_clock::now() < next; first = false) {
                 const uint64_t until = d3d_backend_idle(presenter);

@@ -75,7 +75,6 @@ static GuestThread threads[MAX_THREADS] = {
 static unsigned current_thread;
 static bool scheduler_started;
 static unsigned host_waits; /* Threads blocked in recomp_kernel_wait_host. */
-uint64_t (*recomp_kernel_idle_hook)(void);
 /* Next guest-time scheduler slice offered to a clock read. */
 static uint64_t poll_slice;
 
@@ -457,10 +456,6 @@ static void schedule(void)
            host work each millisecond. */
         uint64_t now = interrupt_time();
         if (host_wait && earliest > now + 10000u) earliest = now + 10000u;
-        if (recomp_kernel_idle_hook != NULL) {
-            const uint64_t until = recomp_kernel_idle_hook();
-            if (earliest > now && until < earliest - now) earliest = now + until;
-        }
         charge_slice(false);
         uint64_t ms = earliest == UINT64_MAX ? 1000u
             : earliest > now ? (earliest - now + 9999u) / 10000u : 1u;
