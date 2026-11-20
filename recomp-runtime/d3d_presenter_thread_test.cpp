@@ -3361,7 +3361,7 @@ static bool testFramegenKeepsRealFrames()
     DeleteFileA(on);
     if (passed) {
         std::printf(engaged ? "PASS frame generation keeps real frames and the previous frame\n"
-            : "PASS frame generation off matches; SKIP its schedule, this display is not 120 or 240 Hz\n");
+            : "PASS frame generation off matches; SKIP its schedule, see the framegen unsupported line\n");
     }
     return passed;
 }

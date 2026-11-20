@@ -3026,6 +3026,12 @@ unsigned framegenPresents(RecompD3dPresenter *presenter)
         : k < 2u ? "the refresh is below 120 Hz"
         : std::fabs(refresh - 60.0f * k) > 0.005f * refresh ? "the refresh is not a whole multiple of 60 Hz"
         : nullptr;
+#ifndef _WIN32
+    /* shortcut: only the Windows worker presents slots between real frames;
+       give d3d_presenter_inline.cpp a timer that calls d3d_backend_idle to
+       support macOS and Linux. */
+    if (reason == nullptr) reason = "it needs the Windows presenter worker";
+#endif
     if (reason != nullptr) {
         std::fprintf(stderr, "recomp d3d presenter: framegen unsupported: %s (%.2f Hz)\n", reason, refresh);
         return 0u;
