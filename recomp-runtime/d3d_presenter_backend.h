@@ -43,5 +43,9 @@ bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
    worker calls it between records and while it waits. Returns the 100 ns
    ticks until the next slot is due, or UINT64_MAX. */
 uint64_t d3d_backend_idle(RecompD3dPresenter *presenter);
+/* SDL_GPU only, for tests: renders generated slot's picture and reads the
+   center pixel of real frames N-1 and N and of it, as 0xAARRGGBB. Returns
+   frame generation's k, or 0 without two real frames. */
+unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot, uint32_t pixels[3]);
 
 #endif
