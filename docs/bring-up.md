@@ -204,18 +204,20 @@ height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output
 and shared depth after capability fallback.
 
-Planned graphics work keeps the authentic look (see `GLOSSARY.md`), one PR
-each, in this order: restore the mip levels that uncompressed textures lose on
-the host; accept point min/mag filtering, which currently stops the runner;
-16x anisotropic filtering behind an environment variable, its default chosen
-from in-game frame dumps; give the 16:9 mirror projection the screen's shape
-outside netplay and replays; scale depthless effect targets (shadow map,
-bloom, heat haze) with the main scale on SDL_GPU, correcting filter radii.
-Every step but the mirror one is presenter-only: the mirror projection lives
-in guest RAM, which is why netplay and replays keep the game's 1.5. The first
-two are accuracy fixes and the third is an enhancement, all three in both
-presenters. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA above 8x)
-are separate work.
+Graphics work keeps the authentic look (see `GLOSSARY.md`), one PR each.
+Two accuracy fixes have landed in both presenters: uncompressed textures keep
+their guest mip levels, and point min/mag filtering no longer stops the
+runner. The 16:9 mirror projection now has the screen's shape whenever
+widescreen is on, Live fights included. It is the only change that is not
+presenter-only: the projection is in guest RAM, outside the ranges a Live
+fight's desync check hashes. 16x anisotropic filtering is shelved. In in-game
+frame dumps, stage floors were bit-identical with and without it in both
+presenters. A possible cause, not confirmed: the stages request point mip
+filtering, and that turns anisotropy off. Scaling the depthless effect targets
+(shadow map, bloom, heat haze) with the main scale on SDL_GPU remains open but
+has low priority. At 2160 lines only the fighters' shadows look soft; bloom
+looks the same as at 480. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA
+above 8x) are separate work.
 
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
