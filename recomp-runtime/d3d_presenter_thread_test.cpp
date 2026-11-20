@@ -3,12 +3,15 @@
 #include "d3d_card_model.h"
 #include "d3d_draw_model.h"
 
-/* Direct3D 11 runs on its own window thread; SDL_GPU (macOS, Linux and the
-   Windows Vulkan build) runs inline on the caller's. */
+/* Both Windows presenters, Direct3D 11 and Vulkan, run on their own window
+   thread; SDL_GPU on macOS and Linux runs inline on the caller's. */
 #if defined(_WIN32) && !defined(RECOMP_PRESENTER_SDL_GPU)
 #define RECOMP_TEST_D3D11
 #else
 #include <SDL3/SDL.h>
+#endif
+#ifdef _WIN32
+#define RECOMP_TEST_WORKER
 #endif
 
 #ifdef _WIN32
@@ -2197,14 +2200,14 @@ static bool testVisibility()
     bool complete = true;
     uint32_t pixels[2]{};
     passed &= expect("queued result", recomp_d3d_presenter_visibility_result(presenter, 7u, &complete, &pixels[0]));
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     // The render thread publishes nothing before the flush.
     passed &= !complete;
 #endif
     passed &= expect("unknown index", recomp_d3d_presenter_visibility_result(presenter, 9u, &complete, &pixels[0]),
         RECOMP_D3D_PRESENTER_INVALID_ARGUMENT);
     passed &= expect("publish visibility", recomp_d3d_presenter_flush(presenter, false));
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     passed &= expect("wait for visibility", recomp_d3d_presenter_flush(presenter, true));
     complete = false;
     passed &= expect("index 7 resolves before the wait returns",
@@ -2225,7 +2228,7 @@ static bool testVisibility()
         passed &= complete;
     }
     passed &= pixels[0] == 160u * 240u && pixels[1] == 320u * 240u;
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     // An END the worker cannot match to a BEGIN fails the presenter.
     passed &= expect("unbegun end", recomp_d3d_presenter_submit(presenter, &end));
     passed &= expect("unbegun end fails", recomp_d3d_presenter_flush(presenter, true),
