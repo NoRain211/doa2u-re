@@ -3487,13 +3487,17 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     /* IMMEDIATE shows each frame when it is presented, so any VRR display paces
        60 Hz evenly. SDL cannot tell whether VRR is active; without it this tears. */
     const char *vrr = std::getenv("RECOMP_D3D_VRR");
-    if (vrr != nullptr && std::strcmp(vrr, "1") == 0) {
-        created->vrr = SDL_WindowSupportsGPUPresentMode(created->device, created->window,
-            SDL_GPU_PRESENTMODE_IMMEDIATE);
-        std::fprintf(stderr, "recomp d3d presenter: vrr %s\n", created->vrr ? "on" : "unsupported");
+    const bool want_vrr = vrr != nullptr && std::strcmp(vrr, "1") == 0;
+    created->vrr = want_vrr && SDL_WindowSupportsGPUPresentMode(created->device, created->window,
+        SDL_GPU_PRESENTMODE_IMMEDIATE);
+    if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+            presentMode(created)) && created->vrr) {
+        // The VRR pacing must not run on top of a blocking present.
+        created->vrr = false;
+        SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+            presentMode(created));
     }
-    SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
-        presentMode(created));
+    if (want_vrr) std::fprintf(stderr, "recomp d3d presenter: vrr %s\n", created->vrr ? "on" : "unsupported");
     if (!createResources(created)) return fail("presenter resources");
     std::fprintf(stderr, "recomp d3d presenter: %s target=%ux%u msaa=%u window=%ux%u\n",
         SDL_GetGPUDeviceDriver(created->device), main_width, main_height, created->msaa_count,
