@@ -3344,8 +3344,8 @@ void flowPass(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, Flo
 /* The forward (N-1 to N) and backward (N to N-1) fields in fg_flow, from
    fg_prev and fg_cur. N-1's pyramid is kept from the frame before unless
    both_frames. Levels are searched from coarse to fine, each around the
-   coarser level's vector, so with radii 4 and 2 a motion of up to
-   4*8 + 2*4 + 2*2 + 2 = 46 finest-level pixels is found. */
+   coarser level's vector, so with radii 4 and 2 and the half-pixel fit carried
+   up, a motion of up to 53.5 finest-level pixels per axis is found. */
 void framegenFlow(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, bool both_frames)
 {
     if (presenter->fg_flow[0] == nullptr) return;
