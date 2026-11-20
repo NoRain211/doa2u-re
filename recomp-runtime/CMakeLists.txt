@@ -794,7 +794,7 @@ if(RECOMP_PROGRAM_DIR)
     endif()
     string(SHA256 _netplay_build "${_netplay_version}\n${_manifest_sha256}\n${_xbe_sha256}\n")
     message(STATUS "Netplay build ${_netplay_build} (${_netplay_version})")
-    # RECOMP_PORTABLE_MATH gives every host the same transcendentals and RCPSS/RSQRTSS.
+    # RECOMP_PORTABLE_MATH gives every host the same transcendentals.
     foreach(_target recomp_runner_objects recomp_program_objects)
         target_compile_definitions(${_target} PRIVATE RECOMP_XBE_SHA256="${_xbe_sha256}" RECOMP_PORTABLE_MATH)
         if(MSVC)
