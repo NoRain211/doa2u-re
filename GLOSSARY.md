@@ -22,7 +22,8 @@ _Avoid_: Bug fix, enhancement
 
 **Real frame**:
 A frame the game drew and presented. Guest-visible counters, the previous
-frame the game reads back, frame dumps and screenshots count only these.
+frame the game reads back, frame dumps, screenshots and draw logs count only
+these.
 _Avoid_: Native frame, source frame
 
 **Generated frame**:
