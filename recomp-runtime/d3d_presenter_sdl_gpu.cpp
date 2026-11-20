@@ -261,6 +261,7 @@ struct VisibilityQuery {
     SDL_GPUTransferBuffer *download = nullptr;
     uint32_t level = 0u, level_width = 0u, level_height = 0u;
     SDL_GPUFence *fence = nullptr;
+    bool reusable = true;                  // false once a quality change outdates the size
 };
 
 } // namespace
@@ -3265,7 +3266,8 @@ void fitWindow(RecompD3dPresenter *presenter)
 void applyQuality(RecompD3dPresenter *presenter)
 {
     // An open occlusion count draws into a target of the old size; ended ones own
-    // their textures and resolve on their own, so only an open one waits.
+    // their textures, resolve on their own and release them then, so only an open
+    // one waits.
     if (presenter->visibility_open) {
         static bool reported;
         bool pending;
@@ -3382,6 +3384,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     }
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);
     presenter->visibility_free.clear();
+    for (VisibilityQuery &query : presenter->visibility_pending) query.reusable = false;
     presenter->last_bound = {};
     if (scale != old_scale) fitWindow(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
@@ -3789,7 +3792,7 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
     if (front.fence != nullptr) SDL_ReleaseGPUFence(presenter->device, front.fence);
     front.fence = nullptr;
     std::vector<VisibilityQuery> &free = presenter->visibility_free;
-    if (front.count != nullptr) free.push_back(front);
+    if (front.count != nullptr && front.reusable) free.push_back(front);
     else releaseQuery(presenter, front);
     if (free.size() > 4u) {
         releaseQuery(presenter, free.front());
