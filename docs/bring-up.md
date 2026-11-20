@@ -73,7 +73,7 @@ Close the game window to exit. Session logs, including the runner identity and a
 runtime stop, are kept under `private/play-logs/`.
 The startup legal presentation is skipped automatically at its game-owned
 wrapper (`0xd92c0`), before its menu and asset setup. The intro movies play
-unless `--skip-intro` (the launcher's **Skip intro movies**) is set. Then the
+unless `--skip-intro` (the launcher's **Intro Movies: Skip**) is set. Then the
 logo movie (`0xd9300`) keeps its setup and teardown but omits its playback
 wait, and the boot opening movie (scene 5, ticked by `0x69180`) ends on its
 first tick; attract replays and story movies still play. The game's soft reset
