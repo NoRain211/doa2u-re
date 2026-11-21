@@ -3556,6 +3556,90 @@ static bool testFramegenFlow()
     return passed;
 }
 
+// Frame A's gray level at (x, y) in pixels, between pixel centers bilinear.
+static double flowSampleA(double x, double y)
+{
+    const int x0 = static_cast<int>(std::floor(x)), y0 = static_cast<int>(std::floor(y));
+    const double fx = x - x0, fy = y - y0;
+    const auto at = [](int px, int py) { return static_cast<double>(flowFrameA(px, py) & 255u); };
+    return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) +
+        (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+}
+
+/* Generated frames follow known motion: at t = 1/4 and 1/2 between A and B =
+   A moved by 3,-2 and by 13,9, pixels away from the edges and the two patches
+   must show A moved by t of it, much closer than the crossfade does. Between
+   A and unrelated noise (a cut), where the flow has no confidence, every pixel
+   must be the crossfade. Engages only where frame generation does. */
+static bool testFramegenWarp()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen warp", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), out(a.size());
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+    const int shifts[3][2] = {{3, -2}, {13, 9}, {0, 0}};
+    uint32_t swap = 0u;
+    for (unsigned i = 0u; i < 3u && passed; ++i) {
+        const int dx = shifts[i][0], dy = shifts[i][1];
+        const bool cut = i == 2u;
+        for (int y = 0; y < 240; ++y) {
+            for (int x = 0; x < 320; ++x)
+                b[static_cast<size_t>(y) * 320u + x] = cut ? flowNoise(x, y, 9u) : flowFrameB(x, y, dx, dy);
+        }
+        passed &= flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x500000u + i * 0x100000u, ++swap);
+        for (const double t : {0.25, 0.5}) {
+            unsigned size[2]{};
+            if (!passed || d3d_backend_framegen_generate(presenter, static_cast<float>(t), 1u, size, out.data(),
+                    out.size()) < 0.0) break;
+            engaged = true;
+            passed = size[0] == 320u && size[1] == 240u;
+            const FlowRect image{0, 0, 320, 240};
+            double warp_sum = 0.0, cross_sum = 0.0, warp_max = 0.0;
+            unsigned count = 0u, off = 0u;
+            for (int y = 0; y < 240 && passed; ++y) {
+                for (int x = 0; x < 320; ++x) {
+                    const size_t at = static_cast<size_t>(y) * 320u + x;
+                    const double got = out[at] & 255u, from = a[at] & 255u, to = b[at] & 255u;
+                    const double crossfade = from + (to - from) * t;
+                    if (cut) {
+                        off += std::fabs(got - crossfade) > 2.0;
+                        continue;
+                    }
+                    const FlowRect around = flowGrow({x, y, x + 1, y + 1}, 16 + (std::max)(std::abs(dx), std::abs(dy)));
+                    if (!flowInside(around, image) || flowTouches(around, kFlowUniform) ||
+                        flowTouches(around, flowMove(kFlowUniform, dx, dy)) || flowTouches(around, kFlowChanged) ||
+                        flowTouches(around, flowMove(kFlowChanged, -dx, -dy))) continue;
+                    const double want = flowSampleA(x - t * dx, y - t * dy);
+                    warp_sum += std::fabs(got - want);
+                    warp_max = (std::max)(warp_max, std::fabs(got - want));
+                    cross_sum += std::fabs(crossfade - want);
+                    ++count;
+                }
+            }
+            if (cut) {
+                std::printf("warp cut t=%.2f: %u pixels differ from the crossfade by more than 2\n", t, off);
+                passed = passed && off == 0u;
+            } else {
+                const double warp = warp_sum / count, crossfade = cross_sum / count;
+                std::printf("warp (%d,%d) t=%.2f: %u pixels, mean error %.2f (max %.0f), crossfade %.2f\n",
+                    dx, dy, t, count, warp, warp_max, crossfade);
+                passed = passed && count >= 10000u && warp < 2.0 && warp * 8.0 < crossfade;
+            }
+            if (!passed) std::fprintf(stderr, "FAIL framegen warp (%d,%d) t=%.2f\n", dx, dy, t);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's warp follows known motion and crossfades a cut\n"
+            : "SKIP frame generation's warp, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
    from the fence wait of 200 extra flow runs less that of none. */
 static void benchFramegenFlow()
@@ -3582,6 +3666,13 @@ static void benchFramegenFlow()
                 runs = (std::min)(runs, d3d_backend_framegen_flow(presenter, 200u, size, nullptr, 0u));
             }
             std::printf("flow bench scale %.1f: %ux%u blocks, %.4f ms per run (fence %.3f ms for none, %.3f for 200)\n",
+                scale, size[0], size[1], (runs - none) / 200.0, none, runs);
+            none = runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_generate(presenter, 0.5f, 0u, size, nullptr, 0u));
+                runs = (std::min)(runs, d3d_backend_framegen_generate(presenter, 0.5f, 200u, size, nullptr, 0u));
+            }
+            std::printf("warp bench scale %.1f: %ux%u, %.4f ms per generated frame (fence %.3f ms for none, %.3f for 200)\n",
                 scale, size[0], size[1], (runs - none) / 200.0, none, runs);
         }
         d3d_backend_destroy(&presenter);
@@ -3635,7 +3726,7 @@ int main()
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
-    if (!testFramegenKeepsRealFrames() || !testFramegenFlow()) return 1;
+    if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");
