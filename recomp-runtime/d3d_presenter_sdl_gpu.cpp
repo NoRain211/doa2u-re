@@ -61,6 +61,7 @@ constexpr uint32_t kPaletteBytes = 256u * 4u;
 constexpr uint64_t kTargetByteLimit = 64u * 1024u * 1024u;
 constexpr uint32_t kMaxTextureSize = 16384u;
 constexpr uint32_t kMaxVolumeSize = 2048u;
+constexpr unsigned kFlowLevels = 4u;  // frame generation's luminance pyramid, finest first
 constexpr float kMipLodBiasMin = -16.0f, kMipLodBiasMax = 15.99f;
 /* The draw constants without vc[192], which goes to its own uniform slot. */
 constexpr uint32_t kProgramFloats = 192u * 4u;
@@ -295,6 +296,12 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *fg_prev = nullptr, *fg_cur = nullptr, *fg_out = nullptr;
     SDL_GPUGraphicsPipeline *fg_blend = nullptr;  // crossfades fg_prev and fg_cur into fg_out
     bool fg_blend_failed = false;
+    // framegenFlow: luminance pyramids of fg_prev and fg_cur, each direction's
+    // block search per level (forward N-1 to N, then backward), and its field.
+    SDL_GPUTexture *fg_luma[2][kFlowLevels]{}, *fg_search[2][kFlowLevels]{}, *fg_flow[2]{};
+    SDL_GPUGraphicsPipeline *fg_flow_pipelines[5]{};  // FlowPipeline
+    bool fg_flow_failed = false;
+    bool fg_flow_view = false;  // RECOMP_D3D_FRAMEGEN=flow
     bool copy_mips = false;
     SDL_GPUTexture *white_texture = nullptr;
     SDL_GPUTexture *white_volume = nullptr;
@@ -3099,6 +3106,286 @@ void framegenCopy(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
     }
 }
 
+/* Frame generation's optical flow: block matching between real frames N-1 and
+   N on a luminance pyramid (framegenFlow). These are fragment shaders within
+   Shader Model 4, so a Direct3D 11 port can run them at feature level 10.
+   Every pass draws one fullscreen triangle (vs_main of kFramegenBlendShader)
+   and reads its inputs with Load; Flow.info and Flow.weights vary by pass. */
+enum FlowPipeline { kFlowLuma, kFlowCoarse, kFlowSearch, kFlowConfidence, kFlowView };
+
+constexpr int kFlowCoarseRadius = 4, kFlowRadius = 2;  // search window, in pixels of the level
+
+// Declares each texture with the sampler SDL_GPU binds beside it, in slot order.
+std::string flowShader(std::initializer_list<const char *> textures, const char *body)
+{
+    std::string hlsl = "[[vk::binding(0, RECOMP_UNIFORM_SET)]] cbuffer Flow : register(b0) { int4 info; float4 weights; };\n";
+    unsigned slot = 0u;
+    for (const char *name : textures) {
+        const std::string at = std::to_string(slot++);
+        hlsl += "[[vk::binding(" + at + ", 2)]] Texture2D " + name + " : register(t" + at + ");\n"
+            "[[vk::binding(" + at + ", 2)]] SamplerState " + name + "_sampler : register(s" + at + ");\n";
+    }
+    return hlsl + body;
+}
+
+/* Luminance of the picture (info.x = 1 to 4, a box of that size per texel,
+   weights = Rec. 601) or of the level below (info.x = 2, weights = red). */
+const char kFlowLumaShader[] =
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " int2 origin = int2(p.xy) * info.x;\n"
+    " float sum = 0;\n"
+    " for (int y = 0; y < 4; ++y) for (int x = 0; x < 4; ++x)\n"
+    "  if (x < info.x && y < info.x) sum += dot(picture.Load(int3(origin + int2(x, y), 0)).rgb, weights.rgb);\n"
+    " return (sum / (info.x * info.x)).xxxx; }\n";
+
+/* One texel per 8x8 block of source: the motion to its best match in target
+   within RADIUS of the prediction (PREDICT: twice the vector of the coarser
+   level's block, else zero), refined to a fraction by an equiangular fit of the
+   SADs beside it. Out: xy = motion in pixels of this level, z = the match's
+   mean absolute difference, w = how much the window's mean exceeds it (zero
+   when nothing in the window tells candidates apart). info.xy = level size,
+   info.zw = coarser field size. */
+const char kFlowSearchShader[] =
+    "float sad(float own[64], int2 at, int2 last) {\n"
+    " float sum = 0;\n"
+    " [unroll] for (int i = 0; i < 64; ++i)\n"
+    "  sum += abs(own[i] - target.Load(int3(clamp(at + int2(i & 7, i >> 3), 0, last), 0)).r);\n"
+    " return sum; }\n"
+    "float fit(float a, float b, float c) {\n"
+    " float slope = max(a, c) - b;\n"
+    " return slope > 0 ? clamp(0.5 * (a - c) / slope, -0.5, 0.5) : 0; }\n"
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " int2 block = int2(p.xy), origin = block * 8, last = info.xy - 1;\n"
+    " float own[64];\n"
+    " [unroll] for (int i = 0; i < 64; ++i) own[i] = source.Load(int3(min(origin + int2(i & 7, i >> 3), last), 0)).r;\n"
+    " int2 center = int2(0, 0);\n"
+    "#if PREDICT\n"
+    " center = int2(round(coarse.Load(int3(min(block >> 1, info.zw - 1), 0)).xy * 2));\n"
+    "#endif\n"
+    " int2 at = center;\n"
+    " float best = 1e30, best_cost = 1e30, total = 0;\n"
+    " [loop] for (int y = -RADIUS; y <= RADIUS; ++y) [loop] for (int x = -RADIUS; x <= RADIUS; ++x) {\n"
+    "  float sum = sad(own, origin + center + int2(x, y), last);\n"
+    "  float cost = sum + 1e-5 * (x * x + y * y);\n"  // exact ties go to the prediction
+    "  total += sum;\n"
+    "  if (cost < best_cost) { best_cost = cost; best = sum; at = center + int2(x, y); } }\n"
+    " float2 sub = float2(\n"
+    "  fit(sad(own, origin + at - int2(1, 0), last), best, sad(own, origin + at + int2(1, 0), last)),\n"
+    "  fit(sad(own, origin + at - int2(0, 1), last), best, sad(own, origin + at + int2(0, 1), last)));\n"
+    " float count = (2 * RADIUS + 1) * (2 * RADIUS + 1);\n"
+    " return float4(float2(at) + sub, best / 64, max(total / count - best, 0) / 64); }\n";
+
+/* The finest search of one direction, checked against the other direction's
+   vector where the block lands. Out: xy = motion in main target pixels
+   (weights.x per finest-level pixel), z = confidence 0..1, w = the match's
+   mean absolute difference. info.xy = field size. */
+const char kFlowConfidenceShader[] =
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " int2 block = int2(p.xy);\n"
+    " float4 own = field.Load(int3(block, 0));\n"
+    " float2 landed = (float2(block) + 0.5) * 8 + own.xy;\n"
+    " float2 back = other.Load(int3(clamp(int2(floor(landed / 8)), 0, info.xy - 1), 0)).xy;\n"
+    " float consistent = saturate(1 - length(own.xy + back) / 2);\n"  // 0 at 2 pixels apart
+    " float matched = saturate(1 - own.z / 0.08);\n"                  // 0 at 8% mean difference
+    " float distinct = saturate(own.w / 0.02);\n"                     // 0 in a flat window
+    " return float4(own.xy * weights.x, consistent * matched * distinct, own.z); }\n";
+
+/* RECOMP_D3D_FRAMEGEN=flow: a field as color, hue = direction, brightness =
+   motion up to weights.y main target pixels, dark = low confidence.
+   weights.x = main target pixels per block, info.xy = field size. */
+const char kFlowViewShader[] =
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " float4 flow = field.Load(int3(min(int2(p.xy / weights.x), info.xy - 1), 0));\n"
+    " float3 hue = saturate(abs(frac(atan2(flow.y, flow.x) / 6.2831853 + float3(1, 2.0 / 3, 1.0 / 3)) * 6 - 3) - 1);\n"
+    " float magnitude = saturate(length(flow.xy) / weights.y);\n"
+    " return float4(lerp((0.15).xxx, hue, magnitude) * lerp(0.1, 1, flow.z), 1); }\n";
+
+struct FlowUniforms {
+    int32_t info[4];
+    float weights[4];
+};
+
+/* Main target pixels per finest pyramid pixel: the finest level is at most 720
+   high, so 2160 searches 1280x720. */
+uint32_t flowScale(const RecompD3dPresenter *presenter)
+{
+    return std::clamp((mainHeight(presenter) + 719u) / 720u, 1u, 4u);
+}
+
+void flowLevelSize(const RecompD3dPresenter *presenter, unsigned level, uint32_t size[2])
+{
+    size[0] = mainWidth(presenter) / flowScale(presenter);
+    size[1] = mainHeight(presenter) / flowScale(presenter);
+    for (unsigned i = 0u; i < level; ++i) {
+        size[0] = (std::max)(size[0] / 2u, 1u);
+        size[1] = (std::max)(size[1] / 2u, 1u);
+    }
+}
+
+// The search field of a level: one texel per 8x8 block, partial blocks included.
+void flowFieldSize(const RecompD3dPresenter *presenter, unsigned level, uint32_t size[2])
+{
+    flowLevelSize(presenter, level, size);
+    size[0] = (size[0] + 7u) / 8u;
+    size[1] = (size[1] + 7u) / 8u;
+}
+
+void releaseFramegenFlow(RecompD3dPresenter *presenter)
+{
+    for (unsigned i = 0u; i < 2u; ++i) {
+        for (unsigned level = 0u; level < kFlowLevels; ++level) {
+            for (SDL_GPUTexture **texture : {&presenter->fg_luma[i][level], &presenter->fg_search[i][level]}) {
+                if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
+                *texture = nullptr;
+            }
+        }
+        if (presenter->fg_flow[i] != nullptr) SDL_ReleaseGPUTexture(presenter->device, presenter->fg_flow[i]);
+        presenter->fg_flow[i] = nullptr;
+    }
+    for (SDL_GPUGraphicsPipeline *&pipeline : presenter->fg_flow_pipelines) {
+        if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
+        pipeline = nullptr;
+    }
+}
+
+SDL_GPUGraphicsPipeline *flowPipeline(RecompD3dPresenter *presenter, SDL_GPUShader *vertex, const std::string &hlsl,
+    const std::vector<std::string> &defines, uint32_t samplers, SDL_GPUTextureFormat format)
+{
+    SDL_GPUShader *fragment = createShader(presenter, hlsl, false, defines, samplers, 1u);
+    if (fragment == nullptr) return nullptr;
+    SDL_GPUColorTargetDescription color{};
+    color.format = format;
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = vertex;
+    info.fragment_shader = fragment;
+    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.target_info.color_target_descriptions = &color;
+    info.target_info.num_color_targets = 1u;
+    SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(presenter->device, &info);
+    SDL_ReleaseGPUShader(presenter->device, fragment);
+    return pipeline;
+}
+
+/* The flow's textures and pipelines, released with the history. On a failure
+   the flow stays off and frame generation keeps its crossfade; logged once. */
+void createFramegenFlow(RecompD3dPresenter *presenter)
+{
+    bool created = true;
+    for (unsigned level = 0u; level < kFlowLevels; ++level) {
+        uint32_t size[2], field[2];
+        flowLevelSize(presenter, level, size);
+        flowFieldSize(presenter, level, field);
+        for (unsigned i = 0u; i < 2u; ++i) {
+            presenter->fg_luma[i][level] = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+                SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, size[0], size[1]);
+            presenter->fg_search[i][level] = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+                SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+                field[0], field[1]);
+            if (level == 0u) {
+                presenter->fg_flow[i] = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+                    SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+                    SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, field[0], field[1]);
+                created &= presenter->fg_flow[i] != nullptr;
+            }
+            created &= presenter->fg_luma[i][level] != nullptr && presenter->fg_search[i][level] != nullptr;
+        }
+    }
+    SDL_GPUShader *vertex = created ? createShader(presenter, kFramegenBlendShader, true, {}, 0u, 0u) : nullptr;
+    if (vertex != nullptr) {
+        const std::string search = flowShader({"source", "target", "coarse"}, kFlowSearchShader);
+        const std::string radius = "RADIUS=" + std::to_string(kFlowRadius);
+        const std::string coarse_radius = "RADIUS=" + std::to_string(kFlowCoarseRadius);
+        auto *pipelines = presenter->fg_flow_pipelines;
+        pipelines[kFlowLuma] = flowPipeline(presenter, vertex, flowShader({"picture"}, kFlowLumaShader), {}, 1u,
+            SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+        pipelines[kFlowCoarse] = flowPipeline(presenter, vertex, search, {coarse_radius, "PREDICT=0"}, 2u,
+            SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+        pipelines[kFlowSearch] = flowPipeline(presenter, vertex, search, {radius, "PREDICT=1"}, 3u,
+            SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+        pipelines[kFlowConfidence] = flowPipeline(presenter, vertex, flowShader({"field", "other"}, kFlowConfidenceShader),
+            {}, 2u, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+        if (presenter->fg_flow_view) {
+            pipelines[kFlowView] = flowPipeline(presenter, vertex, flowShader({"field"}, kFlowViewShader), {}, 1u,
+                SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+        }
+        for (unsigned i = kFlowLuma; i <= (presenter->fg_flow_view ? kFlowView : kFlowConfidence); ++i)
+            created &= pipelines[i] != nullptr;
+        SDL_ReleaseGPUShader(presenter->device, vertex);
+    } else {
+        created = false;
+    }
+    if (!created) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen flow unavailable, keeping the crossfade: %s\n", SDL_GetError());
+        presenter->fg_flow_failed = true;
+        releaseFramegenFlow(presenter);
+    }
+}
+
+// One fullscreen pass of the flow into target, reading inputs in slot order.
+void flowPass(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, FlowPipeline pipeline,
+    SDL_GPUTexture *target, std::initializer_list<SDL_GPUTexture *> inputs, const FlowUniforms &uniforms)
+{
+    SDL_GPUColorTargetInfo info{};
+    info.texture = target;
+    info.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    info.store_op = SDL_GPU_STOREOP_STORE;
+    if (SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &info, 1, nullptr)) {
+        SDL_BindGPUGraphicsPipeline(pass, presenter->fg_flow_pipelines[pipeline]);
+        SDL_GPUTextureSamplerBinding bindings[3]{};
+        uint32_t count = 0u;
+        for (SDL_GPUTexture *input : inputs) bindings[count++] = {input, presenter->point_sampler};
+        SDL_BindGPUFragmentSamplers(pass, 0u, bindings, count);
+        SDL_PushGPUFragmentUniformData(commands, 0u, &uniforms, sizeof uniforms);
+        SDL_DrawGPUPrimitives(pass, 3u, 1u, 0u, 0u);
+        SDL_EndGPURenderPass(pass);
+    }
+}
+
+/* The forward (N-1 to N) and backward (N to N-1) fields in fg_flow, from
+   fg_prev and fg_cur. N-1's pyramid is kept from the frame before unless
+   both_frames. Levels are searched from coarse to fine, each around the
+   coarser level's vector, so with radii 4 and 2 and the half-pixel fit carried
+   up, a motion of up to 53.5 finest-level pixels per axis is found. */
+void framegenFlow(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, bool both_frames)
+{
+    if (presenter->fg_flow[0] == nullptr) return;
+    const int32_t scale = static_cast<int32_t>(flowScale(presenter));
+    SDL_GPUTexture *const frames[2] = {presenter->fg_prev, presenter->fg_cur};
+    for (unsigned frame = both_frames ? 0u : 1u; frame < 2u; ++frame) {
+        flowPass(presenter, commands, kFlowLuma, presenter->fg_luma[frame][0], {frames[frame]},
+            {{scale, 0, 0, 0}, {0.299f, 0.587f, 0.114f, 0.0f}});
+        for (unsigned level = 1u; level < kFlowLevels; ++level) {
+            flowPass(presenter, commands, kFlowLuma, presenter->fg_luma[frame][level],
+                {presenter->fg_luma[frame][level - 1u]}, {{2, 0, 0, 0}, {1.0f, 0.0f, 0.0f, 0.0f}});
+        }
+    }
+    for (unsigned level = kFlowLevels; level-- > 0u;) {
+        uint32_t size[2], coarse[2]{};
+        flowLevelSize(presenter, level, size);
+        if (level + 1u < kFlowLevels) flowFieldSize(presenter, level + 1u, coarse);
+        const FlowUniforms uniforms{{static_cast<int32_t>(size[0]), static_cast<int32_t>(size[1]),
+            static_cast<int32_t>(coarse[0]), static_cast<int32_t>(coarse[1])}, {}};
+        for (unsigned direction = 0u; direction < 2u; ++direction) {
+            SDL_GPUTexture *source = presenter->fg_luma[direction][level];
+            SDL_GPUTexture *target = presenter->fg_luma[1u - direction][level];
+            if (level + 1u == kFlowLevels) {
+                flowPass(presenter, commands, kFlowCoarse, presenter->fg_search[direction][level], {source, target}, uniforms);
+            } else {
+                flowPass(presenter, commands, kFlowSearch, presenter->fg_search[direction][level],
+                    {source, target, presenter->fg_search[direction][level + 1u]}, uniforms);
+            }
+        }
+    }
+    uint32_t field[2];
+    flowFieldSize(presenter, 0u, field);
+    const FlowUniforms uniforms{{static_cast<int32_t>(field[0]), static_cast<int32_t>(field[1]), 0, 0},
+        {static_cast<float>(scale), 0.0f, 0.0f, 0.0f}};
+    for (unsigned direction = 0u; direction < 2u; ++direction) {
+        flowPass(presenter, commands, kFlowConfidence, presenter->fg_flow[direction],
+            {presenter->fg_search[direction][0], presenter->fg_search[1u - direction][0]}, uniforms);
+    }
+}
+
 /* Keeps real frame N's picture before gamma in fg_cur and N-1's in fg_prev,
    and starts N's slots. False while frame generation is off. */
 bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown, float aspect)
@@ -3124,10 +3411,13 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
             return false;
         }
         if (!presenter->fg_blend_failed) createFramegenBlend(presenter);
+        if (!presenter->fg_flow_failed) createFramegenFlow(presenter);
     }
     std::swap(presenter->fg_prev, presenter->fg_cur);
+    std::swap(presenter->fg_luma[0], presenter->fg_luma[1]);
     framegenCopy(presenter, commands, shown, presenter->fg_cur);
     if (!presenter->fg_history) framegenCopy(presenter, commands, shown, presenter->fg_prev);
+    framegenFlow(presenter, commands, !presenter->fg_history);
     presenter->fg_history = true;
     presenter->fg_aspect = aspect;
     presenter->fg_present_ns = steadyNs();
@@ -3142,6 +3432,14 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
    interpolation. */
 SDL_GPUTexture *framegenGenerate(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, float t)
 {
+    if (presenter->fg_flow_pipelines[kFlowView] != nullptr) {
+        uint32_t field[2];
+        flowFieldSize(presenter, 0u, field);
+        const float scale = static_cast<float>(flowScale(presenter));
+        flowPass(presenter, commands, kFlowView, presenter->fg_out, {presenter->fg_flow[0]},
+            {{static_cast<int32_t>(field[0]), static_cast<int32_t>(field[1]), 0, 0}, {8.0f * scale, 16.0f * scale, 0.0f, 0.0f}});
+        return presenter->fg_out;
+    }
     if (presenter->fg_blend == nullptr) {
         framegenCopy(presenter, commands, t < 0.5f ? presenter->fg_prev : presenter->fg_cur, presenter->fg_out);
         return presenter->fg_out;
@@ -3404,6 +3702,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     }
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
+    releaseFramegenFlow(presenter);
     for (SDL_GPUGraphicsPipeline *pipeline : presenter->smaa_pipelines) {
         if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
     }
@@ -3655,6 +3954,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     }
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     presenter->fg_blend = nullptr;
+    releaseFramegenFlow(presenter);
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     presenter->gamma_pipeline = nullptr;
     if (presenter->gamma_enabled && !ensureGammaPass(presenter)) presenter->gamma_enabled = false;
@@ -3755,6 +4055,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     created->fg_k = framegenPresents(created);
+    created->fg_flow_view = created->fg_k != 0u && std::strcmp(std::getenv("RECOMP_D3D_FRAMEGEN"), "flow") == 0;
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
             SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
         ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
@@ -4112,6 +4413,53 @@ unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot
     }
     if (download != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, download);
     return read ? presenter->fg_k : 0u;
+}
+
+double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat, unsigned size[2], float *fields,
+    size_t capacity)
+{
+    if (checkOwner(presenter) != RECOMP_D3D_PRESENTER_OK || !presenter->fg_history || presenter->fg_flow[0] == nullptr)
+        return -1.0;
+    uint32_t field[2];
+    flowFieldSize(presenter, 0u, field);
+    size[0] = field[0];
+    size[1] = field[1];
+    const uint32_t bytes = field[0] * field[1] * 8u;  // RGBA16F
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, 2u * bytes, 0};
+    SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    SDL_GPUCommandBuffer *commands = download ? SDL_AcquireGPUCommandBuffer(presenter->device) : nullptr;
+    double ms = -1.0;
+    if (commands != nullptr) {
+        for (unsigned i = 0u; i < repeat; ++i) framegenFlow(presenter, commands, false);
+        if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+            for (unsigned i = 0u; i < 2u; ++i) {
+                const SDL_GPUTextureRegion region{presenter->fg_flow[i], 0u, 0u, 0u, 0u, 0u, field[0], field[1], 1u};
+                const SDL_GPUTextureTransferInfo destination{download, i * bytes, 0u, 0u};
+                SDL_DownloadFromGPUTexture(pass, &region, &destination);
+            }
+            SDL_EndGPUCopyPass(pass);
+        }
+        const int64_t start = steadyNs();
+        if (SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands)) {
+            SDL_WaitForGPUFences(presenter->device, true, &fence, 1u);
+            ms = (steadyNs() - start) / 1e6;
+            SDL_ReleaseGPUFence(presenter->device, fence);
+            const uint16_t *halves = static_cast<const uint16_t *>(SDL_MapGPUTransferBuffer(presenter->device, download, false));
+            if (halves != nullptr) {
+                for (size_t i = 0u; fields != nullptr && capacity >= bytes && i < bytes; ++i) {
+                    const unsigned half = halves[i], exponent = half >> 10 & 31u, mantissa = half & 1023u;
+                    const float value = exponent == 0u ? std::ldexp(static_cast<float>(mantissa), -24)
+                        : exponent == 31u ? INFINITY : std::ldexp(static_cast<float>(mantissa + 1024u), static_cast<int>(exponent) - 25);
+                    fields[i] = half & 0x8000u ? -value : value;
+                }
+                SDL_UnmapGPUTransferBuffer(presenter->device, download);
+            } else {
+                ms = -1.0;
+            }
+        }
+    }
+    if (download != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, download);
+    return ms;
 }
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)

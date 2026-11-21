@@ -3384,6 +3384,212 @@ static bool testFramegenKeepsRealFrames()
     }
     return passed;
 }
+
+/* Frame generation's flow test pictures: three octaves of hashed noise (2, 8
+   and 32 pixel cells), not periodic, defined for any coordinate. */
+static uint32_t flowNoise(int x, int y, uint32_t seed)
+{
+    unsigned sum = 0u;
+    for (int shift = 1; shift <= 5; shift += 2) {
+        uint32_t h = static_cast<uint32_t>(x >> shift) * 73856093u ^ static_cast<uint32_t>(y >> shift) * 19349663u ^
+            (seed + static_cast<uint32_t>(shift)) * 83492791u;
+        h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+        sum += h & 255u;
+    }
+    return 0xff000000u | sum / 3u * 0x010101u;
+}
+
+struct FlowRect { int x0, y0, x1, y1; };
+static bool flowInside(FlowRect a, FlowRect b) { return a.x0 >= b.x0 && a.y0 >= b.y0 && a.x1 <= b.x1 && a.y1 <= b.y1; }
+static bool flowTouches(FlowRect a, FlowRect b) { return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; }
+static FlowRect flowGrow(FlowRect r, int by) { return {r.x0 - by, r.y0 - by, r.x1 + by, r.y1 + by}; }
+static FlowRect flowMove(FlowRect r, int dx, int dy) { return {r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy}; }
+
+// A uniform patch in frame A, so moved in B, and a patch of B replaced by new noise.
+static const FlowRect kFlowUniform{224, 32, 288, 96}, kFlowChanged{32, 144, 96, 208};
+
+static uint32_t flowFrameA(int x, int y)
+{
+    return flowInside({x, y, x + 1, y + 1}, kFlowUniform) ? 0xff808080u : flowNoise(x, y, 1u);
+}
+
+// B is A moved by (dx, dy), except kFlowChanged.
+static uint32_t flowFrameB(int x, int y, int dx, int dy)
+{
+    return flowInside({x, y, x + 1, y + 1}, kFlowChanged) ? flowNoise(x, y, 7u) : flowFrameA(x - dx, y - dy);
+}
+
+/* Checks the fields of A then B moved by (dx, dy), 4 floats per 8x8 block:
+   - blocks at least 16 pixels from the edges and the two patches (in either
+     frame): forward motion within 0.5 pixel of (dx, dy), backward of
+     (-dx, -dy), both with confidence >= 0.75;
+   - blocks that lie 12 pixels inside the uniform patch in both frames, where
+     any motion matches: confidence < 0.5 both ways;
+   - blocks whose content is replaced (backward: the block lies in the changed
+     patch; forward: it lands there): confidence < 0.5. */
+static bool checkFlow(const std::vector<float> &fields, const unsigned size[2], int dx, int dy)
+{
+    const size_t stride = static_cast<size_t>(size[0]) * size[1] * 4u;
+    const FlowRect image{0, 0, 320, 240};
+    unsigned interior = 0u, uniform = 0u, changed = 0u, bad = 0u;
+    float worst_error = 0.0f, lowest = 1.0f, highest_uniform = 0.0f, highest_changed = 0.0f;
+    for (unsigned direction = 0u; direction < 2u; ++direction) {
+        const int sx = direction == 0u ? dx : -dx, sy = direction == 0u ? dy : -dy;
+        for (unsigned by = 0u; by < size[1]; ++by) {
+            for (unsigned bx = 0u; bx < size[0]; ++bx) {
+                const float *v = &fields[direction * stride + (static_cast<size_t>(by) * size[0] + bx) * 4u];
+                const FlowRect block{static_cast<int>(bx) * 8, static_cast<int>(by) * 8,
+                    static_cast<int>(bx) * 8 + 8, static_cast<int>(by) * 8 + 8};
+                const FlowRect landed = flowMove(block, sx, sy);
+                // In frame A's coordinates for the uniform patch, B's for the changed one.
+                const FlowRect in_a = direction == 0u ? block : landed, in_b = direction == 0u ? landed : block;
+                const FlowRect around = flowGrow(block, 16 + (std::max)(std::abs(dx), std::abs(dy)));
+                if (flowInside(around, image) && !flowTouches(around, kFlowUniform) &&
+                    !flowTouches(around, flowMove(kFlowUniform, dx, dy)) && !flowTouches(around, kFlowChanged) &&
+                    !flowTouches(around, flowMove(kFlowChanged, -dx, -dy))) {
+                    ++interior;
+                    const float error = std::hypot(v[0] - sx, v[1] - sy);
+                    worst_error = (std::max)(worst_error, error);
+                    lowest = (std::min)(lowest, v[2]);
+                    if (error > 0.5f || !(v[2] >= 0.75f)) {
+                        if (++bad <= 4u) std::fprintf(stderr, "FAIL flow (%d,%d) %s block %u,%u = (%.2f,%.2f) confidence %.2f\n",
+                            dx, dy, direction ? "backward" : "forward", bx, by, v[0], v[1], v[2]);
+                    }
+                }
+                if (flowInside(flowGrow(in_a, 12), kFlowUniform) &&
+                    flowInside(flowGrow(in_b, 12), flowMove(kFlowUniform, dx, dy))) {
+                    ++uniform;
+                    highest_uniform = (std::max)(highest_uniform, v[2]);
+                    if (!(v[2] < 0.5f) && ++bad <= 8u) std::fprintf(stderr, "FAIL flow (%d,%d) %s uniform block %u,%u confidence %.2f\n",
+                        dx, dy, direction ? "backward" : "forward", bx, by, v[2]);
+                }
+                if (flowInside(in_b, kFlowChanged)) {
+                    ++changed;
+                    highest_changed = (std::max)(highest_changed, v[2]);
+                    if (!(v[2] < 0.5f) && ++bad <= 8u) std::fprintf(stderr, "FAIL flow (%d,%d) %s changed block %u,%u confidence %.2f\n",
+                        dx, dy, direction ? "backward" : "forward", bx, by, v[2]);
+                }
+            }
+        }
+    }
+    std::printf("flow (%d,%d): %u interior blocks, worst error %.3f px, lowest confidence %.2f; "
+        "%u uniform blocks, highest confidence %.2f; %u changed blocks, highest confidence %.2f\n",
+        dx, dy, interior, worst_error, lowest, uniform, highest_uniform, changed, highest_changed);
+    return bad == 0u && interior >= 100u && uniform >= 4u && changed >= 16u;
+}
+
+// Draws picture (320x240 0xAARRGGBB) over the main target and presents it as a real frame.
+static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t> &picture, uint32_t address, uint32_t swap)
+{
+    const uint16_t indices[] = {0,1,2,3};
+    // Legacy pixel centers are integers: texel centers need the half texel.
+    const float quad[4][7] = {{0,0,0,1,0,0.5f,0.5f}, {320,0,0,1,0,320.5f,0.5f},
+        {0,240,0,1,0,0.5f,240.5f}, {320,240,0,1,0,320.5f,240.5f}};
+    RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+    auto &draw = command.data.draw;
+    draw.fvf = 0x144u;
+    draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+    draw.index_count = draw.vertex_count = 4;
+    draw.triangle_count = 2;
+    draw.vertex_stride = sizeof quad[0];
+    draw.vertex_bytes = quad;
+    draw.index_bytes = indices;
+    draw.blend.color_write_mask = 15;
+    draw.has_texture = true;
+    draw.texture.format_byte = 0x12u;
+    draw.texture.bits_per_pixel = 32;
+    draw.texture.width = 320; draw.texture.height = 240; draw.texture.pitch = 1280;
+    draw.texture.linear = true;
+    draw.texture.data = address;
+    draw.texture_bytes = picture.data();
+    draw.texture_byte_count = static_cast<uint32_t>(picture.size() * 4u);
+    draw.point_min_filter = draw.point_mag_filter = true;
+    draw.address_u = draw.address_v = 3;
+    draw.directional.stage_mode = true;
+    draw.directional.stage[0] = draw.directional.stage[3] = 1;
+    RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    present.data.present = {5u, swap};
+    return expect("flow picture", d3d_backend_submit(presenter, &command)) &&
+        expect("flow present", d3d_backend_submit(presenter, &present));
+}
+
+/* Block matching finds a known motion: B is A moved by 3,-2 (less than a
+   block) and by 13,9 (beyond the finest level's search radius of 2, so only
+   the pyramid finds it). Engages only where frame generation does. */
+static bool testFramegenFlow()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen flow", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    std::vector<uint32_t> a(320u * 240u), b(a.size());
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+    const int shifts[2][2] = {{3, -2}, {13, 9}};
+    uint32_t swap = 0u;
+    for (unsigned i = 0u; i < 2u && passed; ++i) {
+        const int dx = shifts[i][0], dy = shifts[i][1];
+        for (int y = 0; y < 240; ++y)
+            for (int x = 0; x < 320; ++x) b[static_cast<size_t>(y) * 320u + x] = flowFrameB(x, y, dx, dy);
+        passed &= flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x200000u + i * 0x100000u, ++swap);
+        unsigned size[2]{};
+        std::vector<float> fields(2u * 64u * 64u * 4u);
+        uint32_t probe[3]{};
+        if (passed && d3d_backend_framegen_flow(presenter, 0u, size, fields.data(), fields.size()) >= 0.0 &&
+            d3d_backend_framegen_probe(presenter, 0u, probe) != 0u) {
+            engaged = true;
+            // The history must hold the pictures' colors exactly (alpha is the vertex color's).
+            if (((probe[0] ^ a[120u * 320u + 160u]) | (probe[1] ^ b[120u * 320u + 160u])) & 0xffffffu) {
+                std::fprintf(stderr, "FAIL flow history %08x %08x, drew %08x %08x\n",
+                    probe[0], probe[1], a[120u * 320u + 160u], b[120u * 320u + 160u]);
+                passed = false;
+            }
+            passed = passed && size[0] == 40u && size[1] == 30u && checkFlow(fields, size, dx, dy);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's flow finds known motion and doubts what it cannot match\n"
+            : "SKIP frame generation's flow, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+/* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
+   from the fence wait of 200 extra flow runs less that of none. */
+static void benchFramegenFlow()
+{
+    if (!std::getenv("RECOMP_FRAMEGEN_FLOW_BENCH")) return;
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "1");
+    const RecompD3dPresenterConfig wide = {640u, 480u, config.color_format, config.depth_format};
+    for (const float scale : {1.0f, 1.5f, 4.5f}) {
+        RecompD3dPresenter *presenter = nullptr;
+        if (d3d_backend_create(&wide, &presenter) == RECOMP_D3D_PRESENTER_OK) {
+            d3d_backend_set_quality(scale, 1u, false);
+            for (uint32_t swap = 1u; swap <= 3u; ++swap) {
+                auto clear = clearCommand();
+                RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+                present.data.present = {5u, swap};
+                d3d_backend_submit(presenter, &clear);
+                d3d_backend_submit(presenter, &present);
+            }
+            unsigned size[2]{};
+            double none = 1e9, runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_flow(presenter, 0u, size, nullptr, 0u));
+                runs = (std::min)(runs, d3d_backend_framegen_flow(presenter, 200u, size, nullptr, 0u));
+            }
+            std::printf("flow bench scale %.1f: %ux%u blocks, %.4f ms per run (fence %.3f ms for none, %.3f for 200)\n",
+                scale, size[0], size[1], (runs - none) / 200.0, none, runs);
+        }
+        d3d_backend_destroy(&presenter);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+}
 #endif
 
 int main()
@@ -3429,7 +3635,8 @@ int main()
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
-    if (!testFramegenKeepsRealFrames()) return 1;
+    if (!testFramegenKeepsRealFrames() || !testFramegenFlow()) return 1;
+    benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");
     return 0;
