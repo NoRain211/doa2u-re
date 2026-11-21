@@ -168,16 +168,23 @@ that shortcut.
   frame, so the picture is up to one guest frame later. The presenter
   estimates the motion between the last two real frames by block matching and
   moves both along it into each generated frame. Where the motion is doubtful
-  (flat or noisy areas such as water, repeating patterns, scene cuts, the
-  edges of moving objects), it blends toward a crossfade of the two, so moving
-  objects ghost there. The game's 2D layer (life bars, timer, names, menus and
-  logos, but not fades or backdrops that span the screen's width) does not
-  move: it shows the nearer real frame, and the scene is not warped from it.
+  (flat or noisy areas such as water, repeating patterns, the edges of moving
+  objects), it blends toward a crossfade of the two, so moving objects ghost
+  there. The game's 2D layer (life bars, timer, names, menus and logos, but
+  not fades or backdrops that span the screen's width) does not move: it
+  shows the nearer real frame, and the scene is not warped from it. At a
+  scene cut, where most of the picture's shapes change between the two real
+  frames, the generated frames show the older real frame, so the cut lands
+  with the newer one as at 60 Hz; fades and flashes keep the shapes and
+  crossfade, and a very fast camera move can be taken for one cut. After frame generation was off, a quality change, or a real
+  frame more than 1.5 guest frames late (a load), the generated frames start
+  again from the newer real frame.
   `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead, as color per search
   block: hue is the direction, brightness the speed, dark blocks have low
-  confidence, and the 2D layer is whitened. The presenter worker presents
-  each one when it is due, also between the draws of the next real frame, and
-  skips one it would show late; real frames are never delayed. Any other
+  confidence, the 2D layer is whitened, and all of it turns red at a cut.
+  The presenter worker presents each one when it is due, also between the
+  draws of the next real frame, and skips one it would show late; real
+  frames are never delayed. Any other
   refresh, and macOS and Linux, log `framegen unsupported` and run as before.
   It is off while the window is hidden or minimized, in an unpaced or
   fast-forwarded run and under the frame clock (netplay and synctest). With

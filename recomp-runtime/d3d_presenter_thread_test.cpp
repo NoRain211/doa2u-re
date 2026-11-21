@@ -2,6 +2,7 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_card_model.h"
 #include "d3d_draw_model.h"
+#include "xapi_time_adapter.h"
 
 /* Both Windows presenters, Direct3D 11 and Vulkan, run on their own window
    thread; SDL_GPU on macOS and Linux runs inline on the caller's. */
@@ -3575,8 +3576,8 @@ static double flowSampleA(double x, double y)
 /* Generated frames follow known motion: at t = 1/4 and 1/2 between A and B =
    A moved by 3,-2 and by 13,9, pixels away from the edges and the two patches
    must show A moved by t of it, much closer than the crossfade does. Between
-   A and unrelated noise (a cut), where the flow has no confidence, every pixel
-   must be the crossfade. Engages only where frame generation does. */
+   A and unrelated noise (a cut), every pixel must be A, so the cut lands with
+   the real frame. Engages only where frame generation does. */
 static bool testFramegenWarp()
 {
     _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
@@ -3611,7 +3612,7 @@ static bool testFramegenWarp()
                     const double got = out[at] & 255u, from = a[at] & 255u, to = b[at] & 255u;
                     const double crossfade = from + (to - from) * t;
                     if (cut) {
-                        off += std::fabs(got - crossfade) > 2.0;
+                        off += std::fabs(got - from) > 1.0;
                         continue;
                     }
                     const FlowRect around = flowGrow({x, y, x + 1, y + 1}, 16 + (std::max)(std::abs(dx), std::abs(dy)));
@@ -3626,7 +3627,7 @@ static bool testFramegenWarp()
                 }
             }
             if (cut) {
-                std::printf("warp cut t=%.2f: %u pixels differ from the crossfade by more than 2\n", t, off);
+                std::printf("warp cut t=%.2f: %u pixels differ from the earlier real frame by more than 1\n", t, off);
                 passed = passed && off == 0u;
             } else {
                 const double warp = warp_sum / count, crossfade = cross_sum / count;
@@ -3640,7 +3641,7 @@ static bool testFramegenWarp()
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     if (passed) {
-        std::printf(engaged ? "PASS frame generation's warp follows known motion and crossfades a cut\n"
+        std::printf(engaged ? "PASS frame generation's warp follows known motion and holds the earlier frame at a cut\n"
             : "SKIP frame generation's warp, see the framegen unsupported line\n");
     }
     return passed;
@@ -3881,6 +3882,109 @@ static bool testFramegenHud()
     return passed;
 }
 
+static bool fastForwardOn() { return true; }
+
+/* Generated frames never mix real frames that do not belong together. A fade
+   (A a quarter darker) and a white flash (A three quarters white) are not
+   cuts: their generated frames are the crossfade, not A. After frame
+   generation was off (fast-forward, or the frame clock of netplay and
+   rollback), after a real frame came late (a load), and after a quality
+   change, the next real frame C starts again: its generated frames are C,
+   with nothing of A. Engages only where frame generation does. */
+static bool testFramegenCuts()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen cuts", d3d_backend_create(&config, &presenter));
+    std::vector<uint32_t> a(320u * 240u), faded(a.size()), flash(a.size()), c(a.size()), out(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = flowFrameA(x, y);
+            const uint32_t gray = a[at] & 255u;
+            faded[at] = 0xff000000u | gray * 3u / 4u * 0x010101u;
+            flash[at] = 0xff000000u | (gray / 4u + 191u) * 0x010101u;
+            c[at] = flowNoise(x, y, 11u);
+        }
+    }
+    unsigned size[2]{};
+    const auto generate = [&](float t) {
+        return d3d_backend_framegen_generate(presenter, t, 1u, size, out.data(), out.size()) >= 0.0 &&
+            size[0] == 320u && size[1] == 240u;
+    };
+    uint32_t swap = 0u;
+    bool engaged = false;
+    const std::vector<uint32_t> *changes[2] = {&faded, &flash};
+    // A real frame over 25 ms late starts the history again; this one takes the first present's shader work.
+    passed = passed && flowFrame(presenter, a, 0x100000u, ++swap);
+    for (unsigned i = 0u; i < 2u && passed; ++i) {
+        const std::vector<uint32_t> &b = *changes[i];
+        passed = flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x200000u + i * 0x100000u, ++swap);
+        for (const double t : {0.25, 0.5}) {
+            if (!passed || !generate(static_cast<float>(t))) break;
+            engaged = true;
+            unsigned off = 0u;
+            for (size_t at = 0u; at < a.size(); ++at) {
+                const double from = a[at] & 255u, to = b[at] & 255u;
+                off += std::fabs((out[at] & 255u) - (from + (to - from) * t)) > 2.0;
+            }
+            std::printf("framegen %s t=%.2f: %u pixels off the crossfade by more than 2\n", i ? "flash" : "fade", t, off);
+            passed = off <= a.size() / 100u;
+            if (!passed) std::fprintf(stderr, "FAIL framegen %s is taken for a cut\n", i ? "flash" : "fade");
+        }
+    }
+    /* A camera move of 48 pixels a real frame, beyond the cut test's reach:
+       the first such pair is held like a cut, the next one is not. */
+    std::vector<uint32_t> moved[2] = {a, a};
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            for (int step = 0; step < 2; ++step)
+                moved[step][static_cast<size_t>(y) * 320u + x] = flowFrameA(x - 48 * (step + 1), y);
+        }
+    }
+    passed = passed && flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, moved[0], 0x400000u, ++swap) &&
+        flowFrame(presenter, moved[1], 0x500000u, ++swap) && generate(0.5f);
+    if (passed && engaged) {
+        unsigned held = 0u;
+        for (size_t at = 0u; at < a.size(); ++at)
+            held += std::abs(static_cast<int>(out[at] & 255u) - static_cast<int>(moved[0][at] & 255u)) <= 1;
+        std::printf("framegen second fast pair: %u of %zu pixels equal the earlier real frame\n", held, a.size());
+        passed = held < a.size() / 2u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen takes a fast camera move for a cut twice in a row\n");
+    }
+    const char *const restarts[4] = {"fast-forward", "frame clock", "late frame", "quality change"};
+    for (unsigned way = 0u; way < 4u && passed && engaged; ++way) {
+        passed = flowFrame(presenter, a, 0x100000u, ++swap);
+        if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
+        if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
+        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false);  // applied after the next real frame
+        if (way == 2u) std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
+        recomp_xapi_fast_forward = nullptr;
+        recomp_xapi_frame_clock_set_enabled(false);
+        passed = passed && flowFrame(presenter, c, 0x400000u, ++swap) && generate(0.25f);
+        unsigned off = 0u;
+        // Away from the edges, which MSAA blends with the clear.
+        for (int y = 2; y < 238 && passed; ++y) {
+            for (int x = 2; x < 318; ++x) {
+                const size_t at = static_cast<size_t>(y) * 320u + x;
+                off += std::abs(static_cast<int>(out[at] & 255u) - static_cast<int>(c[at] & 255u)) > 2;
+            }
+        }
+        std::printf("framegen after a %s: %u pixels of the first generated frame off the new real frame\n", restarts[way], off);
+        passed = passed && off == 0u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen mixes real frames across a %s\n", restarts[way]);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation takes no fade or flash for a cut and starts again after a break\n"
+            : "SKIP frame generation's cuts, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
    from the fence wait of 200 extra flow runs less that of none. */
 static void benchFramegenFlow()
@@ -3984,7 +4088,7 @@ int main()
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
     if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
-        !testFramegenWarpEdges() || !testFramegenHud()) return 1;
+        !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");

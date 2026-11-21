@@ -301,8 +301,9 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *fg_luma[2][kFlowLevels]{}, *fg_search[2][kFlowLevels]{}, *fg_flow[2]{};
     SDL_GPUTexture *fg_motion = nullptr;  // kFlowSelect: what each finest-level pixel warps along
     SDL_GPUTexture *fg_cover[2]{};        // framegenCover: N-1's and N's HUD mask
+    SDL_GPUTexture *fg_cut_blocks = nullptr, *fg_cut[2]{};  // kFlowCutBlocks; kFlowCut (1x1) of N, of N-1
     bool fg_cover_failed = false;
-    SDL_GPUGraphicsPipeline *fg_flow_pipelines[7]{};  // FlowPipeline
+    SDL_GPUGraphicsPipeline *fg_flow_pipelines[9]{};  // FlowPipeline
     bool fg_flow_failed = false;
     bool fg_flow_view = false;  // RECOMP_D3D_FRAMEGEN=flow
     bool copy_mips = false;
@@ -3173,7 +3174,9 @@ void framegenCopy(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
    Every pass draws one fullscreen triangle (vs_main of kFramegenBlendShader)
    and reads its inputs with Load, the warp's pictures with SampleLevel;
    Flow.info and Flow.weights vary by pass. */
-enum FlowPipeline { kFlowLuma, kFlowCoarse, kFlowSearch, kFlowConfidence, kFlowSelect, kFlowWarp, kFlowView };
+enum FlowPipeline {
+    kFlowLuma, kFlowCoarse, kFlowSearch, kFlowConfidence, kFlowCutBlocks, kFlowCut, kFlowSelect, kFlowWarp, kFlowView
+};
 
 constexpr int kFlowCoarseRadius = 4, kFlowRadius = 2;  // search window, in pixels of the level
 
@@ -3258,6 +3261,54 @@ const char kFlowConfidenceShader[] =
     " float distinct = saturate(own.w / 0.02);\n"                     // 0 in a flat window
     " return float4(own.xy * weights.x, consistent * matched * distinct * scene / 16, own.z); }\n";
 
+/* Cut detection, per 8x8 block of the coarsest luminance level: the best
+   normalized correlation of N-1's block with N within 4 pixels. A fade or a
+   flash scales and offsets the luminance, which correlation ignores, so they
+   still match; the flow's absolute differences do not. A block votes as much
+   as neither HUD mask covers it, and not at all where either frame is flat
+   there (a solid fade or flash tells nothing). Out: x = vote, y = vote if it
+   matched, z = the best correlation. info.xy = level size, weights.y = main
+   target pixels per block, weights.zw = 1 / main target size. */
+const char kFlowCutBlocksShader[] =
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " int2 block = int2(p.xy), origin = block * 8, last = info.xy - 1;\n"
+    " float own[64], mean = 0, spread = 0, best = -1, here = 0, scene = 0;\n"
+    " [unroll] for (int i = 0; i < 64; ++i) {\n"
+    "  own[i] = previous.Load(int3(min(origin + int2(i & 7, i >> 3), last), 0)).r;\n"
+    "  mean += own[i] / 64; }\n"
+    " [unroll] for (int j = 0; j < 64; ++j) { own[j] -= mean; spread += own[j] * own[j]; }\n"
+    " [loop] for (int y = -4; y <= 4; ++y) [loop] for (int x = -4; x <= 4; ++x) {\n"
+    "  float sum = 0, square = 0, cross = 0;\n"
+    "  [unroll] for (int i = 0; i < 64; ++i) {\n"
+    "   float b = current.Load(int3(clamp(origin + int2(x, y) + int2(i & 7, i >> 3), 0, last), 0)).r - mean;\n"
+    "   sum += b; square += b * b; cross += own[i] * b; }\n"
+    "  float variance = max(square - sum * sum / 64, 0);\n"
+    "  if (x == 0 && y == 0) here = variance;\n"
+    "  best = max(best, cross * rsqrt(max(spread * variance, 1e-12))); }\n"
+    " [unroll] for (int k = 0; k < 16; ++k) {\n"
+    "  float2 at = (block + (float2(k & 3, k >> 2) + 0.5) / 4) * weights.y * weights.zw;\n"
+    "  scene += min(previous_cover.SampleLevel(previous_cover_sampler, at, 0).r,\n"
+    "   current_cover.SampleLevel(current_cover_sampler, at, 0).r) / 16; }\n"
+    " float vote = min(spread, here) > 64 * 0.01 * 0.01 ? scene : 0;\n"  // flat: deviation under 1%
+    " return float4(vote, best >= 0.7 ? vote : 0, best, 0); }\n";
+
+/* Whether real frames N-1 and N are a cut: at least a quarter of the blocks
+   voted (kFlowCutBlocksShader), under 30% of the votes matched, and the pair
+   before (earlier, its w) matched. Fast camera moves and close-up fights
+   beyond the search's reach also fail to match, but for several pairs in a
+   row; a cut is one pair between steady ones. Out, one texel: x = 1 at a
+   cut, y = the share that voted, z = the share of votes that matched,
+   w = 1 when under half matched. info.xy = block count. */
+const char kFlowCutShader[] =
+    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " float2 sum = 0;\n"
+    " [loop] for (int y = 0; y < info.y; ++y) [loop] for (int x = 0; x < info.x; ++x)\n"
+    "  sum += blocks.Load(int3(x, y, 0)).xy;\n"
+    " float voted = sum.x / (info.x * info.y), matched = sum.y / max(sum.x, 1e-4);\n"
+    " bool unsteady = earlier.Load(int3(0, 0, 0)).w > 0.5;\n"
+    " return float4(voted >= 0.25 && matched < 0.3 && !unsteady ? 1 : 0, voted, matched,\n"
+    "  voted >= 0.25 && matched < 0.5 ? 1 : 0); }\n";
+
 /* The motion each finest-level pixel of the picture t of the way from N-1 to
    N follows: zero, or the forward or reversed backward vector of one of the
    2x2 blocks nearest it, whichever brings 3x3 luminance patches of N-1 (back
@@ -3318,12 +3369,14 @@ const char kFlowSelectShader[] =
    reads any of it in its own frame gives way to the other frame's, or with
    neither, to the crossfade. The mask sampled bilinearly where a picture is
    sampled is one less the share of 2D layer in that sample, so a steep
-   threshold leaves under 1/256 of it. info.xy = finest level size,
-   weights.x = t, weights.y = main target pixels per finest-level pixel,
-   weights.zw = 1 / main target size. */
+   threshold leaves under 1/256 of it. At a cut (kFlowCutShader) the picture
+   is N-1 with its HUD, so the cut lands with real frame N, as the game shows
+   it. info.xy = finest level size, weights.x = t, weights.y = main target
+   pixels per finest-level pixel, weights.zw = 1 / main target size. */
 const char kFlowWarpShader[] =
     "float covered(float scene, float steep) { return saturate(steep - steep * scene); }\n"
     "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
+    " if (cut.Load(int3(0, 0, 0)).r > 0.5) return previous.Load(int3(p.xy, 0));\n"
     " float t = weights.x;\n"
     " float4 m = motion.SampleLevel(motion_sampler, p.xy / weights.y / float2(info.xy), 0);\n"
     " m.xy /= max(m.z, 1e-3);\n"
@@ -3342,15 +3395,17 @@ const char kFlowWarpShader[] =
 
 /* RECOMP_D3D_FRAMEGEN=flow: a field as color, hue = direction, brightness =
    motion up to weights.y main target pixels, dark = low confidence, and the
-   HUD mask of N whitened. weights.x = main target pixels per block,
-   weights.zw = 1 / main target size, info.xy = field size. */
+   HUD mask of N whitened, all of it tinted red at a cut. weights.x = main
+   target pixels per block, weights.zw = 1 / main target size, info.xy = field
+   size. */
 const char kFlowViewShader[] =
     "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
     " float4 flow = field.Load(int3(min(int2(p.xy / weights.x), info.xy - 1), 0));\n"
     " float3 hue = saturate(abs(frac(atan2(flow.y, flow.x) / 6.2831853 + float3(1, 2.0 / 3, 1.0 / 3)) * 6 - 3) - 1);\n"
     " float magnitude = saturate(length(flow.xy) / weights.y);\n"
     " float3 shown = lerp((0.15).xxx, hue, magnitude) * lerp(0.1, 1, flow.z);\n"
-    " return float4(lerp(shown, (1).xxx, 0.6 - 0.6 * cover.SampleLevel(cover_sampler, p.xy * weights.zw, 0).r), 1); }\n";
+    " shown = lerp(shown, (1).xxx, 0.6 - 0.6 * cover.SampleLevel(cover_sampler, p.xy * weights.zw, 0).r);\n"
+    " return float4(lerp(shown, float3(1, 0, 0), 0.5 * cut.Load(int3(0, 0, 0)).r), 1); }\n";
 
 struct FlowUniforms {
     int32_t info[4];
@@ -3394,11 +3449,10 @@ void releaseFramegenFlow(RecompD3dPresenter *presenter)
         if (presenter->fg_flow[i] != nullptr) SDL_ReleaseGPUTexture(presenter->device, presenter->fg_flow[i]);
         presenter->fg_flow[i] = nullptr;
     }
-    if (presenter->fg_motion != nullptr) SDL_ReleaseGPUTexture(presenter->device, presenter->fg_motion);
-    presenter->fg_motion = nullptr;
-    for (SDL_GPUTexture *&cover : presenter->fg_cover) {
-        if (cover != nullptr) SDL_ReleaseGPUTexture(presenter->device, cover);
-        cover = nullptr;
+    for (SDL_GPUTexture **texture : {&presenter->fg_motion, &presenter->fg_cut_blocks, &presenter->fg_cut[0],
+            &presenter->fg_cut[1], &presenter->fg_cover[0], &presenter->fg_cover[1]}) {
+        if (*texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, *texture);
+        *texture = nullptr;
     }
     for (SDL_GPUGraphicsPipeline *&pipeline : presenter->fg_flow_pipelines) {
         if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
@@ -3447,6 +3501,17 @@ void createFramegenFlow(RecompD3dPresenter *presenter)
             }
             created &= presenter->fg_luma[i][level] != nullptr && presenter->fg_search[i][level] != nullptr;
         }
+        if (level + 1u == kFlowLevels) {
+            presenter->fg_cut_blocks = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+                SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+                field[0], field[1]);
+            created &= presenter->fg_cut_blocks != nullptr;
+            for (SDL_GPUTexture *&cut : presenter->fg_cut) {
+                cut = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+                    SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, 1u, 1u);
+                created &= cut != nullptr;
+            }
+        }
         if (level == 0u) {
             presenter->fg_motion = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
                 SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, size[0], size[1]);
@@ -3467,15 +3532,20 @@ void createFramegenFlow(RecompD3dPresenter *presenter)
             SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
         pipelines[kFlowConfidence] = flowPipeline(presenter, vertex,
             flowShader({"field", "other", "cover"}, kFlowConfidenceShader), {}, 3u, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+        pipelines[kFlowCutBlocks] = flowPipeline(presenter, vertex,
+            flowShader({"previous", "current", "previous_cover", "current_cover"}, kFlowCutBlocksShader), {}, 4u,
+            SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+        pipelines[kFlowCut] = flowPipeline(presenter, vertex, flowShader({"blocks", "earlier"}, kFlowCutShader), {}, 2u,
+            SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
         pipelines[kFlowSelect] = flowPipeline(presenter, vertex,
             flowShader({"previous", "current", "forward", "backward"}, kFlowSelectShader), {}, 4u,
             SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
         pipelines[kFlowWarp] = flowPipeline(presenter, vertex,
-            flowShader({"previous", "current", "motion", "previous_cover", "current_cover"}, kFlowWarpShader), {}, 5u,
+            flowShader({"previous", "current", "motion", "previous_cover", "current_cover", "cut"}, kFlowWarpShader), {}, 6u,
             SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
         if (presenter->fg_flow_view) {
-            pipelines[kFlowView] = flowPipeline(presenter, vertex, flowShader({"field", "cover"}, kFlowViewShader), {}, 2u,
-                SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+            pipelines[kFlowView] = flowPipeline(presenter, vertex, flowShader({"field", "cover", "cut"}, kFlowViewShader),
+                {}, 3u, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
         }
         for (unsigned i = kFlowLuma; i <= (presenter->fg_flow_view ? kFlowView : kFlowWarp); ++i)
             created &= pipelines[i] != nullptr;
@@ -3489,6 +3559,8 @@ void createFramegenFlow(RecompD3dPresenter *presenter)
         releaseFramegenFlow(presenter);
         return;
     }
+    const SDL_FColor steady{0.0f, 0.0f, 0.0f, 0.0f};
+    for (SDL_GPUTexture *cut : presenter->fg_cut) clearTexture(presenter, cut, &steady, nullptr, nullptr, nullptr);
     if (presenter->fg_cover_failed) return;
     for (SDL_GPUTexture *&cover : presenter->fg_cover) {
         cover = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_R8_UNORM,
@@ -3524,7 +3596,7 @@ void flowPass(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, Flo
     info.store_op = SDL_GPU_STOREOP_STORE;
     if (SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &info, 1, nullptr)) {
         SDL_BindGPUGraphicsPipeline(pass, presenter->fg_flow_pipelines[pipeline]);
-        SDL_GPUTextureSamplerBinding bindings[5]{};
+        SDL_GPUTextureSamplerBinding bindings[6]{};
         uint32_t count = 0u;
         for (SDL_GPUTexture *input : inputs) bindings[count++] = {input, sampler ? sampler : presenter->point_sampler};
         SDL_BindGPUFragmentSamplers(pass, 0u, bindings, count);
@@ -3532,6 +3604,24 @@ void flowPass(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, Flo
         SDL_DrawGPUPrimitives(pass, 3u, 1u, 0u, 0u);
         SDL_EndGPURenderPass(pass);
     }
+}
+
+/* Whether real frames N-1 and N are a cut, in fg_cut[0] (the pair before in
+   fg_cut[1]), from both frames' coarsest luminance level and HUD masks. Read
+   only by the generated frames' shaders, so the worker never waits for it. */
+void framegenCut(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands)
+{
+    uint32_t coarsest[2], blocks[2];
+    flowLevelSize(presenter, kFlowLevels - 1u, coarsest);
+    flowFieldSize(presenter, kFlowLevels - 1u, blocks);
+    flowPass(presenter, commands, kFlowCutBlocks, presenter->fg_cut_blocks,
+        {presenter->fg_luma[0][kFlowLevels - 1u], presenter->fg_luma[1][kFlowLevels - 1u], framegenCoverOf(presenter, 0u),
+            framegenCoverOf(presenter, 1u)},
+        {{static_cast<int32_t>(coarsest[0]), static_cast<int32_t>(coarsest[1]), 0, 0},
+            {0.0f, 64.0f * flowScale(presenter), 1.0f / mainWidth(presenter), 1.0f / mainHeight(presenter)}});
+    std::swap(presenter->fg_cut[0], presenter->fg_cut[1]);
+    flowPass(presenter, commands, kFlowCut, presenter->fg_cut[0], {presenter->fg_cut_blocks, presenter->fg_cut[1]},
+        {{static_cast<int32_t>(blocks[0]), static_cast<int32_t>(blocks[1]), 0, 0}, {}});
 }
 
 /* The forward (N-1 to N) and backward (N to N-1) fields in fg_flow, from
@@ -3578,6 +3668,7 @@ void framegenFlow(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
             {presenter->fg_search[direction][0], presenter->fg_search[1u - direction][0], framegenCoverOf(presenter, direction)},
             uniforms);
     }
+    framegenCut(presenter, commands);
 }
 
 /* The HUD mask of real frame N in fg_cover[1], N-1's kept in fg_cover[0]:
@@ -3594,13 +3685,17 @@ void framegenCover(RecompD3dPresenter *presenter)
 }
 
 /* Keeps real frame N's picture before gamma in fg_cur and N-1's in fg_prev,
-   and starts N's slots. False while frame generation is off. */
+   and starts N's slots. False while frame generation is off. N starts the
+   history again, so no generated frame mixes it with N-1, after frame
+   generation was off, a quality change (which releases the history), a
+   change of aspect, or a stall of more than 1.5 guest frames (a load). */
 bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown, float aspect)
 {
     if (presenter->fg_history && presenter->fg_next_slot < presenter->fg_k) {
         presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
         ++presenter->fg_unshown;
     }
+    if (steadyNs() - presenter->fg_present_ns > 25000000 || aspect != presenter->fg_aspect) presenter->fg_history = false;
     if (!framegenActive(presenter)) {
         presenter->fg_history = false;
         return false;
@@ -3644,7 +3739,8 @@ SDL_GPUTexture *framegenGenerate(RecompD3dPresenter *presenter, SDL_GPUCommandBu
     flowFieldSize(presenter, 0u, field);
     const float scale = static_cast<float>(flowScale(presenter));
     if (presenter->fg_flow_pipelines[kFlowView] != nullptr) {
-        flowPass(presenter, commands, kFlowView, presenter->fg_out, {presenter->fg_flow[0], framegenCoverOf(presenter, 1u)},
+        flowPass(presenter, commands, kFlowView, presenter->fg_out,
+            {presenter->fg_flow[0], framegenCoverOf(presenter, 1u), presenter->fg_cut[0]},
             {{static_cast<int32_t>(field[0]), static_cast<int32_t>(field[1]), 0, 0},
                 {8.0f * scale, 16.0f * scale, 1.0f / mainWidth(presenter), 1.0f / mainHeight(presenter)}});
         return presenter->fg_out;
@@ -3659,7 +3755,7 @@ SDL_GPUTexture *framegenGenerate(RecompD3dPresenter *presenter, SDL_GPUCommandBu
             presenter->filter_sampler);
         flowPass(presenter, commands, kFlowWarp, presenter->fg_out,
             {presenter->fg_prev, presenter->fg_cur, presenter->fg_motion, framegenCoverOf(presenter, 0u),
-                framegenCoverOf(presenter, 1u)},
+                framegenCoverOf(presenter, 1u), presenter->fg_cut[0]},
             {{static_cast<int32_t>(size[0]), static_cast<int32_t>(size[1]), 0, 0},
                 {t, scale, 1.0f / mainWidth(presenter), 1.0f / mainHeight(presenter)}},
             presenter->filter_sampler);
