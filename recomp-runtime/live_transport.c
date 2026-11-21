@@ -1055,6 +1055,116 @@ void recomp_live_transport_session_end(void)
     clear_log();
 }
 
+/* --- what the game may receive ---
+
+   The game's receive loop (online_receive_datagrams, 0x2a4b90) trusts its
+   peers as Xbox Live's signed consoles were trusted: no handler is told the
+   datagram's length, counts and string lengths come from the datagram, and
+   type 15 calls through a table indexed by it. So only datagrams shaped as the
+   game's own senders build them reach it. Offsets are from the datagram's
+   start; byte 2 is the type and the body starts at 3. */
+enum {
+    GAME_RECV_BYTES = 0x329,  /* the game's recvfrom buffer */
+    GAME_PLAYERS = 8,         /* g_session_players' slots */
+    GAME_PLAYER_BYTES = 0x5e, /* one slot: XNADDR, XUID, name, wide name */
+    GAME_MSG0F_HANDLERS = 12, /* g_online_msg0f_handlers (0x7bfacc) */
+};
+
+/* A NUL within bytes [at, at + size): lstrcpyA copies until one. */
+static bool game_text_ends(const uint8_t *datagram, size_t at, size_t size)
+{
+    return memchr(datagram + at, 0, size) != NULL;
+}
+
+/* A wide NUL within units [at, at + 2 * units): lstrcpyW copies until one. */
+static bool game_wide_ends(const uint8_t *datagram, size_t at, size_t units)
+{
+    for (size_t i = 0u; i < units; ++i)
+        if (datagram[at + 2u * i] == 0u && datagram[at + 2u * i + 1u] == 0u) return true;
+    return false;
+}
+
+/* A player list: a count byte at count_at, then that many slots from
+   players_at to the datagram's end. session_load_player_list copies count
+   slots into the 8 of g_session_players, and recent_player_add copies each
+   slot's names unbounded. */
+static bool game_players_ok(const uint8_t *datagram, size_t size, size_t count_at, size_t players_at)
+{
+    if (size < players_at) return false;
+    const size_t count = datagram[count_at];
+    if (count > GAME_PLAYERS || size != players_at + count * GAME_PLAYER_BYTES) return false;
+    for (size_t i = 0u; i < count; ++i) {
+        const size_t slot = players_at + i * GAME_PLAYER_BYTES;
+        if (!game_text_ends(datagram, slot + 0x2cu, 16u) || !game_wide_ends(datagram, slot + 0x3cu, 16u))
+            return false;
+    }
+    return true;
+}
+
+static uint16_t game_u16(const uint8_t *at) { return (uint16_t)(at[0] | at[1] << 8); }
+static uint32_t game_u32(const uint8_t *at) { return (uint32_t)game_u16(at) | (uint32_t)game_u16(at + 2u) << 16; }
+
+bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
+{
+    if (datagram == NULL || size < 3u || size > GAME_RECV_BYTES) return false;
+    switch (datagram[2]) {
+    case 0u: /* a join (online_session_join): name, wide name, XUID */
+    case 1u:
+        return size == 0x3cu && game_text_ends(datagram, 3u, 16u) && game_wide_ends(datagram, 0x13u, 16u);
+    case 2u: /* the joined session: its settings record (type 14's), then the players */
+        return size >= 0x39u && game_wide_ends(datagram, 3u, 17u) && game_players_ok(datagram, size, 0x34u, 0x39u);
+    case 3u: case 5u: case 11u: case 17u: /* no body */
+        return size == 3u;
+    case 6u: /* a XUID */
+        return size == 11u;
+    case 7u: /* a count, then that many 10-byte records */
+        return size >= 4u && size == 4u + datagram[3] * 10u;
+    case 8u:
+        return size == 20u;
+    case 9u: { /* lockstep: id, batch, then batch_frames 20-byte pads */
+        if (size < 0xfu + 20u || (size - 0xfu) % 20u != 0u || (size - 0xfu) / 20u > 4u) return false;
+        /* The batch that starts lockstep carries the frames per batch and the
+           delay, which online_lockstep_receive takes as they come and copies
+           frames * 20 bytes into an 84-byte local. The host clamps them to
+           1-4 and 2-7 (0x293a90, 0x293a60). */
+        if (game_u32(datagram + 3u + 8u) != 0xffffffffu) return true;
+        const uint8_t frames = datagram[3u + 0x10u], delay = datagram[3u + 0x11u];
+        return frames >= 1u && frames <= 4u && delay >= 2u && delay <= 7u;
+    }
+    case 10u: /* the player list */
+        return game_players_ok(datagram, size, 3u, 8u);
+    case 12u: /* the session key, then the player list */
+        return game_players_ok(datagram, size, 0x1bu, 0x20u);
+    case 13u: /* a slot, which the game checks */
+        return size == 4u;
+    case 14u: /* the settings record: its wide name is lstrcpyW'd into 17 units */
+        return size == 0x34u && game_wide_ends(datagram, 3u, 17u);
+    case 15u: { /* a handler index, ..., the payload's length at 0x13, the payload */
+        if (size < 0x15u) return false;
+        const uint32_t handler = game_u32(datagram + 3u);
+        const uint16_t payload = game_u16(datagram + 0x13u);
+        if (handler >= GAME_MSG0F_HANDLERS || size != 0x15u + payload) return false;
+        if (handler <= 3u) return payload == 0x14u; /* character select */
+        /* Match settings: controller settings, 0x42 bytes, then the stage's
+           own state, which 0x268320 copies as payload - 0x54 bytes; the
+           largest a stage sends is 0x1d (0x268d00). */
+        if (handler == 4u) return payload >= 0x54u && payload <= 0x54u + 0x1du;
+        if (handler == 5u) return payload == 0x16u;
+        return true; /* requests: their handlers write the reply */
+    }
+    case 16u: /* the payload's length at 0x17, the payload */
+        return size >= 0x19u && size == 3u + game_u16(datagram + 0x17u);
+    case 19u:
+        return size == 0x78u;
+    case 20u:
+        return size == 200u;
+    case 21u: /* a recent player's record: a name, a wide name */
+        return size == 0x60u && game_text_ends(datagram, 0x0bu, 0x27u) && game_wide_ends(datagram, 0x32u, 16u);
+    default: /* 4, 18 and above 21 have no handler */
+        return false;
+    }
+}
+
 /* --- the guest's winsock and XNet transport thunks --- */
 
 /* socket(af, type, protocol): the game's one UDP socket, carried on the
@@ -1129,7 +1239,18 @@ static void live_recvfrom(void)
     uint8_t data[LIVE_GUEST_BYTES];
     uint32_t virtual_ina = 0u;
     uint16_t port = 0u;
-    const int size = recomp_live_transport_guest_receive(data, sizeof data, &virtual_ina, &port);
+    int size;
+    /* A frame run again after a rewind receives the same datagrams, so it
+       drops the same ones. */
+    while ((size = recomp_live_transport_guest_receive(data, sizeof data, &virtual_ina, &port)) >= 0 &&
+        !recomp_live_game_datagram_ok(data, (size_t)size)) {
+        static uint32_t said; /* one line per type */
+        const unsigned type = size >= 3 ? data[2] : 0u;
+        if (type < 32u && (said & 1u << type) == 0u) {
+            said |= 1u << type;
+            fprintf(stderr, "recomp live: dropped a malformed type-%u game datagram (%d bytes)\n", type, size);
+        }
+    }
     if (size < 0) {
         live.last_error = LIVE_WSAEWOULDBLOCK;
         kernel_return(6u, 0xffffffffu);

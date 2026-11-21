@@ -386,8 +386,111 @@ static int guest_read(uint8_t *data, size_t capacity, uint32_t *virtual_ina, uin
     return recomp_live_transport_guest_receive(data, capacity, virtual_ina, port);
 }
 
+/* The game datagrams recvfrom passes, as the game's senders build them, and
+   the shapes its handlers would read past their buffers. */
+static void check_game_datagrams(void)
+{
+    uint8_t d[0x400];
+    memset(d, 0, sizeof d);
+    check("an empty type 3 passes", (d[2] = 3u, recomp_live_game_datagram_ok(d, 3u)));
+    check("a type 3 with a body is dropped", !recomp_live_game_datagram_ok(d, 4u));
+    check("a header alone is dropped", !recomp_live_game_datagram_ok(d, 2u));
+    check("type 4 has no handler", (d[2] = 4u, !recomp_live_game_datagram_ok(d, 3u)));
+    check("type 22 has no handler", (d[2] = 22u, !recomp_live_game_datagram_ok(d, 3u)));
+
+    memset(d, 0, sizeof d);
+    d[2] = 0u;
+    memcpy(d + 3u, "player", 7u);
+    check("a join passes", recomp_live_game_datagram_ok(d, 0x3cu));
+    memset(d + 3u, 'A', 16u);
+    check("a join whose name runs on is dropped", !recomp_live_game_datagram_ok(d, 0x3cu));
+    memset(d + 3u, 0, 16u);
+    memset(d + 0x13u, 'A', 32u);
+    check("a join whose wide name runs on is dropped", !recomp_live_game_datagram_ok(d, 0x3cu));
+
+    /* The player list: a count, then that many 0x5e-byte slots. */
+    memset(d, 0, sizeof d);
+    d[2] = 10u;
+    d[3] = 8u;
+    check("eight players pass", recomp_live_game_datagram_ok(d, 8u + 8u * 0x5eu));
+    d[3] = 9u;
+    check("nine players are dropped", !recomp_live_game_datagram_ok(d, 8u + 9u * 0x5eu));
+    d[3] = 2u;
+    check("a count the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 8u + 3u * 0x5eu));
+    memset(d + 8u + 0x5eu + 0x2cu, 'A', 16u);
+    check("a slot whose name runs on is dropped", !recomp_live_game_datagram_ok(d, 8u + 2u * 0x5eu));
+    memset(d, 0, sizeof d);
+    d[2] = 12u;
+    d[0x1b] = 1u;
+    check("a session key and one player pass", recomp_live_game_datagram_ok(d, 0x20u + 0x5eu));
+    d[0x1b] = 200u;
+    check("a session key with 200 players is dropped", !recomp_live_game_datagram_ok(d, 0x329u));
+    memset(d, 0, sizeof d);
+    d[2] = 2u;
+    d[0x34] = 1u;
+    check("a joined session passes", recomp_live_game_datagram_ok(d, 0x39u + 0x5eu));
+    memset(d + 3u, 'A', 34u);
+    check("a session name that runs on is dropped", !recomp_live_game_datagram_ok(d, 0x39u + 0x5eu));
+    memset(d, 0, sizeof d);
+    d[2] = 14u;
+    memset(d + 3u, 'A', 34u);
+    check("a settings name that runs on is dropped", !recomp_live_game_datagram_ok(d, 0x34u));
+
+    /* Type 15: a handler index into a 12-entry table, and its payload. */
+    memset(d, 0, sizeof d);
+    d[2] = 15u;
+    d[0x13] = 0x14u;
+    check("character select passes", recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
+    check("a payload the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
+    d[3] = 12u;
+    check("handler 12 is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
+    d[3] = 0x41u; d[6] = 0x40u; /* the table index an attacker would aim elsewhere */
+    check("a far handler is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
+    d[6] = 0u;
+    d[3] = 4u;
+    d[0x13] = 0x54u + 0x1du;
+    check("match settings with a stage's state pass", recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1du));
+    d[0x13] = 0x40u;
+    check("match settings too short to hold their own are dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x40u));
+    d[0x13] = 0x54u + 0x1eu;
+    check("a stage's state past 0x1d bytes is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1eu));
+
+    /* Type 9: the batch that starts lockstep names frames and delay. */
+    memset(d, 0, sizeof d);
+    d[2] = 9u;
+    check("a lockstep batch passes", recomp_live_game_datagram_ok(d, 0xfu + 2u * 20u));
+    check("five frames a batch are dropped", !recomp_live_game_datagram_ok(d, 0xfu + 5u * 20u));
+    memset(d + 3u + 8u, 0xff, 4u);
+    d[3u + 0x10u] = 2u;
+    d[3u + 0x11u] = 3u;
+    check("a lockstep start passes", recomp_live_game_datagram_ok(d, 0xfu + 2u * 20u));
+    d[3u + 0x10u] = 255u;
+    check("a start with 255 frames is dropped", !recomp_live_game_datagram_ok(d, 0xfu + 2u * 20u));
+    d[3u + 0x10u] = 2u;
+    d[3u + 0x11u] = 200u;
+    check("a start with a 200-batch delay is dropped", !recomp_live_game_datagram_ok(d, 0xfu + 2u * 20u));
+
+    memset(d, 0, sizeof d);
+    d[2] = 7u;
+    d[3] = 3u;
+    check("three 10-byte records pass", recomp_live_game_datagram_ok(d, 4u + 30u));
+    check("a record count the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 4u + 20u));
+    d[2] = 21u;
+    check("a recent player's record passes", recomp_live_game_datagram_ok(d, 0x60u));
+    memset(d + 0x32u, 'A', 32u);
+    check("a recent player whose wide name runs on is dropped", !recomp_live_game_datagram_ok(d, 0x60u));
+    memset(d, 0, sizeof d);
+    d[2] = 16u;
+    d[0x17] = 0x30u;
+    check("a match message passes", recomp_live_game_datagram_ok(d, 3u + 0x30u));
+    check("a match message the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x31u));
+    d[2] = 3u;
+    check("more than the game's buffer is dropped", !recomp_live_game_datagram_ok(d, 0x32au));
+}
+
 int main(void)
 {
+    check_game_datagrams();
 #ifdef _WIN32
     WSADATA winsock;
     if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) {
@@ -823,7 +926,21 @@ int main(void)
     check("sendto reaches the peer", size > 0 && parse_guest(packet, (size_t)size, &from_ina, &from_port, &payload,
         &payload_size) && memcmp(payload, "thunk", 5u) == 0);
 
-    size = (int)guest_wire(packet, ina_b, port_1000, (const uint8_t *)"via", 3u);
+    /* recvfrom skips what the game's handlers would read past their buffers:
+       not a game datagram, then a type 15 naming handler 12 of 12. */
+    size = (int)guest_wire(packet, ina_b, port_1000, (const uint8_t *)"not", 3u);
+    send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+    {
+        uint8_t hostile[0x15 + 0x14];
+        memset(hostile, 0, sizeof hostile);
+        hostile[2] = 15u;
+        hostile[3] = 12u;
+        hostile[0x13] = 0x14u;
+        size = (int)guest_wire(packet, ina_b, port_1000, hostile, sizeof hostile);
+        send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+    }
+    const uint8_t via[3] = {1u, 0u, 5u}; /* type 5, as FUN_002a2c00 sends it */
+    size = (int)guest_wire(packet, ina_b, port_1000, via, sizeof via);
     send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
     memset(recomp_memory(DATA, 8u), 0, 8u);
     memset(recomp_memory(FROM, 16u), 0xff, 16u);
@@ -833,7 +950,7 @@ int main(void)
     const uint8_t *guest_from = recomp_memory(FROM, 16u);
     check("recvfrom names the sender", guest_from[0] == 2u && memcmp(guest_from + 2u, &port_1000, 2u) == 0 &&
         memcmp(guest_from + 4u, &ina_b, 4u) == 0 && *recomp_memory_u32(FROM_LENGTH) == 16u);
-    check("recvfrom copies the payload", memcmp(recomp_memory(DATA, 3u), "via", 3u) == 0);
+    check("recvfrom copies the payload", memcmp(recomp_memory(DATA, 3u), via, 3u) == 0);
     args[0] = 0x100u; args[1] = DATA; args[2] = 8u; args[3] = 0u; args[4] = 0u; args[5] = 0u;
     check("an empty recvfrom would block", call(recomp_live_transport_lookup(0x003810a2u), args, 6u) == 0xffffffffu);
     check("and says WSAEWOULDBLOCK", call(recomp_live_transport_lookup(0x003814d3u), args, 0u) == 10035u);
