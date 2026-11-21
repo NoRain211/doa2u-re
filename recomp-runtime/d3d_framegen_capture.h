@@ -75,7 +75,12 @@ inline bool framegenCaptureLoad(const FramegenCapture &capture, const FramegenCa
         std::fclose(file);
         if (!framegenCaptureRead(capture, frame.frame, "hud", hud.data(), pixels)) return false;
     }
-    return !frame.gamma || framegenCaptureRead(capture, frame.frame, "gamma", ramp, sizeof ramp);
+    float levels[256][4];  // the presenter's ramp: channel level / 255 per entry, R G B and unused
+    if (!frame.gamma) return true;
+    if (!framegenCaptureRead(capture, frame.frame, "gamma", levels, sizeof levels)) return false;
+    for (unsigned channel = 0u; channel < 3u; ++channel)
+        for (unsigned i = 0u; i < 256u; ++i) ramp[channel][i] = static_cast<uint8_t>(levels[i][channel] * 255.0f + 0.5f);
+    return true;
 }
 
 #endif

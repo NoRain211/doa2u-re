@@ -379,7 +379,7 @@ struct RecompD3dPresenter {
     int64_t fg_present_ns = 0;   // when N arrived
     float fg_aspect = 0.0f;
     bool fg_restarted = false;  // N started the history again
-    // RECOMP_D3D_FRAMEGEN_CAPTURE (framegenCapture): its folder and index, and the real frames it takes.
+    // RECOMP_D3D_FRAMEGEN_CAPTURE (framegenCapture): folder, index, first frame and count.
     const char *fg_capture = nullptr;
     FILE *fg_capture_index = nullptr;
     unsigned fg_capture_at = 1u, fg_capture_count = 0u;
@@ -3898,13 +3898,11 @@ uint64_t framegenIdle(RecompD3dPresenter *presenter)
     return static_cast<uint64_t>(until + 99) / 100u;
 }
 
-/* RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>: what frame generation got for real
-   frame N (the present count, from _AT, _COUNT of them), for
-   d3d_framegen_replay.cpp: N's picture before gamma (<N>.bgra) and HUD mask
-   (<N>.hud, the scene weight; none without a mask), the gamma ramp while one
-   is set (<N>.gamma, 3 x 256 bytes), and a line in framegen.txt
-   (d3d_framegen_capture.h reads them). It waits for the GPU and the disk;
-   that time does not make N+1 late. */
+/* RECOMP_D3D_FRAMEGEN_CAPTURE: what frame generation got for real frame N
+   (the present count), for d3d_framegen_replay.cpp: <N>.bgra (before gamma),
+   <N>.hud (the mask, if any), <N>.gamma (the ramp, while set) and a line in
+   framegen.txt (d3d_framegen_capture.h reads them). Its wait for the GPU and
+   the disk does not make N+1 late. */
 void framegenCapture(RecompD3dPresenter *presenter)
 {
     const unsigned frame = presenter->present_count + 1u;
@@ -3916,27 +3914,19 @@ void framegenCapture(RecompD3dPresenter *presenter)
     if (presenter->fg_capture_index == nullptr) {
         SDL_CreateDirectory(presenter->fg_capture);
         std::snprintf(path, sizeof path, "%s/framegen.txt", presenter->fg_capture);
-        presenter->fg_capture_index = std::fopen(path, "w");
-        if (presenter->fg_capture_index == nullptr) {
-            std::fprintf(stderr, "recomp d3d presenter: framegen capture cannot write %s\n", path);
-            presenter->fg_capture = nullptr;
-            return;
-        }
+        if (!(presenter->fg_capture_index = std::fopen(path, "w"))) return;
         std::fprintf(presenter->fg_capture_index, "recomp framegen capture 1 target=%ux%u k=%u\n",
             width, height, presenter->fg_k);
     }
-    /* The mask has its own buffer: downloaded after the picture into the same
-       one, NVIDIA's Vulkan driver lost the device within a few frames. */
+    // The mask has its own buffer: after the picture in one, NVIDIA's driver lost the device.
     SDL_GPUTexture *const textures[2] = {presenter->fg_cur, presenter->fg_cover[1]};
-    const char *const suffixes[2] = {"bgra", "hud"};
     const uint32_t sizes[2] = {width * height * 4u, width * height};
     SDL_GPUTransferBuffer *downloads[2]{};
     SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
     if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
         for (unsigned i = 0u; i < 2u; ++i) {
             SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, sizes[i], 0};
-            if (textures[i] != nullptr) downloads[i] = SDL_CreateGPUTransferBuffer(presenter->device, &info);
-            if (downloads[i] == nullptr) continue;
+            if (textures[i] == nullptr || !(downloads[i] = SDL_CreateGPUTransferBuffer(presenter->device, &info))) continue;
             const SDL_GPUTextureRegion region{textures[i], 0u, 0u, 0u, 0u, 0u, width, height, 1u};
             const SDL_GPUTextureTransferInfo destination{downloads[i], 0u, 0u, 0u};
             SDL_DownloadFromGPUTexture(pass, &region, &destination);
@@ -3945,37 +3935,26 @@ void framegenCapture(RecompD3dPresenter *presenter)
     }
     SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
     presenter->command_buffer = nullptr;
-    const bool done = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u);
+    bool written = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u) && downloads[0];
     const auto write = [&](const char *suffix, const void *bytes, size_t size) {
         std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
-        FILE *file = std::fopen(path, "wb");
-        const bool written = file != nullptr && std::fwrite(bytes, 1, size, file) == size;
-        return (file == nullptr || std::fclose(file) == 0) && written;
+        FILE *file = bytes ? std::fopen(path, "wb") : nullptr;
+        const bool done = file != nullptr && std::fwrite(bytes, 1, size, file) == size;
+        return (file == nullptr || std::fclose(file) == 0) && done;
     };
-    bool written = done && downloads[0] != nullptr;
     for (unsigned i = 0u; i < 2u; ++i) {
         if (downloads[i] == nullptr) continue;
-        if (const void *bytes = written ? SDL_MapGPUTransferBuffer(presenter->device, downloads[i], false) : nullptr) {
-            written = write(suffixes[i], bytes, sizes[i]);
-            SDL_UnmapGPUTransferBuffer(presenter->device, downloads[i]);
-        } else {
-            written = false;
-        }
+        written = written && write(i ? "hud" : "bgra", SDL_MapGPUTransferBuffer(presenter->device, downloads[i], false), sizes[i]);
+        SDL_UnmapGPUTransferBuffer(presenter->device, downloads[i]);
         SDL_ReleaseGPUTransferBuffer(presenter->device, downloads[i]);
     }
-    if (written && presenter->gamma_enabled) {
-        uint8_t ramp[3][256];
-        for (unsigned i = 0u; i < 256u; ++i)
-            for (unsigned channel = 0u; channel < 3u; ++channel)
-                ramp[channel][i] = static_cast<uint8_t>(presenter->gamma_ramp[i][channel] * 255.0f + 0.5f);
-        written = write("gamma", ramp, sizeof ramp);
-    }
+    if (presenter->gamma_enabled) written = written && write("gamma", presenter->gamma_ramp, sizeof presenter->gamma_ramp);
     if (written) {
         std::fprintf(presenter->fg_capture_index, "%u restart=%d gamma=%d aspect=%.6f\n", frame,
             presenter->fg_restarted ? 1 : 0, presenter->gamma_enabled ? 1 : 0, presenter->fg_aspect);
         std::fflush(presenter->fg_capture_index);
     } else {
-        std::fprintf(stderr, "recomp d3d presenter: framegen capture failed at frame %u\n", frame);
+        std::fprintf(stderr, "recomp d3d presenter: framegen capture failed at %u\n", frame);
     }
     if (fence != nullptr) SDL_ReleaseGPUFence(presenter->device, fence);
     presenter->fg_present_ns += steadyNs() - start;
@@ -4000,8 +3979,7 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
     const bool generated = framegenRecord(presenter, commands, shown, present.aspect);
     shown = applyGamma(presenter, commands, shown);
-    /* A capture's hidden window takes the acquire too: it throttles the frames
-       in flight, and without it the presenter grew by gigabytes in seconds. */
+    // A capture's hidden window acquires too: that throttles frames in flight (memory grew without it).
     if (!generated || (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_HIDDEN)) {
         SDL_GPUTexture *swapchain = nullptr;
         Uint32 swap_width = 0u, swap_height = 0u;

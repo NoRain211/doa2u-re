@@ -3991,8 +3991,8 @@ static bool testFramegenCuts()
 /* RECOMP_D3D_FRAMEGEN_CAPTURE keeps what frame generation got for each real
    frame; pushed into a new presenter, the capture gives the in-process
    generated frames bit for bit: A twice, A moved by 13,9, then a cut to
-   noise, each under a still red HUD quad. Engages only where frame
-   generation does. */
+   noise, each under a still red HUD quad, and the gamma ramp it was shown
+   through. Engages only where frame generation does. */
 static bool testFramegenCapture()
 {
     char folder[MAX_PATH], capture_dir[MAX_PATH];
@@ -4025,6 +4025,10 @@ static bool testFramegenCapture()
     };
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create framegen capture", d3d_backend_create(&config, &presenter));
+    RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
+    for (auto &channel : gamma.data.gamma)
+        for (unsigned i = 0u; i < 256u; ++i) channel[i] = static_cast<uint8_t>((i * i + 127u) / 255u);
+    passed = passed && expect("framegen capture gamma", d3d_backend_submit(presenter, &gamma));
     bool engaged = passed;
     for (uint32_t i = 0u; i < 4u && passed && engaged; ++i) {
         passed = flowFrame(presenter, *frames[i], 0x100000u * (i + 1u), i + 1u, 0.0f, 0.0f, false, overlays);
@@ -4042,7 +4046,8 @@ static bool testFramegenCapture()
         std::vector<uint8_t> hud;
         uint8_t ramp[3][256];
         for (size_t i = 0u; i < capture.frames.size() && passed; ++i) {
-            passed = framegenCaptureLoad(capture, capture.frames[i], picture, hud, ramp) &&
+            passed = framegenCaptureLoad(capture, capture.frames[i], picture, hud, ramp) && capture.frames[i].gamma &&
+                std::memcmp(ramp, gamma.data.gamma, sizeof ramp) == 0 &&
                 d3d_backend_framegen_push(presenter, picture.data(), hud.data(), capture.frames[i].restart || i == 0u) &&
                 (i < 2u || generate(presenter, got));
         }
