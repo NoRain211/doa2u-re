@@ -3878,6 +3878,11 @@ uint64_t framegenIdle(RecompD3dPresenter *presenter)
         presenter->fg_history = false;
         return UINT64_MAX;
     }
+    // A capture's hidden window shows no slots; submitPresent took its real frame.
+    if (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_HIDDEN) {
+        presenter->fg_next_slot = presenter->fg_k;
+        return UINT64_MAX;
+    }
     const RecompFramegenDue due = recomp_framegen_due(presenter->fg_k, presenter->fg_present_ns, steadyNs(),
         presenter->fg_next_slot);
     presenter->fg_late += due.missed;
@@ -3995,7 +4000,9 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
     const bool generated = framegenRecord(presenter, commands, shown, present.aspect);
     shown = applyGamma(presenter, commands, shown);
-    if (!generated) {
+    /* A capture's hidden window takes the acquire too: it throttles the frames
+       in flight, and without it the presenter grew by gigabytes in seconds. */
+    if (!generated || (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_HIDDEN)) {
         SDL_GPUTexture *swapchain = nullptr;
         Uint32 swap_width = 0u, swap_height = 0u;
         if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height)) {
