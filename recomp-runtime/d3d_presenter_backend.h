@@ -67,5 +67,13 @@ double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, uns
    their count. Returns the wait from submit in milliseconds, or a negative
    value without a mask. */
 double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws);
+/* SDL_GPU only, for d3d_framegen_replay.cpp and tests: makes picture (the
+   main target's size, 0xAARRGGBB before gamma) real frame N and hud (one
+   byte per pixel) its HUD mask, as a PRESENT under frame generation does;
+   restart starts the history again from N. False without the history. */
+bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *picture, const uint8_t *hud, bool restart);
+/* SDL_GPU only, for d3d_framegen_replay.cpp: frame generation crossfades
+   from now on, as without its flow. */
+void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
 
 #endif

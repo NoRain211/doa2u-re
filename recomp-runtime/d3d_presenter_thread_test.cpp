@@ -2,6 +2,9 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_card_model.h"
 #include "d3d_draw_model.h"
+#ifndef RECOMP_TEST_D3D11
+#include "d3d_framegen_capture.h"
+#endif
 #include "xapi_time_adapter.h"
 
 /* Both Windows presenters, Direct3D 11 and Vulkan, run on their own window
@@ -3985,6 +3988,84 @@ static bool testFramegenCuts()
     return passed;
 }
 
+/* RECOMP_D3D_FRAMEGEN_CAPTURE keeps what frame generation got for each real
+   frame; pushed into a new presenter, the capture gives the in-process
+   generated frames bit for bit: A twice, A moved by 13,9, then a cut to
+   noise, each under a still red HUD quad. Engages only where frame
+   generation does. */
+static bool testFramegenCapture()
+{
+    char folder[MAX_PATH], capture_dir[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "fgc", 0, capture_dir)) return false;
+    DeleteFileA(capture_dir);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    _putenv_s("RECOMP_D3D_FRAMEGEN_CAPTURE", capture_dir);
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), c(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = flowFrameA(x, y);
+            b[at] = flowFrameA(x - 13, y - 9);
+            c[at] = flowNoise(x, y, 11u);
+        }
+    }
+    const HudVertex red[4] = {{128, 96, 0, 1, 0xffff0000u}, {192, 96, 0, 1, 0xffff0000u},
+        {128, 144, 0, 1, 0xffff0000u}, {192, 144, 0, 1, 0xffff0000u}};
+    const std::vector<RecompD3dPresenterCommand> overlays = {hudQuad(red, false)};
+    const std::vector<uint32_t> *const frames[4] = {&a, &a, &b, &c};
+    const float slots[3] = {0.25f, 0.5f, 0.75f};
+    std::vector<std::vector<uint32_t>> expected, got;
+    const auto generate = [&](RecompD3dPresenter *presenter, std::vector<std::vector<uint32_t>> &into) {
+        for (const float t : slots) {
+            unsigned size[2]{};
+            into.emplace_back(a.size());
+            if (d3d_backend_framegen_generate(presenter, t, 1u, size, into.back().data(), a.size()) < 0.0) return false;
+        }
+        return true;
+    };
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen capture", d3d_backend_create(&config, &presenter));
+    bool engaged = passed;
+    for (uint32_t i = 0u; i < 4u && passed && engaged; ++i) {
+        passed = flowFrame(presenter, *frames[i], 0x100000u * (i + 1u), i + 1u, 0.0f, 0.0f, false, overlays);
+        if (passed && i >= 2u) engaged = generate(presenter, expected);
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_FRAMEGEN_CAPTURE", "");
+    FramegenCapture capture;
+    if (passed && engaged) {
+        passed = framegenCaptureOpen(capture_dir, capture) && capture.frames.size() == 4u &&
+            capture.width == 320u && capture.height == 240u &&
+            expect("create framegen replay", d3d_backend_create(&config, &presenter));
+        std::vector<uint32_t> picture;
+        std::vector<uint8_t> hud;
+        uint8_t ramp[3][256];
+        for (size_t i = 0u; i < capture.frames.size() && passed; ++i) {
+            passed = framegenCaptureLoad(capture, capture.frames[i], picture, hud, ramp) &&
+                d3d_backend_framegen_push(presenter, picture.data(), hud.data(), capture.frames[i].restart || i == 0u) &&
+                (i < 2u || generate(presenter, got));
+        }
+        d3d_backend_destroy(&presenter);
+        passed = passed && got == expected;
+        if (!passed) std::fprintf(stderr, "FAIL framegen capture replays the generated frames bit for bit\n");
+    }
+    for (const FramegenCaptureFrame &frame : capture.frames) {
+        for (const char *suffix : {"bgra", "hud", "gamma"}) {
+            char path[MAX_PATH + 32];
+            std::snprintf(path, sizeof path, "%s/%08u.%s", capture_dir, frame.frame, suffix);
+            DeleteFileA(path);
+        }
+    }
+    DeleteFileA((capture_dir + std::string("/framegen.txt")).c_str());
+    RemoveDirectoryA(capture_dir);
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's capture replays its generated frames bit for bit\n"
+            : "SKIP frame generation's capture, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
    from the fence wait of 200 extra flow runs less that of none. */
 static void benchFramegenFlow()
@@ -4088,7 +4169,7 @@ int main()
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
     if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
-        !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts()) return 1;
+        !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts() || !testFramegenCapture()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");

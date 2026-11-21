@@ -378,6 +378,11 @@ struct RecompD3dPresenter {
     unsigned fg_next_slot = 0u;  // first slot of real frame N neither shown nor skipped
     int64_t fg_present_ns = 0;   // when N arrived
     float fg_aspect = 0.0f;
+    bool fg_restarted = false;  // N started the history again
+    // RECOMP_D3D_FRAMEGEN_CAPTURE (framegenCapture): its folder and index, and the real frames it takes.
+    const char *fg_capture = nullptr;
+    FILE *fg_capture_index = nullptr;
+    unsigned fg_capture_at = 1u, fg_capture_count = 0u;
     // RECOMP_PERF_COUNTER: this second's window presents under frame generation.
     std::vector<double> fg_intervals;
     int64_t fg_last_window_ns = 0, fg_second_ns = 0;
@@ -3108,12 +3113,14 @@ unsigned framegenPresents(RecompD3dPresenter *presenter)
     return k;
 }
 
-// It runs while host time paces the guest and the window shows.
+// It runs while host time paces the guest and the window shows, or is only hidden under a capture.
 bool framegenActive(const RecompD3dPresenter *presenter)
 {
+    const SDL_WindowFlags off = presenter->fg_capture != nullptr ? SDL_WINDOW_MINIMIZED
+        : SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED;
     return presenter->fg_k != 0u && !immediate_present && !recomp_xapi_frame_clock_enabled() &&
         !(recomp_xapi_fast_forward != nullptr && recomp_xapi_fast_forward()) &&
-        (SDL_GetWindowFlags(presenter->window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0;
+        (SDL_GetWindowFlags(presenter->window) & off) == 0;
 }
 
 /* Frame generation's crossfade blends the stored UNORM values before gamma,
@@ -3684,6 +3691,41 @@ void framegenCover(RecompD3dPresenter *presenter)
     flushSegment(presenter, presenter->hud);
 }
 
+// The history textures and the pipelines, made on first use. False without the history.
+bool framegenCreate(RecompD3dPresenter *presenter)
+{
+    if (presenter->fg_prev != nullptr) return true;
+    for (SDL_GPUTexture **texture : {&presenter->fg_prev, &presenter->fg_cur, &presenter->fg_out}) {
+        *texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+            SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+            mainWidth(presenter), mainHeight(presenter));
+    }
+    presenter->fg_history = false;
+    if (presenter->fg_prev == nullptr || presenter->fg_cur == nullptr || presenter->fg_out == nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen off, no history textures: %s\n", SDL_GetError());
+        presenter->fg_k = 0u;
+        return false;
+    }
+    if (!presenter->fg_blend_failed) createFramegenBlend(presenter);
+    if (!presenter->fg_flow_failed) createFramegenFlow(presenter);
+    return true;
+}
+
+// Makes shown real frame N, with fg_cover[1] as its HUD mask, and estimates the flow from N-1.
+void framegenAdvance(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown)
+{
+    presenter->fg_restarted = !presenter->fg_history;
+    std::swap(presenter->fg_prev, presenter->fg_cur);
+    std::swap(presenter->fg_luma[0], presenter->fg_luma[1]);
+    framegenCopy(presenter, commands, shown, presenter->fg_cur);
+    if (!presenter->fg_history) {
+        framegenCopy(presenter, commands, shown, presenter->fg_prev);
+        if (presenter->fg_cover[0] != nullptr) framegenCopy(presenter, commands, presenter->fg_cover[1], presenter->fg_cover[0]);
+    }
+    framegenFlow(presenter, commands, !presenter->fg_history);
+    presenter->fg_history = true;
+}
+
 /* Keeps real frame N's picture before gamma in fg_cur and N-1's in fg_prev,
    and starts N's slots. False while frame generation is off. N starts the
    history again, so no generated frame mixes it with N-1, after frame
@@ -3700,30 +3742,8 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
         presenter->fg_history = false;
         return false;
     }
-    if (presenter->fg_prev == nullptr) {
-        for (SDL_GPUTexture **texture : {&presenter->fg_prev, &presenter->fg_cur, &presenter->fg_out}) {
-            *texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-                SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
-                mainWidth(presenter), mainHeight(presenter));
-        }
-        presenter->fg_history = false;
-        if (presenter->fg_prev == nullptr || presenter->fg_cur == nullptr || presenter->fg_out == nullptr) {
-            std::fprintf(stderr, "recomp d3d presenter: framegen off, no history textures: %s\n", SDL_GetError());
-            presenter->fg_k = 0u;
-            return false;
-        }
-        if (!presenter->fg_blend_failed) createFramegenBlend(presenter);
-        if (!presenter->fg_flow_failed) createFramegenFlow(presenter);
-    }
-    std::swap(presenter->fg_prev, presenter->fg_cur);
-    std::swap(presenter->fg_luma[0], presenter->fg_luma[1]);
-    framegenCopy(presenter, commands, shown, presenter->fg_cur);
-    if (!presenter->fg_history) {
-        framegenCopy(presenter, commands, shown, presenter->fg_prev);
-        if (presenter->fg_cover[0] != nullptr) framegenCopy(presenter, commands, presenter->fg_cover[1], presenter->fg_cover[0]);
-    }
-    framegenFlow(presenter, commands, !presenter->fg_history);
-    presenter->fg_history = true;
+    if (!framegenCreate(presenter)) return false;
+    framegenAdvance(presenter, commands, shown);
     presenter->fg_aspect = aspect;
     presenter->fg_present_ns = steadyNs();
     presenter->fg_next_slot = 0u;
@@ -3873,6 +3893,79 @@ uint64_t framegenIdle(RecompD3dPresenter *presenter)
     return static_cast<uint64_t>(until + 99) / 100u;
 }
 
+/* RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>: what frame generation got for real
+   frame N (the present count, from _AT, _COUNT of them), for
+   d3d_framegen_replay.cpp: N's picture before gamma (<N>.bgra) and HUD mask
+   (<N>.hud, the scene weight; none without a mask), the gamma ramp while one
+   is set (<N>.gamma, 3 x 256 bytes), and a line in framegen.txt
+   (d3d_framegen_capture.h reads them). It waits for the GPU and the disk;
+   that time does not make N+1 late. */
+void framegenCapture(RecompD3dPresenter *presenter)
+{
+    const unsigned frame = presenter->present_count + 1u;
+    if (frame < presenter->fg_capture_at ||
+        (presenter->fg_capture_count != 0u && frame - presenter->fg_capture_at >= presenter->fg_capture_count)) return;
+    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
+    const int64_t start = steadyNs();
+    char path[1024];
+    if (presenter->fg_capture_index == nullptr) {
+        SDL_CreateDirectory(presenter->fg_capture);
+        std::snprintf(path, sizeof path, "%s/framegen.txt", presenter->fg_capture);
+        presenter->fg_capture_index = std::fopen(path, "w");
+        if (presenter->fg_capture_index == nullptr) {
+            std::fprintf(stderr, "recomp d3d presenter: framegen capture cannot write %s\n", path);
+            presenter->fg_capture = nullptr;
+            return;
+        }
+        std::fprintf(presenter->fg_capture_index, "recomp framegen capture 1 target=%ux%u k=%u\n",
+            width, height, presenter->fg_k);
+    }
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, width * height * 5u, 0};
+    SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    if (download == nullptr) return;
+    SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
+    if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+        const SDL_GPUTextureRegion picture{presenter->fg_cur, 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+        const SDL_GPUTextureTransferInfo at_picture{download, 0u, 0u, 0u};
+        SDL_DownloadFromGPUTexture(pass, &picture, &at_picture);
+        if (presenter->fg_cover[1] != nullptr) {
+            const SDL_GPUTextureRegion hud{presenter->fg_cover[1], 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+            const SDL_GPUTextureTransferInfo at_hud{download, width * height * 4u, 0u, 0u};
+            SDL_DownloadFromGPUTexture(pass, &hud, &at_hud);
+        }
+        SDL_EndGPUCopyPass(pass);
+    }
+    SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+    presenter->command_buffer = nullptr;
+    const auto *pixels = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u)
+        ? static_cast<const uint8_t *>(SDL_MapGPUTransferBuffer(presenter->device, download, false)) : nullptr;
+    if (pixels != nullptr) {
+        const auto write = [&](const char *suffix, const void *bytes, size_t size) {
+            std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
+            if (FILE *file = std::fopen(path, "wb")) {
+                std::fwrite(bytes, 1, size, file);
+                std::fclose(file);
+            }
+        };
+        write("bgra", pixels, width * height * 4u);
+        if (presenter->fg_cover[1] != nullptr) write("hud", pixels + width * height * 4u, width * height);
+        if (presenter->gamma_enabled) {
+            uint8_t ramp[3][256];
+            for (unsigned i = 0u; i < 256u; ++i)
+                for (unsigned channel = 0u; channel < 3u; ++channel)
+                    ramp[channel][i] = static_cast<uint8_t>(presenter->gamma_ramp[i][channel] * 255.0f + 0.5f);
+            write("gamma", ramp, sizeof ramp);
+        }
+        SDL_UnmapGPUTransferBuffer(presenter->device, download);
+        std::fprintf(presenter->fg_capture_index, "%u restart=%d gamma=%d aspect=%.6f\n", frame,
+            presenter->fg_restarted ? 1 : 0, presenter->gamma_enabled ? 1 : 0, presenter->fg_aspect);
+        std::fflush(presenter->fg_capture_index);
+    }
+    if (fence != nullptr) SDL_ReleaseGPUFence(presenter->device, fence);
+    SDL_ReleaseGPUTransferBuffer(presenter->device, download);
+    presenter->fg_present_ns += steadyNs() - start;
+}
+
 RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const RecompD3dPresenterPresentCommand &present)
 {
     if (present.effective_flags != 5u || present.swap_counter == 0u) {
@@ -3900,6 +3993,7 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
         }
     }
     if (recomp_screenshot_take_request()) saveScreenshot(presenter, shown);
+    if (generated && presenter->fg_capture != nullptr) framegenCapture(presenter);
     // Capture what the window shows, at the main target size, as the D3D11 backend does.
     char burst[1024];
     if (const char *path = frameDumpPath(presenter, presenter->present_count + 1u, burst)) {
@@ -4026,6 +4120,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     releaseFramegenFlow(presenter);
+    if (presenter->fg_capture_index != nullptr) std::fclose(presenter->fg_capture_index);
     for (SDL_GPUGraphicsPipeline *pipeline : presenter->smaa_pipelines) {
         if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
     }
@@ -4379,6 +4474,12 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     created->fg_k = framegenPresents(created);
     created->fg_flow_view = created->fg_k != 0u && std::strcmp(std::getenv("RECOMP_D3D_FRAMEGEN"), "flow") == 0;
+    if (const char *capture = std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE"); created->fg_k != 0u && capture && capture[0]) {
+        created->fg_capture = capture;
+        if (const char *at = std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE_AT")) created->fg_capture_at = std::strtoul(at, nullptr, 10);
+        if (const char *count = std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE_COUNT"))
+            created->fg_capture_count = std::strtoul(count, nullptr, 10);
+    }
     const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
             SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
         ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
@@ -4843,6 +4944,48 @@ double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, uns
     }
     if (download != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, download);
     return ms;
+}
+
+bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *picture, const uint8_t *hud, bool restart)
+{
+    if (checkOwner(presenter) != RECOMP_D3D_PRESENTER_OK || !framegenCreate(presenter)) return false;
+    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, width * height * 5u, 0};
+    SDL_GPUTransferBuffer *upload = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    auto *bytes = upload ? static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(presenter->device, upload, false)) : nullptr;
+    if (bytes == nullptr) {
+        if (upload != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, upload);
+        return false;
+    }
+    std::memcpy(bytes, picture, width * height * 4u);
+    std::memcpy(bytes + width * height * 4u, hud, width * height);
+    SDL_UnmapGPUTransferBuffer(presenter->device, upload);
+    // As framegenCover and framegenRecord, with the picture staged in fg_out.
+    std::swap(presenter->fg_cover[0], presenter->fg_cover[1]);
+    if (restart) presenter->fg_history = false;
+    SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
+    if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
+        const SDL_GPUTextureTransferInfo at_picture{upload, 0u, width, height};
+        const SDL_GPUTextureRegion staged{presenter->fg_out, 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+        SDL_UploadToGPUTexture(pass, &at_picture, &staged, false);
+        if (presenter->fg_cover[1] != nullptr) {
+            const SDL_GPUTextureTransferInfo at_hud{upload, width * height * 4u, width, height};
+            const SDL_GPUTextureRegion mask{presenter->fg_cover[1], 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+            SDL_UploadToGPUTexture(pass, &at_hud, &mask, false);
+        }
+        SDL_EndGPUCopyPass(pass);
+    }
+    framegenAdvance(presenter, commands, presenter->fg_out);
+    submitCommands(presenter);
+    SDL_ReleaseGPUTransferBuffer(presenter->device, upload);
+    return true;
+}
+
+void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter)
+{
+    if (checkOwner(presenter) != RECOMP_D3D_PRESENTER_OK) return;
+    releaseFramegenFlow(presenter);
+    presenter->fg_flow_failed = true;
 }
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
