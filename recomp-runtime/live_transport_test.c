@@ -441,6 +441,9 @@ static void check_game_datagrams(void)
     d[2] = 15u;
     d[0x13] = 0x14u;
     check("character select passes", recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
+    d[0x13] = 0u;
+    check("an empty character select (not chosen yet) passes", recomp_live_game_datagram_ok(d, 0x15u));
+    d[0x13] = 0x14u;
     check("a payload the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
     d[3] = 12u;
     check("handler 12 is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
@@ -454,6 +457,12 @@ static void check_game_datagrams(void)
     check("match settings too short to hold their own are dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x40u));
     d[0x13] = 0x54u + 0x1eu;
     check("a stage's state past 0x1d bytes is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1eu));
+    d[0x13] = 0u;
+    check("empty match settings are dropped", !recomp_live_game_datagram_ok(d, 0x15u));
+    d[3] = 5u;
+    check("an empty settings answer (not ready) passes", recomp_live_game_datagram_ok(d, 0x15u));
+    d[0x13] = 0x15u;
+    check("a settings answer of another size is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
 
     /* Type 9: the batch that starts lockstep names frames and delay. */
     memset(d, 0, sizeof d);
