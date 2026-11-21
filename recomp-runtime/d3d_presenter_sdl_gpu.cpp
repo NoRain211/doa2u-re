@@ -3920,49 +3920,59 @@ void framegenCapture(RecompD3dPresenter *presenter)
         std::fprintf(presenter->fg_capture_index, "recomp framegen capture 1 target=%ux%u k=%u\n",
             width, height, presenter->fg_k);
     }
-    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, width * height * 5u, 0};
-    SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
-    if (download == nullptr) return;
+    /* The mask has its own buffer: downloaded after the picture into the same
+       one, NVIDIA's Vulkan driver lost the device within a few frames. */
+    SDL_GPUTexture *const textures[2] = {presenter->fg_cur, presenter->fg_cover[1]};
+    const char *const suffixes[2] = {"bgra", "hud"};
+    const uint32_t sizes[2] = {width * height * 4u, width * height};
+    SDL_GPUTransferBuffer *downloads[2]{};
     SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
     if (SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands)) {
-        const SDL_GPUTextureRegion picture{presenter->fg_cur, 0u, 0u, 0u, 0u, 0u, width, height, 1u};
-        const SDL_GPUTextureTransferInfo at_picture{download, 0u, 0u, 0u};
-        SDL_DownloadFromGPUTexture(pass, &picture, &at_picture);
-        if (presenter->fg_cover[1] != nullptr) {
-            const SDL_GPUTextureRegion hud{presenter->fg_cover[1], 0u, 0u, 0u, 0u, 0u, width, height, 1u};
-            const SDL_GPUTextureTransferInfo at_hud{download, width * height * 4u, 0u, 0u};
-            SDL_DownloadFromGPUTexture(pass, &hud, &at_hud);
+        for (unsigned i = 0u; i < 2u; ++i) {
+            SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, sizes[i], 0};
+            if (textures[i] != nullptr) downloads[i] = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+            if (downloads[i] == nullptr) continue;
+            const SDL_GPUTextureRegion region{textures[i], 0u, 0u, 0u, 0u, 0u, width, height, 1u};
+            const SDL_GPUTextureTransferInfo destination{downloads[i], 0u, 0u, 0u};
+            SDL_DownloadFromGPUTexture(pass, &region, &destination);
         }
         SDL_EndGPUCopyPass(pass);
     }
     SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
     presenter->command_buffer = nullptr;
-    const auto *pixels = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u)
-        ? static_cast<const uint8_t *>(SDL_MapGPUTransferBuffer(presenter->device, download, false)) : nullptr;
-    if (pixels != nullptr) {
-        const auto write = [&](const char *suffix, const void *bytes, size_t size) {
-            std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
-            if (FILE *file = std::fopen(path, "wb")) {
-                std::fwrite(bytes, 1, size, file);
-                std::fclose(file);
-            }
-        };
-        write("bgra", pixels, width * height * 4u);
-        if (presenter->fg_cover[1] != nullptr) write("hud", pixels + width * height * 4u, width * height);
-        if (presenter->gamma_enabled) {
-            uint8_t ramp[3][256];
-            for (unsigned i = 0u; i < 256u; ++i)
-                for (unsigned channel = 0u; channel < 3u; ++channel)
-                    ramp[channel][i] = static_cast<uint8_t>(presenter->gamma_ramp[i][channel] * 255.0f + 0.5f);
-            write("gamma", ramp, sizeof ramp);
+    const bool done = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u);
+    const auto write = [&](const char *suffix, const void *bytes, size_t size) {
+        std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
+        FILE *file = std::fopen(path, "wb");
+        const bool written = file != nullptr && std::fwrite(bytes, 1, size, file) == size;
+        return (file == nullptr || std::fclose(file) == 0) && written;
+    };
+    bool written = done && downloads[0] != nullptr;
+    for (unsigned i = 0u; i < 2u; ++i) {
+        if (downloads[i] == nullptr) continue;
+        if (const void *bytes = written ? SDL_MapGPUTransferBuffer(presenter->device, downloads[i], false) : nullptr) {
+            written = write(suffixes[i], bytes, sizes[i]);
+            SDL_UnmapGPUTransferBuffer(presenter->device, downloads[i]);
+        } else {
+            written = false;
         }
-        SDL_UnmapGPUTransferBuffer(presenter->device, download);
+        SDL_ReleaseGPUTransferBuffer(presenter->device, downloads[i]);
+    }
+    if (written && presenter->gamma_enabled) {
+        uint8_t ramp[3][256];
+        for (unsigned i = 0u; i < 256u; ++i)
+            for (unsigned channel = 0u; channel < 3u; ++channel)
+                ramp[channel][i] = static_cast<uint8_t>(presenter->gamma_ramp[i][channel] * 255.0f + 0.5f);
+        written = write("gamma", ramp, sizeof ramp);
+    }
+    if (written) {
         std::fprintf(presenter->fg_capture_index, "%u restart=%d gamma=%d aspect=%.6f\n", frame,
             presenter->fg_restarted ? 1 : 0, presenter->gamma_enabled ? 1 : 0, presenter->fg_aspect);
         std::fflush(presenter->fg_capture_index);
+    } else {
+        std::fprintf(stderr, "recomp d3d presenter: framegen capture failed at frame %u\n", frame);
     }
     if (fence != nullptr) SDL_ReleaseGPUFence(presenter->device, fence);
-    SDL_ReleaseGPUTransferBuffer(presenter->device, download);
     presenter->fg_present_ns += steadyNs() - start;
 }
 
