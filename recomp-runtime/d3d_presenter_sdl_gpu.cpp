@@ -3198,10 +3198,14 @@ const char kFlowConfidenceShader[] =
    by t along it) and N (on by 1 - t) closest. A doubtful vector pays for its
    doubt, and one far from the confident vectors around it for straying, so
    lone picks do not speckle; zero wins ties, so still overlays stay still.
-   Out: xy = motion in main target pixels, z = trust: the fields' confidence
-   near the pixel (none below 0.2) times the patches' agreement, w = their mean
-   difference. info.xy = field size, weights.x = t, weights.y = main target
-   pixels per finest-level pixel, weights.zw = 1 / level size. */
+   A pick that still strays is not trusted: a pocket of zero or of another
+   vector inside a confidently moving surface would show as a hard-edged
+   patch. Out: xy = motion in main target pixels times trust, z = trust: the
+   fields' confidence near the pixel (none below 0.2) times the patches'
+   agreement times how close the pick is to the confident vectors around it
+   (none 3 finest-level pixels away), w = the patches' mean difference.
+   info.xy = field size, weights.x = t, weights.y = main target pixels per
+   finest-level pixel, weights.zw = 1 / level size. */
 const char kFlowSelectShader[] =
     "float patch(float2 at, float2 v) {\n"
     " float sum = 0;\n"
@@ -3231,18 +3235,23 @@ const char kFlowSelectShader[] =
     "  if (cost < best_cost) { best_cost = cost; best = error; motion = v.xy; } }\n"
     " float agree = saturate((0.15 - best) / 0.1);\n"                               // none at 15% mean difference
     " float sure = saturate((max(confidence.x, confidence.y) - 0.2) / 0.6);\n"  // none below 0.2
-    " return float4(motion, sure * agree, best); }\n";
+    " float steady = saturate(1.5 - 0.5 * length(motion - around) / weights.y);\n"
+    " float trust = sure * agree * steady;\n"
+    " return float4(motion * trust, trust, best); }\n";
 
 /* The generated picture t of the way from N-1 to N: N-1 sampled back by t
-   along each finest-level pixel's motion (kFlowSelectShader) and N on by
-   1 - t, weighted by temporal distance and faded toward the crossfade as
-   trust drops. Zero motion is the crossfade itself. info.xy = finest level
+   along the motion (kFlowSelectShader) and N on by 1 - t, weighted by
+   temporal distance and faded toward the crossfade as trust drops. Zero
+   motion is the crossfade itself. The motion is sampled bilinearly and
+   weighted by trust, so motion and trust change smoothly between
+   finest-level pixels instead of in steps of them. info.xy = finest level
    size, weights.x = t, weights.y = main target pixels per finest-level pixel,
    weights.zw = 1 / main target size. */
 const char kFlowWarpShader[] =
     "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
     " float t = weights.x;\n"
-    " float4 m = motion.Load(int3(min(int2(p.xy / weights.y), info.xy - 1), 0));\n"
+    " float4 m = motion.SampleLevel(motion_sampler, p.xy / weights.y / float2(info.xy), 0);\n"
+    " m.xy /= max(m.z, 1e-3);\n"
     " float4 crossfade = lerp(previous.Load(int3(p.xy, 0)), current.Load(int3(p.xy, 0)), t);\n"
     " float4 warped = lerp(previous.SampleLevel(previous_sampler, (p.xy - t * m.xy) * weights.zw, 0),\n"
     "  current.SampleLevel(current_sampler, (p.xy + (1 - t) * m.xy) * weights.zw, 0), t);\n"

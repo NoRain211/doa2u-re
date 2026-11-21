@@ -3479,12 +3479,16 @@ static bool checkFlow(const std::vector<float> &fields, const unsigned size[2], 
 }
 
 // Draws picture (320x240 0xAARRGGBB) over the main target and presents it as a real frame.
-static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t> &picture, uint32_t address, uint32_t swap)
+/* Draws picture over the 320x240 frame and presents it; shift moves it by
+   fractions of a texel, which needs linear filtering. */
+static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t> &picture, uint32_t address, uint32_t swap,
+    float shift_x = 0.0f, float shift_y = 0.0f, bool linear = false)
 {
     const uint16_t indices[] = {0,1,2,3};
     // Legacy pixel centers are integers: texel centers need the half texel.
-    const float quad[4][7] = {{0,0,0,1,0,0.5f,0.5f}, {320,0,0,1,0,320.5f,0.5f},
-        {0,240,0,1,0,0.5f,240.5f}, {320,240,0,1,0,320.5f,240.5f}};
+    const float u = 0.5f - shift_x, v = 0.5f - shift_y;
+    const float quad[4][7] = {{0,0,0,1,0,u,v}, {320,0,0,1,0,320+u,v},
+        {0,240,0,1,0,u,240+v}, {320,240,0,1,0,320+u,240+v}};
     RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
     auto &draw = command.data.draw;
     draw.fvf = 0x144u;
@@ -3503,7 +3507,7 @@ static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t>
     draw.texture.data = address;
     draw.texture_bytes = picture.data();
     draw.texture_byte_count = static_cast<uint32_t>(picture.size() * 4u);
-    draw.point_min_filter = draw.point_mag_filter = true;
+    draw.point_min_filter = draw.point_mag_filter = !linear;
     draw.address_u = draw.address_v = 3;
     draw.directional.stage_mode = true;
     draw.directional.stage[0] = draw.directional.stage[3] = 1;
@@ -3640,6 +3644,128 @@ static bool testFramegenWarp()
     return passed;
 }
 
+// The larger green step to the right or below each pixel.
+static std::vector<int> flowSteps(const std::vector<int> &image, int w, int h)
+{
+    std::vector<int> steps(image.size(), 0);
+    for (int y = 0; y + 1 < h; ++y) {
+        for (int x = 0; x + 1 < w; ++x) {
+            const size_t at = static_cast<size_t>(y) * w + x;
+            steps[at] = (std::max)(std::abs(image[at + 1] - image[at]), std::abs(image[at + w] - image[at]));
+        }
+    }
+    return steps;
+}
+
+static std::vector<int> flowGreen(const std::vector<uint32_t> &pixels)
+{
+    std::vector<int> green(pixels.size());
+    for (size_t i = 0u; i < pixels.size(); ++i) green[i] = static_cast<int>(pixels[i] >> 8 & 255u);
+    return green;
+}
+
+// Pixels of a 2160x1620 picture with a step above the wanted one's within 3 pixels by more than 16, and the worst excess.
+static unsigned flowCutEdges(const std::vector<int> &steps, std::vector<int> wanted, int &worst)
+{
+    const int w = 2160, h = 1620;
+    std::vector<int> grown(wanted.size());
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int most = 0;
+                for (int d = -3; d <= 3; ++d) {
+                    const int px = pass == 0 ? std::clamp(x + d, 0, w - 1) : x, py = pass == 1 ? std::clamp(y + d, 0, h - 1) : y;
+                    most = (std::max)(most, wanted[static_cast<size_t>(py) * w + px]);
+                }
+                grown[static_cast<size_t>(y) * w + x] = most;
+            }
+        }
+        wanted.swap(grown);
+    }
+    unsigned cut = 0u;
+    worst = 0;
+    for (int y = 16; y < h - 16; ++y) {
+        for (int x = 16; x < w - 16; ++x) {
+            const size_t at = static_cast<size_t>(y) * w + x;
+            worst = (std::max)(worst, steps[at] - wanted[at]);
+            cut += steps[at] > wanted[at] + 16;
+        }
+    }
+    return cut;
+}
+
+/* Generated frames cut no edges that neither the true in-between picture nor
+   the crossfade has. At flow scale 3 (main target 2160x1620) the frames are
+   drawn with linear filtering, so their own edges are soft. In the first
+   scene B is A moved by 3,-2 texels with kFlowChanged replaced, and the truth
+   is A moved by half of that. In the second, A slides by 4,-2 left of column
+   160 and by -2,4 right of it. Motion and trust taken in whole finest-level
+   pixels, or a pick trusted against the motion around it, leave hard-edged
+   patches. Engages only where frame generation does. */
+static bool testFramegenWarpEdges()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen warp edges", d3d_backend_create(&config, &presenter));
+    d3d_backend_set_quality(6.75f, 1u, false);
+    const int w = 2160, h = 1620;
+    std::vector<uint32_t> a(320u * 240u), b[2], truth_picture[2], out, from, to, truth;
+    for (std::vector<uint32_t> *picture : {&b[0], &b[1], &truth_picture[0], &truth_picture[1]}) picture->resize(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = truth_picture[0][at] = flowFrameA(x, y);
+            b[0][at] = flowFrameB(x, y, 3, -2);
+            b[1][at] = x < 160 ? flowFrameA(x - 4, y + 2) : flowFrameA(x + 2, y - 4);
+            truth_picture[1][at] = x < 160 ? flowFrameA(x - 2, y + 1) : flowFrameA(x + 1, y - 2);
+        }
+    }
+    const float truth_shift[2][2] = {{1.5f, -1.0f}, {0.0f, 0.0f}};
+    unsigned size[2]{};
+    const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
+        pixels.assign(static_cast<size_t>(w) * h, 0u);
+        return d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) >= 0.0 &&
+            size[0] == static_cast<unsigned>(w) && size[1] == static_cast<unsigned>(h);
+    };
+    RecompD3dPresenterCommand clear = clearCommand(), present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    present.data.present = {5u, 1u};
+    passed = passed && expect("edges clear", d3d_backend_submit(presenter, &clear)) &&
+        expect("edges present", d3d_backend_submit(presenter, &present));
+    bool engaged = false;
+    uint32_t swap = 1u;
+    for (unsigned scene = 0u; scene < 2u && passed; ++scene) {
+        passed = flowFrame(presenter, a, 0x100000u, ++swap, 0.0f, 0.0f, true) &&
+            flowFrame(presenter, b[scene], 0x200000u + scene * 0x100000u, ++swap, 0.0f, 0.0f, true);
+        if (!passed || !generate(0.5f, out)) break;
+        engaged = true;
+        // generate(0) and generate(1) are the real frames themselves.
+        passed = generate(0.0f, from) && generate(1.0f, to) &&
+            flowFrame(presenter, truth_picture[scene], 0x400000u + scene * 0x100000u, ++swap,
+                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth);
+        if (!passed) break;
+        std::vector<int> crossfade = flowGreen(from);
+        const std::vector<int> later = flowGreen(to);
+        for (size_t i = 0u; i < crossfade.size(); ++i) crossfade[i] = (crossfade[i] + later[i] + 1) / 2;
+        std::vector<int> wanted = flowSteps(crossfade, w, h);
+        const std::vector<int> true_steps = flowSteps(flowGreen(truth), w, h);
+        for (size_t i = 0u; i < wanted.size(); ++i) wanted[i] = (std::max)(wanted[i], true_steps[i]);
+        int worst = 0;
+        const unsigned cut = flowCutEdges(flowSteps(flowGreen(out), w, h), wanted, worst);
+        std::printf("warp edges scene %u at 2160x1620: %u pixels cut an edge more than 16 above the truth and crossfade, worst %d\n",
+            scene, cut, worst);
+        passed = cut == 0u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen warp cuts edges in scene %u\n", scene);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's warp cuts no edges the truth and crossfade lack\n"
+            : "SKIP frame generation's warp edges, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
    from the fence wait of 200 extra flow runs less that of none. */
 static void benchFramegenFlow()
@@ -3726,7 +3852,8 @@ int main()
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
-    if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp()) return 1;
+    if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
+        !testFramegenWarpEdges()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");
