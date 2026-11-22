@@ -443,8 +443,11 @@ static void check_game_datagrams(void)
     check("character select passes", recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
     d[0x13] = 0u;
     check("an empty character select (not chosen yet) is dropped", !recomp_live_game_datagram_ok(d, 0x15u));
+    check("an empty character select is an expected drop", recomp_live_game_datagram_expected_drop(d, 0x15u));
+    check("a character select is not an expected drop", !recomp_live_game_datagram_expected_drop(d, 0x15u + 0x14u));
     d[0x13] = 0x14u;
     check("a payload the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
+    check("a payload the length disagrees with is not an expected drop", !recomp_live_game_datagram_expected_drop(d, 0x15u));
     d[3] = 12u;
     check("handler 12 is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
     d[3] = 0x41u; d[6] = 0x40u; /* the table index an attacker would aim elsewhere */
@@ -459,8 +462,10 @@ static void check_game_datagrams(void)
     check("a stage's state past 0x1d bytes is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1eu));
     d[0x13] = 0u;
     check("empty match settings are dropped", !recomp_live_game_datagram_ok(d, 0x15u));
+    check("empty match settings are not an expected drop", !recomp_live_game_datagram_expected_drop(d, 0x15u));
     d[3] = 5u;
     check("an empty settings answer (not ready) is dropped", !recomp_live_game_datagram_ok(d, 0x15u));
+    check("an empty settings answer is an expected drop", recomp_live_game_datagram_expected_drop(d, 0x15u));
     d[0x13] = 0x16u;
     check("a settings answer passes", recomp_live_game_datagram_ok(d, 0x15u + 0x16u));
     d[0x13] = 0x15u;

@@ -1162,9 +1162,10 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
         if (handler >= GAME_MSG0F_HANDLERS || size != 0x15u + payload) return false;
         /* Character select: 0x130f90 and 0x130ef0 copy a 0x14-byte record
            without its length. The empty reply a sender makes before it has
-           chosen (0x130d30) would copy the last datagram's bytes whenever the
-           id it names, which the peer sets, passes their check. The game
-           asks again every second (0x133539) until it has a record. */
+           chosen (0x130d30, 0x130e10) would copy the last datagram's bytes
+           whenever the id it names, which the peer sets, passes their check.
+           The game asks again every second (0x133539) until it has a record;
+           recomp_live_game_datagram_expected_drop tells these apart. */
         if (handler <= 3u) return payload == 0x14u;
         /* Match settings: controller settings, 0x42 bytes, then the stage's
            own state, which 0x268320 copies as payload - 0x54 bytes; the
@@ -1191,6 +1192,13 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
     default: /* 4, 18 and above 21 have no handler */
         return false;
     }
+}
+
+bool recomp_live_game_datagram_expected_drop(const uint8_t *datagram, size_t size)
+{
+    if (datagram == NULL || size != 0x15u || datagram[2] != 15u || game_u16(datagram + 0x13u) != 0u) return false;
+    const uint32_t handler = game_u32(datagram + 3u);
+    return handler <= 3u || handler == 5u;
 }
 
 /* --- the guest's winsock and XNet transport thunks --- */
@@ -1272,6 +1280,8 @@ static void live_recvfrom(void)
        drops the same ones. */
     while ((size = recomp_live_transport_guest_receive(data, sizeof data, &virtual_ina, &port)) >= 0 &&
         !recomp_live_game_datagram_ok(data, (size_t)size)) {
+        /* The game's own empty replies come every second; keep the line for real rejections. */
+        if (recomp_live_game_datagram_expected_drop(data, (size_t)size)) continue;
         static uint32_t said; /* one line per type */
         const unsigned type = size >= 3 ? data[2] : 0u;
         if (type < 32u && (said & 1u << type) == 0u) {
