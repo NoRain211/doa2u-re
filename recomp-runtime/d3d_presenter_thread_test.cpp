@@ -3476,7 +3476,10 @@ static bool testFramegenKeepsOpenCommands()
             passed &= expect("framegen open commands draw", d3d_backend_submit(presenter, &composite));
             present();
             uint32_t probe[3]{};
-            passed = passed && d3d_backend_framegen_probe(presenter, 0u, probe) != 0u;
+            if (passed && d3d_backend_framegen_probe(presenter, 0u, probe) == 0u) {
+                std::fprintf(stderr, "FAIL framegen open commands probe at frame %u\n", frame);
+                passed = false;
+            }
             if (passed && ((probe[1] ^ color) & 0xffffffu) != 0u) {
                 std::fprintf(stderr, "FAIL framegen frame %u shows %06x, its target was cleared to %06x\n",
                     frame, probe[1] & 0xffffffu, color & 0xffffffu);
