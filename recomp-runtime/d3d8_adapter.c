@@ -296,29 +296,13 @@ void recomp_d3d8_fit_2d_layer(RecompD3dPresenterDrawCommand *draw)
     const float aspect = recomp_d3d8_content_aspect();
     if (!content_widescreen || aspect == 16.0f / 9.0f || draw->target.offscreen) return;
     const float width = (float)draw->target.color.width;
-    float left = INFINITY, right = -INFINITY, top = INFINITY, bottom = -INFINITY;
-    /* An indexed draw may share its buffer, so only the vertices it uses count. */
-    const uint16_t *indices = draw->index_count != 0u ? draw->index_bytes : NULL;
-    const uint32_t count = indices != NULL ? draw->index_count : draw->vertex_count;
-    for (uint32_t i = 0u; i < count; ++i) {
-        const uint32_t vertex = indices != NULL ? indices[i] : i;
-        if (vertex >= draw->vertex_count) continue;
-        float xy[2];
-        memcpy(xy, (const uint8_t *)draw->vertex_bytes + (size_t)vertex * draw->vertex_stride, sizeof xy);
-        if (!isfinite(xy[0]) || !isfinite(xy[1])) continue;
-        left = fminf(left, xy[0]);
-        right = fmaxf(right, xy[0]);
-        top = fminf(top, xy[1]);
-        bottom = fmaxf(bottom, xy[1]);
-    }
-    /* A screen effect laid over the whole height from one of the game's own
-       render targets (Danger Zone's glow) fills the screen like a fade, even
-       drawn narrower than the target; a picture in a menu panel is shorter. */
-    if (draw->has_texture && draw->texture.render_target && top <= 1.0f &&
-        bottom >= (float)draw->target.color.height - 1.0f)
+    float bounds[4];
+    if (!recomp_widescreen_2d_layer(draw->vertex_bytes, draw->vertex_stride, draw->vertex_count,
+            draw->index_count != 0u ? draw->index_bytes : NULL, draw->index_count, width,
+            (float)draw->target.color.height, draw->has_texture && draw->texture.render_target, bounds))
         return;
     float scale[2];
-    recomp_widescreen_2d_scale(aspect, width, left, right, scale);
+    recomp_widescreen_2d_scale(aspect, width, bounds[0], bounds[2], scale);
     if (scale[0] == 1.0f && scale[1] == 1.0f) return;
     memcpy(draw->layer_scale, scale, sizeof scale);
     /* The presenter scales about the viewport's center; zero width is the whole target. */
@@ -551,6 +535,53 @@ static void validate_storage(const RecompD3dSurfaceHeader *surface)
     (void)recomp_memory(surface->data, (size_t)pitch * height);
 }
 
+/* The six vertex programs the game creates, as constant token blocks in the
+   verified executable: a header word (count << 16 | 0x2078), then count NV2A
+   instructions. The FVFs are the ones attach_program derives from each
+   declaration; the 26, 28 and 14 instruction programs draw with the scaled
+   receiver depth bias on a scaled target. */
+static const struct {
+    uint32_t address, count, fvf;
+    bool depth_bias;
+} boot_programs[] = {
+    {0x73df80u, 17u, 0x112u, false},
+    {0x7add80u, 26u, 0x142u, true},
+    {0x7ae238u, 8u, 0x142u, false},
+    {0x7af0f0u, 30u, 0x112u, false},
+    {0x7af4e0u, 14u, 0x012u, true},
+    {0x7afb48u, 28u, 0x442u, true},
+};
+_Static_assert(sizeof boot_programs / sizeof boot_programs[0] <= RECOMP_D3D_BOOT_PROGRAMS,
+    "the boot program table outgrows the presenter's config");
+
+static RecompD3dBootProgram boot_program_copies[RECOMP_D3D_BOOT_PROGRAMS];
+
+/* Reads those blocks for the presenter's boot precompile. A block whose header
+   or instruction end bits do not match is skipped: its shader compiles on
+   first use, as before. The copy keeps guest memory out of that thread. */
+static void load_boot_programs(RecompD3dPresenterConfig *config)
+{
+    config->programs = boot_program_copies;
+    config->program_count = 0u;
+    for (size_t i = 0u; i < sizeof boot_programs / sizeof boot_programs[0]; ++i) {
+        const uint32_t count = boot_programs[i].count;
+        const uint32_t header = *recomp_memory_u32(boot_programs[i].address);
+        const uint32_t *tokens = (const uint32_t *)(const void *)recomp_memory(
+            boot_programs[i].address + 4u, count * 16u);
+        bool valid = (header & 0xffffu) == 0x2078u && (header >> 16u) == count;
+        /* recomp_d3d_vertex_program_source rejects any other end bits. */
+        for (uint32_t instruction = 0u; valid && instruction < count; ++instruction)
+            valid = (tokens[instruction * 4u + 3u] & 3u) ==
+                (instruction + 1u == count ? 1u : 0u);
+        if (!valid) continue;
+        RecompD3dBootProgram *program = &boot_program_copies[config->program_count++];
+        program->fvf = boot_programs[i].fvf;
+        program->count = count;
+        program->depth_bias = boot_programs[i].depth_bias;
+        memcpy(program->tokens, tokens, count * 16u);
+    }
+}
+
 static void create_device(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -583,7 +614,10 @@ static void create_device(void)
     for (uint32_t i = 0; i < 2u; ++i) validate_storage(&colors[i]);
     validate_storage(&depth);
     if (presenter == NULL) { // a reboot keeps the window
-        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
+        // Only this copy names the programs: device_state is rewound every frame.
+        RecompD3dPresenterConfig config = candidate.presenter_config;
+        load_boot_programs(&config);
+        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&config, &presenter);
         if (host_error != RECOMP_D3D_PRESENTER_OK) {
             result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
             goto returned;

@@ -57,7 +57,11 @@ keeps running.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
   60 fps, including heavy rain-stage fights at 4K. On Windows, **VRR: On** is
   for G-SYNC or FreeSync displays and tears on fixed-refresh ones; it is not
-  yet verified on a VRR monitor.
+  yet verified on a VRR monitor. **Frame rate: Display** fills a screen at any
+  multiple of 60 Hz from 120 Hz with generated frames, and other rates with
+  VRR. It is experimental and off by default, because it adds about 8 to 15 ms
+  of input delay, which matters in a fighting game; online play turns it off. See
+  [frame generation](docs/frame-generation.md).
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
   own 5.1 surround mix. The intro and story movies play.
@@ -242,11 +246,11 @@ SHA-256 check.
    **BUILD GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen, the renderer and VRR on **VIDEO SETTINGS**, stereo or
-   5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
-   **GAMEPLAY** to leave unlocks to play, then choose
-   **START GAME**. A controller, the keyboard or the mouse all work. Your
-   choices are remembered, and `DOA2U.exe` plays with them later.
+3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR and the frame
+   rate on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**, the intro
+   skip on **MOVIES** and **Earn** on **GAMEPLAY** to leave unlocks to play,
+   then choose **START GAME**. A controller, the keyboard or the mouse all work.
+   Your choices are remembered, and `DOA2U.exe` plays with them later.
 
 The first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache

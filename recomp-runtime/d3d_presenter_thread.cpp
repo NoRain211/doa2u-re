@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -110,6 +111,9 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
         const auto &record = packet.record(i);
         RecompD3dPresenterError error = RECOMP_D3D_PRESENTER_OK;
         bool draw = false;
+        // A draw's exception logs with its decline line, at power-of-two counts.
+        const unsigned next_decline = thread.draw_declines + 1u;
+        const auto log_exception = [&] { return !draw || (next_decline & (next_decline - 1u)) == 0u; };
         try {
             switch (record.kind) {
             case D3dCapturePacket::COMMAND: {
@@ -120,7 +124,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
                     error = d3d_backend_draw_coverage(backend, &command.data.draw, &covered);
                     std::lock_guard<std::mutex> lock(thread.mutex);
                     thread.covered = covered;
-                } else error = d3d_backend_submit(backend, &command);
+                } else {
+                    if (command.type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
+                        !d3d_backend_paces_present(backend)) recomp_d3d_pace_present(d3d_backend_flush, backend);
+                    error = d3d_backend_submit(backend, &command);
+                }
                 break;
             }
             case D3dCapturePacket::RELEASE:
@@ -134,7 +142,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
         } catch (const std::bad_alloc &) {
             error = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+        } catch (const std::exception &exception) {
+            if (log_exception()) std::fprintf(stderr, "recomp d3d presenter: host exception: %s\n", exception.what());
+            error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         } catch (...) {
+            if (log_exception()) std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type\n");
             error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
         if (draw && error != RECOMP_D3D_PRESENTER_OK &&
@@ -163,6 +175,8 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
             fail(thread, error);
         }
+        // A frame's draws take milliseconds; frame generation's due slots go between them.
+        if (status(thread) == RECOMP_D3D_PRESENTER_OK) (void)d3d_backend_idle(backend);
     }
 }
 
@@ -243,7 +257,11 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         created = d3d_backend_create(&config, &backend);
     } catch (const std::bad_alloc &) {
         created = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+    } catch (const std::exception &exception) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception at create: %s\n", exception.what());
+        created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     } catch (...) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type at create\n");
         created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     {
@@ -261,6 +279,9 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
     EnumThreadWindows(GetCurrentThreadId(), findPresenterWindow, reinterpret_cast<LPARAM>(&window));
     if (window != nullptr) SetTimer(window, 1, USER_TIMER_MINIMUM, drawDuringModalLoop);
     bool &querying = timer_querying;
+    // Frame generation's in-between presents wake the worker on their own schedule.
+    HANDLE handles[2] = {thread.wake, CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS)};
     for (;;) {
         pump(thread);
         if (runPacket(thread, backend, querying)) continue;
@@ -271,11 +292,21 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         }
         // Resolve queries off the GPU while idle, polling until none remain.
         if (querying) querying = resolveVisibility(thread, backend);
-        if (MsgWaitForMultipleObjects(1, &thread.wake, FALSE,
-                querying ? 1u : INFINITE, QS_ALLINPUT) == WAIT_FAILED) {
+        const uint64_t until = status(thread) == RECOMP_D3D_PRESENTER_OK
+            ? d3d_backend_idle(backend) : UINT64_MAX;
+        if (until == 0u) continue;
+        DWORD count = 1u, wait_ms = querying ? 1u : INFINITE;
+        if (until != UINT64_MAX) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -static_cast<LONGLONG>(until);
+            if (handles[1] != nullptr && SetWaitableTimer(handles[1], &due, 0, nullptr, nullptr, FALSE)) count = 2u;
+            else wait_ms = (std::min)(wait_ms, static_cast<DWORD>((until + 9999u) / 10000u));
+        }
+        if (MsgWaitForMultipleObjects(count, handles, FALSE, wait_ms, QS_ALLINPUT) == WAIT_FAILED) {
             fail(thread, RECOMP_D3D_PRESENTER_HOST_FAILURE);
         }
     }
+    if (handles[1] != nullptr) CloseHandle(handles[1]);
     if (window != nullptr && IsWindow(window)) KillTimer(window, 1);
     thread.destroyed = d3d_backend_destroy(&backend);
     std::fprintf(stderr, "recomp d3d presenter thread: draw declines=%u\n",

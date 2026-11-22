@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "d3d_presenter_backend.h"
+#include "d3d_vblank.h"
 
 #include <new>
 #include <thread>
 #include <unordered_map>
 
-/* The presenter API run on the calling thread. SDL creates its window, takes
-   its swapchain and pumps its events on one thread, the main thread on macOS,
-   so the SDL_GPU backend cannot move to a worker as Direct3D 11 does
-   (d3d_presenter_thread.cpp). The backend records commands as they arrive
+/* The presenter API run on the calling thread, for macOS and Linux. SDL
+   creates its window, takes its swapchain and pumps its events on one thread,
+   the main thread on macOS. Windows runs SDL_GPU on the worker
+   (d3d_presenter_thread.cpp), which then owns SDL's video thread and window
+   messages. The backend records commands as they arrive
    and submits them in batches, so the guest only waits for the GPU at a
    present or when it asks for a visibility result. */
 
@@ -89,6 +91,8 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
             return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
         }
     }
+    if (command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
+        !d3d_backend_paces_present(active->backend)) recomp_d3d_pace_present(d3d_backend_flush, active->backend);
     try {
         error = d3d_backend_submit(active->backend, command);
     } catch (const std::bad_alloc &) {

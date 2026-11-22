@@ -207,7 +207,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
 {
     // The file is shared: the Windows launcher, the in-game PC SETTINGS page
     // and run_game.py read keys this launcher does not write (vulkan, vrr,
-    // game_source, window...), so keep every entry it does not own.
+    // frameRate, game_source, window...), so keep every entry it does not own.
     std::vector<std::pair<std::string, std::string>> entries;
     std::ifstream existing(path, std::ios::binary);
     if (existing.is_open()) {

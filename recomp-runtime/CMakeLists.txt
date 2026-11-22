@@ -403,6 +403,8 @@ else()
 endif()
 add_executable(recomp_d3d_vblank_test d3d_vblank.cpp xapi_clock.cpp d3d_vblank_test.cpp)
 add_test(NAME recomp-runtime-d3d-vblank COMMAND recomp_d3d_vblank_test)
+add_executable(recomp_d3d_framegen_schedule_test d3d_framegen_schedule.c d3d_framegen_schedule_test.c)
+add_test(NAME recomp-runtime-d3d-framegen-schedule COMMAND recomp_d3d_framegen_schedule_test)
 add_executable(recomp_xapi_clock_test xapi_clock.cpp xapi_clock_test.cpp)
 add_test(NAME recomp-runtime-xapi-clock COMMAND recomp_xapi_clock_test)
 add_executable(recomp_synctest_test synctest.c guest_snapshot.c synctest_test.c)
@@ -481,17 +483,22 @@ set(RECOMP_PRESENTER_SHARED ${RECOMP_PRESENTER_SHARED} overlay_imgui_panel.cpp o
 if(WIN32)
     add_library(recomp_d3d_presenter STATIC
         d3d_presenter_d3d11.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp overlay_d3d11.cpp
+        d3d_framegen_schedule.c
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     # screenshot.c asks the shell for the Pictures folder.
-    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid
+    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid winmm
         recomp_keyboard recomp_imgui)
     set(_sdl_gpu_presenter recomp_d3d_presenter_vulkan)
+    # Vulkan runs on the Direct3D 11 presenter's worker thread; macOS keeps its window on the main thread.
+    set(_sdl_gpu_wrapper d3d_presenter_thread.cpp d3d_presenter_capture.cpp)
 else()
     set(_sdl_gpu_presenter recomp_d3d_presenter)
+    set(_sdl_gpu_wrapper d3d_presenter_inline.cpp)
 endif()
 add_library(${_sdl_gpu_presenter} STATIC
-    d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
+    d3d_presenter_sdl_gpu.cpp ${_sdl_gpu_wrapper} d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
+    d3d_framegen_schedule.c
     ${RECOMP_PRESENTER_SHARED})
 target_include_directories(${_sdl_gpu_presenter} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_keyboard)
@@ -523,9 +530,9 @@ add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbr
 target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
 add_test(NAME recomp-runtime-texture-upscale COMMAND recomp_texture_upscale_test)
 if(WIN32)
-    # Tests and the runner tell the inline SDL_GPU presenter from the Direct3D 11 one.
+    # Tests tell the SDL_GPU presenter from the Direct3D 11 one.
     target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)
-    target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3)
+    target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3 user32)
 else()
     recomp_use_sdl3(${_sdl_gpu_presenter})
     recomp_use_shader_compiler(${_sdl_gpu_presenter})
@@ -550,6 +557,11 @@ if(WIN32)
     set_tests_properties(recomp-runtime-d3d-presenter-vulkan PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77
         RESOURCE_LOCK gpu)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES RESOURCE_LOCK gpu)
+    # Renders a RECOMP_D3D_FRAMEGEN_CAPTURE offline (docs/frame-generation.md).
+    add_executable(recomp_d3d_framegen_replay d3d_framegen_replay.cpp xapi_clock.cpp d3d_card_model.c)
+    target_link_libraries(recomp_d3d_framegen_replay PRIVATE recomp_d3d_presenter_vulkan)
+    recomp_use_sdl3(recomp_d3d_framegen_replay)
+    recomp_use_shader_compiler(recomp_d3d_framegen_replay)
 endif()
 
 if(WIN32 OR SDL3_FOUND)

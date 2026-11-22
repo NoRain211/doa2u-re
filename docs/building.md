@@ -161,6 +161,32 @@ that shortcut.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
+- `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows runners,
+  Direct3D 11 and Vulkan. The **Frame rate: Display** row on the Windows
+  launcher's (`Launcher.exe`) VIDEO SETTINGS page and in the game's PC
+  SETTINGS sets it at the next launch. Both save the choice, so when the game
+  starts through the launcher or `run_game.py`, the saved Frame rate sets the
+  variable and takes priority over one you set by hand. On a display of
+  120 Hz, 240 Hz or another whole multiple of 60 Hz,
+  it presents k = refresh / 60 pictures per guest frame on VSYNC: k - 1
+  generated frames between the last two real frames, then the newer real
+  frame. With **VRR: On** (Direct3D 11), any other rate gets
+  k = floor((refresh - 3) / 60) timed slots. It adds input delay: the newer
+  real frame is shown at the last slot, (k - 1) / (60 k) s after it arrives
+  (about 8.3 ms at k = 2, 11.1 ms at k = 3, 12.5 ms at k = 4), plus the GPU
+  time of its passes. It is off while the window is hidden or minimized, in
+  an unpaced or fast-forwarded run, under the frame clock (netplay and
+  synctest) and under immediate present. Any other display, and macOS and
+  Linux, log `framegen unsupported` and run as before.
+  `RECOMP_D3D_FRAMEGEN=flow` shows the estimated motion instead, and
+  `RECOMP_PERF_COUNTER=1` logs a `recomp framegen` line each second.
+  [Frame generation](frame-generation.md) describes how it works, its
+  latency, limits and debugging.
+- `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on in the
+  Vulkan renderer, writes what it gets for each real frame into the folder,
+  for `recomp_d3d_framegen_replay` to render offline. The frames are game
+  output: keep captures under `private/`. See
+  [Frame generation](frame-generation.md#debugging-and-evaluation).
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.

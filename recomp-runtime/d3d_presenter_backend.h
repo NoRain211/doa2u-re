@@ -3,10 +3,10 @@
 
 #include "d3d_presenter.h"
 
-/* The presenter worker (d3d_presenter_thread.cpp) or, on hosts whose window
-   must stay on its own thread, d3d_presenter_inline.cpp calls these. The
-   backend is d3d_presenter_d3d11.cpp on Windows and d3d_presenter_sdl_gpu.cpp
-   elsewhere. */
+/* The Windows presenter worker (d3d_presenter_thread.cpp) or, on macOS and
+   Linux, d3d_presenter_inline.cpp calls these. The backend is
+   d3d_presenter_d3d11.cpp or, for Vulkan and on other hosts,
+   d3d_presenter_sdl_gpu.cpp. */
 
 RecompD3dPresenterError d3d_backend_create(
     const RecompD3dPresenterConfig *config, RecompD3dPresenter **presenter);
@@ -20,7 +20,21 @@ RecompD3dPresenterError d3d_backend_draw_coverage(
 RecompD3dPresenterError d3d_backend_release_memory(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size, bool targets);
 RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
+/* SDL_GPU only: builds the config's vertex program shaders after the fixed
+   list, returning how many compiled. d3d_boot_programs_sdl_gpu.h defines it
+   among the presenter's internals it needs. scaled and samples are the boot
+   precompile's quality snapshot. */
+unsigned precompileProgramShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples);
+/* SDL_GPU only, for tests: waits for the boot precompile and returns the draw
+   shaders it holds. */
+unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
 void d3d_backend_set_immediate_present(bool enabled);
+/* True when the presenter must not pace PRESENT: the backend paces it itself
+   (Direct3D 11 on a VRR display, or holding each frame 2 or 4 refreshes) or
+   presents each frame at once, as immediate present asks. */
+bool d3d_backend_paces_present(RecompD3dPresenter *presenter);
+/* Sends the frame's recorded GPU work before the presenter holds a PRESENT. */
+void d3d_backend_flush(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);
 bool d3d_backend_quality_live();
@@ -39,5 +53,45 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(
 /* Inline backends only: true when the next swapchain acquire would not wait
    for the GPU to finish an earlier frame. */
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
+/* Windows worker only: presents frame generation's due slot, if any. The
+   worker calls it between records and while it waits. Returns the 100 ns
+   ticks until the next slot is due, or UINT64_MAX. */
+uint64_t d3d_backend_idle(RecompD3dPresenter *presenter);
+/* For tests: renders generated slot's picture and reads the center pixel of
+   real frames N-1 and N and of it, as 0xAARRGGBB. Returns frame generation's
+   k, or 0 without two real frames. */
+unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot, uint32_t pixels[3]);
+/* For tests: runs frame generation's flow passes repeat more times on the
+   history, waits for them, and reads the forward then the backward field
+   (4 floats per block, see framegenFlow) into fields when capacity holds both.
+   size gets the blocks per row and column. Returns the wait for the GPU in
+   milliseconds, or a negative value without a field. */
+double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat, unsigned size[2], float *fields,
+    size_t capacity);
+/* For tests: generates the picture t of the way from real frame N-1 to N
+   repeat times, waits for it, and reads it as 0xAARRGGBB into pixels when
+   capacity holds the main target. size gets its width and height. Returns the
+   wait for the GPU in milliseconds, or a negative value without two real
+   frames. */
+double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, unsigned repeat, unsigned size[2],
+    uint32_t *pixels, size_t capacity);
+/* For tests: draws frame generation's HUD mask from the 2D layer draws queued
+   since the last PRESENT repeat times, after submitting the draws before
+   them, and waits for it; the draws stay queued. draws gets their count.
+   Returns the wait for the GPU in milliseconds, or a negative value without a
+   mask. */
+double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws);
+/* For d3d_framegen_replay.cpp and tests: makes picture (the main target's
+   size, 0xAARRGGBB before gamma) real frame N and hud (one byte per pixel) its
+   HUD mask, as a PRESENT under frame generation does; restart starts the
+   history again from N. False without the history. */
+bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *picture, const uint8_t *hud, bool restart);
+/* For d3d_framegen_replay.cpp: frame generation crossfades from now on, as
+   without its flow. */
+void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
+/* For tests: a real frame recorded more than late_ns after the one before
+   starts frame generation's history again. 25 ms by default on SDL_GPU,
+   40 ms on Direct3D 11; tests that push frames unpaced widen it. */
+void d3d_backend_framegen_set_late_ns(int64_t late_ns);
 
 #endif

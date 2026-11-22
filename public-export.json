@@ -23,6 +23,7 @@
     "public-export.json",
     "docs/reuse.md",
     "docs/free-camera.md",
+    "docs/frame-generation.md",
     "docs/adr/0001-three-platform-targets.md",
     "docs/bring-up.md",
     "docs/test-release.md",

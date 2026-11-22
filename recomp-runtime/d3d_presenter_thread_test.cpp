@@ -2,13 +2,20 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_card_model.h"
 #include "d3d_draw_model.h"
+#ifndef RECOMP_TEST_D3D11
+#include "d3d_framegen_capture.h"
+#endif
+#include "xapi_time_adapter.h"
 
-/* Direct3D 11 runs on its own window thread; SDL_GPU (macOS, Linux and the
-   Windows Vulkan build) runs inline on the caller's. */
+/* Both Windows presenters, Direct3D 11 and Vulkan, run on their own window
+   thread; SDL_GPU on macOS and Linux runs inline on the caller's. */
 #if defined(_WIN32) && !defined(RECOMP_PRESENTER_SDL_GPU)
 #define RECOMP_TEST_D3D11
 #else
 #include <SDL3/SDL.h>
+#endif
+#ifdef _WIN32
+#define RECOMP_TEST_WORKER
 #endif
 
 #ifdef _WIN32
@@ -36,6 +43,7 @@ static ULONGLONG GetTickCount64()
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <thread>
 #include <string>
 #include <vector>
@@ -217,6 +225,31 @@ static bool testTicks()
     return passed;
 }
 
+/* Under the frame clock the guest advances one frame per present, so the
+   presenter holds real presents to 60 a second: a display accepting them
+   faster would run the guest fast. */
+static bool testFrameClockPacing()
+{
+    RecompD3dPresenter *presenter = nullptr;
+    if (!expect("create pacing", recomp_d3d_presenter_create(&config, &presenter))) return false;
+    uint32_t swap = 1u;
+    bool passed = expect("pacing first frame", tick(presenter, swap++));
+    recomp_xapi_frame_clock_set_enabled(true);
+    const auto start = std::chrono::steady_clock::now();
+    for (unsigned i = 0u; i < 6u && passed; ++i) passed &= expect("paced tick", tick(presenter, swap++));
+    passed &= expect("paced flush", recomp_d3d_presenter_flush(presenter, true));
+    const auto paced = std::chrono::steady_clock::now() - start;
+    recomp_xapi_frame_clock_set_enabled(false);
+    if (paced < std::chrono::milliseconds(70)) {
+        std::fprintf(stderr, "FAIL six frame-clock presents took %lld us\n",
+            static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(paced).count()));
+        passed = false;
+    }
+    passed &= destroy(presenter);
+    if (passed) std::puts("PASS the frame clock holds presents to 60 Hz");
+    return passed;
+}
+
 static bool testCapturedDraw()
 {
     RecompD3dPresenter *presenter = nullptr;
@@ -253,6 +286,53 @@ static bool testCapturedDraw()
     recomp_d3d_presenter_report_draw_textures();
     passed &= destroy(presenter);
     if (passed) std::puts("PASS captured draw survives source overwrite");
+    return passed;
+}
+
+/* A runner started without tools/run_game.py names a shader cache folder that
+   nobody made. It runs first: Direct3D 11 keeps compiled shaders for the process. */
+static bool testShaderCacheFolder()
+{
+    char temp[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, temp)) return false;
+    const std::filesystem::path root =
+        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetCurrentProcessId()) + "-" +
+            std::to_string(GetTickCount64()));
+    const std::filesystem::path folder = root / "cache";
+    _putenv_s("RECOMP_SHADER_CACHE", folder.string().c_str());
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create shader cache", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        const Vertex vertices[] = {{20, 20, 0.25f, 1, 0xffff8040u, 0, 0}, {200, 20, 0.25f, 1, 0xffff8040u, 1, 0},
+            {20, 200, 0.25f, 1, 0xffff8040u, 0, 1}, {200, 200, 0.25f, 1, 0xffff8040u, 1, 1}};
+        const uint16_t indices[] = {0, 1, 2, 3};
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof(Vertex);
+        draw.fvf = 0x144u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        passed &= expect("shader cache draw", d3d_backend_submit(presenter, &command));
+        command = {};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5, 1};
+        passed &= expect("shader cache present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy shader cache", d3d_backend_destroy(&presenter));
+    }
+    _putenv_s("RECOMP_SHADER_CACHE", "");
+    std::error_code error;
+    if (!std::filesystem::is_directory(folder, error) || std::filesystem::is_empty(folder, error)) {
+        std::fprintf(stderr, "FAIL shader cache folder is missing or empty\n");
+        passed = false;
+    }
+    std::filesystem::remove_all(root, error);
+    if (passed) std::puts("PASS the shader cache makes its folder");
     return passed;
 }
 
@@ -485,6 +565,79 @@ static bool testUncompressedMipChain()
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     DeleteFileA(path);
     if (passed) std::puts("PASS uncompressed guest mip levels at minifying scales");
+    return passed;
+}
+
+/* A stage change uploads more texels in one frame than the SDL_GPU backend's
+   staging buffer holds, so the buffer starts again before the frame's uploads
+   run. Each texture must still get its own texels. */
+static bool testTextureBurst()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "burst", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create texture burst", d3d_backend_create(&config, &presenter));
+    // Five 4 MiB textures, a solid colour each (BGR below), drawn 16 pixels square in a row.
+    const uint32_t colors[] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffff00u, 0xffff00ffu};
+    const unsigned char bgr[][3] = {{0, 0, 255}, {0, 255, 0}, {255, 0, 0}, {0, 255, 255}, {255, 0, 255}};
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        uint16_t indices[] = {0, 1, 2, 3};
+        std::vector<uint32_t> texels(1024u * 1024u);
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("texture burst clear", d3d_backend_submit(presenter, &clear));
+        for (unsigned i = 0u; i < 5u; ++i) {
+            // The backend reads the texels during the submit, so one buffer serves every texture.
+            std::fill(texels.begin(), texels.end(), colors[i]);
+            const float left = 20.0f + 32.0f * i;
+            const Vertex vertices[4] = {{left, 20.0f, 0.25f, 1.0f, 0xffffffffu, 0.0f, 0.0f},
+                {left + 16.0f, 20.0f, 0.25f, 1.0f, 0xffffffffu, 1.0f, 0.0f},
+                {left, 36.0f, 0.25f, 1.0f, 0xffffffffu, 0.0f, 1.0f},
+                {left + 16.0f, 36.0f, 0.25f, 1.0f, 0xffffffffu, 1.0f, 1.0f}};
+            RecompD3dPresenterCommand command{};
+            command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+            auto &draw = command.data.draw;
+            draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+            draw.index_count = draw.vertex_count = 4u;
+            draw.triangle_count = 2u;
+            draw.vertex_stride = sizeof(Vertex);
+            draw.fvf = 0x144u;
+            draw.vertex_bytes = vertices;
+            draw.index_bytes = indices;
+            draw.blend.color_write_mask = 15u;
+            draw.has_texture = true;
+            draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+            draw.texture.bits_per_pixel = 32u;
+            draw.texture.width = draw.texture.height = 1024u;
+            draw.texture.mip_levels = 1u;
+            draw.texture.data = 0x400000u * (i + 1u);
+            draw.texture_bytes = texels.data();
+            draw.texture_byte_count = static_cast<uint32_t>(texels.size() * 4u);
+            passed &= expect("texture burst draw", d3d_backend_submit(presenter, &command));
+        }
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5u, 1u};
+        passed &= expect("texture burst present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy texture burst", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            for (unsigned i = 0u; i < 5u; ++i) {
+                unsigned char pixel[3]{};
+                std::fseek(file, 54 + (240 - 1 - 28) * 320 * 3 + (28 + 32 * static_cast<int>(i)) * 3, SEEK_SET);
+                passed &= std::fread(pixel, 1, 3, file) == 3;
+                if (std::memcmp(pixel, bgr[i], 3) != 0) {
+                    std::fprintf(stderr, "FAIL texture burst %u BGR=%u,%u,%u\n", i, pixel[0], pixel[1], pixel[2]);
+                    passed = false;
+                }
+            }
+            std::fclose(file);
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS a frame's texture uploads beyond the staging buffer keep their texels");
     return passed;
 }
 
@@ -1843,6 +1996,108 @@ static bool testProgramMaxSlt()
     return passed;
 }
 
+#ifndef RECOMP_TEST_D3D11
+/* The boot precompile builds each guest vertex program's draw shader, so the
+   program's first draw finds it and compiles nothing; a program the config
+   lacks, or holds past RECOMP_D3D_BOOT_PROGRAMS, compiles once. The presenter
+   keeps its own copy of the programs. */
+static bool testBootProgramShaders(bool scaled)
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "vpb", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_SCALE", scaled ? "2" : "");
+    _putenv_s("RECOMP_D3D_MSAA", scaled ? "4" : "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "0");
+    // Two instructions writing oPos, encoded as the MAX/SLT program test does.
+    const uint32_t xyzw = 0x1bu;
+    const auto setProgram = [xyzw](uint32_t (*program)[4]) {
+        program[0][1] = (10u << 21) | (1u << 13) | xyzw;
+        program[0][2] = (2u << 26) | (3u << 11) | (xyzw << 17);
+        program[0][3] = (15u << 12) | 2048u;
+        program[1][1] = (11u << 21) | (2u << 9) | (2u << 13) | xyzw;
+        program[1][2] = (2u << 26) | (3u << 11) | (xyzw << 17);
+        program[1][3] = (15u << 12) | (9u << 3) | 2048u | 1u;
+    };
+    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS + 1u] = {};
+    programs[0].fvf = 0x012u;
+    programs[0].count = 2u;
+    // True: a scaled target draws it with the sample depth bias; scale 1 ignores it.
+    programs[0].depth_bias = true;
+    setProgram(programs[0].tokens);
+    for (RecompD3dBootProgram &program : programs) program = programs[0];
+    // The late program below, one past the limit: the presenter must not build it.
+    programs[RECOMP_D3D_BOOT_PROGRAMS].tokens[1][3] = (15u << 12) | (10u << 3) | 2048u | 1u;
+    auto boot_config = config;
+    boot_config.programs = programs;
+    boot_config.program_count = RECOMP_D3D_BOOT_PROGRAMS + 1u;
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create boot program", d3d_backend_create(&boot_config, &presenter));
+    std::memset(programs, 0, sizeof programs);
+    if (passed) {
+        const unsigned boot = d3d_backend_draw_shader_count(presenter);
+        if (boot == 0u) std::fprintf(stderr, "FAIL boot program built no shaders\n");
+        passed &= boot != 0u;
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("boot program clear", d3d_backend_submit(presenter, &clear));
+        const float vertices[4][6] = {{-1, 1, 0.5f, 0, 0, 0}, {1, 1, 0.5f, 0, 0, 0},
+            {-1, -1, 0.5f, 0, 0, 0}, {1, -1, 0.5f, 0, 0, 0}};
+        const uint16_t indices[] = {0, 1, 2, 3};
+        const uint32_t texels[2] = {0xffff0000u, 0xff00ff00u};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof vertices[0];
+        draw.fvf = 0x012u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.address_u = draw.address_v = 3;
+        draw.has_texture = true;
+        draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = 2;
+        draw.texture.height = 1;
+        draw.texture.mip_levels = 1;
+        draw.texture.data = 0x1000u;
+        draw.texture_bytes = texels;
+        draw.texture_byte_count = sizeof texels;
+        draw.slope_scaled_depth_bias = scaled ? 1.0f / 16 : 0.0f;
+        draw.program_count = 2u;
+        setProgram(draw.program);
+        draw.program_constants[58][0] = draw.program_constants[58][1] = draw.program_constants[58][2] = 1;
+        passed &= expect("boot program draw", d3d_backend_submit(presenter, &command));
+        const unsigned after = d3d_backend_draw_shader_count(presenter);
+        if (after != boot) std::fprintf(stderr, "FAIL boot program draw compiled %u shaders, had %u\n",
+            after, boot);
+        passed &= after == boot;
+        // One output index away, so the tokens hash differently.
+        RecompD3dPresenterCommand other = command;
+        other.data.draw.program[1][3] = (15u << 12) | (10u << 3) | 2048u | 1u;
+        passed &= expect("late program draw", d3d_backend_submit(presenter, &other));
+        const unsigned late = d3d_backend_draw_shader_count(presenter);
+        if (late != boot + 1u) std::fprintf(stderr, "FAIL late program compiled %u shaders, had %u\n",
+            late, boot);
+        passed &= late == boot + 1u;
+        RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        present.data.present = {5, 1};
+        passed &= expect("boot program present", d3d_backend_submit(presenter, &present));
+        passed &= expect("destroy boot program", d3d_backend_destroy(&presenter));
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_SCALE", "");
+    _putenv_s("RECOMP_D3D_MSAA", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    DeleteFileA(path);
+    if (passed) std::printf("PASS boot vertex program%s compiled before its first draw\n",
+        scaled ? " with scaled MSAA depth bias" : "");
+    return passed;
+}
+#endif
+
 // Vertex-program LIT and SGE over the stage effect's four-UV stream (FVF 0x442):
 // oT0 = lit(v10).zwxx * sge(v11, c3).yyyy, so x = v10.y only when v10.x > 0.
 static bool testProgramLitSge()
@@ -2224,14 +2479,14 @@ static bool testVisibility()
     bool complete = true;
     uint32_t pixels[2]{};
     passed &= expect("queued result", recomp_d3d_presenter_visibility_result(presenter, 7u, &complete, &pixels[0]));
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     // The render thread publishes nothing before the flush.
     passed &= !complete;
 #endif
     passed &= expect("unknown index", recomp_d3d_presenter_visibility_result(presenter, 9u, &complete, &pixels[0]),
         RECOMP_D3D_PRESENTER_INVALID_ARGUMENT);
     passed &= expect("publish visibility", recomp_d3d_presenter_flush(presenter, false));
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     passed &= expect("wait for visibility", recomp_d3d_presenter_flush(presenter, true));
     complete = false;
     passed &= expect("index 7 resolves before the wait returns",
@@ -2252,7 +2507,7 @@ static bool testVisibility()
         passed &= complete;
     }
     passed &= pixels[0] == 160u * 240u && pixels[1] == 320u * 240u;
-#ifdef RECOMP_TEST_D3D11
+#ifdef RECOMP_TEST_WORKER
     // An END the worker cannot match to a BEGIN fails the presenter.
     passed &= expect("unbegun end", recomp_d3d_presenter_submit(presenter, &end));
     passed &= expect("unbegun end fails", recomp_d3d_presenter_flush(presenter, true),
@@ -3276,6 +3531,1004 @@ static bool testResampledMsaaTarget()
     return passed;
 }
 
+/* Four real frames that each blend the previous one (GetBackBuffer(-1)) over
+   a new color, through a gamma ramp, with frame generation's slots presented
+   between them.
+   Returns false on an error; engaged reports frame generation's schedule, and
+   k and probe its first generated slot after the last frame. */
+static bool framegenFrames(bool framegen, const char *path, bool &engaged, unsigned &k, uint32_t (&probe)[3])
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", framegen ? "1" : "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_COUNT", "4");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen", d3d_backend_create(&config, &presenter));
+    engaged = false;
+    k = 0u;
+    if (passed) {
+        RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
+        for (auto &channel : gamma.data.gamma)
+            for (unsigned i = 0u; i < 256u; ++i) channel[i] = static_cast<uint8_t>((i * i + 127u) / 255u);
+        passed &= expect("framegen gamma", d3d_backend_submit(presenter, &gamma));
+        const uint16_t indices[] = {0,1,2,3};
+        const float quad[4][7] = {{0,0,0,1,0,0,0}, {320,0,0,1,0,320,0},
+            {0,240,0,1,0,0,240}, {320,240,0,1,0,320,240}};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.fvf = 0x144u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof quad[0];
+        draw.vertex_bytes = quad;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.blend.blend_enable = true;
+        draw.blend.src_factor = RECOMP_D3D_BLEND_CONSTANT_ALPHA;
+        draw.blend.dst_factor = RECOMP_D3D_BLEND_INV_CONSTANT_ALPHA;
+        draw.blend.op = RECOMP_D3D_BLEND_OP_ADD;
+        draw.blend.constant_color = 0x80000000u;
+        draw.has_texture = draw.texture_is_backbuffer = draw.texture_is_front_buffer = true;
+        draw.texture.format_byte = 0x12u;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = 320; draw.texture.height = 240; draw.texture.pitch = 1280;
+        draw.texture.linear = true;
+        draw.address_u = draw.address_v = 3;
+        draw.directional.stage_mode = true;
+        draw.directional.stage[0] = draw.directional.stage[3] = 1;
+        const uint32_t colors[4] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffffffu};
+        for (uint32_t frame = 1u; frame <= 4u && passed; ++frame) {
+            auto clear = clearCommand();
+            clear.data.clear.color = colors[frame - 1u];
+            passed &= expect("framegen clear", d3d_backend_submit(presenter, &clear));
+            passed &= expect("framegen previous frame", d3d_backend_submit(presenter, &command));
+            RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+            present.data.present = {5u, frame};
+            passed &= expect("framegen present", d3d_backend_submit(presenter, &present));
+            // Present due slots until the next frame, as the worker does while it waits.
+            const auto next = std::chrono::steady_clock::now() + std::chrono::microseconds(16667);
+            for (bool first = true; std::chrono::steady_clock::now() < next; first = false) {
+                const uint64_t until = d3d_backend_idle(presenter);
+                if (first && until != UINT64_MAX) engaged = true;
+                std::this_thread::sleep_for(std::chrono::microseconds(until == UINT64_MAX ? 1000u
+                    : static_cast<unsigned>((std::min)(until / 10u, uint64_t{1000u}))));
+            }
+        }
+        if (passed && engaged) k = d3d_backend_framegen_probe(presenter, 0u, probe);
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_COUNT", "");
+    return passed;
+}
+
+static std::vector<char> readFile(const std::string &path)
+{
+    std::vector<char> bytes;
+    if (FILE *file = std::fopen(path.c_str(), "rb")) {
+        char buffer[4096];
+        for (size_t got; (got = std::fread(buffer, 1, sizeof buffer, file)) != 0u;) bytes.insert(bytes.end(), buffer, buffer + got);
+        std::fclose(file);
+    }
+    return bytes;
+}
+
+// Frame generation must leave the real frames and the previous frame the guest samples unchanged.
+static bool testFramegenKeepsRealFrames()
+{
+    char folder[MAX_PATH], off[MAX_PATH], on[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "fg0", 0, off) ||
+        !GetTempFileNameA(folder, "fg1", 0, on)) return false;
+    bool engaged_off = false, engaged = false;
+    unsigned k = 0u;
+    uint32_t probe[3]{};
+    bool passed = framegenFrames(false, off, engaged_off, k, probe) && framegenFrames(true, on, engaged, k, probe);
+    passed &= !engaged_off;
+    // Slot 0 crossfades real frames 3 and 4 at t = 1/k, before gamma.
+    if (passed && engaged) {
+        passed = k >= 2u;
+        for (unsigned shift = 0u; shift < 32u && passed; shift += 8u) {
+            const int a = static_cast<int>(probe[0] >> shift & 255u), b = static_cast<int>(probe[1] >> shift & 255u);
+            const int got = static_cast<int>(probe[2] >> shift & 255u);
+            const int want = static_cast<int>(std::lround(a + (b - a) / static_cast<double>(k)));
+            passed = std::abs(got - want) <= 1 && (shift == 24u || a != b);
+        }
+        if (!passed) {
+            std::fprintf(stderr, "FAIL framegen crossfade k=%u frame 3=%08x frame 4=%08x slot 0=%08x\n",
+                k, probe[0], probe[1], probe[2]);
+        }
+    }
+    for (unsigned i = 0u; i < 4u && passed; ++i) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof suffix, ".%03u.bmp", i);
+        const std::vector<char> a = readFile(off + std::string(suffix)), b = readFile(on + std::string(suffix));
+        if (a.empty() || a != b) {
+            std::fprintf(stderr, "FAIL framegen real frame %u differs (%zu and %zu bytes)\n", i + 1u, a.size(), b.size());
+            passed = false;
+        }
+    }
+    for (unsigned i = 0u; i < 4u; ++i) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof suffix, ".%03u.bmp", i);
+        DeleteFileA((off + std::string(suffix)).c_str());
+        DeleteFileA((on + std::string(suffix)).c_str());
+    }
+    DeleteFileA(off);
+    DeleteFileA(on);
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation keeps real frames and the previous frame and crossfades them\n"
+            : "PASS frame generation off matches; SKIP its schedule, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+/* A slot shown while a real frame's commands are open must not lose them. On a
+   slot's submit SDL's Vulkan backend moves the textures of fragmented memory:
+   targets released between kept ones leave holes, and more small targets
+   than one 16 MiB page of SDL's holds mark the holes' page to move. Each
+   frame then clears a kept target, lets the slots show, and draws the target. */
+static bool testFramegenKeepsOpenCommands()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen open commands", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    uint32_t swap = 0u;
+    RecompD3dPresenterTarget target{};
+    target.offscreen = target.no_depth = true;
+    target.color.format_byte = 0x12u;
+    target.color.bits_per_pixel = 32u;
+    target.color.linear = true;
+    const auto clear = [&](uint32_t index, uint32_t size, uint32_t color) {
+        target.color.data = 0x100000u + index * 0x10000u;
+        target.color.width = target.color.height = size;
+        target.color.pitch = size * 4u;
+        auto command = clearCommand();
+        command.data.clear.target = target;
+        command.data.clear.clear_depth = false;
+        command.data.clear.color = color;
+        passed &= expect("framegen open commands clear", d3d_backend_submit(presenter, &command));
+    };
+    // Shows the due slots for one guest frame, as the worker does between a frame's records.
+    const auto idle = [&] {
+        const auto next = std::chrono::steady_clock::now() + std::chrono::microseconds(16667);
+        while (std::chrono::steady_clock::now() < next) {
+            const uint64_t until = d3d_backend_idle(presenter);
+            engaged |= until != UINT64_MAX;
+            std::this_thread::sleep_for(std::chrono::microseconds(until == UINT64_MAX ? 1000u
+                : static_cast<unsigned>((std::min)(until / 10u, uint64_t{1000u}))));
+        }
+    };
+    const auto present = [&] {
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        command.data.present = {5u, ++swap};
+        passed &= expect("framegen open commands present", d3d_backend_submit(presenter, &command));
+    };
+    const auto frames = [&](unsigned count) {
+        for (unsigned i = 0u; i < count && passed; ++i) {
+            auto command = clearCommand();
+            passed &= expect("framegen open commands frame", d3d_backend_submit(presenter, &command));
+            present();
+            idle();
+        }
+    };
+    unsigned lost = 0u;
+    if (passed) {
+        frames(3u);
+        for (uint32_t i = 0u; i < 8u; ++i) clear(i, 96u, 0xff000000u);
+        frames(1u);
+        for (uint32_t i = 0u; i < 8u; i += 2u) {
+            passed &= expect("framegen open commands release",
+                d3d_backend_release_memory(presenter, 0x100000u + i * 0x10000u, 0x1000u, true));
+        }
+        frames(2u);
+        for (uint32_t i = 8u; i < 18u; ++i) clear(i, 700u, 0xff000000u);
+        const float quad[4][7] = {{0,0,0,1,0,0,0}, {320,0,0,1,0,96,0}, {0,240,0,1,0,0,96}, {320,240,0,1,0,96,96}};
+        const uint16_t indices[] = {0,1,2,3};
+        RecompD3dPresenterCommand composite{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = composite.data.draw;
+        draw.fvf = 0x144u;
+        draw.vertex_stride = sizeof quad[0];
+        draw.vertex_count = draw.index_count = 4u;
+        draw.triangle_count = 2u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.vertex_bytes = quad;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15u;
+        draw.has_texture = true;
+        draw.address_u = draw.address_v = 3u;
+        draw.directional.stage_mode = true;
+        draw.directional.stage[0] = draw.directional.stage[3] = 1u;
+        for (uint32_t frame = 1u; frame <= 12u && passed && engaged; ++frame) {
+            const uint32_t color = 0xff000000u | frame * 0x140c07u;
+            auto command = clearCommand();
+            passed &= expect("framegen open commands frame", d3d_backend_submit(presenter, &command));
+            clear(1u, 96u, color);
+            idle();
+            draw.texture = target.color;
+            passed &= expect("framegen open commands draw", d3d_backend_submit(presenter, &composite));
+            present();
+            uint32_t probe[3]{};
+            if (passed && d3d_backend_framegen_probe(presenter, 0u, probe) == 0u) {
+                std::fprintf(stderr, "FAIL framegen open commands probe at frame %u\n", frame);
+                passed = false;
+            }
+            if (passed && ((probe[1] ^ color) & 0xffffffu) != 0u) {
+                std::fprintf(stderr, "FAIL framegen frame %u shows %06x, its target was cleared to %06x\n",
+                    frame, probe[1] & 0xffffffu, color & 0xffffffu);
+                ++lost;
+            }
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    passed = passed && lost == 0u;
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's slots keep a real frame's open commands\n"
+            : "SKIP frame generation's open commands, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+/* Frame generation's flow test pictures: three octaves of hashed noise (2, 8
+   and 32 pixel cells), not periodic, defined for any coordinate. */
+static uint32_t flowNoise(int x, int y, uint32_t seed)
+{
+    unsigned sum = 0u;
+    for (int shift = 1; shift <= 5; shift += 2) {
+        uint32_t h = static_cast<uint32_t>(x >> shift) * 73856093u ^ static_cast<uint32_t>(y >> shift) * 19349663u ^
+            (seed + static_cast<uint32_t>(shift)) * 83492791u;
+        h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+        sum += h & 255u;
+    }
+    return 0xff000000u | sum / 3u * 0x010101u;
+}
+
+struct FlowRect { int x0, y0, x1, y1; };
+static bool flowInside(FlowRect a, FlowRect b) { return a.x0 >= b.x0 && a.y0 >= b.y0 && a.x1 <= b.x1 && a.y1 <= b.y1; }
+static bool flowTouches(FlowRect a, FlowRect b) { return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; }
+static FlowRect flowGrow(FlowRect r, int by) { return {r.x0 - by, r.y0 - by, r.x1 + by, r.y1 + by}; }
+static FlowRect flowMove(FlowRect r, int dx, int dy) { return {r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy}; }
+
+// A uniform patch in frame A, so moved in B, and a patch of B replaced by new noise.
+static const FlowRect kFlowUniform{224, 32, 288, 96}, kFlowChanged{32, 144, 96, 208};
+
+static uint32_t flowFrameA(int x, int y)
+{
+    return flowInside({x, y, x + 1, y + 1}, kFlowUniform) ? 0xff808080u : flowNoise(x, y, 1u);
+}
+
+// B is A moved by (dx, dy), except kFlowChanged.
+static uint32_t flowFrameB(int x, int y, int dx, int dy)
+{
+    return flowInside({x, y, x + 1, y + 1}, kFlowChanged) ? flowNoise(x, y, 7u) : flowFrameA(x - dx, y - dy);
+}
+
+/* Checks the fields of A then B moved by (dx, dy), 4 floats per 8x8 block:
+   - blocks at least 16 pixels from the edges and the two patches (in either
+     frame): forward motion within 0.5 pixel of (dx, dy), backward of
+     (-dx, -dy), both with confidence >= 0.75;
+   - blocks that lie 12 pixels inside the uniform patch in both frames, where
+     any motion matches: confidence < 0.5 both ways;
+   - blocks whose content is replaced (backward: the block lies in the changed
+     patch; forward: it lands there): confidence < 0.5. */
+static bool checkFlow(const std::vector<float> &fields, const unsigned size[2], int dx, int dy)
+{
+    const size_t stride = static_cast<size_t>(size[0]) * size[1] * 4u;
+    const FlowRect image{0, 0, 320, 240};
+    unsigned interior = 0u, uniform = 0u, changed = 0u, bad = 0u;
+    float worst_error = 0.0f, lowest = 1.0f, highest_uniform = 0.0f, highest_changed = 0.0f;
+    for (unsigned direction = 0u; direction < 2u; ++direction) {
+        const int sx = direction == 0u ? dx : -dx, sy = direction == 0u ? dy : -dy;
+        for (unsigned by = 0u; by < size[1]; ++by) {
+            for (unsigned bx = 0u; bx < size[0]; ++bx) {
+                const float *v = &fields[direction * stride + (static_cast<size_t>(by) * size[0] + bx) * 4u];
+                const FlowRect block{static_cast<int>(bx) * 8, static_cast<int>(by) * 8,
+                    static_cast<int>(bx) * 8 + 8, static_cast<int>(by) * 8 + 8};
+                const FlowRect landed = flowMove(block, sx, sy);
+                // In frame A's coordinates for the uniform patch, B's for the changed one.
+                const FlowRect in_a = direction == 0u ? block : landed, in_b = direction == 0u ? landed : block;
+                const FlowRect around = flowGrow(block, 16 + (std::max)(std::abs(dx), std::abs(dy)));
+                if (flowInside(around, image) && !flowTouches(around, kFlowUniform) &&
+                    !flowTouches(around, flowMove(kFlowUniform, dx, dy)) && !flowTouches(around, kFlowChanged) &&
+                    !flowTouches(around, flowMove(kFlowChanged, -dx, -dy))) {
+                    ++interior;
+                    const float error = std::hypot(v[0] - sx, v[1] - sy);
+                    worst_error = (std::max)(worst_error, error);
+                    lowest = (std::min)(lowest, v[2]);
+                    if (error > 0.5f || !(v[2] >= 0.75f)) {
+                        if (++bad <= 4u) std::fprintf(stderr, "FAIL flow (%d,%d) %s block %u,%u = (%.2f,%.2f) confidence %.2f\n",
+                            dx, dy, direction ? "backward" : "forward", bx, by, v[0], v[1], v[2]);
+                    }
+                }
+                if (flowInside(flowGrow(in_a, 12), kFlowUniform) &&
+                    flowInside(flowGrow(in_b, 12), flowMove(kFlowUniform, dx, dy))) {
+                    ++uniform;
+                    highest_uniform = (std::max)(highest_uniform, v[2]);
+                    if (!(v[2] < 0.5f) && ++bad <= 8u) std::fprintf(stderr, "FAIL flow (%d,%d) %s uniform block %u,%u confidence %.2f\n",
+                        dx, dy, direction ? "backward" : "forward", bx, by, v[2]);
+                }
+                if (flowInside(in_b, kFlowChanged)) {
+                    ++changed;
+                    highest_changed = (std::max)(highest_changed, v[2]);
+                    if (!(v[2] < 0.5f) && ++bad <= 8u) std::fprintf(stderr, "FAIL flow (%d,%d) %s changed block %u,%u confidence %.2f\n",
+                        dx, dy, direction ? "backward" : "forward", bx, by, v[2]);
+                }
+            }
+        }
+    }
+    std::printf("flow (%d,%d): %u interior blocks, worst error %.3f px, lowest confidence %.2f; "
+        "%u uniform blocks, highest confidence %.2f; %u changed blocks, highest confidence %.2f\n",
+        dx, dy, interior, worst_error, lowest, uniform, highest_uniform, changed, highest_changed);
+    return bad == 0u && interior >= 100u && uniform >= 4u && changed >= 16u;
+}
+
+// Draws picture (320x240 0xAARRGGBB) over the main target and presents it as a real frame.
+/* Draws picture over the 320x240 frame, then overlays, and presents it; shift
+   moves it by fractions of a texel, which needs linear filtering. */
+static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t> &picture, uint32_t address, uint32_t swap,
+    float shift_x = 0.0f, float shift_y = 0.0f, bool linear = false,
+    const std::vector<RecompD3dPresenterCommand> &overlays = {})
+{
+    const uint16_t indices[] = {0,1,2,3};
+    // Legacy pixel centers are integers: texel centers need the half texel.
+    const float u = 0.5f - shift_x, v = 0.5f - shift_y;
+    const float quad[4][7] = {{0,0,0,1,0,u,v}, {320,0,0,1,0,320+u,v},
+        {0,240,0,1,0,u,240+v}, {320,240,0,1,0,320+u,240+v}};
+    RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+    auto &draw = command.data.draw;
+    draw.fvf = 0x144u;
+    draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+    draw.index_count = draw.vertex_count = 4;
+    draw.triangle_count = 2;
+    draw.vertex_stride = sizeof quad[0];
+    draw.vertex_bytes = quad;
+    draw.index_bytes = indices;
+    draw.blend.color_write_mask = 15;
+    draw.has_texture = true;
+    draw.texture.format_byte = 0x12u;
+    draw.texture.bits_per_pixel = 32;
+    draw.texture.width = 320; draw.texture.height = 240; draw.texture.pitch = 1280;
+    draw.texture.linear = true;
+    draw.texture.data = address;
+    draw.texture_bytes = picture.data();
+    draw.texture_byte_count = static_cast<uint32_t>(picture.size() * 4u);
+    draw.point_min_filter = draw.point_mag_filter = !linear;
+    draw.address_u = draw.address_v = 3;
+    draw.directional.stage_mode = true;
+    draw.directional.stage[0] = draw.directional.stage[3] = 1;
+    RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    present.data.present = {5u, swap};
+    bool passed = expect("flow picture", d3d_backend_submit(presenter, &command));
+    for (const RecompD3dPresenterCommand &overlay : overlays) passed &= expect("flow overlay", d3d_backend_submit(presenter, &overlay));
+    return passed && expect("flow present", d3d_backend_submit(presenter, &present));
+}
+
+/* Block matching finds a known motion: B is A moved by 3,-2 (less than a
+   block) and by 13,9 (beyond the finest level's search radius of 2, so only
+   the pyramid finds it). Engages only where frame generation does. */
+static bool testFramegenFlow()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen flow", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    std::vector<uint32_t> a(320u * 240u), b(a.size());
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+    const int shifts[2][2] = {{3, -2}, {13, 9}};
+    uint32_t swap = 0u;
+    for (unsigned i = 0u; i < 2u && passed; ++i) {
+        const int dx = shifts[i][0], dy = shifts[i][1];
+        for (int y = 0; y < 240; ++y)
+            for (int x = 0; x < 320; ++x) b[static_cast<size_t>(y) * 320u + x] = flowFrameB(x, y, dx, dy);
+        passed &= flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x200000u + i * 0x100000u, ++swap);
+        unsigned size[2]{};
+        std::vector<float> fields(2u * 64u * 64u * 4u);
+        uint32_t probe[3]{};
+        if (passed && d3d_backend_framegen_flow(presenter, 0u, size, fields.data(), fields.size()) >= 0.0 &&
+            d3d_backend_framegen_probe(presenter, 0u, probe) != 0u) {
+            engaged = true;
+            // The history must hold the pictures' colors exactly (alpha is the vertex color's).
+            if (((probe[0] ^ a[120u * 320u + 160u]) | (probe[1] ^ b[120u * 320u + 160u])) & 0xffffffu) {
+                std::fprintf(stderr, "FAIL flow history %08x %08x, drew %08x %08x\n",
+                    probe[0], probe[1], a[120u * 320u + 160u], b[120u * 320u + 160u]);
+                passed = false;
+            }
+            passed = passed && size[0] == 40u && size[1] == 30u && checkFlow(fields, size, dx, dy);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's flow finds known motion and doubts what it cannot match\n"
+            : "SKIP frame generation's flow, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+// Frame A's gray level at (x, y) in pixels, between pixel centers bilinear.
+static double flowSampleA(double x, double y)
+{
+    const int x0 = static_cast<int>(std::floor(x)), y0 = static_cast<int>(std::floor(y));
+    const double fx = x - x0, fy = y - y0;
+    const auto at = [](int px, int py) { return static_cast<double>(flowFrameA(px, py) & 255u); };
+    return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) +
+        (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+}
+
+/* Generated frames follow known motion: at t = 1/4 and 1/2 between A and B =
+   A moved by 3,-2 and by 13,9, pixels away from the edges and the two patches
+   must show A moved by t of it, much closer than the crossfade does. Between
+   A and unrelated noise (a cut), every pixel must be A, so the cut lands with
+   the real frame. Engages only where frame generation does. */
+static bool testFramegenWarp()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen warp", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), out(a.size());
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+    const int shifts[3][2] = {{3, -2}, {13, 9}, {0, 0}};
+    uint32_t swap = 0u;
+    for (unsigned i = 0u; i < 3u && passed; ++i) {
+        const int dx = shifts[i][0], dy = shifts[i][1];
+        const bool cut = i == 2u;
+        for (int y = 0; y < 240; ++y) {
+            for (int x = 0; x < 320; ++x)
+                b[static_cast<size_t>(y) * 320u + x] = cut ? flowNoise(x, y, 9u) : flowFrameB(x, y, dx, dy);
+        }
+        passed &= flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x500000u + i * 0x100000u, ++swap);
+        for (const double t : {0.25, 0.5}) {
+            unsigned size[2]{};
+            if (!passed || d3d_backend_framegen_generate(presenter, static_cast<float>(t), 1u, size, out.data(),
+                    out.size()) < 0.0) break;
+            engaged = true;
+            passed = size[0] == 320u && size[1] == 240u;
+            const FlowRect image{0, 0, 320, 240};
+            double warp_sum = 0.0, cross_sum = 0.0, warp_max = 0.0;
+            unsigned count = 0u, off = 0u;
+            for (int y = 0; y < 240 && passed; ++y) {
+                for (int x = 0; x < 320; ++x) {
+                    const size_t at = static_cast<size_t>(y) * 320u + x;
+                    const double got = out[at] & 255u, from = a[at] & 255u, to = b[at] & 255u;
+                    const double crossfade = from + (to - from) * t;
+                    if (cut) {
+                        off += std::fabs(got - from) > 1.0;
+                        continue;
+                    }
+                    const FlowRect around = flowGrow({x, y, x + 1, y + 1}, 16 + (std::max)(std::abs(dx), std::abs(dy)));
+                    if (!flowInside(around, image) || flowTouches(around, kFlowUniform) ||
+                        flowTouches(around, flowMove(kFlowUniform, dx, dy)) || flowTouches(around, kFlowChanged) ||
+                        flowTouches(around, flowMove(kFlowChanged, -dx, -dy))) continue;
+                    const double want = flowSampleA(x - t * dx, y - t * dy);
+                    warp_sum += std::fabs(got - want);
+                    warp_max = (std::max)(warp_max, std::fabs(got - want));
+                    cross_sum += std::fabs(crossfade - want);
+                    ++count;
+                }
+            }
+            if (cut) {
+                std::printf("warp cut t=%.2f: %u pixels differ from the earlier real frame by more than 1\n", t, off);
+                passed = passed && off == 0u;
+            } else {
+                const double warp = warp_sum / count, crossfade = cross_sum / count;
+                std::printf("warp (%d,%d) t=%.2f: %u pixels, mean error %.2f (max %.0f), crossfade %.2f\n",
+                    dx, dy, t, count, warp, warp_max, crossfade);
+                passed = passed && count >= 10000u && warp < 2.0 && warp * 8.0 < crossfade;
+            }
+            if (!passed) std::fprintf(stderr, "FAIL framegen warp (%d,%d) t=%.2f\n", dx, dy, t);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's warp follows known motion and holds the earlier frame at a cut\n"
+            : "SKIP frame generation's warp, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+// The larger green step to the right or below each pixel.
+static std::vector<int> flowSteps(const std::vector<int> &image, int w, int h)
+{
+    std::vector<int> steps(image.size(), 0);
+    for (int y = 0; y + 1 < h; ++y) {
+        for (int x = 0; x + 1 < w; ++x) {
+            const size_t at = static_cast<size_t>(y) * w + x;
+            steps[at] = (std::max)(std::abs(image[at + 1] - image[at]), std::abs(image[at + w] - image[at]));
+        }
+    }
+    return steps;
+}
+
+static std::vector<int> flowGreen(const std::vector<uint32_t> &pixels)
+{
+    std::vector<int> green(pixels.size());
+    for (size_t i = 0u; i < pixels.size(); ++i) green[i] = static_cast<int>(pixels[i] >> 8 & 255u);
+    return green;
+}
+
+// Pixels of a 2160x1620 picture with a step above the wanted one's within 3 pixels by more than 16, and the worst excess.
+static unsigned flowCutEdges(const std::vector<int> &steps, std::vector<int> wanted, int &worst)
+{
+    const int w = 2160, h = 1620;
+    std::vector<int> grown(wanted.size());
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int most = 0;
+                for (int d = -3; d <= 3; ++d) {
+                    const int px = pass == 0 ? std::clamp(x + d, 0, w - 1) : x, py = pass == 1 ? std::clamp(y + d, 0, h - 1) : y;
+                    most = (std::max)(most, wanted[static_cast<size_t>(py) * w + px]);
+                }
+                grown[static_cast<size_t>(y) * w + x] = most;
+            }
+        }
+        wanted.swap(grown);
+    }
+    unsigned cut = 0u;
+    worst = 0;
+    for (int y = 16; y < h - 16; ++y) {
+        for (int x = 16; x < w - 16; ++x) {
+            const size_t at = static_cast<size_t>(y) * w + x;
+            worst = (std::max)(worst, steps[at] - wanted[at]);
+            cut += steps[at] > wanted[at] + 16;
+        }
+    }
+    return cut;
+}
+
+/* Generated frames cut no edges that neither the true in-between picture nor
+   the crossfade has. At flow scale 3 (main target 2160x1620) the frames are
+   drawn with linear filtering, so their own edges are soft. In the first
+   scene B is A moved by 3,-2 texels with kFlowChanged replaced, and the truth
+   is A moved by half of that. In the second, A slides by 4,-2 left of column
+   160 and by -2,4 right of it. Motion and trust taken in whole finest-level
+   pixels, or a pick trusted against the motion around it, leave hard-edged
+   patches. Engages only where frame generation does. */
+static bool testFramegenWarpEdges()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen warp edges", d3d_backend_create(&config, &presenter));
+    d3d_backend_set_quality(6.75f, 1u, false);
+    const int w = 2160, h = 1620;
+    std::vector<uint32_t> a(320u * 240u), b[2], truth_picture[2], out, from, to, truth;
+    for (std::vector<uint32_t> *picture : {&b[0], &b[1], &truth_picture[0], &truth_picture[1]}) picture->resize(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = truth_picture[0][at] = flowFrameA(x, y);
+            b[0][at] = flowFrameB(x, y, 3, -2);
+            b[1][at] = x < 160 ? flowFrameA(x - 4, y + 2) : flowFrameA(x + 2, y - 4);
+            truth_picture[1][at] = x < 160 ? flowFrameA(x - 2, y + 1) : flowFrameA(x + 1, y - 2);
+        }
+    }
+    const float truth_shift[2][2] = {{1.5f, -1.0f}, {0.0f, 0.0f}};
+    unsigned size[2]{};
+    bool wrong_size = false;
+    // False when frame generation does not engage, a failure once it has; a wrong size sets wrong_size.
+    const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
+        pixels.assign(static_cast<size_t>(w) * h, 0u);
+        if (d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) < 0.0) return false;
+        if (size[0] != static_cast<unsigned>(w) || size[1] != static_cast<unsigned>(h)) {
+            std::fprintf(stderr, "FAIL framegen warp edges made %ux%u, not %dx%d\n", size[0], size[1], w, h);
+            wrong_size = true;
+        }
+        return true;
+    };
+    RecompD3dPresenterCommand clear = clearCommand(), present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+    present.data.present = {5u, 1u};
+    passed = passed && expect("edges clear", d3d_backend_submit(presenter, &clear)) &&
+        expect("edges present", d3d_backend_submit(presenter, &present));
+    bool engaged = false;
+    uint32_t swap = 1u;
+    for (unsigned scene = 0u; scene < 2u && passed; ++scene) {
+        passed = flowFrame(presenter, a, 0x100000u, ++swap, 0.0f, 0.0f, true) &&
+            flowFrame(presenter, b[scene], 0x200000u + scene * 0x100000u, ++swap, 0.0f, 0.0f, true);
+        if (!passed) break;
+        if (!generate(0.5f, out)) {
+            if (engaged) {
+                passed = false;
+                std::fprintf(stderr, "FAIL framegen warp edges stopped generating in scene %u\n", scene);
+            }
+            break;
+        }
+        engaged = true;
+        // generate(0) and generate(1) are the real frames themselves.
+        passed = generate(0.0f, from) && generate(1.0f, to) &&
+            flowFrame(presenter, truth_picture[scene], 0x400000u + scene * 0x100000u, ++swap,
+                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth) && !wrong_size;
+        if (!passed) break;
+        std::vector<int> crossfade = flowGreen(from);
+        const std::vector<int> later = flowGreen(to);
+        for (size_t i = 0u; i < crossfade.size(); ++i) crossfade[i] = (crossfade[i] + later[i] + 1) / 2;
+        std::vector<int> wanted = flowSteps(crossfade, w, h);
+        const std::vector<int> true_steps = flowSteps(flowGreen(truth), w, h);
+        for (size_t i = 0u; i < wanted.size(); ++i) wanted[i] = (std::max)(wanted[i], true_steps[i]);
+        int worst = 0;
+        const unsigned cut = flowCutEdges(flowSteps(flowGreen(out), w, h), wanted, worst);
+        std::printf("warp edges scene %u at 2160x1620: %u pixels cut an edge more than 16 above the truth and crossfade, worst %d\n",
+            scene, cut, worst);
+        passed = cut == 0u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen warp cuts edges in scene %u\n", scene);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's warp cuts no edges the truth and crossfade lack\n"
+            : "SKIP frame generation's warp edges, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+struct HudVertex {
+    float x, y, z, rhw;
+    uint32_t color;
+};
+
+// A pretransformed XYZRHW|DIFFUSE quad, blended over the scene by its alpha when blend.
+static RecompD3dPresenterCommand hudQuad(const HudVertex *quad, bool blend)
+{
+    static const uint16_t indices[] = {0,1,2,3};
+    RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+    auto &draw = command.data.draw;
+    draw.fvf = 0x44u;
+    draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+    draw.index_count = draw.vertex_count = 4;
+    draw.triangle_count = 2;
+    draw.vertex_stride = sizeof quad[0];
+    draw.vertex_bytes = quad;
+    draw.index_bytes = indices;
+    draw.blend.color_write_mask = 15;
+    draw.blend.blend_enable = blend;
+    draw.blend.src_factor = RECOMP_D3D_BLEND_SRC_ALPHA;
+    draw.blend.dst_factor = RECOMP_D3D_BLEND_INV_SRC_ALPHA;
+    draw.blend.op = RECOMP_D3D_BLEND_OP_ADD;
+    return command;
+}
+
+/* The HUD mask keeps the 2D layer still and out of the scene. The scene (A,
+   then A moved by 13,9) is drawn full width, then a red 2D quad that does not
+   move, then a full-width quarter-black fade over both. At t = 1/4 and 1/2:
+   the red quad's pixels must be the nearer real frame (it does not move); no
+   scene pixel may take any of its red; and away from it, the faded scene must
+   still follow the motion (the fade spans the width, so it is a screen
+   effect, not HUD). Engages only where frame generation does. */
+static bool testFramegenHud()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen hud", d3d_backend_create(&config, &presenter));
+    const int dx = 13, dy = 9;
+    const FlowRect hud{128, 96, 192, 144};
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), out, from, to;
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+            b[static_cast<size_t>(y) * 320u + x] = flowFrameA(x - dx, y - dy);
+        }
+    }
+    const float x0 = static_cast<float>(hud.x0), y0 = static_cast<float>(hud.y0);
+    const float x1 = static_cast<float>(hud.x1), y1 = static_cast<float>(hud.y1);
+    const HudVertex red[4] = {{x0, y0, 0, 1, 0xffff0000u}, {x1, y0, 0, 1, 0xffff0000u},
+        {x0, y1, 0, 1, 0xffff0000u}, {x1, y1, 0, 1, 0xffff0000u}};
+    const HudVertex fade[4] = {{0, 0, 0, 1, 0x40000000u}, {320, 0, 0, 1, 0x40000000u},
+        {0, 240, 0, 1, 0x40000000u}, {320, 240, 0, 1, 0x40000000u}};
+    const std::vector<RecompD3dPresenterCommand> overlays = {hudQuad(red, false), hudQuad(fade, true)};
+    unsigned size[2]{};
+    const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
+        pixels.assign(a.size(), 0u);
+        return d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) >= 0.0 &&
+            size[0] == 320u && size[1] == 240u;
+    };
+    // The first real frame fills both frames' history, so the mask's first pair is A, A.
+    passed = passed && flowFrame(presenter, a, 0x100000u, 1u, 0.0f, 0.0f, false, overlays) &&
+        flowFrame(presenter, a, 0x100000u, 2u, 0.0f, 0.0f, false, overlays) &&
+        flowFrame(presenter, b, 0x200000u, 3u, 0.0f, 0.0f, false, overlays);
+    bool engaged = false;
+    if (passed && generate(0.0f, from) && generate(1.0f, to)) {
+        engaged = true;
+        const double faded = 1.0 - 64.0 / 255.0;
+        for (const double t : {0.25, 0.5}) {
+            const bool generated = generate(static_cast<float>(t), out);
+            unsigned moved = 0u, red_scene = 0u, count = 0u;
+            double warp_sum = 0.0, cross_sum = 0.0;
+            for (int y = 0; y < 240 && generated; ++y) {
+                for (int x = 0; x < 320; ++x) {
+                    const size_t at = static_cast<size_t>(y) * 320u + x;
+                    const int r = out[at] >> 16 & 255u, g = out[at] >> 8 & 255u, bl = out[at] & 255u;
+                    if (flowInside({x, y, x + 1, y + 1}, hud)) {
+                        for (unsigned shift : {0u, 8u, 16u}) {
+                            const double want = ((t < 0.5 ? from[at] : to[at]) >> shift) & 255u;
+                            if (std::fabs((out[at] >> shift & 255u) - want) > 1.0) {
+                                ++moved;
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    red_scene += std::abs(r - g) > 2 || std::abs(bl - g) > 2;
+                    const FlowRect around = flowGrow({x, y, x + 1, y + 1}, 16 + dx);
+                    if (!flowInside(around, {0, 0, 320, 240}) || flowTouches(around, hud) ||
+                        flowTouches(around, kFlowUniform) || flowTouches(around, flowMove(kFlowUniform, dx, dy))) continue;
+                    const double want = flowSampleA(x - t * dx, y - t * dy) * faded;
+                    warp_sum += std::fabs(g - want);
+                    cross_sum += std::fabs((from[at] >> 8 & 255u) * (1 - t) + (to[at] >> 8 & 255u) * t - want);
+                    ++count;
+                }
+            }
+            const double warp = count ? warp_sum / count : 1e9, crossfade = count ? cross_sum / count : 0.0;
+            std::printf("hud t=%.2f: %u of %u HUD pixels off the nearer frame, %u scene pixels with its red; "
+                "faded scene %u pixels, mean error %.2f, crossfade %.2f\n",
+                t, moved, static_cast<unsigned>((hud.x1 - hud.x0) * (hud.y1 - hud.y0)), red_scene, count, warp, crossfade);
+            passed = passed && generated && moved == 0u && red_scene == 0u && count >= 5000u && warp < 2.0 && warp * 8.0 < crossfade;
+            if (!passed) std::fprintf(stderr, "FAIL framegen hud t=%.2f\n", t);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation keeps the HUD still and out of the scene, and warps a fade\n"
+            : "SKIP frame generation's HUD mask, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+static bool fastForwardOn() { return true; }
+
+/* Generated frames never mix real frames that do not belong together. A fade
+   (A a quarter darker) and a white flash (A three quarters white) are not
+   cuts: their generated frames are the crossfade, not A. After frame
+   generation was off (fast-forward, or the frame clock of netplay and
+   rollback), after a real frame came late (a load), and after a quality
+   change, the next real frame C starts again: its generated frames are C,
+   with nothing of A. Engages only where frame generation does. */
+static bool testFramegenCuts()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen cuts", d3d_backend_create(&config, &presenter));
+    std::vector<uint32_t> a(320u * 240u), faded(a.size()), flash(a.size()), c(a.size()), out(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = flowFrameA(x, y);
+            const uint32_t gray = a[at] & 255u;
+            faded[at] = 0xff000000u | gray * 3u / 4u * 0x010101u;
+            flash[at] = 0xff000000u | (gray / 4u + 191u) * 0x010101u;
+            c[at] = flowNoise(x, y, 11u);
+        }
+    }
+    unsigned size[2]{};
+    const auto generate = [&](float t) {
+        return d3d_backend_framegen_generate(presenter, t, 1u, size, out.data(), out.size()) >= 0.0 &&
+            size[0] == 320u && size[1] == 240u;
+    };
+    uint32_t swap = 0u;
+    bool engaged = false;
+    const std::vector<uint32_t> *changes[2] = {&faded, &flash};
+    // A real frame over 25 ms late starts the history again; this one takes the first present's shader work.
+    passed = passed && flowFrame(presenter, a, 0x100000u, ++swap);
+    for (unsigned i = 0u; i < 2u && passed; ++i) {
+        const std::vector<uint32_t> &b = *changes[i];
+        passed = flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, b, 0x200000u + i * 0x100000u, ++swap);
+        for (const double t : {0.25, 0.5}) {
+            if (!passed || !generate(static_cast<float>(t))) break;
+            engaged = true;
+            unsigned off = 0u;
+            for (size_t at = 0u; at < a.size(); ++at) {
+                const double from = a[at] & 255u, to = b[at] & 255u;
+                off += std::fabs((out[at] & 255u) - (from + (to - from) * t)) > 2.0;
+            }
+            std::printf("framegen %s t=%.2f: %u pixels off the crossfade by more than 2\n", i ? "flash" : "fade", t, off);
+            passed = off <= a.size() / 100u;
+            if (!passed) std::fprintf(stderr, "FAIL framegen %s is taken for a cut\n", i ? "flash" : "fade");
+        }
+    }
+    /* A camera move of 48 pixels a real frame, beyond the cut test's reach:
+       the first such pair is held like a cut, the next one is not. */
+    std::vector<uint32_t> moved[2] = {a, a};
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            for (int step = 0; step < 2; ++step)
+                moved[step][static_cast<size_t>(y) * 320u + x] = flowFrameA(x - 48 * (step + 1), y);
+        }
+    }
+    passed = passed && flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, moved[0], 0x400000u, ++swap) &&
+        flowFrame(presenter, moved[1], 0x500000u, ++swap) && generate(0.5f);
+    if (passed && engaged) {
+        unsigned held = 0u;
+        for (size_t at = 0u; at < a.size(); ++at)
+            held += std::abs(static_cast<int>(out[at] & 255u) - static_cast<int>(moved[0][at] & 255u)) <= 1;
+        std::printf("framegen second fast pair: %u of %zu pixels equal the earlier real frame\n", held, a.size());
+        passed = held < a.size() / 2u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen takes a fast camera move for a cut twice in a row\n");
+    }
+    const char *const restarts[4] = {"fast-forward", "frame clock", "late frame", "quality change"};
+    for (unsigned way = 0u; way < 4u && passed && engaged; ++way) {
+        passed = flowFrame(presenter, a, 0x100000u, ++swap);
+        if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
+        if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
+        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false);  // applied after the next real frame
+        if (way == 2u) {
+            d3d_backend_framegen_set_late_ns(25000000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        } else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
+        recomp_xapi_fast_forward = nullptr;
+        recomp_xapi_frame_clock_set_enabled(false);
+        passed = passed && flowFrame(presenter, c, 0x400000u, ++swap) && generate(0.25f);
+        d3d_backend_framegen_set_late_ns(INT64_MAX);
+        unsigned off = 0u;
+        // Away from the edges, which MSAA blends with the clear.
+        for (int y = 2; y < 238 && passed; ++y) {
+            for (int x = 2; x < 318; ++x) {
+                const size_t at = static_cast<size_t>(y) * 320u + x;
+                off += std::abs(static_cast<int>(out[at] & 255u) - static_cast<int>(c[at] & 255u)) > 2;
+            }
+        }
+        std::printf("framegen after a %s: %u pixels of the first generated frame off the new real frame\n", restarts[way], off);
+        passed = passed && off == 0u;
+        if (!passed) std::fprintf(stderr, "FAIL framegen mixes real frames across a %s\n", restarts[way]);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation takes no fade or flash for a cut and starts again after a break\n"
+            : "SKIP frame generation's cuts, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+#ifndef RECOMP_TEST_D3D11
+/* RECOMP_D3D_FRAMEGEN_CAPTURE keeps what frame generation got for each real
+   frame; pushed into a new presenter, the capture gives the in-process
+   generated frames bit for bit: A twice, A moved by 13,9, then a cut to
+   noise, each under a still red HUD quad, and the gamma ramp it was shown
+   through. Engages only where frame generation does. */
+static bool testFramegenCapture()
+{
+    char folder[MAX_PATH], capture_dir[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "fgc", 0, capture_dir)) return false;
+    DeleteFileA(capture_dir);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    _putenv_s("RECOMP_D3D_FRAMEGEN_CAPTURE", capture_dir);
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), c(a.size());
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            const size_t at = static_cast<size_t>(y) * 320u + x;
+            a[at] = flowFrameA(x, y);
+            b[at] = flowFrameA(x - 13, y - 9);
+            c[at] = flowNoise(x, y, 11u);
+        }
+    }
+    const HudVertex red[4] = {{128, 96, 0, 1, 0xffff0000u}, {192, 96, 0, 1, 0xffff0000u},
+        {128, 144, 0, 1, 0xffff0000u}, {192, 144, 0, 1, 0xffff0000u}};
+    const std::vector<RecompD3dPresenterCommand> overlays = {hudQuad(red, false)};
+    const std::vector<uint32_t> *const frames[4] = {&a, &a, &b, &c};
+    const float slots[3] = {0.25f, 0.5f, 0.75f};
+    std::vector<std::vector<uint32_t>> expected, got;
+    const auto generate = [&](RecompD3dPresenter *presenter, std::vector<std::vector<uint32_t>> &into) {
+        for (const float t : slots) {
+            unsigned size[2]{};
+            into.emplace_back(a.size());
+            if (d3d_backend_framegen_generate(presenter, t, 1u, size, into.back().data(), a.size()) < 0.0) return false;
+        }
+        return true;
+    };
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen capture", d3d_backend_create(&config, &presenter));
+    RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
+    for (auto &channel : gamma.data.gamma)
+        for (unsigned i = 0u; i < 256u; ++i) channel[i] = static_cast<uint8_t>((i * i + 127u) / 255u);
+    passed = passed && expect("framegen capture gamma", d3d_backend_submit(presenter, &gamma));
+    bool engaged = passed;
+    for (uint32_t i = 0u; i < 4u && passed && engaged; ++i) {
+        passed = flowFrame(presenter, *frames[i], 0x100000u * (i + 1u), i + 1u, 0.0f, 0.0f, false, overlays);
+        if (passed && i >= 2u) engaged = generate(presenter, expected);
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_FRAMEGEN_CAPTURE", "");
+    FramegenCapture capture;
+    if (passed && engaged) {
+        passed = framegenCaptureOpen(capture_dir, capture) && capture.frames.size() == 4u &&
+            capture.width == 320u && capture.height == 240u &&
+            expect("create framegen replay", d3d_backend_create(&config, &presenter));
+        std::vector<uint32_t> picture;
+        std::vector<uint8_t> hud;
+        uint8_t ramp[3][256];
+        for (size_t i = 0u; i < capture.frames.size() && passed; ++i) {
+            passed = framegenCaptureLoad(capture, capture.frames[i], picture, hud, ramp) && capture.frames[i].gamma &&
+                std::memcmp(ramp, gamma.data.gamma, sizeof ramp) == 0 &&
+                d3d_backend_framegen_push(presenter, picture.data(), hud.data(), capture.frames[i].restart || i == 0u) &&
+                (i < 2u || generate(presenter, got));
+        }
+        d3d_backend_destroy(&presenter);
+        passed = passed && got == expected;
+        if (!passed) std::fprintf(stderr, "FAIL framegen capture replays the generated frames bit for bit\n");
+    }
+    for (const FramegenCaptureFrame &frame : capture.frames) {
+        for (const char *suffix : {"bgra", "hud", "gamma"}) {
+            char path[MAX_PATH + 32];
+            std::snprintf(path, sizeof path, "%s/%08u.%s", capture_dir, frame.frame, suffix);
+            DeleteFileA(path);
+        }
+    }
+    DeleteFileA((capture_dir + std::string("/framegen.txt")).c_str());
+    RemoveDirectoryA(capture_dir);
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's capture replays its generated frames bit for bit\n"
+            : "SKIP frame generation's capture, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
+/* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
+   from the fence wait of 200 extra flow runs less that of none. */
+static void benchFramegenFlow()
+{
+    if (!std::getenv("RECOMP_FRAMEGEN_FLOW_BENCH")) return;
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "1");
+    const RecompD3dPresenterConfig wide = {640u, 480u, config.color_format, config.depth_format};
+    for (const float scale : {1.0f, 1.5f, 4.5f}) {
+        RecompD3dPresenter *presenter = nullptr;
+        if (d3d_backend_create(&wide, &presenter) == RECOMP_D3D_PRESENTER_OK) {
+            d3d_backend_set_quality(scale, 1u, false);
+            for (uint32_t swap = 1u; swap <= 3u; ++swap) {
+                auto clear = clearCommand();
+                RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+                present.data.present = {5u, swap};
+                d3d_backend_submit(presenter, &clear);
+                d3d_backend_submit(presenter, &present);
+            }
+            unsigned size[2]{};
+            double none = 1e9, runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_flow(presenter, 0u, size, nullptr, 0u));
+                runs = (std::min)(runs, d3d_backend_framegen_flow(presenter, 200u, size, nullptr, 0u));
+            }
+            std::printf("flow bench scale %.1f: %ux%u blocks, %.4f ms per run (fence %.3f ms for none, %.3f for 200)\n",
+                scale, size[0], size[1], (runs - none) / 200.0, none, runs);
+            none = runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_generate(presenter, 0.5f, 0u, size, nullptr, 0u));
+                runs = (std::min)(runs, d3d_backend_framegen_generate(presenter, 0.5f, 200u, size, nullptr, 0u));
+            }
+            std::printf("warp bench scale %.1f: %ux%u, %.4f ms per generated frame (fence %.3f ms for none, %.3f for 200)\n",
+                scale, size[0], size[1], (runs - none) / 200.0, none, runs);
+            // A HUD of 100 half-transparent 32x16 quads, a sixth of the 640x480 screen.
+            for (unsigned i = 0u; i < 100u; ++i) {
+                const float x = 16.0f + (i % 10u) * 60.0f, y = 16.0f + (i / 10u) * 44.0f;
+                const HudVertex quad[4] = {{x, y, 0, 1, 0x80ffffffu}, {x + 32, y, 0, 1, 0x80ffffffu},
+                    {x, y + 16, 0, 1, 0x80ffffffu}, {x + 32, y + 16, 0, 1, 0x80ffffffu}};
+                const RecompD3dPresenterCommand command = hudQuad(quad, true);
+                d3d_backend_submit(presenter, &command);
+            }
+            unsigned draws = 0u;
+            none = runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_cover(presenter, 0u, &draws));
+                runs = (std::min)(runs, d3d_backend_framegen_cover(presenter, 200u, &draws));
+            }
+            std::printf("hud mask bench scale %.1f: %u draws, %.4f ms per real frame (fence %.3f ms for none, %.3f for 200)\n",
+                scale, draws, (runs - none) / 200.0, none, runs);
+        }
+        d3d_backend_destroy(&presenter);
+    }
+    d3d_backend_set_quality(1.0f, 1u, false);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+}
+#endif
+
 int main()
 {
 #if defined(_WIN32) && !defined(RECOMP_TEST_D3D11)
@@ -3290,7 +4543,7 @@ int main()
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 #endif
     recomp_d3d_presenter_set_immediate_present(false);
-    if (!testResampledMsaaTarget() ||
+    if (!testShaderCacheFolder() || !testResampledMsaaTarget() ||
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||
         !testWidescreenAntialiasing(false, true) || !testWidescreenAntialiasing(true, true) ||
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||
@@ -3298,8 +4551,9 @@ int main()
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) || !testOneFrameInFlight() ||
 #endif
-        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
-        !testPointMinMagFilter() ||
+        !testTicks() || !testFrameClockPacing() ||
+        !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
+        !testTextureBurst() || !testPointMinMagFilter() ||
         !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
@@ -3312,12 +4566,23 @@ int main()
         !testVolume() || !testVolume(true) || !testFrameBufferBlend() || !testDepthBias() || !testDepthBias(true) ||
         !testCard() ||
         !testScaledMsaaDepthBias() || !testProgramMaxSlt() ||
+#ifndef RECOMP_TEST_D3D11
+        !testBootProgramShaders(false) || !testBootProgramShaders(true) ||
+#endif
         !testProgramLitSge() ||
         !testStageBump() ||
         !testStageWater(false) || !testStageWater(true) ||
         !testVisibility() ||
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
+    // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
+    d3d_backend_framegen_set_late_ns(INT64_MAX);
+    if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() ||
+        !testFramegenWarp() || !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts()) return 1;
+#ifndef RECOMP_TEST_D3D11
+    if (!testFramegenCapture()) return 1;
+    benchFramegenFlow();
+#endif
     std::puts("PASS presenter render thread");
     return 0;
 }

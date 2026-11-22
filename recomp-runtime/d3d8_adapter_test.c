@@ -513,6 +513,85 @@ static int coverage_tests(void)
     return passed;
 }
 
+/* The constant vertex programs Device creation copies for the presenter's boot
+   precompile: one header word (count << 16 | 0x2078), then count instructions
+   whose word 3 carries the end bit on the last one only. */
+static void write_boot_program(uint32_t address, uint32_t count)
+{
+    *recomp_memory_u32(address) = (count << 16u) | 0x2078u;
+    uint32_t *tokens = recomp_memory_u32(address + 4u);
+    for (uint32_t i = 0u; i < count; ++i) {
+        tokens[i * 4u] = 0u;
+        tokens[i * 4u + 1u] = 0x00010000u + i;
+        tokens[i * 4u + 2u] = 0x00020000u + i;
+        tokens[i * 4u + 3u] = 0xfff00000u | (i * 4u) | (i + 1u == count ? 1u : 0u);
+    }
+}
+
+static bool contains(const unsigned char *bytes, size_t size, const void *needle, size_t length)
+{
+    for (size_t at = 0u; at + length <= size; ++at)
+        if (memcmp(bytes + at, needle, length) == 0) return true;
+    return false;
+}
+
+static int boot_program_tests(void)
+{
+    /* The table the adapter reads, and what it tells the presenter. */
+    const struct { uint32_t address, count, fvf; bool depth_bias; } table[] = {
+        {0x73df80u, 17u, 0x112u, false},
+        {0x7add80u, 26u, 0x142u, true},
+        {0x7ae238u, 8u, 0x142u, false},
+        {0x7af0f0u, 30u, 0x112u, false},
+        {0x7af4e0u, 14u, 0x012u, true},
+        {0x7afb48u, 28u, 0x442u, true},
+    };
+    const uint32_t programs = sizeof table / sizeof table[0];
+    int passed = 1;
+
+    reset_fixture();
+    for (uint32_t i = 0u; i < programs; ++i) write_boot_program(table[i].address, table[i].count);
+    passed &= create();
+    passed &= expect("the six vertex programs reach the presenter",
+        created_config.program_count == programs);
+    for (uint32_t i = 0u; i < programs && created_config.program_count == programs; ++i) {
+        const RecompD3dBootProgram *program = &created_config.programs[i];
+        passed &= expect("a boot program keeps its FVF, count and bias",
+            program->fvf == table[i].fvf && program->count == table[i].count &&
+            program->depth_bias == table[i].depth_bias);
+        passed &= expect("a boot program's tokens are copied",
+            memcmp(program->tokens, recomp_memory(table[i].address + 4u, table[i].count * 16u),
+                table[i].count * 16u) == 0);
+    }
+    /* Rollback saves this state every frame: the programs stay out of it. */
+    unsigned char *state = malloc(recomp_d3d8_state_size());
+    passed &= expect("boot program snapshot allocated", state != NULL);
+    if (state != NULL) {
+        recomp_d3d8_state_save(state);
+        passed &= expect("the saved device state holds no boot program",
+            !contains(state, recomp_d3d8_state_size(), recomp_memory(table[0].address + 4u, table[0].count * 16u),
+                table[0].count * 16u) &&
+            !contains(state, recomp_d3d8_state_size(), &created_config.programs, sizeof created_config.programs));
+        free(state);
+    }
+
+    reset_fixture();
+    for (uint32_t i = 0u; i < programs; ++i) write_boot_program(table[i].address, table[i].count);
+    *recomp_memory_u32(0x7ae238u) = (8u << 16u) | 0x2079u;
+    passed &= create();
+    passed &= expect("a block with a wrong tag is skipped",
+        created_config.program_count == programs - 1u && created_config.programs[2].count == 30u);
+
+    reset_fixture();
+    for (uint32_t i = 0u; i < programs; ++i) write_boot_program(table[i].address, table[i].count);
+    recomp_memory_u32(0x73df80u + 4u + 16u * 16u)[3] &= ~1u;
+    passed &= create();
+    passed &= expect("a block without its end bit is skipped",
+        created_config.program_count == programs - 1u && created_config.programs[0].count == 26u);
+    reset_fixture();
+    return passed;
+}
+
 int main(void)
 {
     uint32_t arguments[6] = {0};
@@ -536,6 +615,7 @@ int main(void)
     stop_armed = false;
     passed &= expect("push-buffer stop names its caller",
         strcmp(stop_reason, "d3d8:push-buffer-unbound:ret=00346793") == 0);
+    passed &= boot_program_tests();
     reset_fixture();
     create_error = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
     passed &= create();
@@ -579,6 +659,7 @@ int main(void)
         created_config.width == 720u && created_config.height == 480u &&
         created_config.color_format == RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM &&
         created_config.depth_format == RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8 &&
+        created_config.program_count == 0u &&
         create_count == 1u && submit_count == 1u && vblank_reset_count == 1u &&
         submitted.type == RECOMP_D3D_PRESENTER_COMMAND_CLEAR &&
         !submitted.data.clear.clear_color && submitted.data.clear.clear_depth &&

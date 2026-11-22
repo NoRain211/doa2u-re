@@ -1133,15 +1133,16 @@ Rollback replays frames, so a replayed frame must reproduce the first pass
 exactly. `RECOMP_FRAME_CLOCK=1` replaces the host clock with a frame-locked
 guest clock: every read inside a frame returns the frame's end, plus a 1 us
 tick per read (`RECOMP_FRAME_CLOCK_TICK_NS`) so loops that poll the counter
-reach their deadline. Each Swap advances 1/60 s. A skipped wait (a
-vblank wait, or the scheduler idling until the next timer) jumps the counter
-to its deadline; a wait that ends by the next frame's end moves time inside
-the current frame only. A wait whose deadline is more than two frames past
-the frame start moves the next frame's start to that deadline, so that Swap
-advances further. A refresh at the current time counts as reached, or
-every frame that waited for vblank would span two. The scheduler slice a
-clock read offers is gated on guest time, so a replay preempts at the same
-points.
+reach their deadline. Each Swap advances 1/60 s. A real Present is held to a
+1/60 s host grid, so a display that accepts presents faster than 60 Hz does
+not run the guest fast. A skipped wait (a vblank wait, or the scheduler
+idling until the next timer) jumps the counter to its deadline; a wait that
+ends by the next frame's end moves time inside the current frame only. A
+wait whose deadline is more than two frames past the frame start moves
+the next frame's start to that deadline, so that Swap advances further. A
+refresh at the current time counts as reached, or every frame that waited
+for vblank would span two. The scheduler slice a clock read offers is gated
+on guest time, so a replay preempts at the same points.
 
 `RECOMP_SYNCTEST=1` saves state at `RECOMP_SYNCTEST_START`, replays
 `RECOMP_SYNCTEST_FRAMES` frames (default 1) and compares; `loop` keeps

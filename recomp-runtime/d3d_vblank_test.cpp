@@ -25,6 +25,33 @@ int main()
 {
     using Clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
+    // Under the frame clock the presenter holds real presents to a 60 Hz host
+    // grid; offline and fast-forwarded presents stay immediate.
+    const auto pace = [](unsigned presents) {
+        const auto start = Clock::now();
+        for (unsigned i = 0; i < presents; ++i) recomp_d3d_pace_present(nullptr, nullptr);
+        return Clock::now() - start;
+    };
+    if (pace(2u) >= 8ms) {
+        std::fprintf(stderr, "pacing: an offline present waited\n");
+        return 1;
+    }
+    recomp_xapi_frame_clock_set_enabled(true);
+    const auto paced = pace(8u);
+    if (paced < 100ms) {
+        std::fprintf(stderr, "pacing: 8 frame-clock presents took %lld us\n",
+            static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(paced).count()));
+        return 1;
+    }
+    recomp_xapi_fast_forward = fast_forward_hook;
+    fast_forward = true;
+    if (pace(4u) >= 50ms) {
+        std::fprintf(stderr, "pacing: a fast-forwarded present waited\n");
+        return 1;
+    }
+    fast_forward = false;
+    recomp_xapi_fast_forward = nullptr;
+    recomp_xapi_frame_clock_set_enabled(false);
     // Under the frame clock, Swap is the vblank: a wait each frame must not
     // round up to the refresh after the frame's end and run time double.
     recomp_xapi_frame_clock_set_enabled(true);
