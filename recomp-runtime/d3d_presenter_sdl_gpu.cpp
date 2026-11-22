@@ -5,8 +5,8 @@
    sizes, declines and resource lifetimes. Where SDL_GPU lacks a Direct3D 11
    feature this file says so: widened lines are expanded on the CPU instead of
    in a geometry shader, coverage probes rasterize on the CPU, and occlusion
-   counts come from an additive pass. VRR and RECOMP_D3D_PRESENT_LOG are
-   Direct3D 11 only. */
+   counts come from an additive pass. RECOMP_D3D_PRESENT_LOG is Direct3D 11
+   only. */
 #include "d3d_presenter_backend.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
@@ -277,6 +277,8 @@ struct RecompD3dPresenter {
     bool close_requested = false;
     // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
     SDL_GPUFence *present_fences[2] = {};
+    bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
+    long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;
@@ -425,6 +427,22 @@ bool preferMailbox(bool immediate)
 #else
     return immediate;
 #endif
+}
+
+// steady_clock now, in nanoseconds since its epoch, as recomp_d3d_sleep_until takes it.
+long long steadyNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// VRR presents IMMEDIATE and paces itself, so it outranks immediate_present, as in the D3D11 backend.
+SDL_GPUPresentMode presentMode(RecompD3dPresenter *presenter)
+{
+    if (presenter->vrr) return SDL_GPU_PRESENTMODE_IMMEDIATE;
+    return preferMailbox(immediate_present) &&
+            SDL_WindowSupportsGPUPresentMode(presenter->device, presenter->window, SDL_GPU_PRESENTMODE_MAILBOX)
+        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
 }
 
 SDL_GPUCommandBuffer *commandBuffer(RecompD3dPresenter *presenter)
@@ -2966,6 +2984,17 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
             shown = presenter->gamma_target;
         }
     }
+    if (presenter->vrr) {
+        /* VRR shows a frame the moment it is presented; present on the guest's
+           1/60 s grid, as the D3D11 backend does. SDL presents when the
+           swapchain's command buffer is submitted, so the frame renders during
+           the sleep and only the blit to the window follows it. */
+        submitCommands(presenter);
+        presenter->vrr_slot_ns = recomp_d3d_vrr_slot(presenter->vrr_slot_ns, steadyNs());
+        recomp_d3d_sleep_until(presenter->vrr_slot_ns);
+        commands = commandBuffer(presenter);
+        if (commands == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
     SDL_GPUTexture *swapchain = nullptr;
     Uint32 swap_width = 0u, swap_height = 0u;
     if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height) &&
@@ -3471,10 +3500,22 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
-    const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
-            SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
-        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, present_mode);
+    /* IMMEDIATE shows each frame when it is presented, so any VRR display paces
+       60 Hz evenly. SDL cannot tell whether VRR is active; without it this tears. */
+    const char *vrr = std::getenv("RECOMP_D3D_VRR");
+    const bool want_vrr = vrr != nullptr && std::strcmp(vrr, "1") == 0;
+    created->vrr = want_vrr && SDL_WindowSupportsGPUPresentMode(created->device, created->window,
+        SDL_GPU_PRESENTMODE_IMMEDIATE);
+    if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+            presentMode(created)) && created->vrr) {
+        // The VRR pacing must not run on top of a blocking present.
+        created->vrr = false;
+        if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+                presentMode(created))) {
+            std::fprintf(stderr, "recomp d3d presenter: swapchain parameters failed: %s\n", SDL_GetError());
+        }
+    }
+    if (want_vrr) std::fprintf(stderr, "recomp d3d presenter: vrr %s\n", created->vrr ? "on" : "unsupported");
     if (!createResources(created)) return fail("presenter resources");
     std::fprintf(stderr, "recomp d3d presenter: %s target=%ux%u msaa=%u window=%ux%u\n",
         SDL_GetGPUDeviceDriver(created->device), main_width, main_height, created->msaa_count,
@@ -3760,10 +3801,8 @@ void d3d_backend_set_immediate_present(bool enabled)
     immediate_present = enabled;
     RecompD3dPresenter *presenter = active_presenter;
     if (presenter == nullptr || presenter->window == nullptr) return;
-    const SDL_GPUPresentMode mode = preferMailbox(enabled) &&
-            SDL_WindowSupportsGPUPresentMode(presenter->device, presenter->window, SDL_GPU_PRESENTMODE_MAILBOX)
-        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+    SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+        presentMode(presenter));
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels)
@@ -3804,6 +3843,19 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
 {
+    /* This presenter runs on the guest thread, and submitPresent's VRR sleep
+       stalls every guest thread, CRI's audio refills too (issue #69). The
+       guest's wait for this lets them run, so VRR waits here until 2 ms before
+       its slot (the scheduler polls host waits each millisecond); the frame's
+       draws render meanwhile. */
+    if (presenter->vrr) {
+        // Queue the draws still batched, or they would wait for submitPresent.
+        flushSegment(presenter);
+        resolveMain(presenter);
+        submitCommands(presenter);
+        const long long now = steadyNs();
+        if (recomp_d3d_vrr_slot(presenter->vrr_slot_ns, now) - now > 2000000) return false;
+    }
     return presenter->present_fences[0] == nullptr ||
         SDL_QueryGPUFence(presenter->device, presenter->present_fences[0]);
 }
