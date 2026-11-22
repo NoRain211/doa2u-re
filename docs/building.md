@@ -24,11 +24,11 @@ from the sister projects
 
 ## Build from the launcher
 
-`./launcher.sh` opens on its BUILD GAME page while the game is not built. Choose
-your Disc 2 ISO with DISC ISO, or drop it on the window, and choose BUILD. The
+`./launcher.sh` opens on its GAME page. Choose
+your Disc 2 ISO with DISC 2 ISO, or drop it on the window, and choose BUILD. The
 page shows the elapsed time and the build's latest line, and keeps the full
 output in `private/build.log`; leaving while it runs asks twice, then stops it.
-When it finishes, choose START GAME.
+When it finishes, choose START GAME on the same page.
 
 The Linux package ships a prebuilt launcher, so this page needs nothing
 installed. The build it starts still needs the tools below; on SteamOS it runs
@@ -75,8 +75,8 @@ the build before it compiles. The ISO is extracted once into
 once the build succeeds.
 
 `./launcher.sh` opens the same menu as the Windows launcher: resolution, MSAA,
-SMAA and widescreen on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**
-and the intro skip on **MOVIES**. **START GAME** saves them to
+SMAA, widescreen and the intro skip on **VIDEO** and stereo or 5.1 on
+**AUDIO**. **Start Game** on the **GAME** page saves them to
 `private/launcher.json` and starts the game. A
 `private/launcher-background.png` (or `.jpg` on macOS) replaces its backdrop.
 `./run_game.sh` starts the game with the saved choices, and
@@ -160,7 +160,9 @@ that shortcut.
 - Depth is 32-bit float with 8-bit stencil, as Apple and AMD GPUs lack D24S8.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
-- `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
+- `RECOMP_D3D_PRESENT_LOG` is a Direct3D 11 feature. `RECOMP_D3D_VRR` needs
+  the immediate present mode; without it the game logs `vrr unsupported` and
+  keeps vsync.
 - `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows runners,
   Direct3D 11 and Vulkan. The **Frame rate: Display** row on the Windows
   launcher's (`Launcher.exe`) VIDEO SETTINGS page and in the game's PC
@@ -194,7 +196,7 @@ that shortcut.
   refresh, and macOS and Linux, log `framegen unsupported` and run as before.
   It is off while the window is hidden or minimized, in an unpaced or
   fast-forwarded run and under the frame clock (netplay and synctest).
-  Direct3D 11 also leaves it off with `RECOMP_D3D_VRR=1`, which logs
+  Both renderers also leave it off with `RECOMP_D3D_VRR=1`, which logs
   `framegen unsupported: VRR is on`: the two are not combined yet. With
   `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
 - `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on in the

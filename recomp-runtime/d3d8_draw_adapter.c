@@ -479,6 +479,12 @@ static void distortion(uint32_t device, uint32_t stride, RecompD3dPresenterDrawC
     if (stride != 56u || !draw->has_texture || !scene->has_texture || draw->palette_bytes != NULL ||
         scene->palette_bytes != NULL || draw->texture.linear)
         recomp_stop(2, "d3d8:distortion-inputs");
+    /* The presenter samples the normal map (stage 0) linearly: it has no point min/mag flag for it. */
+    const uint32_t normal_min = *recomp_memory_u32(STAGES + 12u), normal_mag = *recomp_memory_u32(STAGES + 16u),
+                   normal_mip = *recomp_memory_u32(STAGES + 20u);
+    if (normal_min != 2u || normal_mag != 2u ||
+        (draw->texture.mip_levels > 1u && normal_mip != 1u && normal_mip != 2u))
+        recomp_stop(2, "d3d8:distortion-normal-filter:%u,%u,%u", normal_min, normal_mag, normal_mip);
     draw->reflection_texture = draw->texture;
     draw->reflection_bytes = draw->texture_bytes;
     draw->reflection_byte_count = draw->texture_byte_count;
@@ -491,9 +497,13 @@ static void distortion(uint32_t device, uint32_t stride, RecompD3dPresenterDrawC
     draw->texture_byte_count = scene->texture_byte_count;
     draw->address_u = scene->address_u;
     draw->address_v = scene->address_v;
-    draw->point_min_filter = *recomp_memory_u32(STAGES + 256u + 12u) == 1u;
-    draw->point_mag_filter = *recomp_memory_u32(STAGES + 256u + 16u) == 1u;
-    draw->point_mip_filter = *recomp_memory_u32(STAGES + 256u + 20u) == 1u;
+    const uint32_t min = *recomp_memory_u32(STAGES + 256u + 12u), mag = *recomp_memory_u32(STAGES + 256u + 16u);
+    if (min < 1u || min > 2u || mag < 1u || mag > 2u) recomp_stop(2, "d3d8:distortion-filter:%u,%u", min, mag);
+    draw->point_min_filter = min == 1u;
+    draw->point_mag_filter = mag == 1u;
+    const uint32_t mip = *recomp_memory_u32(STAGES + 256u + 20u);
+    if (scene->texture.mip_levels > 1u && mip != 1u && mip != 2u) recomp_stop(2, "d3d8:distortion-mip:%u", mip);
+    draw->point_mip_filter = mip == 1u;
     draw->mip_lod_bias = lod_bias(*recomp_memory_u32(STAGES + 256u + 24u));
     draw->texture_is_backbuffer = scene->texture_is_backbuffer;
     draw->texture_is_front_buffer = scene->texture_is_front_buffer;
