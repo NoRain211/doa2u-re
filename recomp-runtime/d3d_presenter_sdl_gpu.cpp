@@ -11,6 +11,7 @@
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
 #include "d3d_framegen_schedule.h"
+#include "d3d_sdl_gpu_state.h"
 #include "d3d_shader_compiler.h"
 #include "d3d_texture_model.h"
 #include "d3d_vblank.h"
@@ -1343,75 +1344,6 @@ void precompileDrawShaders(RecompD3dPresenter *presenter)
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
-}
-
-SDL_GPUBlendFactor hostBlendFactor(RecompD3dBlendFactor factor, bool alpha_channel)
-{
-    switch (factor) {
-    case RECOMP_D3D_BLEND_ZERO: return SDL_GPU_BLENDFACTOR_ZERO;
-    case RECOMP_D3D_BLEND_CONSTANT_COLOR:
-    case RECOMP_D3D_BLEND_CONSTANT_ALPHA: return SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
-    case RECOMP_D3D_BLEND_INV_CONSTANT_COLOR:
-    case RECOMP_D3D_BLEND_INV_CONSTANT_ALPHA: return SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
-    /* The alpha blend equation may only name alpha operands. */
-    case RECOMP_D3D_BLEND_SRC_COLOR:
-        return alpha_channel ? SDL_GPU_BLENDFACTOR_SRC_ALPHA : SDL_GPU_BLENDFACTOR_SRC_COLOR;
-    case RECOMP_D3D_BLEND_INV_SRC_COLOR:
-        return alpha_channel ? SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
-    case RECOMP_D3D_BLEND_SRC_ALPHA: return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    case RECOMP_D3D_BLEND_INV_SRC_ALPHA: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    case RECOMP_D3D_BLEND_DST_ALPHA: return SDL_GPU_BLENDFACTOR_DST_ALPHA;
-    case RECOMP_D3D_BLEND_INV_DST_ALPHA: return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
-    case RECOMP_D3D_BLEND_DST_COLOR:
-        return alpha_channel ? SDL_GPU_BLENDFACTOR_DST_ALPHA : SDL_GPU_BLENDFACTOR_DST_COLOR;
-    case RECOMP_D3D_BLEND_INV_DST_COLOR:
-        return alpha_channel ? SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA : SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR;
-    case RECOMP_D3D_BLEND_SRC_ALPHA_SATURATE: return SDL_GPU_BLENDFACTOR_SRC_ALPHA_SATURATE;
-    case RECOMP_D3D_BLEND_ONE:
-    default: return SDL_GPU_BLENDFACTOR_ONE;
-    }
-}
-
-SDL_GPUBlendOp hostBlendOp(RecompD3dBlendOp op)
-{
-    switch (op) {
-    case RECOMP_D3D_BLEND_OP_MIN: return SDL_GPU_BLENDOP_MIN;
-    case RECOMP_D3D_BLEND_OP_MAX: return SDL_GPU_BLENDOP_MAX;
-    case RECOMP_D3D_BLEND_OP_SUBTRACT: return SDL_GPU_BLENDOP_SUBTRACT;
-    case RECOMP_D3D_BLEND_OP_REVERSE_SUBTRACT: return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
-    case RECOMP_D3D_BLEND_OP_ADD:
-    default: return SDL_GPU_BLENDOP_ADD;
-    }
-}
-
-SDL_GPUCompareOp hostCompareOp(RecompD3dCompareFunc func)
-{
-    switch (func) {
-    case RECOMP_D3D_COMPARE_NEVER: return SDL_GPU_COMPAREOP_NEVER;
-    case RECOMP_D3D_COMPARE_LESS: return SDL_GPU_COMPAREOP_LESS;
-    case RECOMP_D3D_COMPARE_EQUAL: return SDL_GPU_COMPAREOP_EQUAL;
-    case RECOMP_D3D_COMPARE_GREATER: return SDL_GPU_COMPAREOP_GREATER;
-    case RECOMP_D3D_COMPARE_NOT_EQUAL: return SDL_GPU_COMPAREOP_NOT_EQUAL;
-    case RECOMP_D3D_COMPARE_GREATER_EQUAL: return SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
-    case RECOMP_D3D_COMPARE_ALWAYS: return SDL_GPU_COMPAREOP_ALWAYS;
-    case RECOMP_D3D_COMPARE_LESS_EQUAL:
-    default: return SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
-    }
-}
-
-SDL_GPUStencilOp hostStencilOp(RecompD3dStencilOp op)
-{
-    switch (op) {
-    case RECOMP_D3D_STENCIL_ZERO: return SDL_GPU_STENCILOP_ZERO;
-    case RECOMP_D3D_STENCIL_REPLACE: return SDL_GPU_STENCILOP_REPLACE;
-    case RECOMP_D3D_STENCIL_INCRSAT: return SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP;
-    case RECOMP_D3D_STENCIL_DECRSAT: return SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP;
-    case RECOMP_D3D_STENCIL_INVERT: return SDL_GPU_STENCILOP_INVERT;
-    case RECOMP_D3D_STENCIL_INCRWRAP: return SDL_GPU_STENCILOP_INCREMENT_AND_WRAP;
-    case RECOMP_D3D_STENCIL_DECRWRAP: return SDL_GPU_STENCILOP_DECREMENT_AND_WRAP;
-    case RECOMP_D3D_STENCIL_KEEP:
-    default: return SDL_GPU_STENCILOP_KEEP;
-    }
 }
 
 /* Vertex inputs in the shader's VSIn order, which recomp_shader_draw_bindings
