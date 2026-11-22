@@ -115,8 +115,9 @@ SyncTest.
   `portable_math_test.c` pins a hash of 160,000 results; MSVC, GCC and Clang
   on x86-64 and arm64 Linux all match it.
   `RCPSS` and `RSQRTSS` are table approximations whose bits differ between
-  Intel, AMD and the Xbox's CPU, so the runner computes the exact reciprocal
-  on every host, within Intel's documented 1.5 * 2^-12 error.
+  Intel and AMD, so the runner computes Intel's result on every host
+  (`recomp_types.h`; see `docs/bring-up.md`). It is taken to be the Xbox
+  CPU's. That is not measured on a console.
 - The game reads its widescreen (XC_VIDEO) and surround (XC_AUDIO) settings
   in its own logic. A Live fight's desync check ignores everything outside the
   fight (below), so each player keeps their own settings. The presenter fits

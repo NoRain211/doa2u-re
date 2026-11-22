@@ -55,12 +55,12 @@ keeps running.
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
-  60 fps, including heavy rain-stage fights at 4K. On Windows, **VRR: On** is
-  for G-SYNC or FreeSync displays and tears on fixed-refresh ones; it is not
-  yet verified on a VRR monitor. **Frame rate: Display** fills a screen at a
-  whole multiple of 60 Hz (120, 180, 240, 360) with generated frames and works
-  with VRR: a whole multiple of 60 Hz keeps VSYNC slots, and another rate runs
-  just below the panel's ceiling.
+  60 fps, including heavy rain-stage fights at 4K. **VRR: On** is for G-SYNC
+  or FreeSync displays and tears on fixed-refresh ones; it is not yet verified
+  on a VRR monitor. **Frame rate: Display** fills a screen at a whole multiple
+  of 60 Hz (120, 180, 240, 360) with generated frames. On Direct3D 11 it also
+  works with VRR: a whole multiple of 60 Hz keeps VSYNC slots, and another
+  rate runs just below the panel's ceiling.
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
   own 5.1 surround mix. The intro and story movies play.
@@ -81,21 +81,22 @@ keeps running.
   rows, with the launcher's settings over four pages: the top **Page** row
   (left, right or confirm) turns between the display, audio, gameplay and
   HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
-  **Dedication**, **Life Bar**, **Combo HUD**, **Hit Voices** and
+  **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
   **KO Replay** change at once, and so do **Resolution**, **MSAA** and
   **SMAA**, on either renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
-  breaks, as Sparring's bar does. **Combo HUD** turns both off or on, online
-  too; neither changes the fight's state or timing.
+  breaks, as Sparring's bar does. **Fight HUD** picks **Both**, **Damage**,
+  **Stun Meter** or **Original** (the base game's HUD), online too; neither
+  addition changes the fight's state or timing.
 - **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
   of Dead or Alive 4, drop its ISO on the launcher (or choose it with
-  AUDIO SETTINGS' **Import DOA4 Voices**): it imports the disc's music for
+  **Import DOA4 Voices** on its **AUDIO** page): it imports the disc's music for
   the Jukebox, then the voices, and turns Hit Voices on. No extraction is
   needed; on Windows it fetches the ffmpeg it needs the first time. By hand,
   `python tools/import_doa4_voices.py <DOA4 ISO, extracted disc or snd.afs>`
@@ -204,10 +205,10 @@ keeps running.
 | Story, Ayane and Gen Fu | Stages 1-6 cleared without a stop in scripted runs; the Tengu fight was lost each time |
 | Watch | Fights played, including Kasumi vs Lei Fang on The Burai Zenin at 4K and 60 fps |
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
-| Tengu's stage, The Miyama | In Stage Select, before Random, outside Tag; played in Sparring only, other modes not yet played through |
+| Tengu's stage, The Miyama | In Stage Select, before Random, outside offline Tag, and in Live Tag and Team Battle; played in Sparring only, other modes and Live not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
 | Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
-| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x; VRR is Direct3D 11 only |
+| Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
@@ -242,14 +243,14 @@ SHA-256 check.
    [latest release](https://github.com/NoRain211/doa2u-re/releases/latest) and
    extract it into a new folder with a short path, such as `C:\DOA2U`.
 2. Open `Launcher.exe` and drag your Disc 2 ISO onto it (or choose it on the
-   **BUILD GAME** page); the build starts at once. Wait for **Build complete**
+   **GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR and the frame
-   rate on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**, the intro
-   skip on **MOVIES** and **Earn** on **GAMEPLAY** to leave unlocks to play,
-   then choose **START GAME**. A controller, the keyboard or the mouse all work.
-   Your choices are remembered, and `DOA2U.exe` plays with them later.
+3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR, the frame rate
+   and the intro skip on **VIDEO**, stereo or 5.1 on **AUDIO** and **Earn** on
+   **GAMEPLAY** to leave unlocks to play, then choose **Start Game** on the
+   **GAME** page. A controller, the keyboard or the mouse all work. Your
+   choices are remembered, and `DOA2U.exe` plays with them later.
 
 The first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache

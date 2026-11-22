@@ -26,6 +26,9 @@ extern unsigned recomp_d3d_submit_count;
 extern double recomp_d3d_submit_mb;
 // Sleeps the calling thread until a steady_clock time, in nanoseconds since its epoch.
 void recomp_d3d_sleep_until(long long steady_ns);
+// RECOMP_D3D_VRR: the present slot after previous_ns on the guest's exact 1/60 s
+// grid; a late frame presents now and moves the grid, as the guest timer does.
+long long recomp_d3d_vrr_slot(long long previous_ns, long long now_ns);
 
 #ifdef __cplusplus
 }

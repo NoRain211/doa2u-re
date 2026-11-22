@@ -35,6 +35,21 @@ static int expect_u32(const char *check, uint32_t actual, uint32_t expected)
     return 0;
 }
 
+/* Bit views of a float; recomp_types.h redirects memcpy to guest memory. */
+static uint32_t float_bits(float value)
+{
+    RecompXmm lanes;
+    lanes.f[0] = value;
+    return lanes.u[0];
+}
+
+static float bits_float(uint32_t bits)
+{
+    RecompXmm lanes;
+    lanes.u[0] = bits;
+    return lanes.f[0];
+}
+
 static RecompXmm row(float a, float b, float c, float d)
 {
     RecompXmm value;
@@ -332,9 +347,28 @@ int recomp_sse_semantics_test(void)
         passed &= expect_u32("cvtss2si ties to even", (uint32_t)MMX_CVT_F2I(2.5f, 0), 2u);
         passed &= expect_u32("cvttss2si chops", (uint32_t)MMX_CVT_F2I(-2.7f, 1), 0xfffffffeu);
         passed &= expect_u32("cvtss2si NaN", (uint32_t)MMX_CVT_F2I(NAN, 0), 0x80000000u);
-        /* An estimate, not 1/x: Intel documents 1.5 * 2^-12 relative error. */
-        passed &= expect_u32("rcpss estimate",
-            fabsf(recomp_rcpss(3.0f) * 3.0f - 1.0f) <= 0.000367f, 1u);
+        /* Estimates with Intel's bits, not 1/x (see recomp_rcpss). */
+        passed &= expect_u32("rcpss 3", float_bits(recomp_rcpss(3.0f)), 0x3eaaa000u);
+        passed &= expect_u32("rcpss -0", float_bits(recomp_rcpss(-0.0f)), 0xff800000u);
+        passed &= expect_u32("rcpss denormal", float_bits(recomp_rcpss(bits_float(0x007fffffu))), 0x7f800000u);
+        passed &= expect_u32("rcpss tiny result", float_bits(recomp_rcpss(bits_float(0xfe800000u))), 0x80000000u);
+        passed &= expect_u32("rcpss infinity", float_bits(recomp_rcpss(INFINITY)), 0u);
+        passed &= expect_u32("rsqrtss 1", float_bits(recomp_rsqrtss(1.0f)), 0x3f7ff000u);
+        passed &= expect_u32("rsqrtss 2", float_bits(recomp_rsqrtss(2.0f)), 0x3f34f800u);
+        passed &= expect_u32("rsqrtss 0", float_bits(recomp_rsqrtss(0.0f)), 0x7f800000u);
+        passed &= expect_u32("rsqrtss negative", float_bits(recomp_rsqrtss(-1.0f)), 0xffc00000u);
+        passed &= expect_u32("rsqrtss infinity", float_bits(recomp_rsqrtss(INFINITY)), 0u);
+        /* Every table interval: RCPSS over [1, 2), RSQRTSS over [1, 4) for
+           both exponent parities, hashed from the 12-bit results. */
+        {
+            uint32_t rcp = 0u, rsqrt = 0u;
+            for (uint32_t i = 0u; i < 2048u; ++i) {
+                rcp = rcp * 31u + (float_bits(recomp_rcpss(bits_float(0x3f800000u + (i << 12)))) >> 11);
+                rsqrt = rsqrt * 31u + (float_bits(recomp_rsqrtss(bits_float(0x3f800000u + (i << 13)))) >> 11);
+            }
+            passed &= expect_u32("rcpss table", rcp, 0x935c1ceau);
+            passed &= expect_u32("rsqrtss table", rsqrt, 0x11e62ffbu);
+        }
     }
 
     {

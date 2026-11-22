@@ -6,8 +6,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# The Linux package ships a prebuilt launcher (tools/build_linux_launcher.sh), so its BUILD GAME
-# page works before any build. A checkout has none and uses the one the game build makes.
+# The Linux package ships a prebuilt launcher (tools/build_linux_launcher.sh), so its GAME page
+# works before any build. A checkout has none and uses the one the game build makes.
 if [[ "$(uname -s)" != "Darwin" ]]; then
     PREBUILT="${ROOT}/tools/artifacts/launcher-linux-x86_64"
     # It is x86_64 only; other machines (ARM Linux) use the launcher their game build makes.
