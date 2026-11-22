@@ -358,7 +358,7 @@ class LauncherForm : Form
         savedShape = savedScreen >= 0 ? null : Game.ScreenShape(settings);
         renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
-        frameRate = Choice("Frame rate", "Display fills a 120 Hz or faster screen with generated frames; Windows Direct3D 11 or Vulkan, experimental",
+        frameRate = Choice("Frame rate", "Display fills a 120 or 240 Hz screen with generated frames; Windows Direct3D 11 or Vulkan, experimental",
             new[] { "Original", "Display" }, Game.Str(settings, "frameRate", "original") == "display", 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);

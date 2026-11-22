@@ -23,8 +23,9 @@ int64_t fgSteadyNs()
    1.5 guest frames on the SDL_GPU presenter; here the gap also holds this
    presenter's own work between two presents (the flow, the mask and the
    in-betweens' passes), which the SDL_GPU one queues and submits in one go, so
-   it allows 2.5 guest frames and still catches a load, hundreds of ms long. */
-constexpr int64_t kFgStallNs = 40000000;
+   it allows 2.5 guest frames and still catches a load, hundreds of ms long.
+   Tests set it through d3d_backend_framegen_set_late_ns. */
+std::atomic<int64_t> fgStallNs{40000000};
 
 bool fgReadback(RecompD3dPresenter *presenter, ID3D11Texture2D *texture, UINT width, UINT height,
     UINT x, UINT y, void *bytes, UINT pitch);
@@ -763,14 +764,14 @@ bool framegenResolvePicture(RecompD3dPresenter *presenter)
    while frame generation is off. N starts the history again, so no generated
    frame mixes it with N-1, after frame generation was off, a quality change
    (which releases the history), a change of aspect, or a stall (a load, see
-   kFgStallNs). */
+   fgStallNs). */
 bool framegenRecord(RecompD3dPresenter *presenter, float aspect)
 {
     if (presenter->fg_history && presenter->fg_next_slot < presenter->fg_k) {
         presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
         ++presenter->fg_unshown;
     }
-    if (fgSteadyNs() - presenter->fg_present_ns > kFgStallNs || aspect != presenter->fg_aspect)
+    if (fgSteadyNs() - presenter->fg_present_ns > fgStallNs || aspect != presenter->fg_aspect)
         presenter->fg_history = false;
     if (!framegenActive(presenter)) {
         presenter->fg_history = false;

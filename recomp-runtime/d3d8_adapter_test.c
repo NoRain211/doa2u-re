@@ -528,6 +528,13 @@ static void write_boot_program(uint32_t address, uint32_t count)
     }
 }
 
+static bool contains(const unsigned char *bytes, size_t size, const void *needle, size_t length)
+{
+    for (size_t at = 0u; at + length <= size; ++at)
+        if (memcmp(bytes + at, needle, length) == 0) return true;
+    return false;
+}
+
 static int boot_program_tests(void)
 {
     /* The table the adapter reads, and what it tells the presenter. */
@@ -555,6 +562,17 @@ static int boot_program_tests(void)
         passed &= expect("a boot program's tokens are copied",
             memcmp(program->tokens, recomp_memory(table[i].address + 4u, table[i].count * 16u),
                 table[i].count * 16u) == 0);
+    }
+    /* Rollback saves this state every frame: the programs stay out of it. */
+    unsigned char *state = malloc(recomp_d3d8_state_size());
+    passed &= expect("boot program snapshot allocated", state != NULL);
+    if (state != NULL) {
+        recomp_d3d8_state_save(state);
+        passed &= expect("the saved device state holds no boot program",
+            !contains(state, recomp_d3d8_state_size(), recomp_memory(table[0].address + 4u, table[0].count * 16u),
+                table[0].count * 16u) &&
+            !contains(state, recomp_d3d8_state_size(), &created_config.programs, sizeof created_config.programs));
+        free(state);
     }
 
     reset_fixture();
