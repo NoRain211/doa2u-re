@@ -1345,13 +1345,13 @@ void precompileDrawShaders(RecompD3dPresenter *presenter)
 {
     const auto start = std::chrono::steady_clock::now();
     unsigned compiled = 0u;
-    for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
+    for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
         if (presenter->precompile_stop.load()) return;
-        const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
-        compiled += lookupShaders(presenter, key, false).vertex != nullptr;
+        if ((boot.depth_bias && presenter->scale == 1.0f) || (boot.output > kOutputOne && !presenter->fg_k)) continue;
+        const RecompD3dDrawShaderKey key{boot.fvf, 0u, nullptr, false, boot.depth_bias,
+            boot.depth_bias && presenter->msaa_count > 1u, boot.projected_stages};
+        compiled += lookupShaders(presenter, key, boot.output).vertex != nullptr;
     }
-    const RecompD3dDrawShaderKey projected{0x142u, 0u, nullptr, false, false, false, true};
-    if (!presenter->precompile_stop.load()) compiled += lookupShaders(presenter, projected, false).vertex != nullptr;
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));

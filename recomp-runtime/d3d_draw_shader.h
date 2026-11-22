@@ -23,13 +23,30 @@
 constexpr uint32_t kRecompD3dDrawConstantFloats = 140u + 192u * 4u + 512u + 4u + 56u + 8u + 4u;
 constexpr uint32_t kRecompD3dDrawUvClamp = kRecompD3dDrawConstantFloats - 4u;
 
-/* FVFs compiled at boot (17): those seen in the developers' logged runs plus
-   0x012, 0x102 and 0x204 from a player's log (#61). Compiling them at boot keeps
-   first use of each scene from stalling ~85 ms per shader. Tina's ending also
-   precompiles 0x142 with projected stages. */
-constexpr uint32_t kRecompD3dBootDrawFvfs[] = {
-    0x012u, 0x042u, 0x102u, 0x104u, 0x112u, 0x116u, 0x118u, 0x11Au, 0x204u,
-    0x142u, 0x144u, 0x212u, 0x216u, 0x21Au, 0x242u, 0x244u, 0x404u};
+/* One fixed-function shader compiled at boot. output is the SDL_GPU presenter's
+   DrawOutput: 0 shaded, 1 an occlusion count, above that frame generation's
+   HUD cover (2 alpha, 3 added, 4 added by alpha). depth_bias is the scaled
+   receiver bias, which only a scaled target draws with; with MSAA it is built
+   for the current sample count. */
+struct RecompD3dBootDrawShader {
+    uint32_t fvf;
+    uint8_t output;
+    bool depth_bias, projected_stages;
+};
+
+/* Shaders compiled at boot. The plain ones (18 FVFs) are those seen in the
+   developers' logged runs plus 0x012, 0x102 and 0x204 from a player's log
+   (#61). The variants are every other fixed-function key in 161 logged runs
+   (demo, Story, menus, endings): Tina's ending draws 0x142 with projected
+   stages, occlusion tests count 0x112 and 0x142, both also draw with the
+   depth bias, and the HUD's 0x044, 0x104 and 0x144 cover the scene. A run that
+   logs each key's variant named the cover outputs. Compiling them at boot
+   keeps first use of each scene from stalling ~85 ms per shader. */
+constexpr RecompD3dBootDrawShader kRecompD3dBootDrawShaders[] = {
+    {0x012u}, {0x042u}, {0x044u}, {0x102u}, {0x104u}, {0x112u}, {0x116u}, {0x118u}, {0x11Au},
+    {0x204u}, {0x142u}, {0x144u}, {0x212u}, {0x216u}, {0x21Au}, {0x242u}, {0x244u}, {0x404u},
+    {0x142u, 0u, false, true}, {0x112u, 1u}, {0x142u, 1u}, {0x112u, 0u, true}, {0x142u, 0u, true},
+    {0x044u, 2u}, {0x104u, 3u}, {0x144u, 2u}, {0x144u, 4u}};
 
 /* What selects one draw shader: its FVF, vertex program and variant. */
 struct RecompD3dDrawShaderKey {
