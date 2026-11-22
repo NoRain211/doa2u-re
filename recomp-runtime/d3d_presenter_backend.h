@@ -37,7 +37,9 @@ enum D3dBackendVisibilityPoll {
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(
     RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels);
 /* Inline backends only: true when the next swapchain acquire would not wait
-   for the GPU to finish an earlier frame. */
+   for the GPU to finish an earlier frame. Not a pure query: its only caller
+   is Swap's wait, just before that frame's PRESENT, and with VRR the SDL_GPU
+   backend queues the frame's draws here so they render during the wait. */
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
 
 #endif
