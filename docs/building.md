@@ -191,6 +191,25 @@ that shortcut.
   It is off while the window is hidden or minimized, in an unpaced or
   fast-forwarded run and under the frame clock (netplay and synctest). With
   `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
+- `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on, writes
+  what it gets for each real frame into the folder: the picture before
+  gamma, the HUD mask, the gamma ramp, and whether the frame started the
+  history again. `RECOMP_D3D_FRAMEGEN_CAPTURE_AT` (first present, default 1)
+  and `_COUNT` (default all) select the frames. Frame generation then also
+  runs with `RECOMP_HEADLESS=1`. The game runs slowly while it writes, and a
+  2160 frame takes 41 MB; keep the quality fixed during a capture. The frames
+  are game output: keep captures under `private/`. Built with the runtime
+  tests, `recomp_d3d_framegen_replay <capture> <output>` renders every frame
+  the window would show at k times 60 Hz (`--k 4` by default): for each real
+  frame, its k - 1 generated frames, then the frame, after gamma, through the
+  presenter's own frame generation, as `<frame>-<slot>.bmp` files.
+  `--crossfade` replaces the generated frames with the plain crossfade and
+  `--original` repeats each real frame k times, as the game looks at 60 Hz.
+  `--ffmpeg` and the options after it pipe the frames to `ffmpeg` on `PATH`
+  instead, with `<output>` as its output file, for example
+  `--ffmpeg -c:v ffv1`. Those options and `<output>` go through `cmd.exe`,
+  so the tool refuses any that hold `"`, `%`, `^`, `&`, `|`, `<`, `>` or a
+  line break. The first real frame starts the history.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
