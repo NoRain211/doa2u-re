@@ -6,7 +6,7 @@ the game's own frames, so motion looks smoother at 120 Hz or more. It is
 experimental and off by default.
 
 It costs input delay: each of the game's frames reaches the screen about 8 to
-14 ms later than without it (8.3 ms at 120 Hz, 13.9 ms at 360 Hz). See [Latency](#latency) before you turn it on
+15 ms later than without it (8.3 ms at 120 Hz, 14.6 ms at 480 Hz). See [Latency](#latency) before you turn it on
 for a fighting game.
 
 In this page a *real frame* is a frame the game drew, a *generated frame* is
@@ -45,7 +45,7 @@ Turn it on with one of these. It takes effect at the next launch.
 
 The display's refresh rate is read once at startup and sets k:
 
-- **A whole multiple of 60 Hz** (120, 180, 240, 360 Hz, within 0.5%):
+- **A whole multiple of 60 Hz** from 120 Hz (120, 180, 240, 300, 360, 480 Hz…, within 0.5%):
   k = refresh / 60. Each picture takes one refresh on VSYNC.
 - **Any other rate, with VRR: On** (Direct3D 11 only):
   k = floor((refresh - 3) / 60). 144 Hz and 165 Hz give 2, 200 Hz gives 3,
@@ -229,6 +229,7 @@ generation.
 | 240 Hz, or 280 Hz with VRR | 4 | about 12.5 ms |
 | 300 Hz | 5 | about 13.3 ms |
 | 360 Hz | 6 | about 13.9 ms |
+| 480 Hz | 8 | about 14.6 ms |
 
 The delay grows toward one game frame (16.7 ms) as k grows. On top of it
 comes the GPU time of the flow and warp passes, and with VRR a late slot
