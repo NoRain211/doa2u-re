@@ -4040,6 +4040,45 @@ void beginDrawLogIfRequested(RecompD3dPresenter *presenter)
 // Frame generation's resources, passes and presents (RECOMP_D3D_FRAMEGEN).
 #include "d3d_framegen_d3d11.h"
 
+// Once, at the first present: the window takes the focus and is checked.
+RecompD3dPresenterError reportFirstPresent(RecompD3dPresenter *presenter, HRESULT present_result)
+{
+    if (presenter->first_present_reported) return RECOMP_D3D_PRESENTER_OK;
+    ShowWindow(presenter->window, SW_SHOW);
+    SetForegroundWindow(presenter->window); // take the focus from the launcher
+    UpdateWindow(presenter->window);
+    if (quitPending()) {
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    if (presenter->close_requested) {
+        return RECOMP_D3D_PRESENTER_CLOSED;
+    }
+    if (!IsWindow(presenter->window)) {
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    RECT client_rect{};
+    if (!GetClientRect(presenter->window, &client_rect) ||
+        !IsWindowVisible(presenter->window)) {
+        std::fprintf(stderr,
+            "recomp d3d presenter: first present window not visible\n");
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    std::fprintf(
+        stderr,
+        "recomp d3d presenter: creation/first-present hwnd=%p "
+        "client=%ldx%ld visible=1 driver=%s create_hr=0x%08lX "
+        "present_hr=0x%08lX count=%u\n",
+        static_cast<void *>(presenter->window),
+        client_rect.right - client_rect.left,
+        client_rect.bottom - client_rect.top,
+        presenter->driver_name,
+        static_cast<unsigned long>(presenter->create_result),
+        static_cast<unsigned long>(present_result),
+        static_cast<unsigned>(presenter->present_count));
+    presenter->first_present_reported = true;
+    return RECOMP_D3D_PRESENTER_OK;
+}
+
 RecompD3dPresenterError submitPresent(
     RecompD3dPresenter *presenter,
     const RecompD3dPresenterPresentCommand &present)
@@ -4122,7 +4161,10 @@ RecompD3dPresenterError submitPresent(
         ++presenter->present_count;
         beginDrawLogIfRequested(presenter);
         /* Slot 0 is due now; the worker's d3d_backend_idle presents it as soon
-           as this packet's records are done, outside the guest's present. */
+           as this packet's records are done, outside the guest's present, so
+           the first present's report has no Present result yet. */
+        const RecompD3dPresenterError first = reportFirstPresent(presenter, S_OK);
+        if (first != RECOMP_D3D_PRESENTER_OK) return first;
         applyQuality(presenter);
         return RECOMP_D3D_PRESENTER_OK;
     }
@@ -4272,40 +4314,8 @@ RecompD3dPresenterError submitPresent(
        run can "pass" on desktop pixels. Reading the back buffer here measures
        what this program actually rendered. Opt-in, and off by default. */
 
-    if (!presenter->first_present_reported) {
-        ShowWindow(presenter->window, SW_SHOW);
-        SetForegroundWindow(presenter->window); // take the focus from the launcher
-        UpdateWindow(presenter->window);
-        if (quitPending()) {
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        if (presenter->close_requested) {
-            return RECOMP_D3D_PRESENTER_CLOSED;
-        }
-        if (!IsWindow(presenter->window)) {
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        RECT client_rect{};
-        if (!GetClientRect(presenter->window, &client_rect) ||
-            !IsWindowVisible(presenter->window)) {
-            std::fprintf(stderr,
-                "recomp d3d presenter: first present window not visible\n");
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        std::fprintf(
-            stderr,
-            "recomp d3d presenter: creation/first-present hwnd=%p "
-            "client=%ldx%ld visible=1 driver=%s create_hr=0x%08lX "
-            "present_hr=0x%08lX count=%u\n",
-            static_cast<void *>(presenter->window),
-            client_rect.right - client_rect.left,
-            client_rect.bottom - client_rect.top,
-            presenter->driver_name,
-            static_cast<unsigned long>(presenter->create_result),
-            static_cast<unsigned long>(present_result),
-            static_cast<unsigned>(presenter->present_count));
-        presenter->first_present_reported = true;
-    }
+    const RecompD3dPresenterError first = reportFirstPresent(presenter, present_result);
+    if (first != RECOMP_D3D_PRESENTER_OK) return first;
     applyQuality(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
