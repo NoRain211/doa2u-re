@@ -468,6 +468,79 @@ static bool testUncompressedMipChain()
     return passed;
 }
 
+/* A stage change uploads more texels in one frame than the SDL_GPU backend's
+   staging buffer holds, so the buffer starts again before the frame's uploads
+   run. Each texture must still get its own texels. */
+static bool testTextureBurst()
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "burst", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create texture burst", d3d_backend_create(&config, &presenter));
+    // Five 4 MiB textures, a solid colour each (BGR below), drawn 16 pixels square in a row.
+    const uint32_t colors[] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffff00u, 0xffff00ffu};
+    const unsigned char bgr[][3] = {{0, 0, 255}, {0, 255, 0}, {255, 0, 0}, {0, 255, 255}, {255, 0, 255}};
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        uint16_t indices[] = {0, 1, 2, 3};
+        std::vector<uint32_t> texels(1024u * 1024u);
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("texture burst clear", d3d_backend_submit(presenter, &clear));
+        for (unsigned i = 0u; i < 5u; ++i) {
+            // The backend reads the texels during the submit, so one buffer serves every texture.
+            std::fill(texels.begin(), texels.end(), colors[i]);
+            const float left = 20.0f + 32.0f * i;
+            const Vertex vertices[4] = {{left, 20.0f, 0.25f, 1.0f, 0xffffffffu, 0.0f, 0.0f},
+                {left + 16.0f, 20.0f, 0.25f, 1.0f, 0xffffffffu, 1.0f, 0.0f},
+                {left, 36.0f, 0.25f, 1.0f, 0xffffffffu, 0.0f, 1.0f},
+                {left + 16.0f, 36.0f, 0.25f, 1.0f, 0xffffffffu, 1.0f, 1.0f}};
+            RecompD3dPresenterCommand command{};
+            command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+            auto &draw = command.data.draw;
+            draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+            draw.index_count = draw.vertex_count = 4u;
+            draw.triangle_count = 2u;
+            draw.vertex_stride = sizeof(Vertex);
+            draw.fvf = 0x144u;
+            draw.vertex_bytes = vertices;
+            draw.index_bytes = indices;
+            draw.blend.color_write_mask = 15u;
+            draw.has_texture = true;
+            draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+            draw.texture.bits_per_pixel = 32u;
+            draw.texture.width = draw.texture.height = 1024u;
+            draw.texture.mip_levels = 1u;
+            draw.texture.data = 0x400000u * (i + 1u);
+            draw.texture_bytes = texels.data();
+            draw.texture_byte_count = static_cast<uint32_t>(texels.size() * 4u);
+            passed &= expect("texture burst draw", d3d_backend_submit(presenter, &command));
+        }
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5u, 1u};
+        passed &= expect("texture burst present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy texture burst", d3d_backend_destroy(&presenter));
+        if (FILE *file = std::fopen(path, "rb")) {
+            for (unsigned i = 0u; i < 5u; ++i) {
+                unsigned char pixel[3]{};
+                std::fseek(file, 54 + (240 - 1 - 28) * 320 * 3 + (28 + 32 * static_cast<int>(i)) * 3, SEEK_SET);
+                passed &= std::fread(pixel, 1, 3, file) == 3;
+                if (std::memcmp(pixel, bgr[i], 3) != 0) {
+                    std::fprintf(stderr, "FAIL texture burst %u BGR=%u,%u,%u\n", i, pixel[0], pixel[1], pixel[2]);
+                    passed = false;
+                }
+            }
+            std::fclose(file);
+        } else passed = false;
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    DeleteFileA(path);
+    if (passed) std::puts("PASS a frame's texture uploads beyond the staging buffer keep their texels");
+    return passed;
+}
+
 static bool testPointMinMagFilter()
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -4258,7 +4331,7 @@ int main()
         !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
         !testTicks() || !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
-        !testPointMinMagFilter() ||
+        !testTextureBurst() || !testPointMinMagFilter() ||
         !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||

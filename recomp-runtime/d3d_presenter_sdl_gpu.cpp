@@ -69,6 +69,7 @@ constexpr uint32_t kProgramFloats = 192u * 4u;
 constexpr uint32_t kTransformFloats = kRecompD3dDrawConstantFloats - kProgramFloats;
 constexpr uint32_t kInitialVertexCapacity = 32u * 1024u * 1024u;
 constexpr uint32_t kInitialIndexCapacity = 16u * 1024u * 1024u;
+constexpr uint32_t kTextureStagingBytes = 8u * 1024u * 1024u;  // larger uploads get their own transfer buffer
 
 bool envFlag(const char *name)
 {
@@ -321,8 +322,9 @@ struct RecompD3dPresenter {
     SDL_GPUBuffer *index_buffer = nullptr;
     SDL_GPUTransferBuffer *vertex_transfer = nullptr;
     SDL_GPUTransferBuffer *index_transfer = nullptr;
+    SDL_GPUTransferBuffer *texture_transfer = nullptr;
     uint32_t vertex_capacity = 0u, index_capacity = 0u;
-    uint32_t vertex_used = 0u, index_used = 0u;
+    uint32_t vertex_used = 0u, index_used = 0u, texture_used = 0u;
 
     Segment segment;
     Segment hud;  // framegenCover: the frame's 2D layer draws again, for the HUD mask
@@ -885,29 +887,38 @@ bool isSwizzledTextureFormat(uint32_t format_byte)
         format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8 || format_byte == 0x28u;
 }
 
-/* Uploads one region of bytes, rows packed at pixels_per_row texels. */
+/* Uploads one region of bytes, rows packed at pixels_per_row texels. They stage
+   in one transfer buffer, cycled when it is full: a stage change uploads
+   hundreds of mip levels in one frame, and a transfer buffer for each took
+   0.1 ms to make and, two presents later, a long submit to free. */
 bool uploadTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *texture, const void *bytes,
     uint32_t size, uint32_t level, uint32_t width, uint32_t height, uint32_t depth = 1u,
     uint32_t pixels_per_row = 0u)
 {
-    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, size, 0};
-    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    const bool staged = size <= kTextureStagingBytes;
+    SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, staged ? kTextureStagingBytes : size, 0};
+    SDL_GPUTransferBuffer *&staging = presenter->texture_transfer;
+    if (staged && staging == nullptr) staging = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+    SDL_GPUTransferBuffer *transfer = staged ? staging : SDL_CreateGPUTransferBuffer(presenter->device, &info);
     if (transfer == nullptr) return false;
-    void *mapped = SDL_MapGPUTransferBuffer(presenter->device, transfer, false);
-    if (mapped == nullptr) {
-        SDL_ReleaseGPUTransferBuffer(presenter->device, transfer);
-        return false;
+    uint32_t offset = staged ? (presenter->texture_used + 255u) & ~255u : 0u;
+    if (offset + size > info.size) offset = 0u;
+    // Offset 0 starts the staging buffer again; cycling it keeps the bytes that recorded uploads still read.
+    auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(presenter->device, transfer, staged && offset == 0u));
+    SDL_GPUCopyPass *pass = nullptr;
+    if (mapped != nullptr) {
+        std::memcpy(mapped + offset, bytes, size);
+        SDL_UnmapGPUTransferBuffer(presenter->device, transfer);
+        pass = SDL_BeginGPUCopyPass(commandBuffer(presenter));
     }
-    std::memcpy(mapped, bytes, size);
-    SDL_UnmapGPUTransferBuffer(presenter->device, transfer);
-    SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commandBuffer(presenter));
     if (pass != nullptr) {
-        SDL_GPUTextureTransferInfo source{transfer, 0u, pixels_per_row, depth > 1u ? height : 0u};
+        SDL_GPUTextureTransferInfo source{transfer, offset, pixels_per_row, depth > 1u ? height : 0u};
         SDL_GPUTextureRegion region{texture, level, 0u, 0u, 0u, 0u, width, height, depth};
         SDL_UploadToGPUTexture(pass, &source, &region, false);
         SDL_EndGPUCopyPass(pass);
     }
-    SDL_ReleaseGPUTransferBuffer(presenter->device, transfer);
+    if (staged) presenter->texture_used = offset + size;
+    else SDL_ReleaseGPUTransferBuffer(presenter->device, transfer);
     return pass != nullptr;
 }
 
@@ -4072,7 +4083,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     for (SDL_GPUBuffer *buffer : {presenter->vertex_buffer, presenter->index_buffer}) {
         if (buffer != nullptr) SDL_ReleaseGPUBuffer(presenter->device, buffer);
     }
-    for (SDL_GPUTransferBuffer *buffer : {presenter->vertex_transfer, presenter->index_transfer}) {
+    for (SDL_GPUTransferBuffer *buffer : {presenter->vertex_transfer, presenter->index_transfer, presenter->texture_transfer}) {
         if (buffer != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, buffer);
     }
     if (presenter->window != nullptr) {
