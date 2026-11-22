@@ -8,17 +8,17 @@
    finds the pair cached. Depth bias is the same rule as the fixed list: only a
    scaled target draws with it, and with MSAA it is built for the sample count.
    A variant nobody logged (say a projected stage) still compiles on first
-   use. */
-unsigned precompileProgramShaders(RecompD3dPresenter *presenter)
+   use. scaled and samples are precompileDrawShaders' quality snapshot. */
+unsigned precompileProgramShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples)
 {
     unsigned compiled = 0u;
     for (uint32_t i = 0u; i < presenter->config.program_count; ++i) {
         if (presenter->precompile_stop.load()) break;
         const RecompD3dBootProgram &program = presenter->config.programs[i];
-        const bool bias = program.depth_bias && presenter->scale != 1.0f;
+        const bool bias = program.depth_bias && scaled;
         const RecompD3dDrawShaderKey key{program.fvf, program.count, program.tokens, false, bias,
-            bias && presenter->msaa_count > 1u, false};
-        compiled += lookupShaders(presenter, key, kOutputShaded).vertex != nullptr;
+            bias && samples > 1u, false};
+        compiled += lookupShaders(presenter, key, kOutputShaded, samples).vertex != nullptr;
     }
     return compiled;
 }
