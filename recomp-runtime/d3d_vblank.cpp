@@ -7,6 +7,7 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -228,4 +229,9 @@ void recomp_d3d_note_block(uint32_t return_address)
 void recomp_d3d_sleep_until(long long steady_ns)
 {
     sleepUntil(Clock::time_point(std::chrono::nanoseconds(steady_ns)), Clock::now);
+}
+
+long long recomp_d3d_vrr_slot(long long previous_ns, long long now_ns)
+{
+    return (std::max)(previous_ns + 1000000000 / 60, now_ns);
 }

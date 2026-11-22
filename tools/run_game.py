@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
                         help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
-                        help="Present for a G-SYNC or FreeSync display (Direct3D 11)")
+                        help="Present for a G-SYNC or FreeSync display")
     parser.add_argument("--random-cpu-costumes", action=argparse.BooleanOptionalAction, default=None,
                         help="Dress CPU opponents in random unlocked costumes (offline)")
     parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,

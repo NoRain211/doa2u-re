@@ -342,6 +342,7 @@ void recomp_d3d8_release_memory(uint32_t base, uint32_t size)
 {
     if (presenter == NULL) return;
     const RecompD3dPresenterError error = recomp_d3d_presenter_release_memory(presenter, base, size);
+    if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
     if (error != RECOMP_D3D_PRESENTER_OK) recomp_stop(2, "d3d8:release-memory:%u", (unsigned)error);
 }
 
@@ -349,6 +350,7 @@ void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size)
 {
     if (presenter == NULL) return;
     const RecompD3dPresenterError error = recomp_d3d_presenter_invalidate_textures(presenter, base, size);
+    if (error == RECOMP_D3D_PRESENTER_CLOSED) recomp_stop(0, "host-window-closed");
     if (error != RECOMP_D3D_PRESENTER_OK) recomp_stop(2, "d3d8:invalidate-textures:%u", (unsigned)error);
 }
 
