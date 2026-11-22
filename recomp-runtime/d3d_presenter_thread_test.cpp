@@ -3280,8 +3280,9 @@ static bool testResampledMsaaTarget()
 /* Four real frames that each blend the previous one (GetBackBuffer(-1)) over
    a new color, through a gamma ramp, with frame generation's slots presented
    between them.
-   Returns false on an error; engaged reports frame generation's schedule. */
-static bool framegenFrames(bool framegen, const char *path, bool &engaged)
+   Returns false on an error; engaged reports frame generation's schedule, and
+   k and probe its first generated slot after the last frame. */
+static bool framegenFrames(bool framegen, const char *path, bool &engaged, unsigned &k, uint32_t (&probe)[3])
 {
     _putenv_s("RECOMP_D3D_FRAMEGEN", framegen ? "1" : "");
     _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
@@ -3289,6 +3290,7 @@ static bool framegenFrames(bool framegen, const char *path, bool &engaged)
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create framegen", d3d_backend_create(&config, &presenter));
     engaged = false;
+    k = 0u;
     if (passed) {
         RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
         for (auto &channel : gamma.data.gamma)
@@ -3338,6 +3340,7 @@ static bool framegenFrames(bool framegen, const char *path, bool &engaged)
                     : static_cast<unsigned>((std::min)(until / 10u, uint64_t{1000u}))));
             }
         }
+        if (passed && engaged) k = d3d_backend_framegen_probe(presenter, 0u, probe);
     }
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
@@ -3364,8 +3367,24 @@ static bool testFramegenKeepsRealFrames()
     if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "fg0", 0, off) ||
         !GetTempFileNameA(folder, "fg1", 0, on)) return false;
     bool engaged_off = false, engaged = false;
-    bool passed = framegenFrames(false, off, engaged_off) && framegenFrames(true, on, engaged);
+    unsigned k = 0u;
+    uint32_t probe[3]{};
+    bool passed = framegenFrames(false, off, engaged_off, k, probe) && framegenFrames(true, on, engaged, k, probe);
     passed &= !engaged_off;
+    // Slot 0 crossfades real frames 3 and 4 at t = 1/k, before gamma.
+    if (passed && engaged) {
+        passed = k >= 2u;
+        for (unsigned shift = 0u; shift < 32u && passed; shift += 8u) {
+            const int a = static_cast<int>(probe[0] >> shift & 255u), b = static_cast<int>(probe[1] >> shift & 255u);
+            const int got = static_cast<int>(probe[2] >> shift & 255u);
+            const int want = static_cast<int>(std::lround(a + (b - a) / static_cast<double>(k)));
+            passed = std::abs(got - want) <= 1 && (shift == 24u || a != b);
+        }
+        if (!passed) {
+            std::fprintf(stderr, "FAIL framegen crossfade k=%u frame 3=%08x frame 4=%08x slot 0=%08x\n",
+                k, probe[0], probe[1], probe[2]);
+        }
+    }
     for (unsigned i = 0u; i < 4u && passed; ++i) {
         char suffix[16];
         std::snprintf(suffix, sizeof suffix, ".%03u.bmp", i);
@@ -3384,7 +3403,7 @@ static bool testFramegenKeepsRealFrames()
     DeleteFileA(off);
     DeleteFileA(on);
     if (passed) {
-        std::printf(engaged ? "PASS frame generation keeps real frames and the previous frame\n"
+        std::printf(engaged ? "PASS frame generation keeps real frames and the previous frame and crossfades them\n"
             : "PASS frame generation off matches; SKIP its schedule, see the framegen unsupported line\n");
     }
     return passed;
