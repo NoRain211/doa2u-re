@@ -288,8 +288,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     if iso is not None and sys.platform.startswith("linux") and on_steamos():
         raise ValueError("SteamOS cannot build the game itself. Run ./build_steamdeck.sh with the ISO,"
                          " or choose BUILD in ./launcher.sh; see docs/building.md")
+    # Check the tools before extracting, so a missing one stops before the long ISO import.
     if iso is not None:
-        import_disc(iso, extractor)
         if shutil.which("cmake") is None:
             raise ValueError("Install CMake 3.20 or newer and add it to PATH")
         if not windows and shutil.which("ninja") is None:
@@ -317,6 +317,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                                 f"pillow>={PILLOW}"]):
                 print("Could not install Pillow, so the dedication card will be skipped. Check the pip error above;"
                       " a new Python version may have no prebuilt Pillow yet.")
+        import_disc(iso, extractor)
     # Fetch the compiler before the long lift, so a failed download stops early.
     compiler = llvm_mingw(ROOT) if windows and not lift_only else None
     if windows and not lift_only:
