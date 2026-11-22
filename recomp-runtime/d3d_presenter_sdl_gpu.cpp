@@ -4794,6 +4794,7 @@ double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat
     const SDL_FColor scene{1.0f, 1.0f, 1.0f, 1.0f};
     for (unsigned i = 0u; i < repeat; ++i) {
         Segment copy = presenter->hud;
+        copy.color = presenter->fg_cover[1];
         clearTexture(presenter, presenter->fg_cover[1], &scene, nullptr, nullptr, nullptr);
         flushSegment(presenter, copy);
     }
