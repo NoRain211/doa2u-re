@@ -50,37 +50,37 @@ bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
    worker calls it between records and while it waits. Returns the 100 ns
    ticks until the next slot is due, or UINT64_MAX. */
 uint64_t d3d_backend_idle(RecompD3dPresenter *presenter);
-/* SDL_GPU only, for tests: renders generated slot's picture and reads the
-   center pixel of real frames N-1 and N and of it, as 0xAARRGGBB. Returns
-   frame generation's k, or 0 without two real frames. */
+/* For tests: renders generated slot's picture and reads the center pixel of
+   real frames N-1 and N and of it, as 0xAARRGGBB. Returns frame generation's
+   k, or 0 without two real frames. */
 unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot, uint32_t pixels[3]);
-/* SDL_GPU only, for tests: runs frame generation's flow passes repeat more
-   times on the history, waits for them, and reads the forward then the
-   backward field (4 floats per block, see framegenFlow) into fields when
-   capacity holds both. size gets the blocks per row and column. Returns the
-   wait from submit in milliseconds, or a negative value without a field. */
+/* For tests: runs frame generation's flow passes repeat more times on the
+   history, waits for them, and reads the forward then the backward field
+   (4 floats per block, see framegenFlow) into fields when capacity holds both.
+   size gets the blocks per row and column. Returns the wait for the GPU in
+   milliseconds, or a negative value without a field. */
 double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat, unsigned size[2], float *fields,
     size_t capacity);
-/* SDL_GPU only, for tests: generates the picture t of the way from real frame
-   N-1 to N repeat times, waits for it, and reads it as 0xAARRGGBB into pixels
-   when capacity holds the main target. size gets its width and height.
-   Returns the wait from submit in milliseconds, or a negative value without
-   two real frames. */
+/* For tests: generates the picture t of the way from real frame N-1 to N
+   repeat times, waits for it, and reads it as 0xAARRGGBB into pixels when
+   capacity holds the main target. size gets its width and height. Returns the
+   wait for the GPU in milliseconds, or a negative value without two real
+   frames. */
 double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, unsigned repeat, unsigned size[2],
     uint32_t *pixels, size_t capacity);
-/* SDL_GPU only, for tests: draws frame generation's HUD mask from the 2D
-   layer draws queued since the last PRESENT repeat times, after submitting
-   the draws before them, and waits for it; the draws stay queued. draws gets
-   their count. Returns the wait from submit in milliseconds, or a negative
-   value without a mask. */
+/* For tests: draws frame generation's HUD mask from the 2D layer draws queued
+   since the last PRESENT repeat times, after submitting the draws before
+   them, and waits for it; the draws stay queued. draws gets their count.
+   Returns the wait for the GPU in milliseconds, or a negative value without a
+   mask. */
 double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws);
-/* SDL_GPU only, for d3d_framegen_replay.cpp and tests: makes picture (the
-   main target's size, 0xAARRGGBB before gamma) real frame N and hud (one
-   byte per pixel) its HUD mask, as a PRESENT under frame generation does;
-   restart starts the history again from N. False without the history. */
+/* For d3d_framegen_replay.cpp and tests: makes picture (the main target's
+   size, 0xAARRGGBB before gamma) real frame N and hud (one byte per pixel) its
+   HUD mask, as a PRESENT under frame generation does; restart starts the
+   history again from N. False without the history. */
 bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *picture, const uint8_t *hud, bool restart);
-/* SDL_GPU only, for d3d_framegen_replay.cpp: frame generation crossfades
-   from now on, as without its flow. */
+/* For d3d_framegen_replay.cpp: frame generation crossfades from now on, as
+   without its flow. */
 void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
 
 #endif
