@@ -917,8 +917,9 @@ bool uploadTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *texture, const
         SDL_UploadToGPUTexture(pass, &source, &region, false);
         SDL_EndGPUCopyPass(pass);
     }
-    if (staged) presenter->texture_used = offset + size;
-    else SDL_ReleaseGPUTransferBuffer(presenter->device, transfer);
+    // A failed map at offset 0 did not cycle, so the next upload must start again too.
+    if (staged && mapped != nullptr) presenter->texture_used = offset + size;
+    else if (!staged) SDL_ReleaseGPUTransferBuffer(presenter->device, transfer);
     return pass != nullptr;
 }
 
