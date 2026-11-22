@@ -315,7 +315,13 @@ int main(void)
     frame();
     confirm_this_frame = false;
     expect("options alone", jukebox_opens == 1u);
+    /* A Live logon clears the request with the menu still built. */
     recomp_menu_quit_set_jukebox(NULL);
+    *recomp_memory(MENU + 0x120u, 1u) = 16u;
+    confirm_this_frame = true;
+    frame();
+    confirm_this_frame = false;
+    expect("logged-on jukebox entry asks for nothing", jukebox_opens == 1u);
 
     if (failures == 0) printf("menu quit: all tests passed\n");
     return failures == 0 ? 0 : 1;
