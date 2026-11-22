@@ -36,8 +36,10 @@ shaderc.
 
 Turn it on with one of these. It takes effect at the next launch.
 
-- **Frame rate: Display** on the launcher's VIDEO SETTINGS page or in the
-  game's PC SETTINGS.
+- **Frame rate: Display** on the Windows launcher's (`Launcher.exe`) VIDEO
+  SETTINGS page or in the game's PC SETTINGS. Both save the choice, and when
+  the game starts through the launcher or `run_game.py`, the saved choice
+  takes priority over `RECOMP_D3D_FRAMEGEN` set by hand.
 - `--framegen` on `tools/run_game.py` (`--no-framegen` turns it off).
 - `RECOMP_D3D_FRAMEGEN=1` in the runner's environment.
 
@@ -202,9 +204,9 @@ slot is N itself. `recomp-runtime/d3d_framegen_schedule.c` holds this rule.
 - **VRR slots** (Direct3D 11). A timed slot presents at sync interval 0
   with tearing allowed, at its time on the game's 1/60 s grid, so the
   jitter of the presenter's own work does not reach the panel. Its
-  generated frame is made before its time comes. Two presents are never
-  closer than one refresh; a slot that fell that far behind waits, up to
-  one refresh.
+  generated frame is made before its time comes. Two presents never start
+  closer than one refresh apart; a slot that fell that far behind waits, up
+  to one refresh.
 - **Stall reset.** A real frame that arrives long after the one before it
   (a load) starts the history again, so no generated frame mixes it with a
   stale picture: more than 25 ms (1.5 game frames) on Vulkan, 40 ms on
@@ -281,7 +283,7 @@ real frames directly.
   | `real_unshown` | real frames replaced by the next one before they were shown |
   | `interval_ms p1 p50 p99 max` | time between shown pictures |
   | `refreshes 1= 2= other=` | intervals within a quarter slot of one slot, of two slots, and the rest |
-  | `window_max_ms` | the longest single slot present, from its start to its return |
+  | `window_max_ms` | the longest single slot present, from its start to its return, without a VRR slot's wait for its time |
 
   A steady run shows `generated` near (k - 1) x 60, `real` near 60, and
   almost all intervals under `refreshes 1=`.
@@ -293,7 +295,11 @@ real frames directly.
   Frame generation then also runs with `RECOMP_HEADLESS=1`. The game runs
   slowly while it writes, and a 2160 frame takes 41 MB; keep the quality
   fixed during a capture. The frames are game output: keep captures under
-  `private/`. Direct3D 11 logs that capture is unsupported.
+  `private/`. If the folder or its `framegen.txt` cannot be written, the
+  presenter logs `framegen capture off` with the reason and captures
+  nothing more; a frame it cannot download or write in full, its HUD mask
+  included, logs `framegen capture failed` and is left out of the index.
+  Direct3D 11 logs that capture is unsupported.
 
   Built with the runtime tests,
   `recomp_d3d_framegen_replay <capture> <output>` renders every picture the
@@ -303,7 +309,9 @@ real frames directly.
   crossfade, and `--original` repeats each real frame k times, as the game
   looks at 60 Hz. `--ffmpeg` and the options after it pipe the frames to
   `ffmpeg` on `PATH` instead, with `<output>` as its output file, for
-  example `--ffmpeg -c:v ffv1`. The first real frame starts the history.
+  example `--ffmpeg -c:v ffv1`. Those options and `<output>` go through
+  `cmd.exe`, so the tool refuses any that hold `"`, `%`, `^`, `&`, `|`, `<`,
+  `>` or a line break. The first real frame starts the history.
 - **Tests.** `recomp-runtime-d3d-framegen-schedule` checks the slot rule
   and the VRR plan. The presenter tests (`recomp-runtime-d3d-presenter` for
   Direct3D 11 and `recomp-runtime-d3d-presenter-vulkan`) check that real
