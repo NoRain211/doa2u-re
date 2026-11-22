@@ -233,7 +233,7 @@ void recomp_d3d_sleep_until(long long steady_ns)
     sleepUntil(Clock::time_point(std::chrono::nanoseconds(steady_ns)), Clock::now);
 }
 
-void recomp_d3d_pace_present(void)
+void recomp_d3d_pace_present(void (*flush)(RecompD3dPresenter *), RecompD3dPresenter *presenter)
 {
     /* The frame clock advances the guest one frame per Present, so a display
        that accepts presents faster than 60 Hz would run the guest fast. */
@@ -242,5 +242,6 @@ void recomp_d3d_pace_present(void)
     const long long now = std::chrono::duration_cast<std::chrono::nanoseconds>(
         Clock::now().time_since_epoch()).count();
     present_slot_ns = (std::max)(present_slot_ns + 1000000000 / 60, now);
+    if (flush != nullptr && present_slot_ns > now) flush(presenter);
     recomp_d3d_sleep_until(present_slot_ns);
 }

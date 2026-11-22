@@ -16,6 +16,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -39,13 +40,13 @@ static bool writeBmp(const std::string &path, const std::vector<uint32_t> &pixel
     std::memcpy(header + 34, &image, 4);
     FILE *file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) return false;
-    std::fwrite(header, 1, sizeof header, file);
+    bool written = std::fwrite(header, 1, sizeof header, file) == sizeof header;
     std::vector<uint8_t> row(padded, 0u);
-    for (uint32_t y = height; y-- > 0u;) {
+    for (uint32_t y = height; y-- > 0u && written;) {
         for (uint32_t x = 0u; x < width; ++x) std::memcpy(&row[x * 3u], &pixels[static_cast<size_t>(y) * width + x], 3u);
-        std::fwrite(row.data(), 1, padded, file);
+        written = std::fwrite(row.data(), 1, padded, file) == padded;
     }
-    return std::fclose(file) == 0;
+    return std::fclose(file) == 0 && written;
 }
 
 int main(int argc, char **argv)
@@ -78,13 +79,24 @@ int main(int argc, char **argv)
         std::snprintf(input, sizeof input, " -hide_banner -loglevel error -y -f rawvideo -pix_fmt bgra -video_size %ux%u "
             "-framerate %u -i -", width, height, 60u * k);
         ffmpeg += input;
-        for (; arg < argc; ++arg) ffmpeg += std::string(" \"") + argv[arg] + "\"";
-        ffmpeg += std::string(" \"") + argv[2] + "\"";
+        for (int i = arg; i <= argc; ++i) {
+            // cmd.exe runs the line: one of these in an argument would end its quotes or expand there.
+            const char *text = i < argc ? argv[i] : argv[2];
+            if (std::strpbrk(text, "\"%^&|<>\r\n") != nullptr) {
+                std::fprintf(stderr, "framegen replay: --ffmpeg arguments and the output cannot hold \" %% ^ & | < > "
+                    "or line breaks: %s\n", text);
+                return 2;
+            }
+            ffmpeg += std::string(" \"") + text + "\"";
+        }
         pipe = _popen(ffmpeg.c_str(), "wb");
         if (pipe == nullptr) {
             std::fprintf(stderr, "framegen replay: cannot run ffmpeg\n");
             return 1;
         }
+    } else if (std::error_code error; !std::filesystem::create_directories(argv[2], error) && error) {
+        std::fprintf(stderr, "framegen replay: cannot create %s: %s\n", argv[2], error.message().c_str());
+        return 1;
     }
 
     // A hidden presenter whose main target is the capture's size, at scale 1.

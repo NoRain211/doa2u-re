@@ -25,7 +25,7 @@ typedef enum RecompD3dPresenterDepthFormat {
 /* The device's vertex program limit. */
 #define RECOMP_D3D_BOOT_PROGRAM_TOKENS 136u
 /* The programs the D3D8 device creates: excluded from the boot list when a
-   run finds more. */
+   run finds more. A presenter builds at most this many. */
 #define RECOMP_D3D_BOOT_PROGRAMS 6u
 
 /* One guest vertex program a presenter can build before its first draw: the
@@ -45,9 +45,11 @@ typedef struct RecompD3dPresenterConfig {
     uint32_t height;
     RecompD3dPresenterColorFormat color_format;
     RecompD3dPresenterDepthFormat depth_format;
-    /* Vertex programs whose draw shaders the boot precompile builds. */
+    /* Vertex programs whose draw shaders the boot precompile builds. The
+       presenter copies them at creation; they stay out of the device state
+       that rollback saves every frame. */
+    const RecompD3dBootProgram *programs;
     uint32_t program_count;
-    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS];
 } RecompD3dPresenterConfig;
 
 typedef enum RecompD3dPresenterCommandType {

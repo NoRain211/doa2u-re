@@ -22,8 +22,9 @@ RecompD3dPresenterError d3d_backend_release_memory(
 RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
 /* SDL_GPU only: builds the config's vertex program shaders after the fixed
    list, returning how many compiled. d3d_boot_programs_sdl_gpu.h defines it
-   among the presenter's internals it needs. */
-unsigned precompileProgramShaders(RecompD3dPresenter *presenter);
+   among the presenter's internals it needs. scaled and samples are the boot
+   precompile's quality snapshot. */
+unsigned precompileProgramShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples);
 /* SDL_GPU only, for tests: waits for the boot precompile and returns the draw
    shaders it holds. */
 unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
@@ -32,6 +33,8 @@ void d3d_backend_set_immediate_present(bool enabled);
    (Direct3D 11 on a VRR display, or holding each frame 2 or 4 refreshes) or
    presents each frame at once, as immediate present asks. */
 bool d3d_backend_paces_present(RecompD3dPresenter *presenter);
+/* Sends the frame's recorded GPU work before the presenter holds a PRESENT. */
+void d3d_backend_flush(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);
 bool d3d_backend_quality_live();
@@ -86,5 +89,9 @@ bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *pi
 /* For d3d_framegen_replay.cpp: frame generation crossfades from now on, as
    without its flow. */
 void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
+/* For tests: a real frame recorded more than late_ns after the one before
+   starts frame generation's history again. 25 ms by default on SDL_GPU,
+   40 ms on Direct3D 11; tests that push frames unpaced widen it. */
+void d3d_backend_framegen_set_late_ns(int64_t late_ns);
 
 #endif
