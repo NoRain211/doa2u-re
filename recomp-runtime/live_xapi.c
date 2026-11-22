@@ -433,7 +433,8 @@ static void live_finish_mutelist(LiveTask *task)
     const RecompLiveBackend *backend = live_backend();
     if (backend == NULL || backend->mutes == NULL) return;
     const uint32_t capacity = task->capacity < RECOMP_LIVE_MAX_MUTES ? task->capacity : RECOMP_LIVE_MAX_MUTES;
-    const uint32_t count = backend->mutes(backend->self, live_mutes, capacity);
+    uint32_t count = backend->mutes(backend->self, live_mutes, capacity);
+    if (count > capacity) count = capacity;
     for (uint32_t i = 0u; i < count; ++i) {
         uint8_t record[LIVE_MUTE_RECORD_BYTES];
         memset(record, 0, sizeof record);
@@ -876,8 +877,9 @@ static void live_friends_latest(void)
     const uint32_t array = kernel_arg(3), capacity = kernel_arg(2);
     uint32_t count = 0u;
     if (array != 0u && capacity != 0u && backend != NULL && backend->friends != NULL) {
-        count = backend->friends(backend->self, live_friends,
-            capacity < RECOMP_LIVE_MAX_FRIENDS ? capacity : RECOMP_LIVE_MAX_FRIENDS);
+        const uint32_t available = capacity < RECOMP_LIVE_MAX_FRIENDS ? capacity : RECOMP_LIVE_MAX_FRIENDS;
+        count = backend->friends(backend->self, live_friends, available);
+        if (count > available) count = available;
         for (uint32_t i = 0u; i < count; ++i)
             live_write_friend(array + i * LIVE_FRIEND_RECORD_BYTES, &live_friends[i]);
     }
@@ -1305,6 +1307,7 @@ static void live_search_results(void)
     uint32_t array = 0u;
     if (task->complete && (int32_t)task->final >= 0 && task->request_count != 0u) {
         count = backend->results(backend->self, task->requests[0], live_sessions, RECOMP_LIVE_MAX_RESULTS);
+        if (count > RECOMP_LIVE_MAX_RESULTS) count = RECOMP_LIVE_MAX_RESULTS;
         const uint32_t scratch = live_scratch(&live_search_scratch,
             RECOMP_LIVE_MAX_RESULTS * LIVE_SEARCH_RECORD_BYTES);
         array = live_scratch(&live_search_pointers, RECOMP_LIVE_MAX_RESULTS * 4u);
@@ -1566,7 +1569,8 @@ static void live_stat_text_row(LiveStatText *text, const char *tag)
     text->row = 0u;
     const uint32_t bytes = LIVE_LEADER_GAMERTAG_UNITS * 2u;
     if (text->buffer == 0u || text->offset > text->size || text->size - text->offset < bytes) return;
-    uint16_t wide[LIVE_LEADER_GAMERTAG_UNITS];
+    /* Zeroed: all of it goes to guest memory, past the tag's end too. */
+    uint16_t wide[LIVE_LEADER_GAMERTAG_UNITS] = {0};
     live_wide_tag(tag, wide, LIVE_LEADER_GAMERTAG_UNITS);
     live_store(text->buffer + text->offset, wide, sizeof wide);
     text->row = text->buffer + text->offset;
@@ -1686,8 +1690,9 @@ static void live_stat_read_results(void)
     LiveStatText text;
     live_stat_text_begin(&text, text_buffer, text_size);
     for (unsigned r = 0u; r < task->request_count; ++r) {
-        const uint32_t rows = backend->stat_results(backend->self, task->requests[r], live_rows,
+        uint32_t rows = backend->stat_results(backend->self, task->requests[r], live_rows,
             RECOMP_LIVE_MAX_LEADER_ROWS);
+        if (rows > RECOMP_LIVE_MAX_LEADER_ROWS) rows = RECOMP_LIVE_MAX_LEADER_ROWS;
         if (rows == 0u) continue;
         for (uint32_t i = 0u; i < count && records != 0u; ++i) {
             const uint32_t record = records + i * LIVE_STAT_RECORD_BYTES;
@@ -1761,7 +1766,8 @@ static void live_write_leader_rows(uint32_t row_array, uint32_t row_capacity, ui
         memcpy(row + LIVE_LEADER_ROW_XUID, &rows[i].xuid, sizeof rows[i].xuid);
         /* +8 is the struct's dwRank slot; the retail parser clears it and the
            game reads the rank from the pseudo -1 entry instead. */
-        uint16_t tag[LIVE_LEADER_GAMERTAG_UNITS];
+        /* Zeroed: all of it goes to guest memory, past the tag's end too. */
+        uint16_t tag[LIVE_LEADER_GAMERTAG_UNITS] = {0};
         live_wide_tag(rows[i].gamertag, tag, LIVE_LEADER_GAMERTAG_UNITS);
         memcpy(row + LIVE_LEADER_ROW_GAMERTAG, tag, sizeof tag);
         live_store(row_array + i * LIVE_LEADER_ROW_BYTES, row, sizeof row);
@@ -1799,6 +1805,7 @@ static void live_stat_leader_results(void)
     if (task->request_count != 0u) {
         const uint32_t available = capacity < RECOMP_LIVE_MAX_LEADER_ROWS ? capacity : RECOMP_LIVE_MAX_LEADER_ROWS;
         count = backend->stat_results(backend->self, task->requests[0], live_rows, available);
+        if (count > available) count = available;
         LiveStatText text;
         live_stat_text_begin(&text, kernel_arg(9), kernel_arg(8));
         live_write_leader_rows(kernel_arg(3), capacity, kernel_arg(5), kernel_arg(4),

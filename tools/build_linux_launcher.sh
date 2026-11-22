@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the prebuilt Linux launcher the Linux package ships, so a machine with no
-# compiler (a stock Steam Deck) can still open the BUILD GAME page. It compiles
+# compiler (a stock Steam Deck) can still open the GAME page and build. It compiles
 # tools/launcher_sdl.cpp in an Ubuntu 22.04 container against a static SDL3 and a
 # static libstdc++, which keeps its glibc requirement at 2.35. Needs Docker.
 #   tools/build_linux_launcher.sh [output]    (default private/release-assets/launcher-linux-x86_64)
