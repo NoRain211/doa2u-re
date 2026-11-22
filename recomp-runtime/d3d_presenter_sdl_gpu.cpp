@@ -3934,7 +3934,8 @@ void framegenCapture(RecompD3dPresenter *presenter)
     }
     SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
     presenter->command_buffer = nullptr;
-    bool written = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u) && downloads[0];
+    bool written = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u) && downloads[0] &&
+        (textures[1] == nullptr || downloads[1]);
     const auto write = [&](const char *suffix, const void *bytes, size_t size) {
         std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
         FILE *file = bytes ? std::fopen(path, "wb") : nullptr;
