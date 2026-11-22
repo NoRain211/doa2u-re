@@ -37,7 +37,7 @@ PLATFORM_FILES = {"windows": WINDOWS_ONLY,
                   "macos": POSIX_ONLY | {"tools/launcher_macos.swift", "tools/launcher-background.jpg"},
                   "linux": POSIX_ONLY | {"build_steamdeck.sh", "install_deps.sh", "tools/launcher_sdl.cpp",
                                          "tools/launcher-background.png"}}
-# The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its BUILD GAME page runs on a
+# The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its GAME page builds on a
 # machine with no compiler (a stock Steam Deck).
 LINUX_LAUNCHER = "launcher-linux-x86_64"
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser

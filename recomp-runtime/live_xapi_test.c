@@ -161,6 +161,12 @@ static uint32_t corrupting_stats(void *self, RecompLiveRequest id, RecompLiveLea
     return count;
 }
 
+/* A backend that reports more friends than it was given room for. */
+static uint32_t inflating_friends(void *self, RecompLiveFriend *out, uint32_t capacity)
+{
+    return corrupt_inner->friends(self, out, capacity) + 50u;
+}
+
 static unsigned corrupt_polls;
 
 static RecompLiveStatus corrupting_poll(void *self, RecompLiveRequest id, uint32_t *hresult)
@@ -610,6 +616,13 @@ int main(void)
     check("friend xuid", ann_xuid == 0x0009000000a1b2c3ull && bob_xuid == 0x0009000000a1b2c4ull);
     check("friend request flag", (peek32(bob + 0x1cu) & 0x80000000u) != 0u);
     check("request-only friend has no presence", guest[bob + 0x34u] == 0u);
+    corrupt_inner = presence_inner;
+    corrupt_backend = *presence_inner;
+    corrupt_backend.friends = inflating_friends;
+    recomp_live_backend_set(&corrupt_backend);
+    check("an inflated friend count is clamped to the game's array", call(thunk_friends_latest,
+        (const uint32_t[]){0u, 2u, FRIENDS}, 3u) == 2u);
+    recomp_live_backend_set(&presence_backend);
     const uint8_t invite_kid[8] = {0x44u, 0x32u, 0x49u, 0x4eu, 0x56u, 0x01u, 0x03u, 0x02u};
     check("friend invite kid", memcmp(&guest[cara + 0x28u], invite_kid, sizeof invite_kid) == 0);
     check("friend received invite", peek32(cara + 0x1cu) == 0x08000001u);
@@ -798,6 +811,14 @@ int main(void)
         peek32(LEADER_ROWS) == (uint32_t)local_xuid && peek32(LEADER_ROWS + 4u) == (uint32_t)(local_xuid >> 32));
     check("leaderboard dwRank slot stays zero", peek32(LEADER_ROWS + 0x08u) == 0u);
     check("leaderboard gamertag", memcmp(&guest[LEADER_ROWS + 0x0cu], "L\0o\0c\0a\0l\0", 10u) == 0);
+    {
+        /* Past the tag's NUL, the 16-unit field holds nothing of the host's stack. */
+        unsigned unit = 0u;
+        while (unit < 16u && peek16(LEADER_ROWS + 0x0cu + 2u * unit) != 0u) ++unit;
+        bool zero = unit < 16u;
+        for (; unit < 16u; ++unit) zero = zero && peek16(LEADER_ROWS + 0x0cu + 2u * unit) == 0u;
+        check("leaderboard gamertag tail is zero", zero);
+    }
     check("leaderboard stat", peek16(LEADER_STATS) == 1u && peek32(LEADER_STATS + 4u) == 2u &&
         peek32(LEADER_STATS + 8u) == 42u);
     check("leaderboard score pseudo", peek16(LEADER_STATS + 0x30u) == 0xfffeu &&

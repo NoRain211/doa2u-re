@@ -438,7 +438,7 @@ static void play_sound(void)
         recomp_quit_prompt_request();
         fprintf(stderr, "recomp menu quit: asking\n");
     }
-    if (in_update && kernel_arg(1u) == SOUND_CONFIRM && jukebox_position >= 0 &&
+    if (in_update && kernel_arg(1u) == SOUND_CONFIRM && jukebox_request != NULL && jukebox_position >= 0 &&
         clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == jukebox_position) {
         jukebox_request();
         fprintf(stderr, "recomp menu jukebox: entering Options for the Jukebox\n");
