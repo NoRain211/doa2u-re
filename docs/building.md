@@ -162,9 +162,12 @@ that shortcut.
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
 - `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows runners,
-  Direct3D 11 and Vulkan. The **Frame rate: Display** row on the launchers'
-  VIDEO SETTINGS page and in the game's PC SETTINGS sets it at the next
-  launch. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
+  Direct3D 11 and Vulkan. The **Frame rate: Display** row on the Windows
+  launcher's (`Launcher.exe`) VIDEO SETTINGS page and in the game's PC
+  SETTINGS sets it at the next launch. Both save the choice, so when the game
+  starts through the launcher or `run_game.py`, the saved Frame rate sets the
+  variable and takes priority over one you set by hand. On a display
+  of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
   it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
   frame, so the picture is up to one guest frame later. The presenter
@@ -217,8 +220,10 @@ that shortcut.
   `--original` repeats each real frame k times, as the game looks at 60 Hz.
   `--ffmpeg` and the options after it pipe the frames to `ffmpeg` on `PATH`
   instead, with `<output>` as its output file, for example
-  `--ffmpeg -c:v ffv1`. The first real frame starts the history. Direct3D 11
-  does not capture; it logs that capture is unsupported.
+  `--ffmpeg -c:v ffv1`. Those options and `<output>` go through `cmd.exe`,
+  so the tool refuses any that hold `"`, `%`, `^`, `&`, `|`, `<`, `>` or a
+  line break. The first real frame starts the history. Direct3D 11 does not
+  capture; it logs that capture is unsupported.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.

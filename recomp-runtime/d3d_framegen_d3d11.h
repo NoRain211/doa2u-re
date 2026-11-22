@@ -23,8 +23,9 @@ int64_t fgSteadyNs()
    1.5 guest frames on the SDL_GPU presenter; here the gap also holds this
    presenter's own work between two presents (the flow, the mask and the
    in-betweens' passes), which the SDL_GPU one queues and submits in one go, so
-   it allows 2.5 guest frames and still catches a load, hundreds of ms long. */
-constexpr int64_t kFgStallNs = 40000000;
+   it allows 2.5 guest frames and still catches a load, hundreds of ms long.
+   Tests set it through d3d_backend_framegen_set_late_ns. */
+std::atomic<int64_t> fgStallNs{40000000};
 
 /* The last part of a timed slot's wait is slept here, not in the worker's
    timer, whose wake can land a millisecond late; a present then starts on its
@@ -773,14 +774,14 @@ bool framegenResolvePicture(RecompD3dPresenter *presenter)
    while frame generation is off. N starts the history again, so no generated
    frame mixes it with N-1, after frame generation was off, a quality change
    (which releases the history), a change of aspect, or a stall (a load, see
-   kFgStallNs). */
+   fgStallNs). */
 bool framegenRecord(RecompD3dPresenter *presenter, float aspect)
 {
     if (presenter->fg_history && presenter->fg_next_slot < presenter->fg_k) {
         presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
         ++presenter->fg_unshown;
     }
-    if (fgSteadyNs() - presenter->fg_arrival_ns > kFgStallNs || aspect != presenter->fg_aspect)
+    if (fgSteadyNs() - presenter->fg_arrival_ns > fgStallNs || aspect != presenter->fg_aspect)
         presenter->fg_history = false;
     if (!framegenActive(presenter)) {
         presenter->fg_history = false;
@@ -849,10 +850,11 @@ void fgGamma(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source, ID
    for a timed slot (VRR) with tearing at at_ns. A real frame also takes the
    frame dump, the draw log and a screenshot, as submitPresent does when it
    presents directly. 1 when shown, 0 when the chain had no room for it this
-   time, and -1 when Present failed. */
+   time, and -1 when Present failed. waited_ns is the time slept until at_ns. */
 int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &picture, float aspect,
-    bool real, int64_t at_ns)
+    bool real, int64_t at_ns, int64_t &waited_ns)
 {
+    waited_ns = 0;
     auto *context = presenter->context;
     DXGI_SWAP_CHAIN_DESC chain{};
     presenter->swap_chain->GetDesc(&chain);
@@ -915,8 +917,12 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
        runs during the wait rather than after it. */
     if (presenter->fg_timed && at_ns > 0) {
         presenter->context->Flush();
+        const int64_t sleep_ns = fgSteadyNs();
         recomp_d3d_sleep_until(at_ns);
+        waited_ns = fgSteadyNs() - sleep_ns;
     }
+    // The one-refresh guard measures present start to present start.
+    const int64_t present_ns = fgSteadyNs();
     const HRESULT result = presenter->fg_timed
         ? presenter->swap_chain->Present(0u, DXGI_PRESENT_ALLOW_TEARING | DXGI_PRESENT_DO_NOT_WAIT)
         : presenter->swap_chain->Present(1u, DXGI_PRESENT_DO_NOT_WAIT);
@@ -926,6 +932,7 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
             static_cast<unsigned long>(result));
         return -1;
     }
+    if (presenter->fg_timed) presenter->fg_last_present_ns = present_ns;
     return 1;
 }
 
@@ -1003,16 +1010,17 @@ bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
     const int64_t start = fgSteadyNs();
     if (!real && !presenter->fg_timed)
         framegenGenerate(presenter, static_cast<float>(slot + 1u) / presenter->fg_k);
+    int64_t waited = 0;
     const int shown = framegenShowPicture(presenter, real ? presenter->fg_cur : presenter->fg_out,
-        presenter->fg_aspect, real, at);
-    if (presenter->performance_counter) framegenCount(presenter, shown > 0, real, start, fgSteadyNs());
+        presenter->fg_aspect, real, at, waited);
+    // The window's work, without a timed slot's sleep, as a VSYNC slot has none.
+    if (presenter->performance_counter) framegenCount(presenter, shown > 0, real, start + waited, fgSteadyNs());
     if (shown < 0) {
         // A lost device must not keep the worker presenting: fall back to real frames.
         presenter->fg_history = false;
         presenter->fg_k = 0u;
         return false;
     }
-    if (presenter->fg_timed && shown > 0) presenter->fg_last_present_ns = fgSteadyNs();
     return shown > 0;
 }
 
