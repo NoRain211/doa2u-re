@@ -244,7 +244,8 @@ static bool testShaderCacheFolder()
     char temp[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, temp)) return false;
     const std::filesystem::path root =
-        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetTickCount64()));
+        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetCurrentProcessId()) + "-" +
+            std::to_string(GetTickCount64()));
     const std::filesystem::path folder = root / "cache";
     _putenv_s("RECOMP_SHADER_CACHE", folder.string().c_str());
     RecompD3dPresenter *presenter = nullptr;
