@@ -554,11 +554,14 @@ static const struct {
 _Static_assert(sizeof boot_programs / sizeof boot_programs[0] <= RECOMP_D3D_BOOT_PROGRAMS,
     "the boot program table outgrows the presenter's config");
 
+static RecompD3dBootProgram boot_program_copies[RECOMP_D3D_BOOT_PROGRAMS];
+
 /* Reads those blocks for the presenter's boot precompile. A block whose header
    or instruction end bits do not match is skipped: its shader compiles on
    first use, as before. The copy keeps guest memory out of that thread. */
 static void load_boot_programs(RecompD3dPresenterConfig *config)
 {
+    config->programs = boot_program_copies;
     config->program_count = 0u;
     for (size_t i = 0u; i < sizeof boot_programs / sizeof boot_programs[0]; ++i) {
         const uint32_t count = boot_programs[i].count;
@@ -571,7 +574,7 @@ static void load_boot_programs(RecompD3dPresenterConfig *config)
             valid = (tokens[instruction * 4u + 3u] & 3u) ==
                 (instruction + 1u == count ? 1u : 0u);
         if (!valid) continue;
-        RecompD3dBootProgram *program = &config->programs[config->program_count++];
+        RecompD3dBootProgram *program = &boot_program_copies[config->program_count++];
         program->fvf = boot_programs[i].fvf;
         program->count = count;
         program->depth_bias = boot_programs[i].depth_bias;
@@ -611,8 +614,10 @@ static void create_device(void)
     for (uint32_t i = 0; i < 2u; ++i) validate_storage(&colors[i]);
     validate_storage(&depth);
     if (presenter == NULL) { // a reboot keeps the window
-        load_boot_programs(&candidate.presenter_config);
-        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
+        // Only this copy names the programs: device_state is rewound every frame.
+        RecompD3dPresenterConfig config = candidate.presenter_config;
+        load_boot_programs(&config);
+        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&config, &presenter);
         if (host_error != RECOMP_D3D_PRESENTER_OK) {
             result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
             goto returned;

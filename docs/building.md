@@ -210,7 +210,9 @@ that shortcut.
   `--original` repeats each real frame k times, as the game looks at 60 Hz.
   `--ffmpeg` and the options after it pipe the frames to `ffmpeg` on `PATH`
   instead, with `<output>` as its output file, for example
-  `--ffmpeg -c:v ffv1`. The first real frame starts the history.
+  `--ffmpeg -c:v ffv1`. Those options and `<output>` go through `cmd.exe`,
+  so the tool refuses any that hold `"`, `%`, `^`, `&`, `|`, `<`, `>` or a
+  line break. The first real frame starts the history.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
