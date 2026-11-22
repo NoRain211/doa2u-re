@@ -3503,10 +3503,11 @@ static bool checkFlow(const std::vector<float> &fields, const unsigned size[2], 
 }
 
 // Draws picture (320x240 0xAARRGGBB) over the main target and presents it as a real frame.
-/* Draws picture over the 320x240 frame and presents it; shift moves it by
-   fractions of a texel, which needs linear filtering. */
+/* Draws picture over the 320x240 frame, then overlays, and presents it; shift
+   moves it by fractions of a texel, which needs linear filtering. */
 static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t> &picture, uint32_t address, uint32_t swap,
-    float shift_x = 0.0f, float shift_y = 0.0f, bool linear = false)
+    float shift_x = 0.0f, float shift_y = 0.0f, bool linear = false,
+    const std::vector<RecompD3dPresenterCommand> &overlays = {})
 {
     const uint16_t indices[] = {0,1,2,3};
     // Legacy pixel centers are integers: texel centers need the half texel.
@@ -3537,8 +3538,9 @@ static bool flowFrame(RecompD3dPresenter *presenter, const std::vector<uint32_t>
     draw.directional.stage[0] = draw.directional.stage[3] = 1;
     RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     present.data.present = {5u, swap};
-    return expect("flow picture", d3d_backend_submit(presenter, &command)) &&
-        expect("flow present", d3d_backend_submit(presenter, &present));
+    bool passed = expect("flow picture", d3d_backend_submit(presenter, &command));
+    for (const RecompD3dPresenterCommand &overlay : overlays) passed &= expect("flow overlay", d3d_backend_submit(presenter, &overlay));
+    return passed && expect("flow present", d3d_backend_submit(presenter, &present));
 }
 
 /* Block matching finds a known motion: B is A moved by 3,-2 (less than a
@@ -3803,6 +3805,119 @@ static bool testFramegenWarpEdges()
     return passed;
 }
 
+struct HudVertex {
+    float x, y, z, rhw;
+    uint32_t color;
+};
+
+// A pretransformed XYZRHW|DIFFUSE quad, blended over the scene by its alpha when blend.
+static RecompD3dPresenterCommand hudQuad(const HudVertex *quad, bool blend)
+{
+    static const uint16_t indices[] = {0,1,2,3};
+    RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+    auto &draw = command.data.draw;
+    draw.fvf = 0x44u;
+    draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+    draw.index_count = draw.vertex_count = 4;
+    draw.triangle_count = 2;
+    draw.vertex_stride = sizeof quad[0];
+    draw.vertex_bytes = quad;
+    draw.index_bytes = indices;
+    draw.blend.color_write_mask = 15;
+    draw.blend.blend_enable = blend;
+    draw.blend.src_factor = RECOMP_D3D_BLEND_SRC_ALPHA;
+    draw.blend.dst_factor = RECOMP_D3D_BLEND_INV_SRC_ALPHA;
+    draw.blend.op = RECOMP_D3D_BLEND_OP_ADD;
+    return command;
+}
+
+/* The HUD mask keeps the 2D layer still and out of the scene. The scene (A,
+   then A moved by 13,9) is drawn full width, then a red 2D quad that does not
+   move, then a full-width quarter-black fade over both. At t = 1/4 and 1/2:
+   the red quad's pixels must be the nearer real frame (it does not move); no
+   scene pixel may take any of its red; and away from it, the faded scene must
+   still follow the motion (the fade spans the width, so it is a screen
+   effect, not HUD). Engages only where frame generation does. */
+static bool testFramegenHud()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen hud", d3d_backend_create(&config, &presenter));
+    const int dx = 13, dy = 9;
+    const FlowRect hud{128, 96, 192, 144};
+    std::vector<uint32_t> a(320u * 240u), b(a.size()), out, from, to;
+    for (int y = 0; y < 240; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            a[static_cast<size_t>(y) * 320u + x] = flowFrameA(x, y);
+            b[static_cast<size_t>(y) * 320u + x] = flowFrameA(x - dx, y - dy);
+        }
+    }
+    const float x0 = static_cast<float>(hud.x0), y0 = static_cast<float>(hud.y0);
+    const float x1 = static_cast<float>(hud.x1), y1 = static_cast<float>(hud.y1);
+    const HudVertex red[4] = {{x0, y0, 0, 1, 0xffff0000u}, {x1, y0, 0, 1, 0xffff0000u},
+        {x0, y1, 0, 1, 0xffff0000u}, {x1, y1, 0, 1, 0xffff0000u}};
+    const HudVertex fade[4] = {{0, 0, 0, 1, 0x40000000u}, {320, 0, 0, 1, 0x40000000u},
+        {0, 240, 0, 1, 0x40000000u}, {320, 240, 0, 1, 0x40000000u}};
+    const std::vector<RecompD3dPresenterCommand> overlays = {hudQuad(red, false), hudQuad(fade, true)};
+    unsigned size[2]{};
+    const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
+        pixels.assign(a.size(), 0u);
+        return d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) >= 0.0 &&
+            size[0] == 320u && size[1] == 240u;
+    };
+    // The first real frame fills both frames' history, so the mask's first pair is A, A.
+    passed = passed && flowFrame(presenter, a, 0x100000u, 1u, 0.0f, 0.0f, false, overlays) &&
+        flowFrame(presenter, a, 0x100000u, 2u, 0.0f, 0.0f, false, overlays) &&
+        flowFrame(presenter, b, 0x200000u, 3u, 0.0f, 0.0f, false, overlays);
+    bool engaged = false;
+    if (passed && generate(0.0f, from) && generate(1.0f, to)) {
+        engaged = true;
+        const double faded = 1.0 - 64.0 / 255.0;
+        for (const double t : {0.25, 0.5}) {
+            const bool generated = generate(static_cast<float>(t), out);
+            unsigned moved = 0u, red_scene = 0u, count = 0u;
+            double warp_sum = 0.0, cross_sum = 0.0;
+            for (int y = 0; y < 240 && generated; ++y) {
+                for (int x = 0; x < 320; ++x) {
+                    const size_t at = static_cast<size_t>(y) * 320u + x;
+                    const int r = out[at] >> 16 & 255u, g = out[at] >> 8 & 255u, bl = out[at] & 255u;
+                    if (flowInside({x, y, x + 1, y + 1}, hud)) {
+                        for (unsigned shift : {0u, 8u, 16u}) {
+                            const double want = ((t < 0.5 ? from[at] : to[at]) >> shift) & 255u;
+                            if (std::fabs((out[at] >> shift & 255u) - want) > 1.0) {
+                                ++moved;
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    red_scene += std::abs(r - g) > 2 || std::abs(bl - g) > 2;
+                    const FlowRect around = flowGrow({x, y, x + 1, y + 1}, 16 + dx);
+                    if (!flowInside(around, {0, 0, 320, 240}) || flowTouches(around, hud) ||
+                        flowTouches(around, kFlowUniform) || flowTouches(around, flowMove(kFlowUniform, dx, dy))) continue;
+                    const double want = flowSampleA(x - t * dx, y - t * dy) * faded;
+                    warp_sum += std::fabs(g - want);
+                    cross_sum += std::fabs((from[at] >> 8 & 255u) * (1 - t) + (to[at] >> 8 & 255u) * t - want);
+                    ++count;
+                }
+            }
+            const double warp = count ? warp_sum / count : 1e9, crossfade = count ? cross_sum / count : 0.0;
+            std::printf("hud t=%.2f: %u of %u HUD pixels off the nearer frame, %u scene pixels with its red; "
+                "faded scene %u pixels, mean error %.2f, crossfade %.2f\n",
+                t, moved, static_cast<unsigned>((hud.x1 - hud.x0) * (hud.y1 - hud.y0)), red_scene, count, warp, crossfade);
+            passed = passed && generated && moved == 0u && red_scene == 0u && count >= 5000u && warp < 2.0 && warp * 8.0 < crossfade;
+            if (!passed) std::fprintf(stderr, "FAIL framegen hud t=%.2f\n", t);
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation keeps the HUD still and out of the scene, and warps a fade\n"
+            : "SKIP frame generation's HUD mask, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* RECOMP_FRAMEGEN_FLOW_BENCH=1: the flow's GPU time at 480 and 2160 (16:9),
    from the fence wait of 200 extra flow runs less that of none. */
 static void benchFramegenFlow()
@@ -3837,6 +3952,22 @@ static void benchFramegenFlow()
             }
             std::printf("warp bench scale %.1f: %ux%u, %.4f ms per generated frame (fence %.3f ms for none, %.3f for 200)\n",
                 scale, size[0], size[1], (runs - none) / 200.0, none, runs);
+            // A HUD of 100 half-transparent 32x16 quads, a sixth of the 640x480 screen.
+            for (unsigned i = 0u; i < 100u; ++i) {
+                const float x = 16.0f + (i % 10u) * 60.0f, y = 16.0f + (i / 10u) * 44.0f;
+                const HudVertex quad[4] = {{x, y, 0, 1, 0x80ffffffu}, {x + 32, y, 0, 1, 0x80ffffffu},
+                    {x, y + 16, 0, 1, 0x80ffffffu}, {x + 32, y + 16, 0, 1, 0x80ffffffu}};
+                const RecompD3dPresenterCommand command = hudQuad(quad, true);
+                d3d_backend_submit(presenter, &command);
+            }
+            unsigned draws = 0u;
+            none = runs = 1e9;
+            for (unsigned i = 0u; i < 5u; ++i) {
+                none = (std::min)(none, d3d_backend_framegen_cover(presenter, 0u, &draws));
+                runs = (std::min)(runs, d3d_backend_framegen_cover(presenter, 200u, &draws));
+            }
+            std::printf("hud mask bench scale %.1f: %u draws, %.4f ms per real frame (fence %.3f ms for none, %.3f for 200)\n",
+                scale, draws, (runs - none) / 200.0, none, runs);
         }
         d3d_backend_destroy(&presenter);
     }
@@ -3890,7 +4021,7 @@ int main()
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
     if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
-        !testFramegenWarpEdges()) return 1;
+        !testFramegenWarpEdges() || !testFramegenHud()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");

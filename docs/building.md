@@ -172,9 +172,12 @@ that shortcut.
   moves both along it into each generated frame. Where the motion is doubtful
   (flat or noisy areas such as water, repeating patterns, scene cuts, the
   edges of moving objects), it blends toward a crossfade of the two, so moving
-  objects ghost there. `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead,
-  as color per search block: hue is the direction, brightness the speed, and
-  dark blocks have low confidence. The presenter worker presents
+  objects ghost there. The game's 2D layer (life bars, timer, names, menus and
+  logos, but not fades or backdrops that span the screen's width) does not
+  move: it shows the nearer real frame, and the scene is not warped from it.
+  `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead, as color per search
+  block: hue is the direction, brightness the speed, dark blocks have low
+  confidence, and the 2D layer is whitened. The presenter worker presents
   each one when it is due, also between the draws of the next real frame, and
   skips one it would show late; real frames are never delayed. Any other
   refresh, `RECOMP_D3D_VRR=1`, and macOS and Linux, log `framegen

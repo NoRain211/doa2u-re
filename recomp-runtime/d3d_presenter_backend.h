@@ -63,5 +63,11 @@ double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat,
    two real frames. */
 double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, unsigned repeat, unsigned size[2],
     uint32_t *pixels, size_t capacity);
+/* SDL_GPU only, for tests: draws frame generation's HUD mask from the 2D
+   layer draws queued since the last PRESENT repeat times, after submitting
+   the draws before them, and waits for it; the draws stay queued. draws gets
+   their count. Returns the wait from submit in milliseconds, or a negative
+   value without a mask. */
+double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws);
 
 #endif
