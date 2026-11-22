@@ -187,7 +187,8 @@ that shortcut.
   confidence, the 2D layer is whitened, and all of it turns red at a cut.
   The presenter worker presents each one when it is due, also between the
   draws of the next real frame, and skips one it would show late; real
-  frames are never delayed. A refresh that is not a whole multiple of 60 Hz
+  frames are never delayed, except that a late VRR slot may wait up to one
+  refresh so two pictures never share one. A refresh that is not a whole multiple of 60 Hz
   without VRR, and macOS and Linux, log `framegen unsupported` and run as
   before. With **VRR: On**, a display that is a whole multiple of 60 Hz keeps
   those VSYNC slots; any other rate gets k = floor((refresh - 3) / 60) slots
