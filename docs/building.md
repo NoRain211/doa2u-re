@@ -169,7 +169,10 @@ that shortcut.
   generated frames between the last two real frames, then the newer real
   frame, so the picture is up to one guest frame later. The generated frames
   are a crossfade of the last two real frames for now, so moving objects
-  ghost. The presenter worker presents
+  ghost. The presenter also estimates the motion between them by block
+  matching, not yet used; `RECOMP_D3D_FRAMEGEN=flow` shows it instead of the
+  crossfade, as color per search block: hue is the direction, brightness the
+  speed, and dark blocks have low confidence. The presenter worker presents
   each one when it is due, also between the draws of the next real frame, and
   skips one it would show late; real frames are never delayed. Any other
   refresh, `RECOMP_D3D_VRR=1`, and macOS and Linux, log `framegen
