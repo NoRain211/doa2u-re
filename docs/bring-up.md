@@ -937,7 +937,7 @@ own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
 `RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
-Dedication, the life bar, the combo HUD, hit voices and the KO replay apply at
+Dedication, the life bar, the fight HUD, hit voices and the KO replay apply at
 once, as do CPU Costumes and the Free Camera offline (both are off while
 logged on to DOA ONLINE), and the others at the next launch.
 

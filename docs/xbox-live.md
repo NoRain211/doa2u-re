@@ -54,7 +54,7 @@ switches back; a failed logon the game then closes counts as leaving.
 Online, what the rollback fights need is on: guest time is locked to the
 frame, disc reads are synchronous and DirectSound buffers follow the same
 frame clock. The free camera, random CPU costumes and the Dynamic KO replay
-stay off, since they change one game's memory or timing. The combo HUD and
+stay off, since they change one game's memory or timing. The fight HUD and
 the hit voices are not forced off: each player's PC SETTINGS row decides,
 online too, because neither writes guest memory the desync check hashes and
 the hit voices are host audio only. Leaving puts the rest back, honouring the
