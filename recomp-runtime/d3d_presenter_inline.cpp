@@ -92,7 +92,7 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
         }
     }
     if (command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
-        !d3d_backend_paces_present(active->backend)) recomp_d3d_pace_present();
+        !d3d_backend_paces_present(active->backend)) recomp_d3d_pace_present(d3d_backend_flush, active->backend);
     try {
         error = d3d_backend_submit(active->backend, command);
     } catch (const std::bad_alloc &) {

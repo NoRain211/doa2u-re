@@ -29,7 +29,7 @@ int main()
     // grid; offline and fast-forwarded presents stay immediate.
     const auto pace = [](unsigned presents) {
         const auto start = Clock::now();
-        for (unsigned i = 0; i < presents; ++i) recomp_d3d_pace_present();
+        for (unsigned i = 0; i < presents; ++i) recomp_d3d_pace_present(nullptr, nullptr);
         return Clock::now() - start;
     };
     if (pace(2u) >= 8ms) {

@@ -122,7 +122,7 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
                     thread.covered = covered;
                 } else {
                     if (command.type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
-                        !d3d_backend_paces_present(backend)) recomp_d3d_pace_present();
+                        !d3d_backend_paces_present(backend)) recomp_d3d_pace_present(d3d_backend_flush, backend);
                     error = d3d_backend_submit(backend, &command);
                 }
                 break;

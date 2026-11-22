@@ -29,7 +29,9 @@ void recomp_d3d_sleep_until(long long steady_ns);
 // Under the frame clock, holds real PRESENT commands to the guest's 1/60 s grid
 // on the host clock, so a display accepting presents faster than 60 Hz cannot
 // run the guest fast. Offline and fast-forwarded presents return at once.
-void recomp_d3d_pace_present(void);
+// flush, when set, runs before a hold, so the GPU renders during it.
+struct RecompD3dPresenter;
+void recomp_d3d_pace_present(void (*flush)(struct RecompD3dPresenter *), struct RecompD3dPresenter *presenter);
 
 #ifdef __cplusplus
 }
