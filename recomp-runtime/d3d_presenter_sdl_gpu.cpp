@@ -3616,12 +3616,17 @@ void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t
 }
 
 /* Shows slot's picture through gamma, the aspect blit and the overlay, in its
-   own command buffer, so the next real frame's open one is untouched. The
-   acquire never waits; the submit may block the worker while VSYNC's queue is
-   full, never the guest thread. The window's image is taken first: with none
-   ready, nothing is drawn, as a real slot retries every 0.5 ms. */
+   own command buffer, submitted after the next real frame's open one: SDL's
+   Vulkan backend moves textures on this submit, and open commands would keep
+   using the old ones. The acquire never waits; the submit may block the
+   worker while VSYNC's queue is full, never the guest thread. The window's
+   image is taken first: with none ready, nothing is drawn, as a real slot
+   retries every 0.5 ms. */
 bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
 {
+    // The real frame's open commands go first: a submit can move textures, and
+    // this slot's work must be recorded after any move it does.
+    submitCommands(presenter);
     SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(presenter->device);
     if (commands == nullptr) return false;
     const bool real = slot + 1u == presenter->fg_k;

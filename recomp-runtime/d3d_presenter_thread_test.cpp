@@ -3413,6 +3413,114 @@ static bool testFramegenKeepsRealFrames()
     return passed;
 }
 
+/* A slot shown while a real frame's commands are open must not lose them. On a
+   slot's submit SDL's Vulkan backend moves the textures of fragmented memory:
+   targets released between kept ones leave holes, and more small targets
+   than one 16 MiB page of SDL's holds mark the holes' page to move. Each
+   frame then clears a kept target, lets the slots show, and draws the target. */
+static bool testFramegenKeepsOpenCommands()
+{
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create framegen open commands", d3d_backend_create(&config, &presenter));
+    bool engaged = false;
+    uint32_t swap = 0u;
+    RecompD3dPresenterTarget target{};
+    target.offscreen = target.no_depth = true;
+    target.color.format_byte = 0x12u;
+    target.color.bits_per_pixel = 32u;
+    target.color.linear = true;
+    const auto clear = [&](uint32_t index, uint32_t size, uint32_t color) {
+        target.color.data = 0x100000u + index * 0x10000u;
+        target.color.width = target.color.height = size;
+        target.color.pitch = size * 4u;
+        auto command = clearCommand();
+        command.data.clear.target = target;
+        command.data.clear.clear_depth = false;
+        command.data.clear.color = color;
+        passed &= expect("framegen open commands clear", d3d_backend_submit(presenter, &command));
+    };
+    // Shows the due slots for one guest frame, as the worker does between a frame's records.
+    const auto idle = [&] {
+        const auto next = std::chrono::steady_clock::now() + std::chrono::microseconds(16667);
+        while (std::chrono::steady_clock::now() < next) {
+            const uint64_t until = d3d_backend_idle(presenter);
+            engaged |= until != UINT64_MAX;
+            std::this_thread::sleep_for(std::chrono::microseconds(until == UINT64_MAX ? 1000u
+                : static_cast<unsigned>((std::min)(until / 10u, uint64_t{1000u}))));
+        }
+    };
+    const auto present = [&] {
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        command.data.present = {5u, ++swap};
+        passed &= expect("framegen open commands present", d3d_backend_submit(presenter, &command));
+    };
+    const auto frames = [&](unsigned count) {
+        for (unsigned i = 0u; i < count && passed; ++i) {
+            auto command = clearCommand();
+            passed &= expect("framegen open commands frame", d3d_backend_submit(presenter, &command));
+            present();
+            idle();
+        }
+    };
+    unsigned lost = 0u;
+    if (passed) {
+        frames(3u);
+        for (uint32_t i = 0u; i < 8u; ++i) clear(i, 96u, 0xff000000u);
+        frames(1u);
+        for (uint32_t i = 0u; i < 8u; i += 2u) {
+            passed &= expect("framegen open commands release",
+                d3d_backend_release_memory(presenter, 0x100000u + i * 0x10000u, 0x1000u, true));
+        }
+        frames(2u);
+        for (uint32_t i = 8u; i < 18u; ++i) clear(i, 700u, 0xff000000u);
+        const float quad[4][7] = {{0,0,0,1,0,0,0}, {320,0,0,1,0,96,0}, {0,240,0,1,0,0,96}, {320,240,0,1,0,96,96}};
+        const uint16_t indices[] = {0,1,2,3};
+        RecompD3dPresenterCommand composite{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = composite.data.draw;
+        draw.fvf = 0x144u;
+        draw.vertex_stride = sizeof quad[0];
+        draw.vertex_count = draw.index_count = 4u;
+        draw.triangle_count = 2u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.vertex_bytes = quad;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15u;
+        draw.has_texture = true;
+        draw.address_u = draw.address_v = 3u;
+        draw.directional.stage_mode = true;
+        draw.directional.stage[0] = draw.directional.stage[3] = 1u;
+        for (uint32_t frame = 1u; frame <= 12u && passed && engaged; ++frame) {
+            const uint32_t color = 0xff000000u | frame * 0x140c07u;
+            auto command = clearCommand();
+            passed &= expect("framegen open commands frame", d3d_backend_submit(presenter, &command));
+            clear(1u, 96u, color);
+            idle();
+            draw.texture = target.color;
+            passed &= expect("framegen open commands draw", d3d_backend_submit(presenter, &composite));
+            present();
+            uint32_t probe[3]{};
+            if (passed && d3d_backend_framegen_probe(presenter, 0u, probe) == 0u) {
+                std::fprintf(stderr, "FAIL framegen open commands probe at frame %u\n", frame);
+                passed = false;
+            }
+            if (passed && ((probe[1] ^ color) & 0xffffffu) != 0u) {
+                std::fprintf(stderr, "FAIL framegen frame %u shows %06x, its target was cleared to %06x\n",
+                    frame, probe[1] & 0xffffffu, color & 0xffffffu);
+                ++lost;
+            }
+        }
+    }
+    d3d_backend_destroy(&presenter);
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    passed = passed && lost == 0u;
+    if (passed) {
+        std::printf(engaged ? "PASS frame generation's slots keep a real frame's open commands\n"
+            : "SKIP frame generation's open commands, see the framegen unsupported line\n");
+    }
+    return passed;
+}
+
 /* Frame generation's flow test pictures: three octaves of hashed noise (2, 8
    and 32 pixel cells), not periodic, defined for any coordinate. */
 static uint32_t flowNoise(int x, int y, uint32_t seed)
@@ -4215,7 +4323,7 @@ int main()
 #ifndef RECOMP_TEST_D3D11
     // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
     d3d_backend_framegen_set_late_ns(INT64_MAX);
-    if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
+    if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() || !testFramegenWarp() ||
         !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts() || !testFramegenCapture()) return 1;
     benchFramegenFlow();
 #endif
