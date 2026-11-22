@@ -3722,10 +3722,16 @@ static bool testFramegenWarpEdges()
     }
     const float truth_shift[2][2] = {{1.5f, -1.0f}, {0.0f, 0.0f}};
     unsigned size[2]{};
+    bool wrong_size = false;
+    // False only when frame generation does not engage; a wrong size sets wrong_size.
     const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
         pixels.assign(static_cast<size_t>(w) * h, 0u);
-        return d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) >= 0.0 &&
-            size[0] == static_cast<unsigned>(w) && size[1] == static_cast<unsigned>(h);
+        if (d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) < 0.0) return false;
+        if (size[0] != static_cast<unsigned>(w) || size[1] != static_cast<unsigned>(h)) {
+            std::fprintf(stderr, "FAIL framegen warp edges made %ux%u, not %dx%d\n", size[0], size[1], w, h);
+            wrong_size = true;
+        }
+        return true;
     };
     RecompD3dPresenterCommand clear = clearCommand(), present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     present.data.present = {5u, 1u};
@@ -3741,7 +3747,7 @@ static bool testFramegenWarpEdges()
         // generate(0) and generate(1) are the real frames themselves.
         passed = generate(0.0f, from) && generate(1.0f, to) &&
             flowFrame(presenter, truth_picture[scene], 0x400000u + scene * 0x100000u, ++swap,
-                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth);
+                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth) && !wrong_size;
         if (!passed) break;
         std::vector<int> crossfade = flowGreen(from);
         const std::vector<int> later = flowGreen(to);
