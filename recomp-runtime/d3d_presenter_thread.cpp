@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -137,7 +138,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
         } catch (const std::bad_alloc &) {
             error = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+        } catch (const std::exception &exception) {
+            std::fprintf(stderr, "recomp d3d presenter: host exception: %s\n", exception.what());
+            error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         } catch (...) {
+            std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type\n");
             error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
         if (draw && error != RECOMP_D3D_PRESENTER_OK &&
@@ -248,7 +253,11 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         created = d3d_backend_create(&config, &backend);
     } catch (const std::bad_alloc &) {
         created = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+    } catch (const std::exception &exception) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception at create: %s\n", exception.what());
+        created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     } catch (...) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type at create\n");
         created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     {
