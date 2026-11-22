@@ -43,6 +43,7 @@ static ULONGLONG GetTickCount64()
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <thread>
 #include <string>
 #include <vector>
@@ -233,6 +234,52 @@ static bool testCapturedDraw()
     recomp_d3d_presenter_report_draw_textures();
     passed &= destroy(presenter);
     if (passed) std::puts("PASS captured draw survives source overwrite");
+    return passed;
+}
+
+/* A runner started without tools/run_game.py names a shader cache folder that
+   nobody made. It runs first: Direct3D 11 keeps compiled shaders for the process. */
+static bool testShaderCacheFolder()
+{
+    char temp[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, temp)) return false;
+    const std::filesystem::path root =
+        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetTickCount64()));
+    const std::filesystem::path folder = root / "cache";
+    _putenv_s("RECOMP_SHADER_CACHE", folder.string().c_str());
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create shader cache", d3d_backend_create(&config, &presenter));
+    if (passed) {
+        struct Vertex { float x, y, z, rhw; uint32_t diffuse; float u, v; };
+        const Vertex vertices[] = {{20, 20, 0.25f, 1, 0xffff8040u, 0, 0}, {200, 20, 0.25f, 1, 0xffff8040u, 1, 0},
+            {20, 200, 0.25f, 1, 0xffff8040u, 0, 1}, {200, 200, 0.25f, 1, 0xffff8040u, 1, 1}};
+        const uint16_t indices[] = {0, 1, 2, 3};
+        RecompD3dPresenterCommand command{};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_DRAW;
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof(Vertex);
+        draw.fvf = 0x144u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        passed &= expect("shader cache draw", d3d_backend_submit(presenter, &command));
+        command = {};
+        command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+        command.data.present = {5, 1};
+        passed &= expect("shader cache present", d3d_backend_submit(presenter, &command));
+        passed &= expect("destroy shader cache", d3d_backend_destroy(&presenter));
+    }
+    _putenv_s("RECOMP_SHADER_CACHE", "");
+    std::error_code error;
+    if (!std::filesystem::is_directory(folder, error) || std::filesystem::is_empty(folder, error)) {
+        std::fprintf(stderr, "FAIL shader cache folder is missing or empty\n");
+        passed = false;
+    }
+    std::filesystem::remove_all(root, error);
+    if (passed) std::puts("PASS the shader cache makes its folder");
     return passed;
 }
 
@@ -4322,7 +4369,7 @@ int main()
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 #endif
     recomp_d3d_presenter_set_immediate_present(false);
-    if (!testResampledMsaaTarget() ||
+    if (!testShaderCacheFolder() || !testResampledMsaaTarget() ||
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||
         !testWidescreenAntialiasing(false, true) || !testWidescreenAntialiasing(true, true) ||
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||

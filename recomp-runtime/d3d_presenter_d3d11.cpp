@@ -1453,6 +1453,9 @@ ID3DBlob *readShaderCache(const std::filesystem::path &path)
 
 void writeShaderCache(const std::filesystem::path &path, ID3DBlob *blob)
 {
+    // A runner started without tools/run_game.py names a folder nobody made.
+    std::error_code ignored;
+    std::filesystem::create_directories(path.parent_path(), ignored);
     // Written beside the entry and renamed, so a reader never sees half of one.
     std::filesystem::path partial = path;
     partial += L".tmp" + std::to_wstring(GetCurrentThreadId());

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <mutex>
@@ -431,6 +432,9 @@ bool readCache(const std::string &path, RecompCompiledShader &out)
 
 void writeCache(const std::string &path, const RecompCompiledShader &shader)
 {
+    // A runner started without tools/run_game.py names a folder nobody made.
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
     // Written beside the entry and renamed, so a reader never sees half of one.
     const std::string partial = path + ".tmp" + std::to_string(reinterpret_cast<uintptr_t>(&shader));
     {
