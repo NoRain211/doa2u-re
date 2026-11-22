@@ -269,7 +269,8 @@ static bool testShaderCacheFolder()
     char temp[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, temp)) return false;
     const std::filesystem::path root =
-        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetTickCount64()));
+        std::filesystem::path(temp) / ("recomp-shader-cache-" + std::to_string(GetCurrentProcessId()) + "-" +
+            std::to_string(GetTickCount64()));
     const std::filesystem::path folder = root / "cache";
     _putenv_s("RECOMP_SHADER_CACHE", folder.string().c_str());
     RecompD3dPresenter *presenter = nullptr;
@@ -4083,7 +4084,7 @@ static bool testFramegenWarpEdges()
     const float truth_shift[2][2] = {{1.5f, -1.0f}, {0.0f, 0.0f}};
     unsigned size[2]{};
     bool wrong_size = false;
-    // False only when frame generation does not engage; a wrong size sets wrong_size.
+    // False when frame generation does not engage, a failure once it has; a wrong size sets wrong_size.
     const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
         pixels.assign(static_cast<size_t>(w) * h, 0u);
         if (d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) < 0.0) return false;
@@ -4102,7 +4103,15 @@ static bool testFramegenWarpEdges()
     for (unsigned scene = 0u; scene < 2u && passed; ++scene) {
         passed = flowFrame(presenter, a, 0x100000u, ++swap, 0.0f, 0.0f, true) &&
             flowFrame(presenter, b[scene], 0x200000u + scene * 0x100000u, ++swap, 0.0f, 0.0f, true);
-        if (!passed || !generate(0.5f, out)) break;
+        if (!passed) break;
+        if (!generate(0.5f, out)) {
+            if (engaged) {
+                passed = false;
+                std::fprintf(stderr, "FAIL framegen warp edges stopped generating in scene %u
+", scene);
+            }
+            break;
+        }
         engaged = true;
         // generate(0) and generate(1) are the real frames themselves.
         passed = generate(0.0f, from) && generate(1.0f, to) &&
