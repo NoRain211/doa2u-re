@@ -161,10 +161,10 @@ that shortcut.
 - The I3DL2 reverb is FAudio's reimplementation of XAudio2's reverb
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
-- `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows Vulkan
-  runner. The **Frame rate: Display** row on the launchers' VIDEO SETTINGS
-  page and in the game's PC SETTINGS sets it at the next launch. On a display
-  of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
+- `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows runners,
+  Direct3D 11 and Vulkan. The **Frame rate: Display** row on the launchers'
+  VIDEO SETTINGS page and in the game's PC SETTINGS sets it at the next
+  launch. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
   it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
   frame, so the picture is up to one guest frame later. The presenter
@@ -179,7 +179,8 @@ that shortcut.
   frames, the generated frames show the older real frame, so the cut lands
   with the newer one as at 60 Hz; fades and flashes keep the shapes and
   crossfade, and a very fast camera move can be taken for one cut. After frame generation was off, a quality change, or a real
-  frame more than 1.5 guest frames late (a load), the generated frames start
+  frame more than 1.5 guest frames late (a load; 2.5 on Direct3D 11, where
+  the presenter's own work sits in that gap), the generated frames start
   again from the newer real frame.
   `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead, as color per search
   block: hue is the direction, brightness the speed, dark blocks have low
@@ -189,12 +190,15 @@ that shortcut.
   frames are never delayed. Any other
   refresh, and macOS and Linux, log `framegen unsupported` and run as before.
   It is off while the window is hidden or minimized, in an unpaced or
-  fast-forwarded run and under the frame clock (netplay and synctest). With
+  fast-forwarded run and under the frame clock (netplay and synctest).
+  Direct3D 11 also leaves it off with `RECOMP_D3D_VRR=1`, which logs
+  `framegen unsupported: VRR is on`: the two are not combined yet. With
   `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
-- `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on, writes
-  what it gets for each real frame into the folder: the picture before
-  gamma, the HUD mask, the gamma ramp, and whether the frame started the
-  history again. `RECOMP_D3D_FRAMEGEN_CAPTURE_AT` (first present, default 1)
+- `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on in the
+  Vulkan renderer, writes what it gets for each real frame into the folder:
+  the picture before gamma, the HUD mask, the gamma ramp, and whether the
+  frame started the history again. `RECOMP_D3D_FRAMEGEN_CAPTURE_AT` (first
+  present, default 1)
   and `_COUNT` (default all) select the frames. Frame generation then also
   runs with `RECOMP_HEADLESS=1`. The game runs slowly while it writes, and a
   2160 frame takes 41 MB; keep the quality fixed during a capture. The frames
@@ -207,7 +211,8 @@ that shortcut.
   `--original` repeats each real frame k times, as the game looks at 60 Hz.
   `--ffmpeg` and the options after it pipe the frames to `ffmpeg` on `PATH`
   instead, with `<output>` as its output file, for example
-  `--ffmpeg -c:v ffv1`. The first real frame starts the history.
+  `--ffmpeg -c:v ffv1`. The first real frame starts the history. Direct3D 11
+  does not capture; it logs that capture is unsupported.
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.
