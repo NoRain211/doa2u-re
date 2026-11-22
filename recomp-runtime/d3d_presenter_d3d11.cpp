@@ -399,8 +399,8 @@ struct RecompD3dPresenter {
     UINT sync_interval = 1u;
     std::chrono::steady_clock::time_point next_refresh_check{};
     /* Signaled while the swap chain has a buffer for another present; frame
-       generation's slots skip one that has none instead of waiting. Owned by
-       the swap chain, not closed here. */
+       generation's slots skip one that has none instead of waiting. Fetched
+       only for frame generation; releaseGraphics closes it with the chain. */
     HANDLE frame_latency = nullptr;
     bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
     long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
@@ -732,7 +732,8 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     releaseCom(presenter->previous_frame_sample);
     releaseCom(presenter->previous_frame);
     releaseCom(presenter->swap_chain);
-    presenter->frame_latency = nullptr;  // owned by the swap chain just released
+    if (presenter->frame_latency != nullptr) CloseHandle(presenter->frame_latency);
+    presenter->frame_latency = nullptr;
     releaseCom(presenter->context);
     if (keep_device) presenter->device = nullptr;
     else releaseCom(presenter->device);
@@ -951,7 +952,8 @@ HRESULT createDeviceWithDriver(
         IDXGISwapChain2 *chain = nullptr;
         result = presenter->swap_chain->QueryInterface(IID_PPV_ARGS(&chain));
         if (SUCCEEDED(result)) result = chain->SetMaximumFrameLatency(framegen ? 2u : 1u);
-        if (SUCCEEDED(result)) presenter->frame_latency = chain->GetFrameLatencyWaitableObject();
+        if (SUCCEEDED(result) && framegen)
+            presenter->frame_latency = chain->GetFrameLatencyWaitableObject();
         releaseCom(chain);
     }
     return result;
