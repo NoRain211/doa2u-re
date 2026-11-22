@@ -811,7 +811,16 @@ Random; every other read goes through `0x135410`, `0x135510` and
 replaces those five and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. The tag list stays as it was.
+`0x03ff0c00`, since other data follows the table. The row list's only caller
+(`0x1357a0`) passes the 5-stage tag list for a tag match and for game mode 8,
+Live's Team Battle (session type 2, `0x2a8ab0`). In the online scenes, where
+`frontend_online_select_enabled` (`0xcfa20`: `g_frontend_selected_mode`
+`0xdf57b4` is 0x12 and `0xf252a4` is set) is true, Miyama is added to that
+list too, before Random. Offline Tag stays as it was. Offline modes also set
+game mode 5, so the mode alone does not mark a Live match. Live 1v1 sessions
+already read the regular list. Miyama sends no stage state with the match
+settings (only stages 9 and 55 do, `0x14c220`). Miyama in a tag match or Team
+Battle was not played.
 
 Ids 18, 27, 63, 64 and 65 are one stage group (`0x693370`) with identical data
 and area descriptors. Stage Select's preview load (`0x12e720`) sets the stage
