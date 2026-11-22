@@ -54,7 +54,7 @@ switches back; a failed logon the game then closes counts as leaving.
 Online, what the rollback fights need is on: guest time is locked to the
 frame, disc reads are synchronous and DirectSound buffers follow the same
 frame clock. The free camera, random CPU costumes and the Dynamic KO replay
-stay off, since they change one game's memory or timing. The combo HUD and
+stay off, since they change one game's memory or timing. The fight HUD and
 the hit voices are not forced off: each player's PC SETTINGS row decides,
 online too, because neither writes guest memory the desync check hashes and
 the hit voices are host audio only. Leaving puts the rest back, honouring the
@@ -97,6 +97,16 @@ replaces them at the API boundary, like the D3D8 and DirectSound adapters:
   a quiet player the game is not sending to is left alone. An introduction
   the game did not ask for never takes the slot of a player heard in the
   last 10 s.
+- The guest's `recvfrom` passes only datagrams shaped as the game's own
+  senders build them (`recomp_live_game_datagram_ok`): each type's exact
+  length, at most 8 players in a list, names that end inside their fields,
+  type 15's handler index below 12, and the lockstep start's frames and delay
+  in the host's own ranges. The game's handlers trust these fields as Xbox
+  Live's signed consoles were trusted, so any other datagram is dropped.
+  The first drop of each type prints one `dropped a malformed` line. The
+  game's own empty type-15 replies (not chosen yet, handlers 0-3; not ready,
+  handler 5), which it resends every second, are dropped without one
+  (`recomp_live_game_datagram_expected_drop`).
 
 ## Fights
 

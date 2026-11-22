@@ -5,8 +5,8 @@
    sizes, declines and resource lifetimes. Where SDL_GPU lacks a Direct3D 11
    feature this file says so: widened lines are expanded on the CPU instead of
    in a geometry shader, coverage probes rasterize on the CPU, and occlusion
-   counts come from an additive pass. VRR and RECOMP_D3D_PRESENT_LOG are
-   Direct3D 11 only. */
+   counts come from an additive pass. RECOMP_D3D_PRESENT_LOG is Direct3D 11
+   only. */
 #include "d3d_presenter_backend.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
@@ -270,6 +270,7 @@ struct VisibilityQuery {
     SDL_GPUTransferBuffer *download = nullptr;
     uint32_t level = 0u, level_width = 0u, level_height = 0u;
     SDL_GPUFence *fence = nullptr;
+    bool reusable = true;                  // false once a quality change outdates the size
 };
 
 } // namespace
@@ -285,6 +286,8 @@ struct RecompD3dPresenter {
     bool close_requested = false;
     // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
     SDL_GPUFence *present_fences[2] = {};
+    bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
+    long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;
@@ -469,6 +472,22 @@ bool preferMailbox(bool immediate)
 #else
     return immediate;
 #endif
+}
+
+// steady_clock now, in nanoseconds since its epoch, as recomp_d3d_sleep_until takes it.
+long long steadyNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// VRR presents IMMEDIATE and paces itself, so it outranks immediate_present, as in the D3D11 backend.
+SDL_GPUPresentMode presentMode(RecompD3dPresenter *presenter)
+{
+    if (presenter->vrr) return SDL_GPU_PRESENTMODE_IMMEDIATE;
+    return preferMailbox(immediate_present) &&
+            SDL_WindowSupportsGPUPresentMode(presenter->device, presenter->window, SDL_GPU_PRESENTMODE_MAILBOX)
+        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
 }
 
 SDL_GPUCommandBuffer *commandBuffer(RecompD3dPresenter *presenter)
@@ -1817,17 +1836,29 @@ bool prepareCount(RecompD3dPresenter *presenter, const BoundTarget &bound)
     query.width = bound.host_width;
     query.height = bound.host_height;
     query.samples = bound.samples;
-    query.count = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (bound.samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
-        query.width, query.height, 1u, 1u, query.samples);
-    if (query.samples != SDL_GPU_SAMPLECOUNT_1) {
-        query.resolved = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height);
+    std::vector<VisibilityQuery> &free = presenter->visibility_free;
+    const auto reuse = std::find_if(free.begin(), free.end(), [&](const VisibilityQuery &done) {
+        return done.width == query.width && done.height == query.height && done.samples == query.samples;
+    });
+    if (reuse != free.end()) {
+        query.count = reuse->count;
+        query.resolved = reuse->resolved;
+        query.reduce = reuse->reduce;
+        query.download = reuse->download;
+        free.erase(reuse);
+    } else {
+        query.count = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (bound.samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
+            query.width, query.height, 1u, 1u, query.samples);
+        if (query.samples != SDL_GPU_SAMPLECOUNT_1) {
+            query.resolved = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
+                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height);
+        }
+        uint32_t levels = 1u;
+        while ((std::max(query.width, query.height) >> levels) != 0u) ++levels;
+        query.reduce = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kReduceFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height, 1u, levels);
     }
-    uint32_t levels = 1u;
-    while ((std::max(query.width, query.height) >> levels) != 0u) ++levels;
-    query.reduce = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kReduceFormat,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height, 1u, levels);
     if (query.count == nullptr || query.reduce == nullptr ||
         (query.samples != SDL_GPU_SAMPLECOUNT_1 && query.resolved == nullptr)) {
         std::fprintf(stderr, "recomp d3d presenter: visibility target failed: %s\n", SDL_GetError());
@@ -2429,7 +2460,8 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
         query.level_height = std::max(query.height >> query.level, 1u);
         SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
             query.level_width * query.level_height * 4u, 0};
-        query.download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+        // A reused query's buffer already fits: the level size follows the count's size.
+        if (query.download == nullptr) query.download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
         SDL_GPUCopyPass *pass = query.download != nullptr ? SDL_BeginGPUCopyPass(commands) : nullptr;
         if (pass == nullptr) {
             releaseQuery(presenter, query);
@@ -3025,12 +3057,6 @@ void showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, 
     }
 }
 
-int64_t steadyNs()
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
 /* RECOMP_D3D_FRAMEGEN=1: window presents per guest frame, k = the display's
    refresh / 60, or 0. Frame generation presents on VSYNC with three frames in
    flight, which also asks for three swapchain images: an acquire one refresh
@@ -3043,6 +3069,7 @@ unsigned framegenPresents(RecompD3dPresenter *presenter)
     const float refresh = mode != nullptr ? mode->refresh_rate : 0.0f;
     const unsigned k = static_cast<unsigned>(refresh / 60.0f + 0.5f);
     const char *reason = unpacedRun() ? "unpaced run"
+        : presenter->vrr ? "VRR is on"
         : refresh <= 0.0f ? "unknown refresh"
         : k < 2u ? "the refresh is below 120 Hz"
         : std::fabs(refresh - 60.0f * k) > 0.005f * refresh ? "the refresh is not a whole multiple of 60 Hz"
@@ -3688,6 +3715,17 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     shown = applyGamma(presenter, commands, shown);
     // Hidden under a capture, it acquires too: SDL's Vulkan backend frees finished work only on such a submit.
     if (!generated || (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_HIDDEN)) {
+        if (presenter->vrr) {
+            /* VRR shows a frame the moment it is presented; present on the guest's
+               1/60 s grid, as the D3D11 backend does. SDL presents when the
+               swapchain's command buffer is submitted, so the frame renders during
+               the sleep and only the blit to the window follows it. */
+            submitCommands(presenter);
+            presenter->vrr_slot_ns = recomp_d3d_vrr_slot(presenter->vrr_slot_ns, steadyNs());
+            recomp_d3d_sleep_until(presenter->vrr_slot_ns);
+            commands = commandBuffer(presenter);
+            if (commands == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+        }
         SDL_GPUTexture *swapchain = nullptr;
         Uint32 swap_width = 0u, swap_height = 0u;
         if (SDL_WaitAndAcquireGPUSwapchainTexture(commands, presenter->window, &swapchain, &swap_width, &swap_height)) {
@@ -3969,7 +4007,8 @@ void fitWindow(RecompD3dPresenter *presenter)
 void applyQuality(RecompD3dPresenter *presenter)
 {
     // An open occlusion count draws into a target of the old size; ended ones own
-    // their textures and resolve on their own, so only an open one waits.
+    // their textures, resolve on their own and release them then, so only an open
+    // one waits.
     if (presenter->visibility_open) {
         static bool reported;
         bool pending;
@@ -4090,6 +4129,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     }
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);
     presenter->visibility_free.clear();
+    for (VisibilityQuery &query : presenter->visibility_pending) query.reusable = false;
     presenter->last_bound = {};
     if (scale != old_scale) fitWindow(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
@@ -4176,6 +4216,13 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
+    /* IMMEDIATE shows each frame when it is presented, so any VRR display paces
+       60 Hz evenly. SDL cannot tell whether VRR is active; without it this tears. */
+    const char *vrr = std::getenv("RECOMP_D3D_VRR");
+    const bool want_vrr = vrr != nullptr && std::strcmp(vrr, "1") == 0;
+    created->vrr = want_vrr && SDL_WindowSupportsGPUPresentMode(created->device, created->window,
+        SDL_GPU_PRESENTMODE_IMMEDIATE);
+    // Frame generation presents on VSYNC, so it refuses VRR; it sets the mode below.
     created->fg_k = framegenPresents(created);
     created->fg_flow_view = created->fg_k != 0u && std::strcmp(std::getenv("RECOMP_D3D_FRAMEGEN"), "flow") == 0;
     if (const char *capture = std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE"); created->fg_k != 0u && capture && capture[0]) {
@@ -4184,10 +4231,16 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         if (const char *count = std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE_COUNT"))
             created->fg_capture_count = std::strtoul(count, nullptr, 10);
     }
-    const SDL_GPUPresentMode present_mode = preferMailbox(immediate_present) &&
-            SDL_WindowSupportsGPUPresentMode(created->device, created->window, SDL_GPU_PRESENTMODE_MAILBOX)
-        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, present_mode);
+    if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+            presentMode(created)) && created->vrr) {
+        // The VRR pacing must not run on top of a blocking present.
+        created->vrr = false;
+        if (!SDL_SetGPUSwapchainParameters(created->device, created->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+                presentMode(created))) {
+            std::fprintf(stderr, "recomp d3d presenter: swapchain parameters failed: %s\n", SDL_GetError());
+        }
+    }
+    if (want_vrr) std::fprintf(stderr, "recomp d3d presenter: vrr %s\n", created->vrr ? "on" : "unsupported");
     if (!createResources(created)) return fail("presenter resources");
     std::fprintf(stderr, "recomp d3d presenter: %s target=%ux%u msaa=%u window=%ux%u\n",
         SDL_GetGPUDeviceDriver(created->device), main_width, main_height, created->msaa_count,
@@ -4474,10 +4527,8 @@ void d3d_backend_set_immediate_present(bool enabled)
     immediate_present = enabled;
     RecompD3dPresenter *presenter = active_presenter;
     if (presenter == nullptr || presenter->window == nullptr) return;
-    const SDL_GPUPresentMode mode = preferMailbox(enabled) &&
-            SDL_WindowSupportsGPUPresentMode(presenter->device, presenter->window, SDL_GPU_PRESENTMODE_MAILBOX)
-        ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+    SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+        presentMode(presenter));
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels)
@@ -4500,7 +4551,18 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
     // A resolved count is the per-pixel fraction of passing samples.
     *pixels = static_cast<uint32_t>(std::min(
         std::floor(sum / front.host_pixels_per_guest_pixel + 0.5), 4294967295.0));
-    releaseQuery(presenter, front);
+    /* Keep the targets for the next test of this size (prepareCount). Freeing
+       them cost a window present 10-17 ms at 4K with MSAA 8x; a few kept
+       bound what a size no longer used holds. */
+    if (front.fence != nullptr) SDL_ReleaseGPUFence(presenter->device, front.fence);
+    front.fence = nullptr;
+    std::vector<VisibilityQuery> &free = presenter->visibility_free;
+    if (front.count != nullptr && front.reusable) free.push_back(front);
+    else releaseQuery(presenter, front);
+    if (free.size() > 4u) {
+        releaseQuery(presenter, free.front());
+        free.erase(free.begin());
+    }
     presenter->visibility_pending.erase(presenter->visibility_pending.begin());
     return D3D_BACKEND_VISIBILITY_READY;
 }
@@ -4701,6 +4763,20 @@ void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter)
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
 {
+    /* Only the inline presenter (macOS, Linux) calls this; it runs on the guest
+       thread, and submitPresent's VRR sleep stalls every guest thread, CRI's
+       audio refills too (issue #69). On Windows that sleep is on the worker. The
+       guest's wait for this lets them run, so VRR waits here until 2 ms before
+       its slot (the scheduler polls host waits each millisecond); the frame's
+       draws render meanwhile. */
+    if (presenter->vrr) {
+        // Queue the draws still batched, or they would wait for submitPresent.
+        flushSegment(presenter);
+        resolveMain(presenter);
+        submitCommands(presenter);
+        const long long now = steadyNs();
+        if (recomp_d3d_vrr_slot(presenter->vrr_slot_ns, now) - now > 2000000) return false;
+    }
     return presenter->present_fences[0] == nullptr ||
         SDL_QueryGPUFence(presenter->device, presenter->present_fences[0]);
 }

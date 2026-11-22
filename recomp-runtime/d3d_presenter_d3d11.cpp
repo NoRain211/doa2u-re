@@ -3986,11 +3986,10 @@ RecompD3dPresenterError submitPresent(
         : presenter->vrr ? DXGI_PRESENT_ALLOW_TEARING : 0u;
     if (presenter->vrr) {
         /* VRR shows a frame the moment it is presented, so render-time jitter
-           became 12-23 ms frames. Present on the guest's exact 1/60 s grid; a
-           late frame presents now and moves the grid, as the guest timer does. */
+           became 12-23 ms frames. Present on the guest's exact 1/60 s grid. */
         const long long now = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
-        presenter->vrr_slot_ns = (std::max)(presenter->vrr_slot_ns + 1000000000 / 60, now);
+        presenter->vrr_slot_ns = recomp_d3d_vrr_slot(presenter->vrr_slot_ns, now);
         // Submit the frame's last commands now, so the GPU finishes them before the flip.
         presenter->context->Flush();
         recomp_d3d_sleep_until(presenter->vrr_slot_ns);
