@@ -3918,7 +3918,6 @@ void framegenCapture(RecompD3dPresenter *presenter)
         std::fprintf(presenter->fg_capture_index, "recomp framegen capture 1 target=%ux%u k=%u\n",
             width, height, presenter->fg_k);
     }
-    // The mask has its own buffer: after the picture in one, NVIDIA's driver lost the device.
     SDL_GPUTexture *const textures[2] = {presenter->fg_cur, presenter->fg_cover[1]};
     const uint32_t sizes[2] = {width * height * 4u, width * height};
     SDL_GPUTransferBuffer *downloads[2]{};
@@ -3979,7 +3978,7 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (presenter->smaa) shown = runSmaa(presenter, commands, shown);
     const bool generated = framegenRecord(presenter, commands, shown, present.aspect);
     shown = applyGamma(presenter, commands, shown);
-    // A capture's hidden window acquires too: that throttles frames in flight (memory grew without it).
+    // Hidden under a capture, it acquires too: SDL's Vulkan backend frees finished work only on such a submit.
     if (!generated || (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_HIDDEN)) {
         SDL_GPUTexture *swapchain = nullptr;
         Uint32 swap_width = 0u, swap_height = 0u;
