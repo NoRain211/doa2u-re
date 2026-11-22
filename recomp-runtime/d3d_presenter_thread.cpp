@@ -119,7 +119,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
                     error = d3d_backend_draw_coverage(backend, &command.data.draw, &covered);
                     std::lock_guard<std::mutex> lock(thread.mutex);
                     thread.covered = covered;
-                } else error = d3d_backend_submit(backend, &command);
+                } else {
+                    if (command.type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
+                        !d3d_backend_paces_present(backend)) recomp_d3d_pace_present();
+                    error = d3d_backend_submit(backend, &command);
+                }
                 break;
             }
             case D3dCapturePacket::RELEASE:

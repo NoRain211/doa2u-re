@@ -198,6 +198,31 @@ static bool testTicks()
     return passed;
 }
 
+/* Under the frame clock the guest advances one frame per present, so the
+   presenter holds real presents to 60 a second: a display accepting them
+   faster would run the guest fast. */
+static bool testFrameClockPacing()
+{
+    RecompD3dPresenter *presenter = nullptr;
+    if (!expect("create pacing", recomp_d3d_presenter_create(&config, &presenter))) return false;
+    uint32_t swap = 1u;
+    bool passed = expect("pacing first frame", tick(presenter, swap++));
+    recomp_xapi_frame_clock_set_enabled(true);
+    const auto start = std::chrono::steady_clock::now();
+    for (unsigned i = 0u; i < 6u && passed; ++i) passed &= expect("paced tick", tick(presenter, swap++));
+    passed &= expect("paced flush", recomp_d3d_presenter_flush(presenter, true));
+    const auto paced = std::chrono::steady_clock::now() - start;
+    recomp_xapi_frame_clock_set_enabled(false);
+    if (paced < std::chrono::milliseconds(70)) {
+        std::fprintf(stderr, "FAIL six frame-clock presents took %lld us\n",
+            static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(paced).count()));
+        passed = false;
+    }
+    passed &= destroy(presenter);
+    if (passed) std::puts("PASS the frame clock holds presents to 60 Hz");
+    return passed;
+}
+
 static bool testCapturedDraw()
 {
     RecompD3dPresenter *presenter = nullptr;
@@ -4472,7 +4497,8 @@ int main()
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) ||
 #endif
-        !testTicks() || !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
+        !testTicks() || !testFrameClockPacing() ||
+        !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
         !testTextureBurst() || !testPointMinMagFilter() ||
         !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||

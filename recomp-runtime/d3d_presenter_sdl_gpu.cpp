@@ -4471,6 +4471,11 @@ void d3d_backend_set_immediate_present(bool enabled)
     SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
 }
 
+bool d3d_backend_paces_present(RecompD3dPresenter *)
+{
+    return immediate_present;
+}
+
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels)
 {
     if (checkOwner(presenter) != RECOMP_D3D_PRESENTER_OK) return D3D_BACKEND_VISIBILITY_FAILED;

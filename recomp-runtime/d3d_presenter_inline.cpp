@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "d3d_presenter_backend.h"
+#include "d3d_vblank.h"
 
 #include <new>
 #include <thread>
@@ -90,6 +91,8 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
             return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
         }
     }
+    if (command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
+        !d3d_backend_paces_present(active->backend)) recomp_d3d_pace_present();
     try {
         error = d3d_backend_submit(active->backend, command);
     } catch (const std::bad_alloc &) {
