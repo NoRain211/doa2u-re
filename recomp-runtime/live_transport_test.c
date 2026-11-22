@@ -491,10 +491,27 @@ static void check_game_datagrams(void)
     memset(d + 0x32u, 'A', 32u);
     check("a recent player whose wide name runs on is dropped", !recomp_live_game_datagram_ok(d, 0x60u));
     memset(d, 0, sizeof d);
+    /* Type 16: online_send_msg10 sends its record from byte 3, and the
+       record's length at 0x17 counts all of it. */
     d[2] = 16u;
-    d[0x17] = 0x30u;
-    check("a match message passes", recomp_live_game_datagram_ok(d, 3u + 0x30u));
-    check("a match message the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x31u));
+    d[0x17] = 0x19u;
+    check("a match message passes", recomp_live_game_datagram_ok(d, 3u + 0x19u));
+    check("a match message the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x1au));
+    d[0x13] = 5u; d[0x16] = 0x80u; /* subtype 5 with its high flag */
+    d[0x17] = 0x9du; d[0x18] = 0x01u;
+    check("a whole batch record passes", recomp_live_game_datagram_ok(d, 3u + 0x19du));
+    d[0x17] = 0x19u; d[0x18] = 0u;
+    check("a batch record shorter than its subtype's is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x19u));
+    d[0x13] = 2u; d[0x16] = 0u;
+    d[0x17] = 0x1du; d[0x19] = 1u;
+    check("a length with a high half is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x1du));
+    d[0x19] = 0u;
+    check("a settings record passes", recomp_live_game_datagram_ok(d, 3u + 0x1du));
+    d[0x13] = 11u;
+    d[0x17] = 0x18u;
+    check("an unknown subtype's bare header passes", recomp_live_game_datagram_ok(d, 3u + 0x18u));
+    d[0x17] = 0x15u;
+    check("a record shorter than its header is dropped", !recomp_live_game_datagram_ok(d, 3u + 0x15u));
     d[2] = 3u;
     check("more than the game's buffer is dropped", !recomp_live_game_datagram_ok(d, 0x32au));
 }

@@ -1104,6 +1104,22 @@ static bool game_players_ok(const uint8_t *datagram, size_t size, size_t count_a
 static uint16_t game_u16(const uint8_t *at) { return (uint16_t)(at[0] | at[1] << 8); }
 static uint32_t game_u32(const uint8_t *at) { return (uint32_t)game_u16(at) | (uint32_t)game_u16(at + 2u) << 16; }
 
+/* A type-16 record's size by subtype, as online_msg10_record_size (0x294bb0)
+   gives it to the sender. online_receive_msg10 (0x2999f0) never reads the
+   length; it reads the subtype's fields, and 0x294c40 copies 4's and 5's
+   whole, so a shorter record would be filled from the last datagram. */
+static uint32_t game_msg10_record_bytes(uint32_t subtype)
+{
+    switch (subtype) {
+    case 2u: return 0x1du;
+    case 3u: return 0x21u;
+    case 4u: return 0x170u;
+    case 5u: return 0x19du;
+    case 0u: case 1u: case 6u: case 7u: case 8u: case 9u: case 10u: return 0x19u;
+    default: return 0x18u;
+    }
+}
+
 bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
 {
     if (datagram == NULL || size < 3u || size > GAME_RECV_BYTES) return false;
@@ -1161,8 +1177,11 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
         if (handler == 5u) return payload == 0x16u;
         return true; /* requests: their handlers write the reply */
     }
-    case 16u: /* the payload's length at 0x17, the payload */
-        return size >= 0x19u && size == 3u + game_u16(datagram + 0x17u);
+    case 16u: { /* a record from byte 3: its subtype at 0x13, its own length at 0x17 */
+        if (size < 3u + 0x18u) return false;
+        const uint32_t record = game_u32(datagram + 0x17u);
+        return record == size - 3u && record == game_msg10_record_bytes(game_u32(datagram + 0x13u) & 0x7fffffffu);
+    }
     case 19u:
         return size == 0x78u;
     case 20u:
