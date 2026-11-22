@@ -187,13 +187,18 @@ that shortcut.
   confidence, the 2D layer is whitened, and all of it turns red at a cut.
   The presenter worker presents each one when it is due, also between the
   draws of the next real frame, and skips one it would show late; real
-  frames are never delayed. Any other
-  refresh, and macOS and Linux, log `framegen unsupported` and run as before.
-  It is off while the window is hidden or minimized, in an unpaced or
-  fast-forwarded run and under the frame clock (netplay and synctest).
-  Direct3D 11 also leaves it off with `RECOMP_D3D_VRR=1`, which logs
-  `framegen unsupported: VRR is on`: the two are not combined yet. With
-  `RECOMP_PERF_COUNTER=1` it logs a `recomp framegen` line each second.
+  frames are never delayed. A refresh that is not a whole multiple of 60 Hz
+  without VRR, and macOS and Linux, log `framegen unsupported` and run as
+  before. With **VRR: On**, a display that is a whole multiple of 60 Hz keeps
+  those VSYNC slots; any other rate gets k = floor((refresh - 3) / 60) slots
+  (144 Hz and 165 Hz 2, 200 Hz 3, 280 Hz 4), presented with tearing 1 / (60 k)
+  seconds apart on the guest's 1/60 s grid, just below the panel's ceiling so
+  VRR never reaches it. A VRR rate below 120 Hz logs `framegen unsupported`
+  and runs as before. It is off while the window is hidden or minimized, in
+  an unpaced or fast-forwarded run, under the frame clock (netplay and
+  synctest) and under immediate present; with it off, VRR presents the real
+  frames as it does without frame generation. With `RECOMP_PERF_COUNTER=1` it
+  logs a `recomp framegen` line each second.
 - `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on in the
   Vulkan renderer, writes what it gets for each real frame into the folder:
   the picture before gamma, the HUD mask, the gamma ramp, and whether the
