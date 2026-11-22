@@ -54,7 +54,8 @@ The display's refresh rate is read once at startup and sets k:
   below the panel's maximum, so VRR stays in its range.
 - **Anything else** stays off and logs `framegen unsupported` with the
   reason: a refresh below 120 Hz, a rate that is not a whole multiple of
-  60 Hz without VRR, or a VRR rate with no two slots below its maximum.
+  60 Hz without VRR, a VRR rate with no two slots below its maximum, or VRR
+  on Vulkan (`VRR is on`), which presents immediately and has no VSYNC slots.
 
 A window moved to another display keeps the k it started with.
 
@@ -264,8 +265,8 @@ real frames directly.
   frames, which shows as uneven motion rather than as extra delay.
 - **One display.** k is fixed at startup; moving the window to a display
   with another refresh rate needs a restart.
-- **Windows only**, and VRR slots are Direct3D 11 only. VRR is not yet
-  verified on a VRR monitor.
+- **Windows only**, and VRR slots are Direct3D 11 only: on Vulkan, VRR
+  turns frame generation off. VRR is not yet verified on a VRR monitor.
 
 ## Debugging and evaluation
 

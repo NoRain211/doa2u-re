@@ -27,7 +27,24 @@ class BuildTests(unittest.TestCase):
                     patch("build_game.shutil.which", return_value=None), \
                     self.assertRaisesRegex(ValueError, "CMake"):
                 build(iso=Path("disc.iso"))
-            imported.assert_called_once()
+            imported.assert_not_called()
+
+    def test_pipless_build_stops_before_import(self):
+        with patch("build_game.sys.platform", "linux"), patch("build_game.import_disc") as imported, \
+                patch("build_game.ROOT", "Downloads/DOA2U"), patch("build_game.on_steamos", return_value=False), \
+                patch("build_game.shutil.which", return_value="/usr/bin/tool"), \
+                patch.dict("sys.modules", {"capstone": None}), \
+                patch("build_game.importlib.util.find_spec", return_value=None), \
+                self.assertRaisesRegex(ValueError, "has no pip"):
+            build(iso=Path("disc.iso"))
+        imported.assert_not_called()
+
+    def test_steamos_build_stops_before_import_and_names_the_container_script(self):
+        with patch("build_game.sys.platform", "linux"), patch("build_game.import_disc") as imported, \
+                patch("build_game.ROOT", "Downloads/DOA2U"), patch("build_game.on_steamos", return_value=True), \
+                self.assertRaisesRegex(ValueError, "build_steamdeck.sh"):
+            build(iso=Path("disc.iso"))
+        imported.assert_not_called()
 
     def test_failure_excerpt_keeps_an_early_cause_ahead_of_a_long_tail(self):
         # CMake prints "Could not create named generator" first, then its whole help.
