@@ -1144,15 +1144,21 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
         const uint32_t handler = game_u32(datagram + 3u);
         const uint16_t payload = game_u16(datagram + 0x13u);
         if (handler >= GAME_MSG0F_HANDLERS || size != 0x15u + payload) return false;
-        /* Character select. An empty one is a reply before the sender has
-           chosen (0x130d30), which the receiver's id check ignores. */
-        if (handler <= 3u) return payload == 0u || payload == 0x14u;
+        /* Character select: 0x130f90 and 0x130ef0 copy a 0x14-byte record
+           without its length. The empty reply a sender makes before it has
+           chosen (0x130d30) would copy the last datagram's bytes whenever the
+           id it names, which the peer sets, passes their check. The game
+           asks again every second (0x133539) until it has a record. */
+        if (handler <= 3u) return payload == 0x14u;
         /* Match settings: controller settings, 0x42 bytes, then the stage's
            own state, which 0x268320 copies as payload - 0x54 bytes; the
            largest a stage sends is 0x1d (0x268d00). An empty one would make
            that copy 0xffac bytes. */
         if (handler == 4u) return payload >= 0x54u && payload <= 0x54u + 0x1du;
-        if (handler == 5u) return payload == 0u || payload == 0x16u; /* empty: not ready (0xd00b0) */
+        /* Controller settings: 0xcffc0 reads a fixed 0x16 bytes, so the empty
+           not-ready reply (0xd00b0) would apply stale ones. Asked again
+           every second (0xd1874). */
+        if (handler == 5u) return payload == 0x16u;
         return true; /* requests: their handlers write the reply */
     }
     case 16u: /* the payload's length at 0x17, the payload */

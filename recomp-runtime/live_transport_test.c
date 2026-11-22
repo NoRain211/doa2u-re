@@ -442,7 +442,7 @@ static void check_game_datagrams(void)
     d[0x13] = 0x14u;
     check("character select passes", recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
     d[0x13] = 0u;
-    check("an empty character select (not chosen yet) passes", recomp_live_game_datagram_ok(d, 0x15u));
+    check("an empty character select (not chosen yet) is dropped", !recomp_live_game_datagram_ok(d, 0x15u));
     d[0x13] = 0x14u;
     check("a payload the length disagrees with is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
     d[3] = 12u;
@@ -460,7 +460,9 @@ static void check_game_datagrams(void)
     d[0x13] = 0u;
     check("empty match settings are dropped", !recomp_live_game_datagram_ok(d, 0x15u));
     d[3] = 5u;
-    check("an empty settings answer (not ready) passes", recomp_live_game_datagram_ok(d, 0x15u));
+    check("an empty settings answer (not ready) is dropped", !recomp_live_game_datagram_ok(d, 0x15u));
+    d[0x13] = 0x16u;
+    check("a settings answer passes", recomp_live_game_datagram_ok(d, 0x15u + 0x16u));
     d[0x13] = 0x15u;
     check("a settings answer of another size is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
 
