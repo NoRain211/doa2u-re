@@ -1340,7 +1340,7 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     return inserted.first->second;
 }
 
-// ponytail: fixed list; vertex-program shaders and unlisted FVFs still compile on first use.
+// ponytail: unlisted FVFs still compile on first use.
 void precompileDrawShaders(RecompD3dPresenter *presenter)
 {
     const auto start = std::chrono::steady_clock::now();
@@ -1352,6 +1352,7 @@ void precompileDrawShaders(RecompD3dPresenter *presenter)
             boot.depth_bias && presenter->msaa_count > 1u, boot.projected_stages};
         compiled += lookupShaders(presenter, key, boot.output).vertex != nullptr;
     }
+    compiled += precompileProgramShaders(presenter);
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
@@ -4344,6 +4345,9 @@ RecompD3dPresenterError checkOwner(RecompD3dPresenter *presenter)
 }
 
 } // namespace
+
+// The guest vertex programs' boot shaders.
+#include "d3d_boot_programs_sdl_gpu.h"
 
 RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *config, RecompD3dPresenter **presenter)
 {

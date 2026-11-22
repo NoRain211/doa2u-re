@@ -20,6 +20,13 @@ RecompD3dPresenterError d3d_backend_draw_coverage(
 RecompD3dPresenterError d3d_backend_release_memory(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size, bool targets);
 RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
+/* SDL_GPU only: builds the config's vertex program shaders after the fixed
+   list, returning how many compiled. d3d_boot_programs_sdl_gpu.h defines it
+   among the presenter's internals it needs. */
+unsigned precompileProgramShaders(RecompD3dPresenter *presenter);
+/* SDL_GPU only, for tests: waits for the boot precompile and returns the draw
+   shaders it holds. */
+unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
 void d3d_backend_set_immediate_present(bool enabled);
 /* recomp_d3d_presenter_set_quality, from any thread. */
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);

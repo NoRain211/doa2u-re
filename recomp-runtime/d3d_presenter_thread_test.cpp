@@ -1943,6 +1943,101 @@ static bool testProgramMaxSlt()
     return passed;
 }
 
+#ifndef RECOMP_TEST_D3D11
+/* The boot precompile builds each guest vertex program's draw shader, so the
+   program's first draw finds it and compiles nothing; a program the config
+   lacks compiles once. */
+static bool testBootProgramShaders(bool scaled)
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "vpb", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_SCALE", scaled ? "2" : "");
+    _putenv_s("RECOMP_D3D_MSAA", scaled ? "4" : "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "0");
+    // Two instructions writing oPos, encoded as the MAX/SLT program test does.
+    const uint32_t xyzw = 0x1bu;
+    const auto setProgram = [xyzw](uint32_t (*program)[4]) {
+        program[0][1] = (10u << 21) | (1u << 13) | xyzw;
+        program[0][2] = (2u << 26) | (3u << 11) | (xyzw << 17);
+        program[0][3] = (15u << 12) | 2048u;
+        program[1][1] = (11u << 21) | (2u << 9) | (2u << 13) | xyzw;
+        program[1][2] = (2u << 26) | (3u << 11) | (xyzw << 17);
+        program[1][3] = (15u << 12) | (9u << 3) | 2048u | 1u;
+    };
+    auto boot_config = config;
+    boot_config.program_count = 1u;
+    boot_config.programs[0].fvf = 0x012u;
+    boot_config.programs[0].count = 2u;
+    // True: a scaled target draws it with the sample depth bias; scale 1 ignores it.
+    boot_config.programs[0].depth_bias = true;
+    setProgram(boot_config.programs[0].tokens);
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create boot program", d3d_backend_create(&boot_config, &presenter));
+    if (passed) {
+        const unsigned boot = d3d_backend_draw_shader_count(presenter);
+        if (boot == 0u) std::fprintf(stderr, "FAIL boot program built no shaders\n");
+        passed &= boot != 0u;
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff000000u;
+        passed &= expect("boot program clear", d3d_backend_submit(presenter, &clear));
+        const float vertices[4][6] = {{-1, 1, 0.5f, 0, 0, 0}, {1, 1, 0.5f, 0, 0, 0},
+            {-1, -1, 0.5f, 0, 0, 0}, {1, -1, 0.5f, 0, 0, 0}};
+        const uint16_t indices[] = {0, 1, 2, 3};
+        const uint32_t texels[2] = {0xffff0000u, 0xff00ff00u};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.index_count = draw.vertex_count = 4;
+        draw.triangle_count = 2;
+        draw.vertex_stride = sizeof vertices[0];
+        draw.fvf = 0x012u;
+        draw.vertex_bytes = vertices;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15;
+        draw.address_u = draw.address_v = 3;
+        draw.has_texture = true;
+        draw.texture.format_byte = RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8;
+        draw.texture.bits_per_pixel = 32;
+        draw.texture.width = 2;
+        draw.texture.height = 1;
+        draw.texture.mip_levels = 1;
+        draw.texture.data = 0x1000u;
+        draw.texture_bytes = texels;
+        draw.texture_byte_count = sizeof texels;
+        draw.slope_scaled_depth_bias = scaled ? 1.0f / 16 : 0.0f;
+        draw.program_count = 2u;
+        setProgram(draw.program);
+        draw.program_constants[58][0] = draw.program_constants[58][1] = draw.program_constants[58][2] = 1;
+        passed &= expect("boot program draw", d3d_backend_submit(presenter, &command));
+        const unsigned after = d3d_backend_draw_shader_count(presenter);
+        if (after != boot) std::fprintf(stderr, "FAIL boot program draw compiled %u shaders, had %u\n",
+            after, boot);
+        passed &= after == boot;
+        // One output index away, so the tokens hash differently.
+        RecompD3dPresenterCommand other = command;
+        other.data.draw.program[1][3] = (15u << 12) | (10u << 3) | 2048u | 1u;
+        passed &= expect("late program draw", d3d_backend_submit(presenter, &other));
+        const unsigned late = d3d_backend_draw_shader_count(presenter);
+        if (late != boot + 1u) std::fprintf(stderr, "FAIL late program compiled %u shaders, had %u\n",
+            late, boot);
+        passed &= late == boot + 1u;
+        RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        present.data.present = {5, 1};
+        passed &= expect("boot program present", d3d_backend_submit(presenter, &present));
+        passed &= expect("destroy boot program", d3d_backend_destroy(&presenter));
+    }
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_SCALE", "");
+    _putenv_s("RECOMP_D3D_MSAA", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    DeleteFileA(path);
+    if (passed) std::printf("PASS boot vertex program%s compiled before its first draw\n",
+        scaled ? " with scaled MSAA depth bias" : "");
+    return passed;
+}
+#endif
+
 // Vertex-program LIT and SGE over the stage effect's four-UV stream (FVF 0x442):
 // oT0 = lit(v10).zwxx * sge(v11, c3).yyyy, so x = v10.y only when v10.x > 0.
 static bool testProgramLitSge()
@@ -4391,6 +4486,9 @@ int main()
         !testVolume() || !testVolume(true) || !testFrameBufferBlend() || !testDepthBias() || !testDepthBias(true) ||
         !testCard() ||
         !testScaledMsaaDepthBias() || !testProgramMaxSlt() ||
+#ifndef RECOMP_TEST_D3D11
+        !testBootProgramShaders(false) || !testBootProgramShaders(true) ||
+#endif
         !testProgramLitSge() ||
         !testStageBump() ||
         !testStageWater(false) || !testStageWater(true) ||

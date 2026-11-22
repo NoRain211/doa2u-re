@@ -1583,8 +1583,9 @@ bool compileDrawShader(
 }
 
 /* Loads every shader an earlier launch compiled, including vertex-program ones,
-   then compiles the fixed FVF list; anything else still compiles on first use. */
-void precompileDrawShaders(const std::atomic<bool> *stop)
+   then compiles the fixed FVF list and the guest vertex programs; anything else
+   still compiles on first use. */
+void precompileDrawShaders(const std::atomic<bool> *stop, const RecompD3dPresenterConfig *config)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     precompiling = true;
@@ -1597,6 +1598,10 @@ void precompileDrawShaders(const std::atomic<bool> *stop)
         // shortcut: no depth-bias variants, this thread has no presenter to ask for scale and MSAA.
         for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
             if (!boot.output && !boot.depth_bias) keys.push_back({boot.fvf, 0u, nullptr, false, false, false, boot.projected_stages});
+        }
+        for (uint32_t i = 0u; i < config->program_count; ++i) {
+            const RecompD3dBootProgram &program = config->programs[i];
+            keys.push_back({program.fvf, program.count, program.tokens, false, false, false, false});
         }
         for (const RecompD3dDrawShaderKey &key : keys) {
             RecompD3dVertexLayout layout;
@@ -4225,7 +4230,7 @@ RecompD3dPresenterError d3d_backend_create(
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     try {
-        created->precompile = std::thread(precompileDrawShaders, &created->precompile_stop);
+        created->precompile = std::thread(precompileDrawShaders, &created->precompile_stop, &created->config);
     } catch (const std::system_error &) {
         // Shaders then compile on first use, as before.
     }

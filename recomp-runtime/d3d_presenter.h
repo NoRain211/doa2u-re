@@ -22,11 +22,32 @@ typedef enum RecompD3dPresenterDepthFormat {
     RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8,
 } RecompD3dPresenterDepthFormat;
 
+/* The device's vertex program limit. */
+#define RECOMP_D3D_BOOT_PROGRAM_TOKENS 136u
+/* The programs the D3D8 device creates: excluded from the boot list when a
+   run finds more. */
+#define RECOMP_D3D_BOOT_PROGRAMS 6u
+
+/* One guest vertex program a presenter can build before its first draw: the
+   D3D8 adapter copies it out of the executable at device creation. */
+typedef struct RecompD3dBootProgram {
+    /* The FVF the adapter derives from the program's declaration. */
+    uint32_t fvf;
+    /* NV2A instructions the block holds. */
+    uint32_t count;
+    /* The program's draws use the scaled receiver depth bias on a scaled target. */
+    bool depth_bias;
+    uint32_t tokens[RECOMP_D3D_BOOT_PROGRAM_TOKENS][4];
+} RecompD3dBootProgram;
+
 typedef struct RecompD3dPresenterConfig {
     uint32_t width;
     uint32_t height;
     RecompD3dPresenterColorFormat color_format;
     RecompD3dPresenterDepthFormat depth_format;
+    /* Vertex programs whose draw shaders the boot precompile builds. */
+    uint32_t program_count;
+    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS];
 } RecompD3dPresenterConfig;
 
 typedef enum RecompD3dPresenterCommandType {
