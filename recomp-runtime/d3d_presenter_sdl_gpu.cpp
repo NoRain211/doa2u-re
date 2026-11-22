@@ -3847,6 +3847,9 @@ void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t
    retries every 0.5 ms. */
 bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
 {
+    // The real frame's open commands go first: a submit can move textures, and
+    // this slot's work must be recorded after any move it does.
+    submitCommands(presenter);
     SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(presenter->device);
     if (commands == nullptr) return false;
     const bool real = slot + 1u == presenter->fg_k;
@@ -3860,7 +3863,6 @@ bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
             : framegenGenerate(presenter, commands, static_cast<float>(slot + 1u) / presenter->fg_k);
         showPicture(presenter, commands, applyGamma(presenter, commands, picture), presenter->fg_aspect,
             swapchain, swap_width, swap_height);
-        submitCommands(presenter);
         SDL_SubmitGPUCommandBuffer(commands);
     } else {
         SDL_CancelGPUCommandBuffer(commands);
