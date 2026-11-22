@@ -325,7 +325,8 @@ int main(void)
     expect("choice counts", recomp_pc_settings_choices(RECOMP_PC_MSAA) == 6u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
+        !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
     recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
@@ -468,8 +469,8 @@ int main(void)
     expect("leave online help", rd16(help_text + 26u) == 'w'); /* "Takes effect when you leave ..." */
     recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, false);
     hook(0x0011cfc0u, none, 2u); /* view 3: Life Bar to KO Replay */
-    hook(0x00091560u, row3_help, 3u);
-    expect("combo hud live", rd16(help_text + 26u) == 'i'); /* row 3 is Combo HUD, live */
+    hook(0x00091560u, row2_help, 3u);
+    expect("fight hud live", rd16(help_text + 26u) == 'i'); /* row 2 is Fight HUD, live */
     hook(0x0011cfc0u, none, 2u); /* wraps to view 1 */
     confirm_pressed = 0u;
     hook(0x00091560u, row3_help, 3u);

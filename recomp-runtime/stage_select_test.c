@@ -20,6 +20,8 @@ static uint8_t kernel_page[0x40];                  /* reserved page +0xc00 */
 static uint8_t stage_groups[8];                    /* at 0x693370 */
 static uint8_t time_attack_pool[0x16];             /* at 0x692ba4 */
 static uint8_t rotation_index;                     /* at 0x8783b5 */
+static uint32_t selected_mode;                     /* at 0xdf57b4 */
+static uint8_t online_select_flag;                 /* at 0xf252a4 */
 
 /* The ids one stage group (0x693370) holds; Up steps through them in order. */
 static const uint8_t MIYAMA_IDS[4] = {18u, 64u, 63u, 65u};
@@ -43,6 +45,8 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= 0x692ba4u && address + width <= 0x692ba4u + sizeof time_attack_pool)
         return &time_attack_pool[address - 0x692ba4u];
     if (address == 0x8783b5u && width == 1u) return &rotation_index;
+    if (address == 0xdf57b4u && width == 4u) return (uint8_t *)&selected_mode;
+    if (address == 0xf252a4u && width == 1u) return &online_select_flag;
     abort();
 }
 uint32_t *recomp_memory_u32_checked(uint32_t address)
@@ -121,6 +125,18 @@ static int test_stage_select(void)
         failed = "short list";
     stage_tag_match = 1u;
     if (failed == NULL && call_cdecl(0x001354a0u, 2u, 0u) != 6u) failed = "tag list";
+    selected_mode = 0x12u; /* the online scenes, without a session */
+    if (failed == NULL && call_cdecl(0x001354a0u, 2u, 0u) != 6u) failed = "tag list without a session";
+    online_select_flag = 1u; /* Live Tag, and Team Battle passes list 1 untagged */
+    if (failed == NULL && (call_cdecl(0x001354a0u, 1u, 0u) != 7u || stage_rows[4] != 20u ||
+        stage_rows[5] != 0x16u || stage_rows[6] != 0x15u || call_cdecl(0x00135510u, 5u, 0u) != 18u))
+        failed = "online tag list";
+    stage_tag_match = 0u;
+    modes[0] = 0u; modes[1] = 3u; /* list 0 stays unchanged online */
+    if (failed == NULL && (call_cdecl(0x001354a0u, 0u, 0u) != 4u || stage_rows[3] != 0x15u))
+        failed = "online list 0";
+    selected_mode = 0u;
+    online_select_flag = 0u;
     stage_tag_match = 0u;
     if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
     return failed == NULL;

@@ -44,27 +44,27 @@ Build (once, about 15 to 25 minutes):
 3. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
 
-Or build from the launcher: ./launcher.sh opens on BUILD GAME while the game
-is not built. This ZIP ships a prebuilt launcher, so it needs nothing
-installed. Choose your Disc 2 ISO with DISC ISO, or drop it on the window,
+Or build from the launcher: ./launcher.sh opens on its GAME page.
+This ZIP ships a prebuilt launcher, so it needs nothing
+installed. Choose your Disc 2 ISO with DISC 2 ISO, or drop it on the window,
 then choose BUILD. It shows the elapsed time and the latest line, keeps the
 full output in private/build.log, and asks twice before it stops a build.
 
 Steam Deck: SteamOS has no compiler, so the build runs in an Ubuntu 24.04
 distrobox that shares your home folder, then you play on SteamOS itself.
 Extract this ZIP under your home folder and, in Desktop Mode, either run
-./launcher.sh and use BUILD GAME, or run in Konsole:
+./launcher.sh and use BUILD on its GAME page, or run in Konsole:
 
       ./build_steamdeck.sh "/path/to/disc2.iso"
 
 To play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
-Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
-on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the intro skip on
-MOVIES and the unlocks and free camera on GAMEPLAY, then choose START GAME.
-A controller, the mouse or touch work; on the
-keyboard, arrows move, Enter selects and Esc goes back. It saves the choices
+Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA, widescreen
+and the intro skip on VIDEO, stereo or 5.1 on AUDIO and the unlocks and free
+camera on GAMEPLAY, then choose START GAME on the GAME page.
+A controller, the mouse or touch work; on the keyboard, arrows move and
+change values, Q and E switch pages, Enter selects and Esc goes back. It saves the choices
 and starts the game.
 ./run_game.sh plays again with the saved choices. The
 first launch copies about 700 MB of the game's disc archives into its

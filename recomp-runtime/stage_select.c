@@ -12,7 +12,8 @@
    at 0xdf5f26, short of the next data the game uses (0xdf5f30). Rows are
    read only through 0x135410, 0x135510 and 0x135580, and a row's confirm runs
    through 0x1357f0. These replace all five to add Tengu's boss stage (id 18,
-   the Miyama his story fights use) before Random in the regular list. Other
+   the Miyama his story fights use) before Random in the regular list, and in
+   the tag list online, which Live Tag and Team Battle (game mode 8) read. Other
    data follows the table, so its entry lives in the reserved kernel page.
    Labels 61, 14 and 36 are the game's unused Miyama name and thumbnails.
 
@@ -31,6 +32,9 @@ enum {
     STAGE_CONFIRMING = 0x00df57ceu, /* u16, set once a row is confirmed */
     STAGE_PAD_PRESSED = 0x0087d268u, /* per pad: pressed edges, 0x30 apart */
     STAGE_TAG_MATCH = 0x0087d49du,
+    FRONTEND_SELECTED_MODE = 0x00df57b4u, /* u32, 0x12 for the online scenes */
+    FRONTEND_ONLINE_MODE = 0x12u,
+    ONLINE_SELECT_FLAG = 0x00f252a4u,
     STAGE_PAD_STRIDE = 0x30u,
     STAGE_PAD_UP = 0x00000001u,
     STAGE_PAD_STICK_UP = 0x00010000u,
@@ -91,7 +95,10 @@ static void stage_select_build_rows(void)
     uint8_t *rows = recomp_memory(STAGE_ROWS, count + 2u);
     uint8_t row = 0u;
     for (; row < count; ++row) rows[row] = (uint8_t)(first + row);
-    if (list == STAGE_REGULAR_LIST) {
+    /* frontend_online_select_enabled (0xcfa20); offline modes also set game mode 5 */
+    const bool online = *recomp_memory_u32(FRONTEND_SELECTED_MODE) == FRONTEND_ONLINE_MODE &&
+        guest_byte(ONLINE_SELECT_FLAG) != 0u;
+    if (list == STAGE_REGULAR_LIST || (list == STAGE_TAG_LIST && online)) {
         uint8_t *miyama = recomp_memory(MIYAMA_ENTRY_ADDRESS, STAGE_ENTRY_SIZE);
         const uint8_t selected = miyama[1];
         memcpy(miyama, recomp_memory(STAGE_ENTRIES, STAGE_ENTRY_SIZE), STAGE_ENTRY_SIZE);
