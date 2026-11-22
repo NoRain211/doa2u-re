@@ -29,8 +29,8 @@ unsigned precompileProgramShaders(RecompD3dPresenter *presenter);
 unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
 void d3d_backend_set_immediate_present(bool enabled);
 /* True when the presenter must not pace PRESENT: the backend paces it itself
-   (Direct3D 11 on a VRR display keeps the game's 60 Hz grid) or presents each
-   frame at once, as immediate present asks. */
+   (Direct3D 11 on a VRR display, or holding each frame 2 or 4 refreshes) or
+   presents each frame at once, as immediate present asks. */
 bool d3d_backend_paces_present(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa);

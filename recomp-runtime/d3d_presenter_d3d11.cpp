@@ -4788,7 +4788,9 @@ void d3d_backend_set_immediate_present(bool enabled)
 
 bool d3d_backend_paces_present(RecompD3dPresenter *presenter)
 {
-    return presenter->vrr || immediatePresent(presenter);
+    /* VRR waits for the game's 60 Hz grid, and interval 2 or 4 holds each frame
+       refresh / 60, so a second pacing on top would drop frames. */
+    return presenter->vrr || presenter->sync_interval != 1u || immediatePresent(presenter);
 }
 
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
