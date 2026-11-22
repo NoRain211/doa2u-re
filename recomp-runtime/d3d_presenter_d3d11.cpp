@@ -649,10 +649,6 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     }
     recomp_overlay_d3d11_shutdown();
     framegenRelease(presenter);
-    if (presenter->fg_timer_raised) {
-        timeEndPeriod(1u);
-        presenter->fg_timer_raised = false;
-    }
     releaseCom(presenter->present_target_view);
     releaseCom(presenter->vrr_target_view);
     releaseCom(presenter->vrr_source);
@@ -745,6 +741,11 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
 void releasePresenter(RecompD3dPresenter *presenter, bool keep_device = false)
 {
     releaseGraphics(presenter, keep_device);
+    // Not in releaseGraphics: a failed hardware create retries on the same timer.
+    if (presenter->fg_timer_raised) {
+        timeEndPeriod(1u);
+        presenter->fg_timer_raised = false;
+    }
     if (presenter->present_log != nullptr) {
         std::fclose(presenter->present_log);
         presenter->present_log = nullptr;
