@@ -98,7 +98,7 @@ static void stage_select_build_rows(void)
     /* frontend_online_select_enabled (0xcfa20); offline modes also set game mode 5 */
     const bool online = *recomp_memory_u32(FRONTEND_SELECTED_MODE) == FRONTEND_ONLINE_MODE &&
         guest_byte(ONLINE_SELECT_FLAG) != 0u;
-    if (list == STAGE_REGULAR_LIST || online) {
+    if (list == STAGE_REGULAR_LIST || (list == STAGE_TAG_LIST && online)) {
         uint8_t *miyama = recomp_memory(MIYAMA_ENTRY_ADDRESS, STAGE_ENTRY_SIZE);
         const uint8_t selected = miyama[1];
         memcpy(miyama, recomp_memory(STAGE_ENTRIES, STAGE_ENTRY_SIZE), STAGE_ENTRY_SIZE);

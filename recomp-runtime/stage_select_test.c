@@ -131,6 +131,10 @@ static int test_stage_select(void)
     if (failed == NULL && (call_cdecl(0x001354a0u, 1u, 0u) != 7u || stage_rows[4] != 20u ||
         stage_rows[5] != 0x16u || stage_rows[6] != 0x15u || call_cdecl(0x00135510u, 5u, 0u) != 18u))
         failed = "online tag list";
+    stage_tag_match = 0u;
+    modes[0] = 0u; modes[1] = 3u; /* list 0 stays unchanged online */
+    if (failed == NULL && (call_cdecl(0x001354a0u, 0u, 0u) != 4u || stage_rows[3] != 0x15u))
+        failed = "online list 0";
     selected_mode = 0u;
     online_select_flag = 0u;
     stage_tag_match = 0u;
