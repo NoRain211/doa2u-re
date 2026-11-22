@@ -6,7 +6,7 @@ the game's own frames, so motion looks smoother at 120 Hz or more. It is
 experimental and off by default.
 
 It costs input delay: each of the game's frames reaches the screen about 8 to
-12 ms later than without it. See [Latency](#latency) before you turn it on
+14 ms later than without it (8.3 ms at 120 Hz, 13.9 ms at 360 Hz). See [Latency](#latency) before you turn it on
 for a fighting game.
 
 In this page a *real frame* is a frame the game drew, a *generated frame* is
@@ -227,6 +227,8 @@ generation.
 | 120 Hz, or 144 Hz and 165 Hz with VRR | 2 | about 8.3 ms |
 | 180 Hz, or 200 Hz with VRR | 3 | about 11.1 ms |
 | 240 Hz, or 280 Hz with VRR | 4 | about 12.5 ms |
+| 300 Hz | 5 | about 13.3 ms |
+| 360 Hz | 6 | about 13.9 ms |
 
 The delay grows toward one game frame (16.7 ms) as k grows. On top of it
 comes the GPU time of the flow and warp passes, and with VRR a late slot

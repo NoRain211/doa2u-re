@@ -57,10 +57,10 @@ keeps running.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
   60 fps, including heavy rain-stage fights at 4K. On Windows, **VRR: On** is
   for G-SYNC or FreeSync displays and tears on fixed-refresh ones; it is not
-  yet verified on a VRR monitor. **Frame rate: Display** fills a 120 or
-  240 Hz screen with generated frames, and other rates with VRR. It is experimental
-  and off by default, because it adds about 8 to 12 ms of input delay, which
-  matters in a fighting game; online play turns it off. See
+  yet verified on a VRR monitor. **Frame rate: Display** fills a 120, 180,
+  240 or 360 Hz screen with generated frames, and other rates with VRR. It is
+  experimental and off by default, because it adds about 8 to 14 ms of input
+  delay, which matters in a fighting game; online play turns it off. See
   [frame generation](docs/frame-generation.md).
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
