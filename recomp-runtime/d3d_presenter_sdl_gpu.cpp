@@ -3810,7 +3810,9 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     SDL_GPUFence *fence = presenter->command_buffer != nullptr
         ? SDL_SubmitGPUCommandBufferAndAcquireFence(presenter->command_buffer) : nullptr;
     presenter->command_buffer = nullptr;
-    if (presenter->present_fences[0] != nullptr) SDL_ReleaseGPUFence(presenter->device, presenter->present_fences[0]);
+    // SDL's Vulkan backend reuses an unshown frame's freed fence, done or not; on a lost device, leak it instead.
+    SDL_GPUFence *&done = presenter->present_fences[0];
+    if (done && SDL_WaitForGPUFences(presenter->device, true, &done, 1u)) SDL_ReleaseGPUFence(presenter->device, done);
     presenter->present_fences[0] = presenter->present_fences[1];
     presenter->present_fences[1] = fence;
     ++presenter->present_count;
