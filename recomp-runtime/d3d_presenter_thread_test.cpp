@@ -1946,7 +1946,8 @@ static bool testProgramMaxSlt()
 #ifndef RECOMP_TEST_D3D11
 /* The boot precompile builds each guest vertex program's draw shader, so the
    program's first draw finds it and compiles nothing; a program the config
-   lacks compiles once. */
+   lacks, or holds past RECOMP_D3D_BOOT_PROGRAMS, compiles once. The presenter
+   keeps its own copy of the programs. */
 static bool testBootProgramShaders(bool scaled)
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -1965,15 +1966,21 @@ static bool testBootProgramShaders(bool scaled)
         program[1][2] = (2u << 26) | (3u << 11) | (xyzw << 17);
         program[1][3] = (15u << 12) | (9u << 3) | 2048u | 1u;
     };
-    auto boot_config = config;
-    boot_config.program_count = 1u;
-    boot_config.programs[0].fvf = 0x012u;
-    boot_config.programs[0].count = 2u;
+    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS + 1u] = {};
+    programs[0].fvf = 0x012u;
+    programs[0].count = 2u;
     // True: a scaled target draws it with the sample depth bias; scale 1 ignores it.
-    boot_config.programs[0].depth_bias = true;
-    setProgram(boot_config.programs[0].tokens);
+    programs[0].depth_bias = true;
+    setProgram(programs[0].tokens);
+    for (RecompD3dBootProgram &program : programs) program = programs[0];
+    // The late program below, one past the limit: the presenter must not build it.
+    programs[RECOMP_D3D_BOOT_PROGRAMS].tokens[1][3] = (15u << 12) | (10u << 3) | 2048u | 1u;
+    auto boot_config = config;
+    boot_config.programs = programs;
+    boot_config.program_count = RECOMP_D3D_BOOT_PROGRAMS + 1u;
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create boot program", d3d_backend_create(&boot_config, &presenter));
+    std::memset(programs, 0, sizeof programs);
     if (passed) {
         const unsigned boot = d3d_backend_draw_shader_count(presenter);
         if (boot == 0u) std::fprintf(stderr, "FAIL boot program built no shaders\n");

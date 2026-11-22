@@ -245,7 +245,9 @@ struct DepthTargetEntry {
 } // namespace
 
 struct RecompD3dPresenter {
-    RecompD3dPresenterConfig config{};
+    RecompD3dPresenterConfig config{};  // its programs point at the copies below
+    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS] = {};
+    uint32_t program_count = 0u;
     DWORD owner_thread = 0;
     HINSTANCE instance = nullptr;
     bool owns_window_class = false;
@@ -4177,6 +4179,11 @@ RecompD3dPresenterError d3d_backend_create(
         return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
     }
     created->config = *config;
+    // The caller's programs need not outlive this call; keep at most the limit.
+    created->program_count = config->programs ? (std::min)(config->program_count, RECOMP_D3D_BOOT_PROGRAMS) : 0u;
+    std::copy_n(config->programs, created->program_count, created->programs);
+    created->config.programs = created->programs;
+    created->config.program_count = created->program_count;
     unsigned aspect_w = 16u, aspect_h = 9u;
     created->widescreen = recomp_widescreen(&aspect_w, &aspect_h);
     created->aspect_w = aspect_w;
