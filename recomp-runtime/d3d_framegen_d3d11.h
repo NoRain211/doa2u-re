@@ -209,12 +209,12 @@ bool fgCompilePixelShader(RecompD3dPresenter *presenter, const std::string &sour
     return SUCCEEDED(result) && *shader != nullptr;
 }
 
-/* One fullscreen pass into target, reading inputs in slot order. uniforms is
+/* One fullscreen pass into target, reading inputs in slot order. Every input
+   slot gets the same sampler, as SDL_GPU binds one per input there; uniforms is
    written to the flow constant buffer when given. */
 void fgPass(RecompD3dPresenter *presenter, ID3D11PixelShader *shader, FramegenTexture &target,
     UINT width, UINT height, ID3D11ShaderResourceView *const *views, UINT view_count,
-    ID3D11SamplerState *const *samplers, UINT sampler_count,
-    const recomp_framegen::FlowUniforms *uniforms)
+    ID3D11SamplerState *sampler, const recomp_framegen::FlowUniforms *uniforms)
 {
     auto *context = presenter->context;
     if (uniforms != nullptr) {
@@ -239,7 +239,9 @@ void fgPass(RecompD3dPresenter *presenter, ID3D11PixelShader *shader, FramegenTe
     ID3D11Buffer *constant = presenter->fg_flow_buffer;
     context->PSSetConstantBuffers(0u, 1u, &constant);
     context->PSSetShaderResources(0u, view_count, views);
-    context->PSSetSamplers(0u, sampler_count, samplers);
+    ID3D11SamplerState *samplers[8]{};
+    for (UINT slot = 0u; slot < view_count && slot < 8u; ++slot) samplers[slot] = sampler;
+    context->PSSetSamplers(0u, view_count, samplers);
     context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
     context->OMSetDepthStencilState(presenter->fg_cover_depth, 0u);
     context->Draw(3u, 0u);
@@ -267,7 +269,7 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
         ID3D11ShaderResourceView *const picture = frames[frame]->view;
         fgPass(presenter, pipelines[recomp_framegen::kFlowLuma], presenter->fg_luma[frame][0],
             mainWidth(presenter) / static_cast<UINT>(scale), mainHeight(presenter) / static_cast<UINT>(scale),
-            &picture, 1u, &point, 1u, &uniforms);
+            &picture, 1u, point, &uniforms);
         for (unsigned level = 1u; level < recomp_framegen::kFlowLevels; ++level) {
             uint32_t size[2];
             fgFlowLevelSize(presenter, level, size);
@@ -276,7 +278,7 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
             down.weights[0] = 1.0f;
             ID3D11ShaderResourceView *const below = presenter->fg_luma[frame][level - 1u].view;
             fgPass(presenter, pipelines[recomp_framegen::kFlowLuma], presenter->fg_luma[frame][level],
-                size[0], size[1], &below, 1u, &point, 1u, &down);
+                size[0], size[1], &below, 1u, point, &down);
         }
     }
     for (unsigned level = recomp_framegen::kFlowLevels; level-- > 0u;) {
@@ -293,12 +295,12 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
             if (level + 1u == recomp_framegen::kFlowLevels) {
                 fgPass(presenter, pipelines[recomp_framegen::kFlowCoarse],
                     presenter->fg_search[direction][level], field[0], field[1],
-                    inputs, 2u, &point, 1u, &uniforms);
+                    inputs, 2u, point, &uniforms);
             } else {
                 inputs[2] = presenter->fg_search[direction][level + 1u].view;
                 fgPass(presenter, pipelines[recomp_framegen::kFlowSearch],
                     presenter->fg_search[direction][level], field[0], field[1],
-                    inputs, 3u, &point, 1u, &uniforms);
+                    inputs, 3u, point, &uniforms);
             }
         }
     }
@@ -311,7 +313,7 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
         ID3D11ShaderResourceView *inputs[3] = {presenter->fg_search[direction][0].view,
             presenter->fg_search[1u - direction][0].view, framegenCoverOf(presenter, direction).view};
         fgPass(presenter, pipelines[recomp_framegen::kFlowConfidence], presenter->fg_flow[direction],
-            field[0], field[1], inputs, 3u, &point_sampler, 1u, &uniforms);
+            field[0], field[1], inputs, 3u, point_sampler, &uniforms);
     }
     // Cut detection, then the cut flag: the pair before it (earlier) keeps its own.
     uint32_t coarsest[2], blocks[2];
@@ -326,7 +328,7 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
             {static_cast<int32_t>(coarsest[0]), static_cast<int32_t>(coarsest[1]), 0, 0},
             {0.0f, 64.0f * fgFlowScale(presenter), 1.0f / mainWidth(presenter), 1.0f / mainHeight(presenter)}};
         fgPass(presenter, pipelines[recomp_framegen::kFlowCutBlocks], presenter->fg_cut_blocks,
-            blocks[0], blocks[1], inputs, 4u, &point_sampler, 1u, &cut_uniforms);
+            blocks[0], blocks[1], inputs, 4u, point_sampler, &cut_uniforms);
     }
     std::swap(presenter->fg_cut[0], presenter->fg_cut[1]);
     {
@@ -334,7 +336,7 @@ void framegenFlow(RecompD3dPresenter *presenter, bool both_frames)
         const recomp_framegen::FlowUniforms cut_uniforms{
             {static_cast<int32_t>(blocks[0]), static_cast<int32_t>(blocks[1]), 0, 0}, {}};
         fgPass(presenter, pipelines[recomp_framegen::kFlowCut], presenter->fg_cut[0],
-            1u, 1u, inputs, 2u, &point_sampler, 1u, &cut_uniforms);
+            1u, 1u, inputs, 2u, point_sampler, &cut_uniforms);
     }
 }
 
@@ -353,7 +355,7 @@ void framegenGenerate(RecompD3dPresenter *p, float t)
         const recomp_framegen::FlowUniforms uniforms{{static_cast<int32_t>(field[0]), static_cast<int32_t>(field[1]), 0, 0},
             {8.0f * scale, 16.0f * scale, 1.0f / mainWidth(p), 1.0f / mainHeight(p)}};
         fgPass(p, pipelines[recomp_framegen::kFlowView], p->fg_out,
-            mainWidth(p), mainHeight(p), inputs, 3u, &point, 1u, &uniforms);
+            mainWidth(p), mainHeight(p), inputs, 3u, point, &uniforms);
         return;
     }
     if (pipelines[recomp_framegen::kFlowWarp] != nullptr && p->fg_motion.texture != nullptr) {
@@ -368,14 +370,14 @@ void framegenGenerate(RecompD3dPresenter *p, float t)
             const recomp_framegen::FlowUniforms uniforms{{static_cast<int32_t>(field[0]), static_cast<int32_t>(field[1]), 0, 0},
                 {t, scale, 1.0f / size[0], 1.0f / size[1]}};
             fgPass(p, pipelines[recomp_framegen::kFlowSelect], p->fg_motion,
-                size[0], size[1], inputs, 4u, &linear, 1u, &uniforms);
+                size[0], size[1], inputs, 4u, linear, &uniforms);
         }
         ID3D11ShaderResourceView *inputs[6] = {p->fg_prev.view, p->fg_cur.view, p->fg_motion.view,
             framegenCoverOf(p, 0u).view, framegenCoverOf(p, 1u).view, p->fg_cut[0].view};
         const recomp_framegen::FlowUniforms uniforms{{static_cast<int32_t>(size[0]), static_cast<int32_t>(size[1]), 0, 0},
             {t, scale, 1.0f / mainWidth(p), 1.0f / mainHeight(p)}};
         fgPass(p, pipelines[recomp_framegen::kFlowWarp], p->fg_out,
-            mainWidth(p), mainHeight(p), inputs, 6u, &linear, 1u, &uniforms);
+            mainWidth(p), mainHeight(p), inputs, 6u, linear, &uniforms);
         return;
     }
     if (p->fg_blend_pixel_shader == nullptr) {
@@ -842,10 +844,12 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
     context->ClearState();
     ID3D11Resource *output = nullptr;
     presenter->vrr_source->GetResource(&output);
+    /* The output keeps a mip chain for the window blit, and CopyResource
+       refuses that against a single-level picture: copy level 0 only. */
     if (presenter->gamma_enabled) {
         fgGamma(presenter, picture.view, presenter->vrr_target_view);
     } else if (output != nullptr) {
-        context->CopyResource(output, picture.texture);
+        context->CopySubresourceRegion(output, 0u, 0u, 0u, 0u, picture.texture, 0u, nullptr);
     }
     ID3D11Texture2D *frame = nullptr;
     if (output != nullptr) output->QueryInterface(IID_PPV_ARGS(&frame));
@@ -865,7 +869,8 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
         ID3D11Resource *shown = nullptr;
         presenter->vrr_source->GetResource(&shown);
         context->ClearState();
-        if (back_buffer != nullptr && shown != nullptr) context->CopyResource(back_buffer, shown);
+        if (back_buffer != nullptr && shown != nullptr)
+            context->CopySubresourceRegion(back_buffer, 0u, 0u, 0u, 0u, shown, 0u, nullptr);
         releaseCom(shown);
         releaseCom(back_buffer);
     }
