@@ -39,13 +39,13 @@ static bool writeBmp(const std::string &path, const std::vector<uint32_t> &pixel
     std::memcpy(header + 34, &image, 4);
     FILE *file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) return false;
-    std::fwrite(header, 1, sizeof header, file);
+    bool written = std::fwrite(header, 1, sizeof header, file) == sizeof header;
     std::vector<uint8_t> row(padded, 0u);
-    for (uint32_t y = height; y-- > 0u;) {
+    for (uint32_t y = height; y-- > 0u && written;) {
         for (uint32_t x = 0u; x < width; ++x) std::memcpy(&row[x * 3u], &pixels[static_cast<size_t>(y) * width + x], 3u);
-        std::fwrite(row.data(), 1, padded, file);
+        written = std::fwrite(row.data(), 1, padded, file) == padded;
     }
-    return std::fclose(file) == 0;
+    return std::fclose(file) == 0 && written;
 }
 
 int main(int argc, char **argv)
