@@ -419,7 +419,7 @@ struct RecompD3dPresenter {
     unsigned fg_k = 0u;
     bool fg_timed = false;         // slots at their own time with tearing (VRR)
     long long fg_refresh_ns = 0;   // one refresh: the closest two timed presents may be
-    long long fg_last_present_ns = 0; // steady time of the last timed present, 0 before one
+    long long fg_last_present_ns = 0; // steady time the last timed Present began, 0 before one
     unsigned fg_ready_slot = ~0u;  // the slot whose in-between is made in fg_out
     bool fg_flow_view = false;     // RECOMP_D3D_FRAMEGEN=flow
     bool fg_history = false;       // fg_prev and fg_cur hold real frames

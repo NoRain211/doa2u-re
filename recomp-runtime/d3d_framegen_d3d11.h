@@ -917,6 +917,8 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
         presenter->context->Flush();
         recomp_d3d_sleep_until(at_ns);
     }
+    // The one-refresh guard measures present start to present start.
+    const int64_t present_ns = fgSteadyNs();
     const HRESULT result = presenter->fg_timed
         ? presenter->swap_chain->Present(0u, DXGI_PRESENT_ALLOW_TEARING | DXGI_PRESENT_DO_NOT_WAIT)
         : presenter->swap_chain->Present(1u, DXGI_PRESENT_DO_NOT_WAIT);
@@ -926,6 +928,7 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
             static_cast<unsigned long>(result));
         return -1;
     }
+    if (presenter->fg_timed) presenter->fg_last_present_ns = present_ns;
     return 1;
 }
 
@@ -1012,7 +1015,6 @@ bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
         presenter->fg_k = 0u;
         return false;
     }
-    if (presenter->fg_timed && shown > 0) presenter->fg_last_present_ns = fgSteadyNs();
     return shown > 0;
 }
 
