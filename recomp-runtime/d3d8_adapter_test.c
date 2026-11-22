@@ -110,17 +110,18 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     if (wait && flush_resolves_visibility) visibility_complete = true;
     return RECOMP_D3D_PRESENTER_OK;
 }
+static RecompD3dPresenterError memory_error = RECOMP_D3D_PRESENTER_OK;
 RecompD3dPresenterError recomp_d3d_presenter_release_memory(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size)
 {
     (void)presenter; (void)base; (void)size;
-    return RECOMP_D3D_PRESENTER_OK;
+    return memory_error;
 }
 RecompD3dPresenterError recomp_d3d_presenter_invalidate_textures(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size)
 {
     (void)presenter; (void)base; (void)size;
-    return RECOMP_D3D_PRESENTER_OK;
+    return memory_error;
 }
 void recomp_d3d_wait_vblank(void) { ++wait_vblank_count; }
 void recomp_d3d_note_block(uint32_t return_address) { (void)return_address; }
@@ -589,6 +590,37 @@ static int boot_program_tests(void)
     passed &= expect("a block without its end bit is skipped",
         created_config.program_count == programs - 1u && created_config.programs[0].count == 26u);
     reset_fixture();
+    return passed;
+}
+
+// A window closed while the guest releases or rewrites texture memory is a normal exit.
+static int closed_window_tests(void)
+{
+    static void (*const calls[2])(uint32_t, uint32_t) = {recomp_d3d8_release_memory, recomp_d3d8_invalidate_textures};
+    int passed = 1;
+    memory_error = RECOMP_D3D_PRESENTER_CLOSED;
+    for (unsigned i = 0u; i < 2u; ++i) {
+        stop_armed = true;
+        if (setjmp(stop_environment) == 0) {
+            calls[i](0x1000u, 0x100u);
+            passed &= expect("a closed window stops the run", false);
+        } else {
+            passed &= expect("a closed window exits normally",
+                stop_code == 0 && strcmp(stop_reason, "host-window-closed") == 0);
+        }
+        stop_armed = false;
+    }
+    memory_error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    stop_armed = true;
+    if (setjmp(stop_environment) == 0) {
+        recomp_d3d8_invalidate_textures(0x1000u, 0x100u);
+        passed &= expect("a failed invalidation stops the run", false);
+    } else {
+        passed &= expect("a failed invalidation still fails loud", stop_code == 2 &&
+            strncmp(stop_reason, "d3d8:invalidate-textures:", strlen("d3d8:invalidate-textures:")) == 0);
+    }
+    stop_armed = false;
+    memory_error = RECOMP_D3D_PRESENTER_OK;
     return passed;
 }
 
@@ -1266,6 +1298,7 @@ int main(void)
     const uint32_t partial[5] = {COLOR_HEADER, RECT_SOURCE, 1u, SNAPSHOT, 0u};
     passed &= call(0x344aa0u, partial, 5u, "d3d8:copy-rects-unbound");
     passed &= coverage_tests();
+    passed &= closed_window_tests();
     passed &= fit_tests();
     recomp_d3d8_shutdown();
     passed &= expect("shutdown destroys presenter once", destroy_count == 1u);

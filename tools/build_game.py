@@ -2,6 +2,7 @@
 """Lift the privately selected game executable and build its native runner."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -267,6 +268,13 @@ def import_disc(iso, extractor=None):
     select_xbe(extracted_disc(imported))
 
 
+def on_steamos():
+    try:
+        return "ID=steamos" in Path("/etc/os-release").read_text().splitlines()
+    except OSError:
+        return False
+
+
 def build(build_only=False, lift_only=False, iso=None, disassemble=False, extractor=None):
     windows = sys.platform == "win32"
     if windows and (ROOT / "tools/cmake/bin").is_dir():  # the Windows release ZIP carries CMake
@@ -276,8 +284,12 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
             and set(str(ROOT)) & set("()&;|<>`$'\"\\*?[]!#~{}\n")):
         raise ValueError(f"Rename or move {ROOT} to a folder without ( ) or other shell symbols"
                          " in its path, such as DOA2U-0.1.8-Alpha, and run the build again")
+    # SteamOS has no compiler or pip; inside build_steamdeck.sh's container os-release names Ubuntu.
+    if iso is not None and sys.platform.startswith("linux") and on_steamos():
+        raise ValueError("SteamOS cannot build the game itself. Run ./build_steamdeck.sh with the ISO,"
+                         " or choose BUILD in ./launcher.sh; see docs/building.md")
+    # Check the tools before extracting, so a missing one stops before the long ISO import.
     if iso is not None:
-        import_disc(iso, extractor)
         if shutil.which("cmake") is None:
             raise ValueError("Install CMake 3.20 or newer and add it to PATH")
         if not windows and shutil.which("ninja") is None:
@@ -290,6 +302,9 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
         except ImportError:
             missing.append(f"capstone=={CAPSTONE}")
         if missing:
+            if importlib.util.find_spec("pip") is None:
+                raise ValueError(f"{sys.executable} has no pip to install Capstone {CAPSTONE}."
+                                 " Run ./build_game.sh, which sets up private/venv, or install pip")
             subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
             if "capstone" in sys.modules:
                 raise ValueError(f"Updated Capstone to {CAPSTONE}; run the build again")
@@ -302,6 +317,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                                 f"pillow>={PILLOW}"]):
                 print("Could not install Pillow, so the dedication card will be skipped. Check the pip error above;"
                       " a new Python version may have no prebuilt Pillow yet.")
+        import_disc(iso, extractor)
     # Fetch the compiler before the long lift, so a failed download stops early.
     compiler = llvm_mingw(ROOT) if windows and not lift_only else None
     if windows and not lift_only:
