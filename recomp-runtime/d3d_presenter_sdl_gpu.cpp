@@ -2314,7 +2314,10 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     bindings.sampler_bias[3] = bindings.sampler_bias[0];
     for (SDL_GPUSampler *sampler : bindings.samplers) {
         if (sampler == nullptr) {
-            std::fprintf(stderr, "recomp d3d presenter: sampler create failed: %s\n", SDL_GetError());
+            // Each later draw repeats it; the worker's decline line counts them.
+            static bool logged = false;
+            if (!logged) std::fprintf(stderr, "recomp d3d presenter: sampler create failed: %s\n", SDL_GetError());
+            logged = true;
             return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
     }
