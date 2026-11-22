@@ -101,6 +101,9 @@ def saved_settings():
                         ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
+    # Frame rate: Display turns on frame generation; anything else is Original.
+    if isinstance(saved.get("frameRate"), str):
+        options["framegen"] = saved["frameRate"] == "display"
     # Launchers since 16:10 save a "screen" shape instead of the widescreen flag.
     if isinstance(saved.get("screen"), str):
         try:
@@ -122,7 +125,7 @@ def open_launcher():
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None,
-        random_cpu_costumes=None, hide_dedication=False):
+        random_cpu_costumes=None, hide_dedication=False, framegen=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -136,6 +139,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
                         ("RECOMP_FREE_CAMERA", free_camera), ("RECOMP_RANDOM_CPU_COSTUMES", random_cpu_costumes)):
         if value is not None:
             env[name] = value if isinstance(value, str) else str(int(value))
+    if framegen:
+        env["RECOMP_D3D_FRAMEGEN"] = "1"
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
     # The game's Rebind screen (Options, Controller) saves both files here.
@@ -262,6 +267,8 @@ if __name__ == "__main__":
                         help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
                         help="Present for a G-SYNC or FreeSync display (Direct3D 11)")
+    parser.add_argument("--framegen", action=argparse.BooleanOptionalAction, default=None,
+                        help="Fill a 120 Hz or faster display with generated frames (Windows Vulkan, experimental)")
     parser.add_argument("--random-cpu-costumes", action=argparse.BooleanOptionalAction, default=None,
                         help="Dress CPU opponents in random unlocked costumes (offline)")
     parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,
@@ -306,7 +313,7 @@ if __name__ == "__main__":
                              pick("surround", args.surround), pick("vrr", args.vrr),
                              bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
-                             args.no_dedication_card))
+                             args.no_dedication_card, pick("framegen", args.framegen)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

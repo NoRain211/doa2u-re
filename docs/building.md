@@ -162,7 +162,9 @@ that shortcut.
   (`recomp-runtime/audio_reverb.cpp`).
 - `RECOMP_D3D_VRR` and `RECOMP_D3D_PRESENT_LOG` are Direct3D 11 features.
 - `RECOMP_D3D_FRAMEGEN=1` is an experimental option of the Windows Vulkan
-  runner. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
+  runner. The **Frame rate: Display** row on the launchers' VIDEO SETTINGS
+  page and in the game's PC SETTINGS sets it at the next launch. On a display
+  of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
   it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
   frame, so the picture is up to one guest frame later. The presenter

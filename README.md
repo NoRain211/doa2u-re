@@ -242,11 +242,11 @@ SHA-256 check.
    **BUILD GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen, the renderer and VRR on **VIDEO SETTINGS**, stereo or
-   5.1 on **AUDIO SETTINGS**, the intro skip on **MOVIES** and **Earn** on
-   **GAMEPLAY** to leave unlocks to play, then choose
-   **START GAME**. A controller, the keyboard or the mouse all work. Your
-   choices are remembered, and `DOA2U.exe` plays with them later.
+3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR and the frame
+   rate on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**, the intro
+   skip on **MOVIES** and **Earn** on **GAMEPLAY** to leave unlocks to play,
+   then choose **START GAME**. A controller, the keyboard or the mouse all work.
+   Your choices are remembered, and `DOA2U.exe` plays with them later.
 
 The first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache

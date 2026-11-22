@@ -2,9 +2,10 @@
 // Windows launcher, built twice by tools/package_test.py with the C# compiler
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
-//     anti-aliasing, SMAA, widescreen, the renderer, VRR, the intro skip, 5.1 surround and
-//     the free camera, remembers them in private\launcher.json, then plays. An ISO
-//     dropped on it, or chosen on the build page, starts the build.
+//     anti-aliasing, SMAA, widescreen, the renderer, VRR, the frame rate, the
+//     intro skip, 5.1 surround and the free camera, remembers them in
+//     private\launcher.json, then plays. An ISO dropped on it, or chosen on
+//     the build page, starts the build.
 //   DOA2U.exe (PLAY_ONLY) plays with the saved settings.
 // Adapted from committed DOA3 tools/launcher.cs at 6c782d5: its Horizon Bar menu
 // over the generated castle-bridge backdrop (tools/launcher-background.jpg); no retail art is used.
@@ -281,7 +282,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int InfoY = 380, LabelY = 414, ValueY = 434, ValueH = 30, TabY = 494, TabH = 26;
 
-    readonly Row resolution, msaa, smaa, screen, renderer, vrr, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, screen, renderer, vrr, frameRate, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page; inside a page the row cursor picks a setting.
     int menu, row;
@@ -354,6 +355,8 @@ class LauncherForm : Form
         savedShape = savedScreen >= 0 ? null : Game.ScreenShape(settings);
         renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays with Direct3D 11; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
+        frameRate = Choice("Frame rate", "Display fills a 120 Hz or faster screen with generated frames; Vulkan on Windows, experimental",
+            new[] { "Original", "Display" }, Game.Str(settings, "frameRate", "original") == "display", 0);
         surround = Choice("Output", "5.1 plays the game's own surround mix", new[] { "Stereo", "5.1" }, Game.Bool(settings, "surround", false), 0);
         intro = Choice("Intro Movies", "Skip goes straight to the title screen at boot", new[] { "Play", "Skip" }, Game.Bool(settings, "skipIntro", false), 0);
         unlock = Choice("Unlocks", "Earn offers only what the profile has earned; Everything is never saved to it", new[] { "Everything", "Earn" }, !Game.Bool(settings, "unlockAll", true), 0);
@@ -376,7 +379,7 @@ class LauncherForm : Form
         var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 10 minutes", Action = "build" };
         importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3 or 4 ISO to add its music; DOA4 adds the hit voices too", Action = "import" };
         pages = new[] {
-            new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape, renderer and VRR", Rows = PageRows(resolution, msaa, smaa, screen, renderer, vrr) },
+            new Page { Name = "VIDEO SETTINGS", Info = "Sets resolution, anti-aliasing, screen shape, renderer, VRR and frame rate", Rows = PageRows(resolution, msaa, smaa, screen, renderer, vrr, frameRate) },
             new Page { Name = "AUDIO SETTINGS", Info = "Choose the output, import DOA4 hit voices from your ISO, or edit your clips",
                 Rows = PageRows(surround, voiceSetting,
                     new Row { Label = "Import DOA4 Voices", Info = "Choose your Dead or Alive 4 ISO; your existing clip selections are kept", Action = "voices" },
@@ -490,7 +493,7 @@ class LauncherForm : Form
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
-            { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
+            { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "frameRate", frameRate.Index == 1 ? "display" : "original" }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
             { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "comboHud", comboHud }, { "hitVoices", voiceSetting.Index != 0 },
@@ -639,7 +642,7 @@ class LauncherForm : Form
             var valueRect = new RectangleF(left + 26, ValueY, colW - 30, ValueH);
             if (r.Names == null) { g.DrawString(Verb(r.Action), itemFont, new SolidBrush(sand), new RectangleF(left + 12, ValueY, colW - 16, ValueH), near); continue; }
             string value = r.Names[r.Index].ToUpperInvariant();
-            // Eight columns leave little room; a value too wide for its column drops to the smaller font.
+            // Nine columns leave little room; a value too wide for its column drops to the smaller font.
             Font font = g.MeasureString(value, menuFont).Width > colW - 40 ? itemFont : menuFont;
             float cy = ValueY + ValueH / 2f;
             Color arrow = selected ? sand : Rgb(241, 197, 143, 130);
