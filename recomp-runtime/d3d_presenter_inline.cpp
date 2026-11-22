@@ -5,10 +5,11 @@
 #include <thread>
 #include <unordered_map>
 
-/* The presenter API run on the calling thread. SDL creates its window, takes
-   its swapchain and pumps its events on one thread, the main thread on macOS,
-   so the SDL_GPU backend cannot move to a worker as Direct3D 11 does
-   (d3d_presenter_thread.cpp). The backend records commands as they arrive
+/* The presenter API run on the calling thread, for macOS and Linux. SDL
+   creates its window, takes its swapchain and pumps its events on one thread,
+   the main thread on macOS. Windows runs SDL_GPU on the worker
+   (d3d_presenter_thread.cpp), which then owns SDL's video thread and window
+   messages. The backend records commands as they arrive
    and submits them in batches, so the guest only waits for the GPU at a
    present or when it asks for a visibility result. */
 

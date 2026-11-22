@@ -489,11 +489,14 @@ if(WIN32)
     target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid
         recomp_keyboard recomp_imgui)
     set(_sdl_gpu_presenter recomp_d3d_presenter_vulkan)
+    # Vulkan runs on the Direct3D 11 presenter's worker thread; macOS keeps its window on the main thread.
+    set(_sdl_gpu_wrapper d3d_presenter_thread.cpp d3d_presenter_capture.cpp)
 else()
     set(_sdl_gpu_presenter recomp_d3d_presenter)
+    set(_sdl_gpu_wrapper d3d_presenter_inline.cpp)
 endif()
 add_library(${_sdl_gpu_presenter} STATIC
-    d3d_presenter_sdl_gpu.cpp d3d_presenter_inline.cpp d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
+    d3d_presenter_sdl_gpu.cpp ${_sdl_gpu_wrapper} d3d_shader_compiler.cpp overlay_sdl_gpu.cpp
     ${RECOMP_PRESENTER_SHARED})
 target_include_directories(${_sdl_gpu_presenter} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_keyboard)
@@ -525,9 +528,9 @@ add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbr
 target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
 add_test(NAME recomp-runtime-texture-upscale COMMAND recomp_texture_upscale_test)
 if(WIN32)
-    # Tests and the runner tell the inline SDL_GPU presenter from the Direct3D 11 one.
+    # Tests tell the SDL_GPU presenter from the Direct3D 11 one.
     target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)
-    target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3)
+    target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3 user32)
 else()
     recomp_use_sdl3(${_sdl_gpu_presenter})
     recomp_use_shader_compiler(${_sdl_gpu_presenter})

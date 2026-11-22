@@ -3843,8 +3843,9 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
 
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
 {
-    /* This presenter runs on the guest thread, and submitPresent's VRR sleep
-       stalls every guest thread, CRI's audio refills too (issue #69). The
+    /* Only the inline presenter (macOS, Linux) calls this; it runs on the guest
+       thread, and submitPresent's VRR sleep stalls every guest thread, CRI's
+       audio refills too (issue #69). On Windows that sleep is on the worker. The
        guest's wait for this lets them run, so VRR waits here until 2 ms before
        its slot (the scheduler polls host waits each millisecond); the frame's
        draws render meanwhile. */

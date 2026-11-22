@@ -3,10 +3,10 @@
 
 #include "d3d_presenter.h"
 
-/* The presenter worker (d3d_presenter_thread.cpp) or, on hosts whose window
-   must stay on its own thread, d3d_presenter_inline.cpp calls these. The
-   backend is d3d_presenter_d3d11.cpp on Windows and d3d_presenter_sdl_gpu.cpp
-   elsewhere. */
+/* The Windows presenter worker (d3d_presenter_thread.cpp) or, on macOS and
+   Linux, d3d_presenter_inline.cpp calls these. The backend is
+   d3d_presenter_d3d11.cpp or, for Vulkan and on other hosts,
+   d3d_presenter_sdl_gpu.cpp. */
 
 RecompD3dPresenterError d3d_backend_create(
     const RecompD3dPresenterConfig *config, RecompD3dPresenter **presenter);
