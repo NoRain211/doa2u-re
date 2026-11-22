@@ -261,6 +261,7 @@ struct VisibilityQuery {
     SDL_GPUTransferBuffer *download = nullptr;
     uint32_t level = 0u, level_width = 0u, level_height = 0u;
     SDL_GPUFence *fence = nullptr;
+    bool reusable = true;                  // false once a quality change outdates the size
 };
 
 } // namespace
@@ -1824,17 +1825,29 @@ bool prepareCount(RecompD3dPresenter *presenter, const BoundTarget &bound)
     query.width = bound.host_width;
     query.height = bound.host_height;
     query.samples = bound.samples;
-    query.count = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (bound.samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
-        query.width, query.height, 1u, 1u, query.samples);
-    if (query.samples != SDL_GPU_SAMPLECOUNT_1) {
-        query.resolved = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height);
+    std::vector<VisibilityQuery> &free = presenter->visibility_free;
+    const auto reuse = std::find_if(free.begin(), free.end(), [&](const VisibilityQuery &done) {
+        return done.width == query.width && done.height == query.height && done.samples == query.samples;
+    });
+    if (reuse != free.end()) {
+        query.count = reuse->count;
+        query.resolved = reuse->resolved;
+        query.reduce = reuse->reduce;
+        query.download = reuse->download;
+        free.erase(reuse);
+    } else {
+        query.count = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | (bound.samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
+            query.width, query.height, 1u, 1u, query.samples);
+        if (query.samples != SDL_GPU_SAMPLECOUNT_1) {
+            query.resolved = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kCountFormat,
+                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height);
+        }
+        uint32_t levels = 1u;
+        while ((std::max(query.width, query.height) >> levels) != 0u) ++levels;
+        query.reduce = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kReduceFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height, 1u, levels);
     }
-    uint32_t levels = 1u;
-    while ((std::max(query.width, query.height) >> levels) != 0u) ++levels;
-    query.reduce = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, kReduceFormat,
-        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, query.width, query.height, 1u, levels);
     if (query.count == nullptr || query.reduce == nullptr ||
         (query.samples != SDL_GPU_SAMPLECOUNT_1 && query.resolved == nullptr)) {
         std::fprintf(stderr, "recomp d3d presenter: visibility target failed: %s\n", SDL_GetError());
@@ -2401,7 +2414,8 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
         query.level_height = std::max(query.height >> query.level, 1u);
         SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
             query.level_width * query.level_height * 4u, 0};
-        query.download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
+        // A reused query's buffer already fits: the level size follows the count's size.
+        if (query.download == nullptr) query.download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
         SDL_GPUCopyPass *pass = query.download != nullptr ? SDL_BeginGPUCopyPass(commands) : nullptr;
         if (pass == nullptr) {
             releaseQuery(presenter, query);
@@ -3281,7 +3295,8 @@ void fitWindow(RecompD3dPresenter *presenter)
 void applyQuality(RecompD3dPresenter *presenter)
 {
     // An open occlusion count draws into a target of the old size; ended ones own
-    // their textures and resolve on their own, so only an open one waits.
+    // their textures, resolve on their own and release them then, so only an open
+    // one waits.
     if (presenter->visibility_open) {
         static bool reported;
         bool pending;
@@ -3398,6 +3413,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     }
     for (VisibilityQuery &query : presenter->visibility_free) releaseQuery(presenter, query);
     presenter->visibility_free.clear();
+    for (VisibilityQuery &query : presenter->visibility_pending) query.reusable = false;
     presenter->last_bound = {};
     if (scale != old_scale) fitWindow(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
@@ -3809,7 +3825,18 @@ D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *present
     // A resolved count is the per-pixel fraction of passing samples.
     *pixels = static_cast<uint32_t>(std::min(
         std::floor(sum / front.host_pixels_per_guest_pixel + 0.5), 4294967295.0));
-    releaseQuery(presenter, front);
+    /* Keep the targets for the next test of this size (prepareCount). Freeing
+       them cost a window present 10-17 ms at 4K with MSAA 8x; a few kept
+       bound what a size no longer used holds. */
+    if (front.fence != nullptr) SDL_ReleaseGPUFence(presenter->device, front.fence);
+    front.fence = nullptr;
+    std::vector<VisibilityQuery> &free = presenter->visibility_free;
+    if (front.count != nullptr && front.reusable) free.push_back(front);
+    else releaseQuery(presenter, front);
+    if (free.size() > 4u) {
+        releaseQuery(presenter, free.front());
+        free.erase(free.begin());
+    }
     presenter->visibility_pending.erase(presenter->visibility_pending.begin());
     return D3D_BACKEND_VISIBILITY_READY;
 }

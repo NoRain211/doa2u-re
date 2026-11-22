@@ -24,11 +24,11 @@ from the sister projects
 
 ## Build from the launcher
 
-`./launcher.sh` opens on its BUILD GAME page while the game is not built. Choose
-your Disc 2 ISO with DISC ISO, or drop it on the window, and choose BUILD. The
+`./launcher.sh` opens on its GAME page. Choose
+your Disc 2 ISO with DISC 2 ISO, or drop it on the window, and choose BUILD. The
 page shows the elapsed time and the build's latest line, and keeps the full
 output in `private/build.log`; leaving while it runs asks twice, then stops it.
-When it finishes, choose START GAME.
+When it finishes, choose START GAME on the same page.
 
 The Linux package ships a prebuilt launcher, so this page needs nothing
 installed. The build it starts still needs the tools below; on SteamOS it runs
@@ -75,8 +75,8 @@ the build before it compiles. The ISO is extracted once into
 once the build succeeds.
 
 `./launcher.sh` opens the same menu as the Windows launcher: resolution, MSAA,
-SMAA and widescreen on **VIDEO SETTINGS**, stereo or 5.1 on **AUDIO SETTINGS**
-and the intro skip on **MOVIES**. **START GAME** saves them to
+SMAA, widescreen and the intro skip on **VIDEO** and stereo or 5.1 on
+**AUDIO**. **Start Game** on the **GAME** page saves them to
 `private/launcher.json` and starts the game. A
 `private/launcher-background.png` (or `.jpg` on macOS) replaces its backdrop.
 `./run_game.sh` starts the game with the saved choices, and

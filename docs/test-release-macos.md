@@ -39,17 +39,17 @@ Build (once; lifting and compiling take several minutes):
 4. Wait for "Build complete". The build is checked against the exact
    program the developers tested; any difference stops the build.
 
-Or build from the launcher: ./launcher.sh opens on BUILD GAME while the game
-is not built. Choose your Disc 2 ISO with DISC ISO, or drop it on the window,
+Or build from the launcher: ./launcher.sh opens on its GAME page.
+Choose your Disc 2 ISO with DISC 2 ISO, or drop it on the window,
 then choose BUILD. It shows the elapsed time and the latest line, keeps the
 full output in private/build.log, and asks twice before it stops a build.
 The launcher compiles on first use with the Xcode command line tools.
 
-Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA and widescreen
-on VIDEO SETTINGS, stereo or 5.1 on AUDIO SETTINGS, the intro skip on
-MOVIES and the unlocks and free camera on GAMEPLAY, then choose START GAME.
-Arrow keys move, Return or Space selects and
-Esc goes back; the mouse works too. It saves the choices and starts the game.
+Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA, widescreen
+and the intro skip on VIDEO, stereo or 5.1 on AUDIO and the unlocks and free
+camera on GAMEPLAY, then choose START GAME on the GAME page.
+Arrow keys move and change values, Q and E switch pages, Return or Space
+selects and Esc goes back; the mouse works too. It saves the choices and starts the game.
 ./run_game.sh plays again with the saved choices. The
 first launch copies about 700 MB of the game's disc archives into its
 hard-disk cache, which takes a few seconds. Saves and the cache live in
