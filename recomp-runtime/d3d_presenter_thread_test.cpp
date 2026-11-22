@@ -4107,8 +4107,7 @@ static bool testFramegenWarpEdges()
         if (!generate(0.5f, out)) {
             if (engaged) {
                 passed = false;
-                std::fprintf(stderr, "FAIL framegen warp edges stopped generating in scene %u
-", scene);
+                std::fprintf(stderr, "FAIL framegen warp edges stopped generating in scene %u\n", scene);
             }
             break;
         }
