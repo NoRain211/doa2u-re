@@ -2225,6 +2225,30 @@ static bool testVisibility()
         passed &= complete;
     }
     passed &= pixels[0] == 160u * 240u && pixels[1] == 320u * 240u;
+    /* Five more tests on the same target. On SDL_GPU the first two reuse the
+       counting targets kept above, with the coverage swapped so a stale count
+       shows; the fifth to finish makes a kept set too many. */
+    for (uint32_t index = 7u; index < 12u; ++index) {
+        draw.depth.depth_test_enable = index % 2u == 0u;
+        end.data.visibility_index = index;
+        passed &= expect("reuse begin", recomp_d3d_presenter_submit(presenter, &begin));
+        passed &= expect("reuse draw", recomp_d3d_presenter_submit(presenter, &draw_command));
+        passed &= expect("reuse end", recomp_d3d_presenter_submit(presenter, &end));
+    }
+    passed &= expect("publish reused visibility", recomp_d3d_presenter_flush(presenter, true));
+    const ULONGLONG reuse_deadline = GetTickCount64() + 5000u;
+    for (uint32_t index = 7u; index < 12u && passed; ++index) {
+        uint32_t counted = 0u;
+        complete = false;
+        while (passed && !complete && GetTickCount64() < reuse_deadline) {
+            passed &= expect("poll reused visibility", recomp_d3d_presenter_visibility_result(
+                presenter, index, &complete, &counted));
+        }
+        if (!complete || counted != (index % 2u == 0u ? 160u : 320u) * 240u) {
+            std::fprintf(stderr, "FAIL reused visibility index=%u pixels=%u\n", index, counted);
+            passed = false;
+        }
+    }
 #ifdef RECOMP_TEST_D3D11
     // An END the worker cannot match to a BEGIN fails the presenter.
     passed &= expect("unbegun end", recomp_d3d_presenter_submit(presenter, &end));
