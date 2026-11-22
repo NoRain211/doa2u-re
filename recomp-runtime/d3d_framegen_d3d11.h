@@ -849,10 +849,11 @@ void fgGamma(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source, ID
    for a timed slot (VRR) with tearing at at_ns. A real frame also takes the
    frame dump, the draw log and a screenshot, as submitPresent does when it
    presents directly. 1 when shown, 0 when the chain had no room for it this
-   time, and -1 when Present failed. */
+   time, and -1 when Present failed. waited_ns is the time slept until at_ns. */
 int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &picture, float aspect,
-    bool real, int64_t at_ns)
+    bool real, int64_t at_ns, int64_t &waited_ns)
 {
+    waited_ns = 0;
     auto *context = presenter->context;
     DXGI_SWAP_CHAIN_DESC chain{};
     presenter->swap_chain->GetDesc(&chain);
@@ -915,7 +916,9 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
        runs during the wait rather than after it. */
     if (presenter->fg_timed && at_ns > 0) {
         presenter->context->Flush();
+        const int64_t sleep_ns = fgSteadyNs();
         recomp_d3d_sleep_until(at_ns);
+        waited_ns = fgSteadyNs() - sleep_ns;
     }
     // The one-refresh guard measures present start to present start.
     const int64_t present_ns = fgSteadyNs();
@@ -1006,9 +1009,11 @@ bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
     const int64_t start = fgSteadyNs();
     if (!real && !presenter->fg_timed)
         framegenGenerate(presenter, static_cast<float>(slot + 1u) / presenter->fg_k);
+    int64_t waited = 0;
     const int shown = framegenShowPicture(presenter, real ? presenter->fg_cur : presenter->fg_out,
-        presenter->fg_aspect, real, at);
-    if (presenter->performance_counter) framegenCount(presenter, shown > 0, real, start, fgSteadyNs());
+        presenter->fg_aspect, real, at, waited);
+    // The window's work, without a timed slot's sleep, as a VSYNC slot has none.
+    if (presenter->performance_counter) framegenCount(presenter, shown > 0, real, start + waited, fgSteadyNs());
     if (shown < 0) {
         // A lost device must not keep the worker presenting: fall back to real frames.
         presenter->fg_history = false;
