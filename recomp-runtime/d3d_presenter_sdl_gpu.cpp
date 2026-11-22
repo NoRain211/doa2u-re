@@ -901,7 +901,8 @@ bool uploadTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *texture, const
     if (staged && staging == nullptr) staging = SDL_CreateGPUTransferBuffer(presenter->device, &info);
     SDL_GPUTransferBuffer *transfer = staged ? staging : SDL_CreateGPUTransferBuffer(presenter->device, &info);
     if (transfer == nullptr) return false;
-    uint32_t offset = staged ? (presenter->texture_used + 255u) & ~255u : 0u;
+    // D3D12 copies texels from 512-byte offsets; SDL moves any other upload to a temporary buffer.
+    uint32_t offset = staged ? (presenter->texture_used + 511u) & ~511u : 0u;
     if (offset + size > info.size) offset = 0u;
     // Offset 0 starts the staging buffer again; cycling it keeps the bytes that recorded uploads still read.
     auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(presenter->device, transfer, staged && offset == 0u));
