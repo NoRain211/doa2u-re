@@ -41,6 +41,10 @@ void recomp_combo_hud_install(void);
 void recomp_combo_hud_set_enabled(bool on);
 /* custom_rgb is 0xRRGGBB, used when colour is RECOMP_LIFE_BAR_CUSTOM. */
 void recomp_combo_hud_set_life_bar_colour(unsigned colour, uint32_t custom_rgb);
+/* PC Settings' Fight HUD: 0 Original (the base game's HUD), 1 the combo
+   damage line only, 2 the critical-stun segment only, 3 both. */
+enum { RECOMP_FIGHT_HUD_ORIGINAL = 0, RECOMP_FIGHT_HUD_DAMAGE = 1, RECOMP_FIGHT_HUD_STUN = 2, RECOMP_FIGHT_HUD_BOTH = 3 };
+void recomp_combo_hud_set_choice(unsigned choice);
 RecompFunction recomp_combo_hud_lookup_manual(uint32_t guest_address);
 
 #ifdef __cplusplus
