@@ -323,6 +323,9 @@ class LauncherForm : Form
     readonly Font tabFont = new Font("Arial", 14, FontStyle.Bold | FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font infoFont = new Font("Arial", 14, FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font smallFont = new Font("Arial", 12, FontStyle.Bold, GraphicsUnit.Pixel);
+    // A page with more columns than fit at the usual size keeps its labels and values inside them.
+    readonly Font narrowFont = new Font("Arial", 11, FontStyle.Bold, GraphicsUnit.Pixel);
+    readonly Font narrowValueFont = new Font("Arial", 11, FontStyle.Bold | FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font titleFont = new Font("Arial", 25, FontStyle.Bold | FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font logoFont = new Font("Arial Black", 30, FontStyle.Italic, GraphicsUnit.Pixel);
     readonly Font bigFont = new Font("Arial Black", 54, FontStyle.Italic, GraphicsUnit.Pixel);
@@ -631,6 +634,11 @@ class LauncherForm : Form
         if (page.Action == "play") Shadowed(g, "PRESS START BUTTON", titleFont, Chrome(ValueY - 8, 40), new RectangleF(Side, ValueY - 8, W - 2 * Side, 40), near, 2);
         var divider = new Pen(Rgb(255, 255, 255, 36));
         int colW = ColW;
+        // Nine columns leave little room: a page whose labels do not fit drops
+        // them all to the smaller font, and so does a value too wide for its column.
+        Font labelFont = smallFont;
+        for (int i = 0; i < rows.Length; i++)
+            if (g.MeasureString(rows[i].Label.ToUpperInvariant(), smallFont).Width > colW - 16) { labelFont = narrowFont; break; }
         for (int i = 0; i < rows.Length; i++)
         {
             Row r = rows[i];
@@ -638,12 +646,13 @@ class LauncherForm : Form
             bool selected = inPage && i == row;
             if (selected) g.FillRectangle(new SolidBrush(Rgb(232, 191, 138, 45)), left, LabelY - 6, colW, ValueY + ValueH + 6 - LabelY);
             if (i > 0) g.DrawLine(divider, left, LabelY - 2, left, ValueY + ValueH);
-            g.DrawString(r.Label.ToUpperInvariant(), smallFont, new SolidBrush(selected ? Color.White : Rgb(198, 182, 166)), new RectangleF(left + 12, LabelY, colW - 16, 18), near);
+            g.DrawString(r.Label.ToUpperInvariant(), labelFont, new SolidBrush(selected ? Color.White : Rgb(198, 182, 166)), new RectangleF(left + 12, LabelY, colW - 16, 18), near);
             var valueRect = new RectangleF(left + 26, ValueY, colW - 30, ValueH);
             if (r.Names == null) { g.DrawString(Verb(r.Action), itemFont, new SolidBrush(sand), new RectangleF(left + 12, ValueY, colW - 16, ValueH), near); continue; }
             string value = r.Names[r.Index].ToUpperInvariant();
-            // Nine columns leave little room; a value too wide for its column drops to the smaller font.
+            // A value too wide for its column drops to the smaller fonts.
             Font font = g.MeasureString(value, menuFont).Width > colW - 40 ? itemFont : menuFont;
+            if (g.MeasureString(value, font).Width > colW - 40) font = narrowValueFont;
             float cy = ValueY + ValueH / 2f;
             Color arrow = selected ? sand : Rgb(241, 197, 143, 130);
             Arrow(g, left + 19, cy, -1, 0, arrow);
