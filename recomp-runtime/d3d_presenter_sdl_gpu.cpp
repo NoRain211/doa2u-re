@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -3912,9 +3913,14 @@ void framegenCapture(RecompD3dPresenter *presenter)
     const int64_t start = steadyNs();
     char path[1024];
     if (presenter->fg_capture_index == nullptr) {
-        SDL_CreateDirectory(presenter->fg_capture);
         std::snprintf(path, sizeof path, "%s/framegen.txt", presenter->fg_capture);
-        if (!(presenter->fg_capture_index = std::fopen(path, "w"))) return;
+        const bool folder = SDL_CreateDirectory(presenter->fg_capture);
+        if (!folder || !(presenter->fg_capture_index = std::fopen(path, "w"))) {
+            std::fprintf(stderr, "recomp d3d presenter: framegen capture off, cannot write %s: %s\n", path,
+                folder ? std::strerror(errno) : SDL_GetError());
+            presenter->fg_capture = nullptr;
+            return;
+        }
         std::fprintf(presenter->fg_capture_index, "recomp framegen capture 1 target=%ux%u k=%u\n",
             width, height, presenter->fg_k);
     }
@@ -3934,7 +3940,8 @@ void framegenCapture(RecompD3dPresenter *presenter)
     }
     SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
     presenter->command_buffer = nullptr;
-    bool written = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u) && downloads[0];
+    bool written = fence != nullptr && SDL_WaitForGPUFences(presenter->device, true, &fence, 1u) && downloads[0] &&
+        (textures[1] == nullptr || downloads[1]);
     const auto write = [&](const char *suffix, const void *bytes, size_t size) {
         std::snprintf(path, sizeof path, "%s/%08u.%s", presenter->fg_capture, frame, suffix);
         FILE *file = bytes ? std::fopen(path, "wb") : nullptr;
