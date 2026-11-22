@@ -25,6 +25,13 @@ int main()
 {
     using Clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
+    // A VRR present waits for its 1/60 s slot; a late one presents now and moves the grid.
+    if (recomp_d3d_vrr_slot(1000000000, 1000000001) != 1016666666 ||
+        recomp_d3d_vrr_slot(1016666666, 1040000000) != 1040000000 ||
+        recomp_d3d_vrr_slot(1040000000, 1040000000) != 1056666666) {
+        std::fprintf(stderr, "vrr: present slots left the 1/60 s grid\n");
+        return 1;
+    }
     // Under the frame clock, Swap is the vblank: a wait each frame must not
     // round up to the refresh after the frame's end and run time double.
     recomp_xapi_frame_clock_set_enabled(true);
