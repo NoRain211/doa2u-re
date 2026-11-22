@@ -26,6 +26,11 @@ int64_t fgSteadyNs()
    it allows 2.5 guest frames and still catches a load, hundreds of ms long. */
 constexpr int64_t kFgStallNs = 40000000;
 
+/* The last part of a timed slot's wait is slept here, not in the worker's
+   timer, whose wake can land a millisecond late; a present then starts on its
+   slot rather than after it. */
+constexpr int64_t kFgSettleNs = 1000000;
+
 bool fgReadback(RecompD3dPresenter *presenter, ID3D11Texture2D *texture, UINT width, UINT height,
     UINT x, UINT y, void *bytes, UINT pitch);
 
@@ -61,22 +66,21 @@ bool fgCreateTexture(RecompD3dPresenter *presenter, FramegenTexture &entry, UINT
 }
 
 /* Whether frame generation runs now: host time paces the guest, the window
-   shows, and the picture is not presented the moment it is drawn. */
+   shows, and the picture is not presented the moment it is drawn. With VRR on
+   the slots pace the display themselves; when this returns false the plain VRR
+   path presents the real frames as before. */
 bool framegenActive(const RecompD3dPresenter *presenter)
 {
-    return presenter->fg_k != 0u && !immediate_present && !presenter->vrr &&
+    return presenter->fg_k != 0u && !immediate_present &&
         !recomp_xapi_frame_clock_enabled() &&
         !(recomp_xapi_fast_forward != nullptr && recomp_xapi_fast_forward()) &&
         IsWindowVisible(presenter->window) && !IsIconic(presenter->window);
 }
 
-/* RECOMP_D3D_FRAMEGEN=1: window presents per guest frame, k = the display's
-   refresh / 60, or 0. The chain is created with three buffers and a latency
-   of two (createDeviceWithDriver): a slot presented one refresh after the last
-   still finds a free buffer while one is shown and one queued, as SDL_GPU's
-   three frames in flight do, and one that finds none is skipped rather than
-   waited for. shortcut: k is read once at startup; a window moved to another
-   display keeps it. */
+/* RECOMP_D3D_FRAMEGEN=1: window presents per guest frame, and how the slots
+   reach the display (recomp_framegen_plan), or 0 when frame generation stays
+   off. shortcut: the refresh and the VRR flag are read once at startup; a
+   window moved to another display keeps them. */
 unsigned framegenPresents(RecompD3dPresenter *presenter)
 {
     if (!fgEnvFlag("RECOMP_D3D_FRAMEGEN")) return 0u;
@@ -89,19 +93,25 @@ unsigned framegenPresents(RecompD3dPresenter *presenter)
         EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode)) {
         refresh = static_cast<float>(mode.dmDisplayFrequency);
     }
-    const unsigned k = static_cast<unsigned>(refresh / 60.0f + 0.5f);
-    const char *reason = unpacedRun() ? "unpaced run"
-        : refresh <= 0.0f ? "unknown refresh"
-        : presenter->vrr ? "VRR is on"
-        : k < 2u ? "the refresh is below 120 Hz"
-        : std::fabs(refresh - 60.0f * k) > 0.005f * refresh ? "the refresh is not a whole multiple of 60 Hz"
-        : nullptr;
-    if (reason != nullptr) {
-        std::fprintf(stderr, "recomp d3d presenter: framegen unsupported: %s (%.2f Hz)\n", reason, refresh);
+    if (unpacedRun()) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen unsupported: unpaced run (%.2f Hz)\n", refresh);
         return 0u;
     }
-    std::fprintf(stderr, "recomp d3d presenter: framegen k=%u at %.2f Hz\n", k, refresh);
-    return k;
+    const RecompFramegenPlan plan = recomp_framegen_plan(refresh, presenter->vrr ? 1 : 0);
+    if (plan.k == 0u) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen unsupported: %s (%.2f Hz)\n",
+            plan.reason, refresh);
+        return 0u;
+    }
+    presenter->fg_timed = plan.mode == RECOMP_FRAMEGEN_SLOT_TIMED;
+    presenter->fg_refresh_ns = static_cast<long long>(1000000000.0 / refresh);
+    if (presenter->vrr) {
+        std::fprintf(stderr, "recomp d3d presenter: framegen k=%u at %.2f Hz (VRR on: %s slots)\n",
+            plan.k, refresh, presenter->fg_timed ? "tearing" : "vsync");
+    } else {
+        std::fprintf(stderr, "recomp d3d presenter: framegen k=%u at %.2f Hz\n", plan.k, refresh);
+    }
+    return plan.k;
 }
 
 /* Main target pixels per finest pyramid pixel: the finest level is at most 720
@@ -770,7 +780,7 @@ bool framegenRecord(RecompD3dPresenter *presenter, float aspect)
         presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
         ++presenter->fg_unshown;
     }
-    if (fgSteadyNs() - presenter->fg_present_ns > kFgStallNs || aspect != presenter->fg_aspect)
+    if (fgSteadyNs() - presenter->fg_arrival_ns > kFgStallNs || aspect != presenter->fg_aspect)
         presenter->fg_history = false;
     if (!framegenActive(presenter)) {
         presenter->fg_history = false;
@@ -780,8 +790,18 @@ bool framegenRecord(RecompD3dPresenter *presenter, float aspect)
     framegenCover(presenter);
     if (!framegenResolvePicture(presenter)) return false;
     framegenAdvance(presenter, presenter->fg_picture.texture);
+    presenter->fg_ready_slot = ~0u;
     presenter->fg_aspect = aspect;
-    presenter->fg_present_ns = fgSteadyNs();
+    presenter->fg_arrival_ns = fgSteadyNs();
+    presenter->fg_present_ns = presenter->fg_arrival_ns;
+    if (presenter->fg_timed) {
+        /* N's slots start on the guest's 1/60 s grid, as submitPresent's VRR
+           path presents on it, so the jitter of N's own work never reaches the
+           panel and the generated frames keep the gap the guest timer set. */
+        presenter->vrr_slot_ns = (std::max)(presenter->vrr_slot_ns + 1000000000 / 60,
+            presenter->fg_present_ns);
+        presenter->fg_present_ns = presenter->vrr_slot_ns;
+    }
     presenter->fg_next_slot = 0u;
     return true;
 }
@@ -825,11 +845,13 @@ void fgGamma(RecompD3dPresenter *presenter, ID3D11ShaderResourceView *source, ID
 }
 
 /* Shows picture (the main target's size, before gamma) in the window through
-   gamma, the aspect fit and the overlay, then presents it at one refresh. A
-   real frame also takes the frame dump, the draw log and a screenshot, as
-   submitPresent does when it presents directly. 1 when shown, 0 when the
-   chain had no room for it this time, and -1 when Present failed. */
-int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &picture, float aspect, bool real)
+   gamma, the aspect fit and the overlay, then presents it: at one refresh, or
+   for a timed slot (VRR) with tearing at at_ns. A real frame also takes the
+   frame dump, the draw log and a screenshot, as submitPresent does when it
+   presents directly. 1 when shown, 0 when the chain had no room for it this
+   time, and -1 when Present failed. */
+int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &picture, float aspect,
+    bool real, int64_t at_ns)
 {
     auto *context = presenter->context;
     DXGI_SWAP_CHAIN_DESC chain{};
@@ -885,11 +907,19 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
         recomp_overlay_d3d11_draw(presenter->device, presenter->context, presenter->present_target_view,
             window.BufferDesc.Width, window.BufferDesc.Height, &overlay);
     }
-    /* Each slot is one refresh: frame generation replaces syncInterval's
+    /* Each VSYNC slot is one refresh: frame generation replaces syncInterval's
        holds. Waiting for that refresh would hold the caller (the worker, or a
        test driving the presenter) for it and push the next real frame's
-       arrival out, so a full chain skips the slot instead. */
-    const HRESULT result = presenter->swap_chain->Present(1u, DXGI_PRESENT_DO_NOT_WAIT);
+       arrival out, so a full chain skips the slot instead. A timed slot (VRR)
+       tears instead, at sync interval 0, and starts at at_ns so its own work
+       runs during the wait rather than after it. */
+    if (presenter->fg_timed && at_ns > 0) {
+        presenter->context->Flush();
+        recomp_d3d_sleep_until(at_ns);
+    }
+    const HRESULT result = presenter->fg_timed
+        ? presenter->swap_chain->Present(0u, DXGI_PRESENT_ALLOW_TEARING | DXGI_PRESENT_DO_NOT_WAIT)
+        : presenter->swap_chain->Present(1u, DXGI_PRESENT_DO_NOT_WAIT);
     if (result == DXGI_ERROR_WAS_STILL_DRAWING) return 0;
     if (FAILED(result)) {
         std::fprintf(stderr, "recomp d3d presenter: framegen Present failed hr=0x%08lX\n",
@@ -936,21 +966,45 @@ void framegenCount(RecompD3dPresenter *presenter, bool shown, bool real, int64_t
     presenter->fg_window_max_ms = 0.0;
 }
 
+/* Makes slot's in-between in fg_out before its time comes, so a timed slot's
+   own passes run while the previous slot is on screen. The real slot shows
+   fg_cur and has nothing to make. */
+void framegenPrepare(RecompD3dPresenter *presenter, unsigned slot)
+{
+    if (slot + 1u >= presenter->fg_k || presenter->fg_ready_slot == slot) return;
+    framegenGenerate(presenter, static_cast<float>(slot + 1u) / presenter->fg_k);
+    presenter->fg_ready_slot = slot;
+}
+
 /* Shows slot's picture: an in-between from the flow, or the real frame
    itself at the last slot, which is the only one that is dumped. A slot whose
    swap chain image is not ready is skipped, as the SDL_GPU presenter skips
-   one; a lost device turns frame generation off for real frames. */
+   one; a lost device turns frame generation off for real frames.
+
+   A timed slot (VRR) starts at the time the grid put it at, or one refresh
+   after the last present when that is later: two pictures inside one refresh
+   would tear on the panel, so a slot that fell that far late waits. */
 bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
 {
     const bool real = slot + 1u == presenter->fg_k;
+    int64_t at = 0;
+    if (presenter->fg_timed) {
+        at = presenter->fg_present_ns +
+            static_cast<int64_t>(slot) * recomp_framegen_slot_ns(presenter->fg_k);
+        const int64_t gap = presenter->fg_last_present_ns + presenter->fg_refresh_ns;
+        if (presenter->fg_last_present_ns != 0 && at < gap) at = gap;
+        if (!real) framegenPrepare(presenter, slot);
+        presenter->fg_ready_slot = ~0u;
+    }
     /* The chain offers a buffer one refresh after a present, and a wait takes
        that offer; the real frame's buffer is waited for rather than skipped. */
     if (presenter->frame_latency != nullptr &&
         WaitForSingleObject(presenter->frame_latency, 0u) != WAIT_OBJECT_0) return false;
     const int64_t start = fgSteadyNs();
-    if (!real) framegenGenerate(presenter, static_cast<float>(slot + 1u) / presenter->fg_k);
+    if (!real && !presenter->fg_timed)
+        framegenGenerate(presenter, static_cast<float>(slot + 1u) / presenter->fg_k);
     const int shown = framegenShowPicture(presenter, real ? presenter->fg_cur : presenter->fg_out,
-        presenter->fg_aspect, real);
+        presenter->fg_aspect, real, at);
     if (presenter->performance_counter) framegenCount(presenter, shown > 0, real, start, fgSteadyNs());
     if (shown < 0) {
         // A lost device must not keep the worker presenting: fall back to real frames.
@@ -958,12 +1012,15 @@ bool framegenPresent(RecompD3dPresenter *presenter, unsigned slot)
         presenter->fg_k = 0u;
         return false;
     }
+    if (presenter->fg_timed && shown > 0) presenter->fg_last_present_ns = fgSteadyNs();
     return shown > 0;
 }
 
 /* Presents real frame N's due slot and returns the 100 ns ticks until its
    next one, or UINT64_MAX once N is shown. An in-between whose slot passed is
-   skipped; N is shown at its own slot. */
+   skipped; N is shown at its own slot. A timed slot waits out the worker's
+   last millisecond here, so the present starts on its slot and not after the
+   timer's wake, and its in-between is made before that wait. */
 uint64_t framegenIdle(RecompD3dPresenter *presenter)
 {
     if (!presenter->fg_history || presenter->fg_cur.texture == nullptr ||
@@ -972,19 +1029,29 @@ uint64_t framegenIdle(RecompD3dPresenter *presenter)
         presenter->fg_history = false;
         return UINT64_MAX;
     }
-    const RecompFramegenDue due = recomp_framegen_due(presenter->fg_k, presenter->fg_present_ns,
-        fgSteadyNs(), presenter->fg_next_slot);
-    presenter->fg_late += due.missed;
-    presenter->fg_next_slot += due.missed;
-    if (due.slot >= 0) {
-        const unsigned slot = static_cast<unsigned>(due.slot);
-        if (!framegenPresent(presenter, slot) && slot + 1u == presenter->fg_k) return 5000u;
-        presenter->fg_next_slot = slot + 1u;
+    for (unsigned step = 0u; step <= 2u * presenter->fg_k; ++step) {
+        const RecompFramegenDue due = recomp_framegen_due(presenter->fg_k, presenter->fg_present_ns,
+            fgSteadyNs(), presenter->fg_next_slot);
+        presenter->fg_late += due.missed;
+        presenter->fg_next_slot += due.missed;
+        if (due.slot >= 0) {
+            const unsigned slot = static_cast<unsigned>(due.slot);
+            if (!framegenPresent(presenter, slot) && slot + 1u == presenter->fg_k) return 5000u;
+            presenter->fg_next_slot = slot + 1u;
+            continue;
+        }
+        if (presenter->fg_next_slot >= presenter->fg_k) return UINT64_MAX;
+        const int64_t until = recomp_framegen_until(presenter->fg_k, presenter->fg_present_ns,
+            fgSteadyNs(), presenter->fg_next_slot);
+        if (!presenter->fg_timed) return static_cast<uint64_t>(until + 99) / 100u;
+        framegenPrepare(presenter, presenter->fg_next_slot);
+        if (until > kFgSettleNs) {
+            return static_cast<uint64_t>(until - kFgSettleNs + 99) / 100u;
+        }
+        recomp_d3d_sleep_until(presenter->fg_present_ns +
+            static_cast<int64_t>(presenter->fg_next_slot) * recomp_framegen_slot_ns(presenter->fg_k));
     }
-    if (presenter->fg_k == 0u || presenter->fg_next_slot >= presenter->fg_k) return UINT64_MAX;
-    const int64_t until = recomp_framegen_until(presenter->fg_k, presenter->fg_present_ns,
-        fgSteadyNs(), presenter->fg_next_slot);
-    return static_cast<uint64_t>(until + 99) / 100u;
+    return UINT64_MAX;
 }
 
 /* ---- Test hooks ---------------------------------------------------------- */

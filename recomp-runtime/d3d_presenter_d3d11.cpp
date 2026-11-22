@@ -417,10 +417,15 @@ struct RecompD3dPresenter {
        gamma, an in-between picture and the HUD mask. fg_k is the window
        presents per guest frame, 0 when it is off. */
     unsigned fg_k = 0u;
+    bool fg_timed = false;         // slots at their own time with tearing (VRR)
+    long long fg_refresh_ns = 0;   // one refresh: the closest two timed presents may be
+    long long fg_last_present_ns = 0; // steady time of the last timed present, 0 before one
+    unsigned fg_ready_slot = ~0u;  // the slot whose in-between is made in fg_out
     bool fg_flow_view = false;     // RECOMP_D3D_FRAMEGEN=flow
     bool fg_history = false;       // fg_prev and fg_cur hold real frames
     unsigned fg_next_slot = 0u;    // first slot of real frame N neither shown nor skipped
-    long long fg_present_ns = 0;   // when N arrived
+    long long fg_present_ns = 0;   // when N's first slot is due (its arrival, or the VRR grid's)
+    long long fg_arrival_ns = 0;   // when N arrived, for the stall check
     float fg_aspect = 0.0f;
     bool fg_restarted = false;     // N started the history again
     bool fg_failed = false;        // the history cannot be made; frame generation is off
