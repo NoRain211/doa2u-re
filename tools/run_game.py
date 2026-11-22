@@ -136,11 +136,10 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
                         ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
                         ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr),
-                        ("RECOMP_FREE_CAMERA", free_camera), ("RECOMP_RANDOM_CPU_COSTUMES", random_cpu_costumes)):
+                        ("RECOMP_FREE_CAMERA", free_camera), ("RECOMP_RANDOM_CPU_COSTUMES", random_cpu_costumes),
+                        ("RECOMP_D3D_FRAMEGEN", framegen)):
         if value is not None:
             env[name] = value if isinstance(value, str) else str(int(value))
-    if framegen:
-        env["RECOMP_D3D_FRAMEGEN"] = "1"
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
     # The game's Rebind screen (Options, Controller) saves both files here.

@@ -174,7 +174,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                                  str(root / "private/controller.json"))
                 self.assertEqual(run(None, vulkan=True, framegen=False), 0)
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
-                self.assertNotIn("RECOMP_D3D_FRAMEGEN", execute.call_args.kwargs["env"])
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "0")
                 (root / "private/dedication.bmp").write_bytes(b"card")
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_DEDICATION_CARD"],
