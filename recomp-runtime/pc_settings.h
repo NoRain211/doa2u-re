@@ -28,7 +28,7 @@ enum RecompPcSetting {
     RECOMP_PC_FREE_CAMERA,   /* Off, On */
     RECOMP_PC_DEDICATION,    /* Show, Hide */
     RECOMP_PC_LIFE_BAR,      /* Default, 16 colours, Custom (combo_hud.h) */
-    RECOMP_PC_COMBO_HUD,     /* Off, On (combo_hud.h) */
+    RECOMP_PC_FIGHT_HUD,     /* Original, Damage, Stun Meter, Both (combo_hud.h) */
     RECOMP_PC_HIT_VOICES,    /* Off, Quiet, Normal, Loud (hit_voice.h) */
     RECOMP_PC_KO_REPLAY,     /* Original, Dynamic (ko_replay.h) */
     RECOMP_PC_SETTING_COUNT
