@@ -165,60 +165,25 @@ that shortcut.
   Direct3D 11 and Vulkan. The **Frame rate: Display** row on the launchers'
   VIDEO SETTINGS page and in the game's PC SETTINGS sets it at the next
   launch. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
-  it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
+  it presents k = refresh / 60 pictures per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
-  frame, so the picture is up to one guest frame later. The presenter
-  estimates the motion between the last two real frames by block matching and
-  moves both along it into each generated frame. Where the motion is doubtful
-  (flat or noisy areas such as water, repeating patterns, the edges of moving
-  objects), it blends toward a crossfade of the two, so moving objects ghost
-  there. The game's 2D layer (life bars, timer, names, menus and logos, but
-  not fades or backdrops that span the screen's width) does not move: it
-  shows the nearer real frame, and the scene is not warped from it. At a
-  scene cut, where most of the picture's shapes change between the two real
-  frames, the generated frames show the older real frame, so the cut lands
-  with the newer one as at 60 Hz; fades and flashes keep the shapes and
-  crossfade, and a very fast camera move can be taken for one cut. After frame generation was off, a quality change, or a real
-  frame more than 1.5 guest frames late (a load; 2.5 on Direct3D 11, where
-  the presenter's own work sits in that gap), the generated frames start
-  again from the newer real frame.
-  `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead, as color per search
-  block: hue is the direction, brightness the speed, dark blocks have low
-  confidence, the 2D layer is whitened, and all of it turns red at a cut.
-  The presenter worker presents each one when it is due, also between the
-  draws of the next real frame, and skips one it would show late; real
-  frames are never delayed, except that a late VRR slot may wait up to one
-  refresh so two pictures never share one. A refresh that is not a whole multiple of 60 Hz
-  without VRR, and macOS and Linux, log `framegen unsupported` and run as
-  before. With **VRR: On**, a display that is a whole multiple of 60 Hz keeps
-  those VSYNC slots; any other rate gets k = floor((refresh - 3) / 60) slots
-  (144 Hz and 165 Hz 2, 200 Hz 3, 280 Hz 4), presented with tearing 1 / (60 k)
-  seconds apart on the guest's 1/60 s grid, just below the panel's ceiling so
-  VRR never reaches it. A VRR rate below 120 Hz logs `framegen unsupported`
-  and runs as before. It is off while the window is hidden or minimized, in
+  frame. With **VRR: On** (Direct3D 11), any other rate gets
+  k = floor((refresh - 3) / 60) timed slots. It adds input delay: the newer
+  real frame is shown at the last slot, (k - 1) / (60 k) s after it arrives
+  (about 8.3 ms at k = 2, 11.1 ms at k = 3, 12.5 ms at k = 4), plus the GPU
+  time of its passes. It is off while the window is hidden or minimized, in
   an unpaced or fast-forwarded run, under the frame clock (netplay and
-  synctest) and under immediate present; with it off, VRR presents the real
-  frames as it does without frame generation. With `RECOMP_PERF_COUNTER=1` it
-  logs a `recomp framegen` line each second.
+  synctest) and under immediate present. Any other display, and macOS and
+  Linux, log `framegen unsupported` and run as before.
+  `RECOMP_D3D_FRAMEGEN=flow` shows the estimated motion instead, and
+  `RECOMP_PERF_COUNTER=1` logs a `recomp framegen` line each second.
+  [Frame generation](frame-generation.md) describes how it works, its
+  latency, limits and debugging.
 - `RECOMP_D3D_FRAMEGEN_CAPTURE=<folder>`, with frame generation on in the
-  Vulkan renderer, writes what it gets for each real frame into the folder:
-  the picture before gamma, the HUD mask, the gamma ramp, and whether the
-  frame started the history again. `RECOMP_D3D_FRAMEGEN_CAPTURE_AT` (first
-  present, default 1)
-  and `_COUNT` (default all) select the frames. Frame generation then also
-  runs with `RECOMP_HEADLESS=1`. The game runs slowly while it writes, and a
-  2160 frame takes 41 MB; keep the quality fixed during a capture. The frames
-  are game output: keep captures under `private/`. Built with the runtime
-  tests, `recomp_d3d_framegen_replay <capture> <output>` renders every frame
-  the window would show at k times 60 Hz (`--k 4` by default): for each real
-  frame, its k - 1 generated frames, then the frame, after gamma, through the
-  presenter's own frame generation, as `<frame>-<slot>.bmp` files.
-  `--crossfade` replaces the generated frames with the plain crossfade and
-  `--original` repeats each real frame k times, as the game looks at 60 Hz.
-  `--ffmpeg` and the options after it pipe the frames to `ffmpeg` on `PATH`
-  instead, with `<output>` as its output file, for example
-  `--ffmpeg -c:v ffv1`. The first real frame starts the history. Direct3D 11
-  does not capture; it logs that capture is unsupported.
+  Vulkan renderer, writes what it gets for each real frame into the folder,
+  for `recomp_d3d_framegen_replay` to render offline. The frames are game
+  output: keep captures under `private/`. See
+  [Frame generation](frame-generation.md#debugging-and-evaluation).
 - `RECOMP_AUDIO_CAPTURE` records SDL's dry mix as a float WAV and does not
   stop after 60 seconds.
 - `RECOMP_HEADLESS=1` hides the window, for scripted runs.

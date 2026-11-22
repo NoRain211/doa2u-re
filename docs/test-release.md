@@ -33,7 +33,8 @@ intro skip on MOVIES and the unlocks and free camera on GAMEPLAY, then
 choose START GAME. Direct3D 11 is the default renderer; Vulkan is an
 alternative to try if it stutters. VRR works with Direct3D 11 only; turn it
 on only for a G-SYNC or FreeSync display. Frame rate: Display fills a 120 Hz
-or faster screen with generated frames, also with VRR. A controller, the
+or faster screen with generated frames, also with VRR; it adds about 8 to
+12 ms of input delay and is off online. A controller, the
 keyboard (arrows, Enter, Esc) or the
 mouse all work. It remembers your choices, and DOA2U.exe plays with the same
 choices. Widescreen

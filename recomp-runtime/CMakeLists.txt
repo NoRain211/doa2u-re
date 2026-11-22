@@ -557,7 +557,7 @@ if(WIN32)
     set_tests_properties(recomp-runtime-d3d-presenter-vulkan PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77
         RESOURCE_LOCK gpu)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES RESOURCE_LOCK gpu)
-    # Renders a RECOMP_D3D_FRAMEGEN_CAPTURE offline (docs/building.md).
+    # Renders a RECOMP_D3D_FRAMEGEN_CAPTURE offline (docs/frame-generation.md).
     add_executable(recomp_d3d_framegen_replay d3d_framegen_replay.cpp xapi_clock.cpp d3d_card_model.c)
     target_link_libraries(recomp_d3d_framegen_replay PRIVATE recomp_d3d_presenter_vulkan)
     recomp_use_sdl3(recomp_d3d_framegen_replay)

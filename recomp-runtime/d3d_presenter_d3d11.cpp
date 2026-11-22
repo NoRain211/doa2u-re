@@ -4108,7 +4108,7 @@ RecompD3dPresenterError submitPresent(
         ? fitViewport(shown, chain.BufferDesc.Width, chain.BufferDesc.Height)
         : D3D11_VIEWPORT{};
     /* Frame generation keeps this real frame's picture now and shows it at its
-       last slot, after the generated ones, so a real frame is never delayed.
+       last slot, after the generated ones: (k - 1) / (60 k) s after it arrives.
        The window becomes visible before this decision (the first present's
        diagnostic block shows it later, which would leave the first frame out
        of the history). */

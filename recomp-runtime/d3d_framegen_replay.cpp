@@ -2,7 +2,7 @@
 /* Replays a RECOMP_D3D_FRAMEGEN_CAPTURE folder through the SDL_GPU
    presenter's frame generation, offline: for each real frame N, the k - 1
    generated frames between N-1 and N, then N, after gamma, as the window
-   shows them at k times 60 Hz. docs/building.md describes it.
+   shows them at k times 60 Hz. docs/frame-generation.md describes it.
 
    recomp_d3d_framegen_replay <capture> <output> [--k N] [--crossfade | --original]
        [--ffmpeg <ffmpeg output options>...]
