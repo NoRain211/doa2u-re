@@ -56,5 +56,12 @@ unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot
    wait from submit in milliseconds, or a negative value without a field. */
 double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat, unsigned size[2], float *fields,
     size_t capacity);
+/* SDL_GPU only, for tests: generates the picture t of the way from real frame
+   N-1 to N repeat times, waits for it, and reads it as 0xAARRGGBB into pixels
+   when capacity holds the main target. size gets its width and height.
+   Returns the wait from submit in milliseconds, or a negative value without
+   two real frames. */
+double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, unsigned repeat, unsigned size[2],
+    uint32_t *pixels, size_t capacity);
 
 #endif

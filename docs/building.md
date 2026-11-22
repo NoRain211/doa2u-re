@@ -167,12 +167,14 @@ that shortcut.
   runner. On a display of 120 Hz, 240 Hz or another whole multiple of 60 Hz,
   it presents k = refresh / 60 frames per guest frame on VSYNC: k - 1
   generated frames between the last two real frames, then the newer real
-  frame, so the picture is up to one guest frame later. The generated frames
-  are a crossfade of the last two real frames for now, so moving objects
-  ghost. The presenter also estimates the motion between them by block
-  matching, not yet used; `RECOMP_D3D_FRAMEGEN=flow` shows it instead of the
-  crossfade, as color per search block: hue is the direction, brightness the
-  speed, and dark blocks have low confidence. The presenter worker presents
+  frame, so the picture is up to one guest frame later. The presenter
+  estimates the motion between the last two real frames by block matching and
+  moves both along it into each generated frame. Where the motion is doubtful
+  (flat or noisy areas such as water, repeating patterns, scene cuts, the
+  edges of moving objects), it blends toward a crossfade of the two, so moving
+  objects ghost there. `RECOMP_D3D_FRAMEGEN=flow` shows the motion instead,
+  as color per search block: hue is the direction, brightness the speed, and
+  dark blocks have low confidence. The presenter worker presents
   each one when it is due, also between the draws of the next real frame, and
   skips one it would show late; real frames are never delayed. Any other
   refresh, `RECOMP_D3D_VRR=1`, and macOS and Linux, log `framegen
