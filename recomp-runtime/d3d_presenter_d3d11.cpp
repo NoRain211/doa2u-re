@@ -4817,6 +4817,11 @@ bool d3d_backend_paces_present(RecompD3dPresenter *presenter)
     return presenter->vrr || presenter->sync_interval != 1u || immediatePresent(presenter);
 }
 
+bool d3d_backend_framegen_on(RecompD3dPresenter *presenter)
+{
+    return presenter->fg_k != 0u;
+}
+
 void d3d_backend_flush(RecompD3dPresenter *presenter)
 {
     presenter->context->Flush();

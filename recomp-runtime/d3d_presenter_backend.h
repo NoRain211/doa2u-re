@@ -33,6 +33,8 @@ void d3d_backend_set_immediate_present(bool enabled);
    (Direct3D 11 on a VRR display, or holding each frame 2 or 4 refreshes) or
    presents each frame at once, as immediate present asks. */
 bool d3d_backend_paces_present(RecompD3dPresenter *presenter);
+/* True when frame generation runs on this presenter. */
+bool d3d_backend_framegen_on(RecompD3dPresenter *presenter);
 /* Sends the frame's recorded GPU work before the presenter holds a PRESENT. */
 void d3d_backend_flush(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */

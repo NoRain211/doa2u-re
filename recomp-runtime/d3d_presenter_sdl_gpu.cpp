@@ -4516,6 +4516,11 @@ bool d3d_backend_paces_present(RecompD3dPresenter *)
     return immediate_present;
 }
 
+bool d3d_backend_framegen_on(RecompD3dPresenter *presenter)
+{
+    return presenter->fg_k != 0u;
+}
+
 void d3d_backend_flush(RecompD3dPresenter *presenter)
 {
     // submitPresent flushes the segment first too, so its HUD mask and resolve see the same state.

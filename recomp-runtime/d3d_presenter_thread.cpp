@@ -33,6 +33,8 @@ struct PresenterThread {
     unsigned open = 0;
     unsigned front = 0;
     unsigned pending = 0; // Includes the packet executing outside the mutex.
+    // Frames the guest may queue: one, or two while frame generation runs.
+    unsigned frames_in_flight = 1u;
     bool started = false;
     bool shutdown = false;
     bool finished = false; // run() has released the backend
@@ -269,6 +271,8 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         thread.created = created;
         thread.status = created;
         thread.started = true;
+        // Frame generation's slots were tuned with a spare queued frame; keep it.
+        if (created == RECOMP_D3D_PRESENTER_OK && d3d_backend_framegen_on(backend)) thread.frames_in_flight = 2u;
     }
     thread.changed.notify_all();
     if (created != RECOMP_D3D_PRESENTER_OK) return;
@@ -452,7 +456,8 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
     /* Under the frame clock Swap skips its guest wait, so this publish blocks
        the host: the spare queued frame absorbs a slow one and keeps netplay at speed. */
     return command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT
-        ? publish(thread, false, recomp_xapi_frame_clock_enabled() ? 2u : 1u) : RECOMP_D3D_PRESENTER_OK;
+        ? publish(thread, false, recomp_xapi_frame_clock_enabled() ? 2u : thread.frames_in_flight)
+        : RECOMP_D3D_PRESENTER_OK;
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_release_memory(
@@ -510,7 +515,7 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
 {
     if (validate(presenter) != RECOMP_D3D_PRESENTER_OK) return true;
     std::lock_guard<std::mutex> lock(active_thread->mutex);
-    return canPublish(*active_thread, false);
+    return canPublish(*active_thread, false, active_thread->frames_in_flight);
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
