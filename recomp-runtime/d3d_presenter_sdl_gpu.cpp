@@ -402,6 +402,7 @@ struct QualityRequest {
 std::mutex quality_lock;
 QualityRequest quality_request;
 unsigned quality_applied = 0u;
+std::atomic<int64_t> framegen_late_ns{25000000};
 
 uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
 {
@@ -3695,7 +3696,7 @@ bool framegenRecord(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *command
         presenter->fg_late += presenter->fg_k - 1u - presenter->fg_next_slot;
         ++presenter->fg_unshown;
     }
-    if (steadyNs() - presenter->fg_present_ns > 25000000 || aspect != presenter->fg_aspect) presenter->fg_history = false;
+    if (steadyNs() - presenter->fg_present_ns > framegen_late_ns || aspect != presenter->fg_aspect) presenter->fg_history = false;
     if (!framegenActive(presenter)) {
         presenter->fg_history = false;
         return false;
@@ -4783,6 +4784,11 @@ double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat,
     }
     if (download != nullptr) SDL_ReleaseGPUTransferBuffer(presenter->device, download);
     return ms;
+}
+
+void d3d_backend_framegen_set_late_ns(int64_t late_ns)
+{
+    framegen_late_ns = late_ns;
 }
 
 double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws)

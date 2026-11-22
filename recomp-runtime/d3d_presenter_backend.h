@@ -67,5 +67,9 @@ double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, uns
    their count. Returns the wait from submit in milliseconds, or a negative
    value without a mask. */
 double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws);
+/* SDL_GPU only, for tests: a real frame recorded more than late_ns after the
+   one before starts frame generation's history again. 25 ms by default;
+   tests that push frames unpaced widen it. */
+void d3d_backend_framegen_set_late_ns(int64_t late_ns);
 
 #endif

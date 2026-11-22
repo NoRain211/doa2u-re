@@ -3964,11 +3964,14 @@ static bool testFramegenCuts()
         if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
         if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
         if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false);  // applied after the next real frame
-        if (way == 2u) std::this_thread::sleep_for(std::chrono::milliseconds(40));
-        else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
+        if (way == 2u) {
+            d3d_backend_framegen_set_late_ns(25000000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        } else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
         recomp_xapi_fast_forward = nullptr;
         recomp_xapi_frame_clock_set_enabled(false);
         passed = passed && flowFrame(presenter, c, 0x400000u, ++swap) && generate(0.25f);
+        d3d_backend_framegen_set_late_ns(INT64_MAX);
         unsigned off = 0u;
         // Away from the edges, which MSAA blends with the clear.
         for (int y = 2; y < 238 && passed; ++y) {
@@ -4093,6 +4096,8 @@ int main()
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
+    // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
+    d3d_backend_framegen_set_late_ns(INT64_MAX);
     if (!testFramegenKeepsRealFrames() || !testFramegenFlow() || !testFramegenWarp() ||
         !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts()) return 1;
     benchFramegenFlow();
