@@ -267,7 +267,7 @@ if __name__ == "__main__":
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
                         help="Present for a G-SYNC or FreeSync display (Direct3D 11)")
     parser.add_argument("--framegen", action=argparse.BooleanOptionalAction, default=None,
-                        help="Fill a 120 or 240 Hz display (a whole multiple of 60 Hz) with generated frames (Windows Vulkan, experimental)")
+                        help="Fill a display at a whole multiple of 60 Hz (120, 180, 240, 360) with generated frames (Windows, experimental)")
     parser.add_argument("--random-cpu-costumes", action=argparse.BooleanOptionalAction, default=None,
                         help="Dress CPU opponents in random unlocked costumes (offline)")
     parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,
