@@ -245,3 +245,8 @@ void recomp_d3d_pace_present(void (*flush)(RecompD3dPresenter *), RecompD3dPrese
     if (flush != nullptr && present_slot_ns > now) flush(presenter);
     recomp_d3d_sleep_until(present_slot_ns);
 }
+
+long long recomp_d3d_vrr_slot(long long previous_ns, long long now_ns)
+{
+    return (std::max)(previous_ns + 1000000000 / 60, now_ns);
+}

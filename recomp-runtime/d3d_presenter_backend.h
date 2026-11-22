@@ -30,7 +30,7 @@ unsigned precompileProgramShaders(RecompD3dPresenter *presenter, bool scaled, ui
 unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
 void d3d_backend_set_immediate_present(bool enabled);
 /* True when the presenter must not pace PRESENT: the backend paces it itself
-   (Direct3D 11 on a VRR display, or holding each frame 2 or 4 refreshes) or
+   (on a VRR display, or Direct3D 11 holding each frame 2 or 4 refreshes) or
    presents each frame at once, as immediate present asks. */
 bool d3d_backend_paces_present(RecompD3dPresenter *presenter);
 /* Sends the frame's recorded GPU work before the presenter holds a PRESENT. */
@@ -51,7 +51,9 @@ enum D3dBackendVisibilityPoll {
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(
     RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels);
 /* Inline backends only: true when the next swapchain acquire would not wait
-   for the GPU to finish an earlier frame. */
+   for the GPU to finish an earlier frame. Not a pure query: its only caller
+   is Swap's wait, just before that frame's PRESENT, and with VRR the SDL_GPU
+   backend queues the frame's draws here so they render during the wait. */
 bool d3d_backend_present_ready(RecompD3dPresenter *presenter);
 /* Windows worker only: presents frame generation's due slot, if any. The
    worker calls it between records and while it waits. Returns the 100 ns

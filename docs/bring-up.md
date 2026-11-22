@@ -73,7 +73,7 @@ Close the game window to exit. Session logs, including the runner identity and a
 runtime stop, are kept under `private/play-logs/`.
 The startup legal presentation is skipped automatically at its game-owned
 wrapper (`0xd92c0`), before its menu and asset setup. The intro movies play
-unless `--skip-intro` (the launcher's **Skip intro movies**) is set. Then the
+unless `--skip-intro` (the launcher's **Intro Movies: Skip**) is set. Then the
 logo movie (`0xd9300`) keeps its setup and teardown but omits its playback
 wait, and the boot opening movie (scene 5, ticked by `0x69180`) ends on its
 first tick; attract replays and story movies still play. The game's soft reset
@@ -136,6 +136,18 @@ internal special-value dispatch branches such as `0x338e10`. Numeric results
 include NaN for domain errors; guest CRT errno, math-error callbacks and
 unmasked floating-point exceptions are not implemented by this seam.
 
+`RCPSS` and `RSQRTSS` return Intel's estimate on every host: the result at
+the middle of the interval that the operand's top 11 bits select, rounded to
+12 fraction bits (`recomp_types.h`). The game's square root (`0x282ef0`, 230
+call sites) and reciprocal square root (`0x282f50`) refine that estimate with
+one Newton step, so its low bits reach fight positions. With the exact
+quotient, the Tina and Bass attract demo left the console's path at the
+cliff: Bass's ledge throw (motion 353) did not start, and the camera circled
+until the demo timed out (issue #199). With the estimate the throw starts,
+both fall to the lower level and the demo ends on Tina's win, as reported
+from a console. The formula reproduces Bochs's tables for the two
+instructions; it is not measured on the Xbox CPU.
+
 ## Graphics API contract
 
 `RECOMP_D3D_WIDESCREEN=1` supplies XC_VIDEO 0x004f0000 (widescreen, no
@@ -192,18 +204,20 @@ height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output
 and shared depth after capability fallback.
 
-Planned graphics work keeps the authentic look (see `GLOSSARY.md`), one PR
-each, in this order: restore the mip levels that uncompressed textures lose on
-the host; accept point min/mag filtering, which currently stops the runner;
-16x anisotropic filtering behind an environment variable, its default chosen
-from in-game frame dumps; give the 16:9 mirror projection the screen's shape
-outside netplay and replays; scale depthless effect targets (shadow map,
-bloom, heat haze) with the main scale on SDL_GPU, correcting filter radii.
-Every step but the mirror one is presenter-only: the mirror projection lives
-in guest RAM, which is why netplay and replays keep the game's 1.5. The first
-two are accuracy fixes and the third is an enhancement, all three in both
-presenters. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA above 8x)
-are separate work.
+Graphics work keeps the authentic look (see `GLOSSARY.md`), one PR each.
+Two accuracy fixes have landed in both presenters: uncompressed textures keep
+their guest mip levels, and point min/mag filtering no longer stops the
+runner. The 16:9 mirror projection now has the screen's shape whenever
+widescreen is on, Live fights included. It is the only change that is not
+presenter-only: the projection is in guest RAM, outside the ranges a Live
+fight's desync check hashes. 16x anisotropic filtering is shelved. In in-game
+frame dumps, stage floors were bit-identical with and without it in both
+presenters. A possible cause, not confirmed: the stages request point mip
+filtering, and that turns anisotropy off. Scaling the depthless effect targets
+(shadow map, bloom, heat haze) with the main scale on SDL_GPU remains open but
+has low priority. At 2160 lines only the fighters' shadows look soft; bloom
+looks the same as at 480. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA
+above 8x) are separate work.
 
 Textures aliasing either embedded frame-buffer surface use host-rendered
 storage. The front-buffer selector chooses the previous presented frame;
@@ -797,7 +811,16 @@ Random; every other read goes through `0x135410`, `0x135510` and
 replaces those five and adds stage 18 (the Miyama his story fight loads)
 before Random in the regular list, with the game's unused Miyama name (61)
 and thumbnails (14, 36). Its entry sits in the reserved kernel page at
-`0x03ff0c00`, since other data follows the table. The tag list stays as it was.
+`0x03ff0c00`, since other data follows the table. The row list's only caller
+(`0x1357a0`) passes the 5-stage tag list for a tag match and for game mode 8,
+Live's Team Battle (session type 2, `0x2a8ab0`). In the online scenes, where
+`frontend_online_select_enabled` (`0xcfa20`: `g_frontend_selected_mode`
+`0xdf57b4` is 0x12 and `0xf252a4` is set) is true, Miyama is added to that
+list too, before Random. Offline Tag stays as it was. Offline modes also set
+game mode 5, so the mode alone does not mark a Live match. Live 1v1 sessions
+already read the regular list. Miyama sends no stage state with the match
+settings (only stages 9 and 55 do, `0x14c220`). Miyama in a tag match or Team
+Battle was not played.
 
 Ids 18, 27, 63, 64 and 65 are one stage group (`0x693370`) with identical data
 and area descriptors. Stage Select's preview load (`0x12e720`) sets the stage
@@ -914,7 +937,7 @@ own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
 `RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
-Dedication, the life bar, the combo HUD, hit voices and the KO replay apply at
+Dedication, the life bar, the fight HUD, hit voices and the KO replay apply at
 once, as do CPU Costumes and the Free Camera offline (both are off while
 logged on to DOA ONLINE), and the others at the next launch.
 

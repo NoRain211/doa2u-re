@@ -32,6 +32,9 @@ void recomp_d3d_sleep_until(long long steady_ns);
 // flush, when set, runs before a hold, so the GPU renders during it.
 struct RecompD3dPresenter;
 void recomp_d3d_pace_present(void (*flush)(struct RecompD3dPresenter *), struct RecompD3dPresenter *presenter);
+// RECOMP_D3D_VRR: the present slot after previous_ns on the guest's exact 1/60 s
+// grid; a late frame presents now and moves the grid, as the guest timer does.
+long long recomp_d3d_vrr_slot(long long previous_ns, long long now_ns);
 
 #ifdef __cplusplus
 }

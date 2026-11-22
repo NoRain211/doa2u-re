@@ -326,7 +326,8 @@ int main(void)
         recomp_pc_settings_choices(RECOMP_PC_FRAME_RATE) == 2u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
+        !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
     recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
@@ -472,7 +473,7 @@ int main(void)
     hook(0x0011cfc0u, none, 2u); /* the fourth view: Dedication to Hit Voices */
     const uint32_t row3_help[3] = {19u, 3u, 0u};
     hook(0x00091560u, row3_help, 3u);
-    expect("combo hud live", rd16(help_text + 26u) == 'i'); /* row 3 is Combo HUD, live */
+    expect("fight hud live", rd16(help_text + 26u) == 'i'); /* row 3 is Fight HUD, live */
     hook(0x0011cfc0u, none, 2u); /* the fifth view: KO Replay alone */
     const uint32_t short_page = 19u;
     expect("short view rows", hook(0x0011ac90u, &short_page, 1u) == 2u);
