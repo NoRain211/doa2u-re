@@ -83,5 +83,9 @@ bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *pi
 /* SDL_GPU only, for d3d_framegen_replay.cpp: frame generation crossfades
    from now on, as without its flow. */
 void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
+/* SDL_GPU only, for tests: a real frame recorded more than late_ns after the
+   one before starts frame generation's history again. 25 ms by default;
+   tests that push frames unpaced widen it. */
+void d3d_backend_framegen_set_late_ns(int64_t late_ns);
 
 #endif

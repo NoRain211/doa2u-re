@@ -3698,7 +3698,10 @@ static bool testFramegenKeepsOpenCommands()
             passed &= expect("framegen open commands draw", d3d_backend_submit(presenter, &composite));
             present();
             uint32_t probe[3]{};
-            passed = passed && d3d_backend_framegen_probe(presenter, 0u, probe) != 0u;
+            if (passed && d3d_backend_framegen_probe(presenter, 0u, probe) == 0u) {
+                std::fprintf(stderr, "FAIL framegen open commands probe at frame %u\n", frame);
+                passed = false;
+            }
             if (passed && ((probe[1] ^ color) & 0xffffffu) != 0u) {
                 std::fprintf(stderr, "FAIL framegen frame %u shows %06x, its target was cleared to %06x\n",
                     frame, probe[1] & 0xffffffu, color & 0xffffffu);
@@ -4055,10 +4058,16 @@ static bool testFramegenWarpEdges()
     }
     const float truth_shift[2][2] = {{1.5f, -1.0f}, {0.0f, 0.0f}};
     unsigned size[2]{};
+    bool wrong_size = false;
+    // False only when frame generation does not engage; a wrong size sets wrong_size.
     const auto generate = [&](float t, std::vector<uint32_t> &pixels) {
         pixels.assign(static_cast<size_t>(w) * h, 0u);
-        return d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) >= 0.0 &&
-            size[0] == static_cast<unsigned>(w) && size[1] == static_cast<unsigned>(h);
+        if (d3d_backend_framegen_generate(presenter, t, 1u, size, pixels.data(), pixels.size()) < 0.0) return false;
+        if (size[0] != static_cast<unsigned>(w) || size[1] != static_cast<unsigned>(h)) {
+            std::fprintf(stderr, "FAIL framegen warp edges made %ux%u, not %dx%d\n", size[0], size[1], w, h);
+            wrong_size = true;
+        }
+        return true;
     };
     RecompD3dPresenterCommand clear = clearCommand(), present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
     present.data.present = {5u, 1u};
@@ -4074,7 +4083,7 @@ static bool testFramegenWarpEdges()
         // generate(0) and generate(1) are the real frames themselves.
         passed = generate(0.0f, from) && generate(1.0f, to) &&
             flowFrame(presenter, truth_picture[scene], 0x400000u + scene * 0x100000u, ++swap,
-                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth);
+                truth_shift[scene][0], truth_shift[scene][1], true) && generate(1.0f, truth) && !wrong_size;
         if (!passed) break;
         std::vector<int> crossfade = flowGreen(from);
         const std::vector<int> later = flowGreen(to);
@@ -4288,11 +4297,14 @@ static bool testFramegenCuts()
         if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
         if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
         if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false);  // applied after the next real frame
-        if (way == 2u) std::this_thread::sleep_for(std::chrono::milliseconds(40));
-        else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
+        if (way == 2u) {
+            d3d_backend_framegen_set_late_ns(25000000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        } else passed = passed && flowFrame(presenter, faded, 0x200000u, ++swap);
         recomp_xapi_fast_forward = nullptr;
         recomp_xapi_frame_clock_set_enabled(false);
         passed = passed && flowFrame(presenter, c, 0x400000u, ++swap) && generate(0.25f);
+        d3d_backend_framegen_set_late_ns(INT64_MAX);
         unsigned off = 0u;
         // Away from the edges, which MSAA blends with the clear.
         for (int y = 2; y < 238 && passed; ++y) {
@@ -4503,6 +4515,8 @@ int main()
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
 #ifndef RECOMP_TEST_D3D11
+    // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
+    d3d_backend_framegen_set_late_ns(INT64_MAX);
     if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() || !testFramegenWarp() ||
         !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts() || !testFramegenCapture()) return 1;
     benchFramegenFlow();
