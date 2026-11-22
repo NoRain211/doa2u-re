@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
 // the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
-// launcher.sh starts the game. Mirrors tools/launcher.cs, its BUILD GAME page included,
-// with MSAA up to SDL_GPU's 8x: the backdrop
-// between letterbox bars, the page tabs and the chosen page's settings in the
-// bottom one. Adapted from committed DOA3 tools/launcher_macos.swift at ce393e4.
+// launcher.sh starts the game. Mirrors tools/launcher.cs, its GAME page's build included,
+// with MSAA up to SDL_GPU's 8x: the backdrop under a top letterbox bar, and a panel
+// at the left with the page tabs, the chosen page's settings and their information.
+// Adapted from committed DOA3 tools/launcher_macos.swift at ce393e4.
 // Keyboard and mouse. Exits 1 if the window is closed.
 import AppKit
 
@@ -21,7 +21,7 @@ if let data = try? Data(contentsOf: settingsURL),
    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
     settings = json
 }
-// The BUILD GAME page builds from the player's own Disc 2 ISO, remembered in the shared game_source setting.
+// The GAME page builds from the player's own Disc 2 ISO, remembered in the shared game_source setting.
 var gameSource: String = settings["game_source"] as? String ?? ""
 let buildLogURL = root.appendingPathComponent("private/build.log")
 func isBuilt() -> Bool {
@@ -98,11 +98,12 @@ func runUpdate(_ command: String, done: @escaping (Bool, String) -> Void) {
 }
 
 final class LauncherView: NSView {
-    // Horizon Bar layout, as in tools/launcher.cs: letterbox bars, the settings and page tabs in the bottom one.
+    // Horizon Bar layout, as in tools/launcher.cs: a top letterbox bar, and the page tabs, settings rows and
+    // information in a panel at the left.
     static let topH: CGFloat = 44, side: CGFloat = 30, fadeY: CGFloat = 334
-    static let infoY: CGFloat = 380, labelY: CGFloat = 414, valueY: CGFloat = 434, valueH: CGFloat = 30
-    static let tabY: CGFloat = 494, tabH: CGFloat = 26
-    static let buildPage = 4, playPage = 5, updatePage = 6, exitPage = 7
+    static let panelW: CGFloat = 480, inset: CGFloat = 20
+    static let tabY: CGFloat = 56, tabH: CGFloat = 26, listY: CGFloat = 100, rowH: CGFloat = 36, infoY: CGFloat = 480
+    static let gamePage = 0, updatePage = 4
 
     // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
@@ -116,7 +117,8 @@ final class LauncherView: NSView {
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
     let intro = Row("Intro Movies", "Skip goes straight to the title screen at boot", ["Play", "Skip"],
                     boolSetting("skipIntro", false) ? 1 : 0)
-    let chooseGame = Row("Disc ISO", "", ["Choose"], 0)
+    let playRow = Row("Start Game", "Saves these settings and starts the game", ["Start"], 0)
+    let chooseGame = Row("Disc 2 ISO", "", ["Choose"], 0)
     let buildRow = Row("Build", "Builds the game from your Disc 2 ISO; takes about 10 minutes", ["Build"], 0)
     let updateRow = Row("Update", "Choose Check to look for a newer release", ["Check"], 0)
     let checkAtStart = Row("Check At Start", "Looks for a newer release when the launcher opens", ["Off", "On"],
@@ -129,20 +131,19 @@ final class LauncherView: NSView {
                           boolSetting("randomCpuCostumes", false) ? 1 : 0)
     let dedication = Row("Dedication", "Shows a memorial card before the staff roll", ["Show", "Hide"],
                          boolSetting("dedicationCard", true) ? 0 : 1)
+    // No JUKEBOX page: this launcher has no jukebox rows.
     lazy var pages = [
-        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing and screen shape", rows: [resolution, msaa, smaa, screen]),
+        Page(name: "GAME", info: "Starts the game, or builds it from your own Disc 2 ISO", rows: [playRow, chooseGame, buildRow]),
+        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, screen shape and the intro movies",
+             rows: [resolution, msaa, smaa, screen, intro]),
         Page(name: "AUDIO", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
-        Page(name: "MOVIES", info: "Plays or skips the logo and opening movies at boot", rows: [intro]),
         Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
              rows: [unlock, cpuCostumes, freeCamera, dedication]),
-        Page(name: "BUILD GAME", info: "Builds the game from your own Disc 2 ISO; takes about 10 minutes",
-             rows: [chooseGame, buildRow]),
-        Page(name: "START GAME", info: "Saves these settings and starts the game", rows: []),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
-        Page(name: "EXIT", info: "Closes the launcher", rows: []),
     ]
-    // The tab cursor picks a page; inside a page the row cursor picks a setting column.
-    var tab = isBuilt() ? LauncherView.playPage : LauncherView.buildPage, row = 0, inPage = false
+    // Focus is on the page tabs, or (inPage) on the current page's row. It opens on Start Game, or on
+    // Disc 2 ISO before a build.
+    var tab = LauncherView.gamePage, row = isBuilt() ? 0 : 1, inPage = true
     // A line that replaces the information text until the next input: build progress or a refused action.
     var notice: String?
     // The build runs build_game.sh with its output in private/build.log. The first exit request during a
@@ -151,8 +152,6 @@ final class LauncherView: NSView {
     var buildTimer: Timer?
     var buildStart = Date()
     var stopDeadline = Date.distantPast // a quit during a build asks for a second one before this
-    // A held Down that entered a page waits for release before it changes a value.
-    var downEntered = false
     // The newer version a check found, and whether a check or install is running.
     // Play and quit wait for an install, which replaces the tools.
     var pending: String?
@@ -166,7 +165,7 @@ final class LauncherView: NSView {
 
     let menuFont = font("HelveticaNeue-BoldItalic", 19)
     let tabFont = font("HelveticaNeue-BoldItalic", 14), infoFont = font("HelveticaNeue-Italic", 14), smallFont = font("HelveticaNeue-Bold", 12)
-    let titleFont = font("HelveticaNeue-BoldItalic", 25), ultimateFont = font("HelveticaNeue-BoldItalic", 21)
+    let ultimateFont = font("HelveticaNeue-BoldItalic", 21)
     let logoFont = font("Arial-Black", 30), bigFont = font("Arial-Black", 54)
 
     override var isFlipped: Bool { true }
@@ -175,6 +174,7 @@ final class LauncherView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         updateRow.action = { [unowned self] in self.update(quiet: false) }
+        playRow.action = { [unowned self] in self.startGame() }
         chooseGame.action = { [unowned self] in self.chooseGameDisc() }
         buildRow.action = { [unowned self] in self.startBuild() }
         showGame()
@@ -184,7 +184,6 @@ final class LauncherView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     var rows: [Row] { pages[tab].rows }
-    var columnWidth: CGFloat { (bounds.width - 2 * LauncherView.side) / CGFloat(max(rows.count, 1)) }
 
     var chosen: [String: Any] {
         var chosen: [String: Any] = [
@@ -227,16 +226,17 @@ final class LauncherView: NSView {
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
               (path as NSString).pathExtension.lowercased() == "iso" else {
             notice = "Choose your Disc 2 .iso image"
-            tab = LauncherView.buildPage
-            inPage = false // the row may be past the Build page's two
+            tab = LauncherView.gamePage
+            inPage = true
+            row = 1 // Disc 2 ISO
             return
         }
         gameSource = path
         settings["game_source"] = path
         showGame()
-        tab = LauncherView.buildPage
+        tab = LauncherView.gamePage
         inPage = true
-        row = 1 // Build
+        row = 2 // Build
         notice = "Disc: " + (path as NSString).lastPathComponent + ". Press Build"
     }
 
@@ -306,14 +306,16 @@ final class LauncherView: NSView {
         built = isBuilt()
         showGame()
         if exited && status == 0 {
-            notice = "Build complete. Choose START GAME to play"
-            tab = LauncherView.playPage
-            inPage = false
+            notice = "Build complete. Choose Start Game to play"
+            tab = LauncherView.gamePage
+            inPage = true
+            row = 0 // Start Game
         } else {
             let tail = logTail()
             notice = tail.hasPrefix("Build failed") ? tail : "Build failed: " + tail
-            tab = LauncherView.buildPage
-            inPage = false
+            tab = LauncherView.gamePage
+            inPage = true
+            row = 2 // Build
         }
         needsDisplay = true
     }
@@ -336,8 +338,9 @@ final class LauncherView: NSView {
         guard buildProcess != nil else { return false }
         if Date() < stopDeadline { stopBuild(); return false }
         stopDeadline = Date().addingTimeInterval(3)
-        tab = LauncherView.buildPage
-        inPage = false
+        tab = LauncherView.gamePage
+        inPage = true
+        row = 2 // Build
         notice = "A build is running. Quit again to stop it"
         needsDisplay = true
         return true
@@ -389,22 +392,29 @@ final class LauncherView: NSView {
         return true
     }
 
+    // Start Game; before a build the cursor goes to the row that comes next, Disc 2 ISO or Build.
+    func startGame() {
+        if waitForInstall() { return }
+        tab = LauncherView.gamePage
+        inPage = true
+        if buildProcess != nil { row = 2; notice = "Wait for the build to finish"; return }
+        if !built { row = gameSource.isEmpty ? 1 : 2; notice = "Build the game first"; return }
+        onPlay()
+    }
+
+    // Q/E, PageUp/PageDown, or Left/Right on the tabs; a focused list starts at its first row.
+    func switchPage(_ delta: Int) {
+        let m = min(max(tab + delta, 0), pages.count - 1)
+        if m != tab { tab = m; row = 0 }
+    }
+
+    // From the tabs, enters the list; on a row, runs its action. Value rows change only with Left/Right.
     func accept() {
         if !inPage {
-            if (tab == LauncherView.playPage || tab == LauncherView.exitPage) && waitForInstall() { return }
-            if tab == LauncherView.playPage {
-                if buildProcess != nil { tab = LauncherView.buildPage; notice = "Wait for the build to finish"; return }
-                if !built { tab = LauncherView.buildPage; notice = "Build the game first"; return }
-                onPlay()
-                return
-            }
-            if tab == LauncherView.exitPage { NSApp.terminate(nil); return }
             inPage = true
             row = 0
         } else if let action = rows[row].action {
             action()
-        } else {
-            change(1)
         }
     }
 
@@ -415,13 +425,13 @@ final class LauncherView: NSView {
     override func keyDown(with event: NSEvent) {
         if buildProcess == nil { notice = nil }
         switch event.keyCode {
-        case 123: if inPage { row = max(row - 1, 0) } else { tab = max(tab - 1, 0) }
-        case 124: if inPage { row = min(row + 1, rows.count - 1) } else { tab = min(tab + 1, pages.count - 1) }
-        case 126: if inPage { change(1) }
-        case 125:
-            if !event.isARepeat { downEntered = false }
-            if !inPage { if !rows.isEmpty { accept(); downEntered = true } }
-            else if !(event.isARepeat && downEntered) { change(-1) }
+        case 123: if inPage { change(-1) } else { switchPage(-1) }
+        case 124: if inPage { change(1) } else { switchPage(1) }
+        case 126: if inPage { if row == 0 { inPage = false } else { row -= 1 } }
+        case 125: if inPage { row = min(row + 1, rows.count - 1) } else { accept() }
+        // Q and E (not Cmd-Q or Cmd-E), PageUp and PageDown.
+        case 12 where !event.modifierFlags.contains(.command), 116: switchPage(-1)
+        case 14 where !event.modifierFlags.contains(.command), 121: switchPage(1)
         case 36, 76, 49: accept()
         case 53, 51: back()
         default: super.keyDown(with: event); return
@@ -430,32 +440,35 @@ final class LauncherView: NSView {
     }
 
     func hitTab(_ p: NSPoint) -> Int { tabs.firstIndex { $0.contains(p) } ?? -1 }
-    func hitColumn(_ p: NSPoint) -> Int {
-        guard p.y >= LauncherView.labelY - 6, p.y <= LauncherView.valueY + LauncherView.valueH, p.x >= LauncherView.side else { return -1 }
-        let i = Int((p.x - LauncherView.side) / columnWidth)
+    func hitRow(_ p: NSPoint) -> Int {
+        guard p.x >= LauncherView.inset - 10, p.x < LauncherView.panelW - LauncherView.inset + 10, p.y >= LauncherView.listY else { return -1 }
+        let i = Int((p.y - LauncherView.listY) / LauncherView.rowH)
         return i < rows.count ? i : -1
     }
 
+    // The right edge of a row's value or button, and the left edge of its value with the left arrow.
+    var valueRight: CGFloat { LauncherView.panelW - LauncherView.inset }
+    func valueLeft(_ r: Row) -> CGFloat { valueRight - 28 - width(r.names[r.index].uppercased(), menuFont) }
+
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        let m = hitTab(p), i = hitColumn(p)
-        if !inPage && m >= 0 && m != tab { tab = m; needsDisplay = true }
-        if inPage && i >= 0 && i != row { row = i; needsDisplay = true }
+        let m = hitTab(p), i = hitRow(p)
+        if m >= 0 && (m != tab || inPage) { tab = m; inPage = false; needsDisplay = true }
+        if i >= 0 && (i != row || !inPage) { row = i; inPage = true; needsDisplay = true }
     }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        let m = hitTab(p), i = hitColumn(p)
+        let m = hitTab(p), i = hitRow(p)
         if buildProcess == nil { notice = nil }
         defer { needsDisplay = true }
-        if m >= 0 { tab = m; inPage = false; accept(); return }
+        if m >= 0 { tab = m; inPage = false; return }
         guard i >= 0 else { return }
-        // From the tabs, the first click only enters the page and selects the setting.
-        let entering = !inPage
         inPage = true
         row = i
-        if entering { return }
-        if rows[i].action != nil { accept() } else { change(p.x < LauncherView.side + (CGFloat(i) + 0.5) * columnWidth ? -1 : 1) }
+        let r = rows[i]
+        // A click on the value steps it: its left half -1, its right half +1.
+        if let action = r.action { action() } else if p.x >= valueLeft(r) { change(p.x < (valueLeft(r) + valueRight) / 2 ? -1 : 1) }
     }
 
     override func rightMouseDown(with event: NSEvent) { back(); needsDisplay = true }
@@ -492,7 +505,7 @@ final class LauncherView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let w = bounds.width, h = bounds.height, side = LauncherView.side, topH = LauncherView.topH
-        let labelY = LauncherView.labelY, valueY = LauncherView.valueY, valueH = LauncherView.valueH
+        let panelW = LauncherView.panelW, inset = LauncherView.inset, rowH = LauncherView.rowH
         let tabY = LauncherView.tabY, tabH = LauncherView.tabH
         let sand = rgb(241, 197, 143), dark = rgb(42, 29, 21), muted = rgb(191, 178, 165), chrome = rgb(226, 228, 228)
         rgb(74, 60, 51).setFill()
@@ -511,7 +524,7 @@ final class LauncherView: NSView {
              + (pending != nil ? "  \u{00B7}  UPDATE AVAILABLE" : ""), smallFont, muted,
              NSRect(x: side, y: 0, width: 500, height: topH))
         var x = w - side
-        for (key, label) in [("", "CHANGE"), ("Esc", "BACK"), ("Return", "SELECT")] {
+        for (key, label) in [("Esc", "BACK"), ("Return", "SELECT"), ("", "CHANGE"), ("Q/E", "PAGE")] {
             x -= width(label, smallFont)
             text(label, smallFont, muted, NSRect(x: x, y: 0, width: width(label, smallFont) + 4, height: topH))
             let pillW: CGFloat = key.isEmpty ? 26 : width(key, smallFont) + 14
@@ -519,7 +532,7 @@ final class LauncherView: NSView {
             let pill = NSRect(x: x, y: topH / 2 - 10, width: pillW, height: 20)
             rgb(242, 227, 207).setFill()
             NSBezierPath(roundedRect: pill, xRadius: 10, yRadius: 10).fill()
-            if key.isEmpty { arrow(x + 9, topH / 2 + 2, 0, -1, dark); arrow(x + 17, topH / 2 - 2, 0, 1, dark) }
+            if key.isEmpty { arrow(x + 12, topH / 2, -1, 0, dark); arrow(x + 14, topH / 2, 1, 0, dark) }
             else { text(key, smallFont, dark, pill, .center) }
             x -= 22
         }
@@ -530,47 +543,61 @@ final class LauncherView: NSView {
         text("DEAD OR ALIVE", logoFont, chrome, NSRect(x: 0, y: 78, width: right - two - 8, height: 46), .right, shadow: true, oblique: 0.2)
         text("ULTIMATE", ultimateFont, chrome, NSRect(x: 0, y: 124, width: right - 4, height: 30), .right, shadow: true)
 
-        // The chosen page in the bottom bar: its information line, then its settings side by side.
-        let page = pages[tab]
-        text(notice ?? (inPage ? page.rows[row].info : page.info), infoFont, rgb(216, 202, 188),
-             NSRect(x: side, y: LauncherView.infoY, width: w - 2 * side, height: 22))
-        if tab == LauncherView.playPage {
-            text("PRESS START BUTTON", titleFont, chrome, NSRect(x: side, y: valueY - 8, width: w - 2 * side, height: 40), shadow: true)
+        // The settings panel: the page tabs, the chosen page's rows, then the information.
+        rgb(13, 10, 9, 190).setFill()
+        NSRect(x: 0, y: topH, width: panelW, height: h - topH).fill(using: .sourceOver)
+        // The current tab is underlined in sunset gold, and highlighted while the tabs have focus.
+        let tabW = (panelW - 2 * inset) / CGFloat(pages.count)
+        tabs = pages.enumerated().map { m, p in
+            let rect = NSRect(x: inset + CGFloat(m) * tabW, y: tabY, width: tabW, height: tabH)
+            if m == tab && !inPage {
+                rgb(232, 191, 138, 45).setFill()
+                rect.fill(using: .sourceOver)
+            }
+            text(p.name, tabFont, m != tab ? rgb(169, 156, 144) : inPage ? rgb(255, 243, 228) : .white, rect, .center)
+            if m == tab {
+                let tw = width(p.name, tabFont)
+                NSGradient(starting: rgb(247, 220, 181), ending: rgb(201, 138, 85))?
+                    .draw(in: NSRect(x: rect.midX - tw / 2, y: tabY + tabH, width: tw, height: 3), angle: 0)
+            }
+            return rect
         }
-        let colW = columnWidth
+        rgb(255, 255, 255, 36).setFill()
+        NSRect(x: inset, y: tabY + tabH + 8, width: panelW - 2 * inset, height: 1).fill(using: .sourceOver)
+
+        // One row per setting: its label, then its value between arrows at the right, or an action's verb in a pill.
+        let page = pages[tab], right = valueRight
         for (i, r) in page.rows.enumerated() {
-            let left = side + CGFloat(i) * colW
+            let y = LauncherView.listY + CGFloat(i) * rowH, mid = y + rowH / 2
             let selected = inPage && i == row
             if selected {
                 rgb(232, 191, 138, 45).setFill()
-                NSRect(x: left, y: labelY - 6, width: colW, height: valueY + valueH + 6 - labelY).fill(using: .sourceOver)
+                NSRect(x: inset - 10, y: y, width: panelW - 2 * inset + 20, height: rowH).fill(using: .sourceOver)
             }
-            if i > 0 {
-                rgb(255, 255, 255, 36).setFill()
-                NSRect(x: left, y: labelY - 2, width: 1, height: valueY + valueH + 2 - labelY).fill(using: .sourceOver)
-            }
-            text(r.label.uppercased(), smallFont, selected ? .white : rgb(198, 182, 166), NSRect(x: left + 12, y: labelY, width: colW - 16, height: 18))
+            text(r.label.uppercased(), tabFont, selected ? .white : rgb(198, 182, 166), NSRect(x: inset, y: y, width: 220, height: rowH))
             let value = r.names[r.index].uppercased()
-            let arrowColor = selected ? sand : rgb(241, 197, 143, 130)
-            arrow(left + 19, valueY + valueH / 2, -1, 0, arrowColor)
-            arrow(left + 30 + width(value, menuFont), valueY + valueH / 2, 1, 0, arrowColor)
-            text(value, menuFont, selected ? .white : rgb(232, 222, 212), NSRect(x: left + 26, y: valueY, width: colW - 30, height: valueH))
+            if r.action != nil {
+                let pillW = width(value, smallFont) + 24
+                let pill = NSRect(x: right - pillW, y: mid - 11, width: pillW, height: 22)
+                (selected ? rgb(242, 227, 207) : rgb(255, 255, 255, 36)).setFill()
+                NSBezierPath(roundedRect: pill, xRadius: 11, yRadius: 11).fill()
+                text(value, smallFont, selected ? dark : rgb(232, 222, 212), pill, .center)
+            } else {
+                // The arrows show which way the value can still move; the ends do not wrap.
+                let left = valueLeft(r), arrowColor = selected ? sand : rgb(241, 197, 143, 130)
+                if r.index > 0 { arrow(left + 7, mid, -1, 0, arrowColor) }
+                if r.index < r.names.count - 1 { arrow(right - 7, mid, 1, 0, arrowColor) }
+                text(value, menuFont, selected ? .white : rgb(232, 222, 212), NSRect(x: left, y: y, width: right - 14 - left, height: rowH), .right)
+            }
         }
 
-        // Page tabs along the bottom, the current one underlined in sunset gold.
-        rgb(255, 255, 255, 36).setFill()
-        NSRect(x: side, y: tabY - 8, width: w - 2 * side, height: 1).fill(using: .sourceOver)
-        var tx = side
-        tabs = pages.enumerated().map { m, p in
-            let tw = width(p.name, tabFont)
-            let rect = NSRect(x: tx, y: tabY, width: tw, height: tabH)
-            text(p.name, tabFont, m == tab ? rgb(255, 243, 228) : rgb(169, 156, 144), NSRect(x: tx, y: tabY, width: tw + 4, height: tabH))
-            if m == tab {
-                NSGradient(starting: rgb(247, 220, 181), ending: rgb(201, 138, 85))?.draw(in: NSRect(x: tx, y: tabY + tabH, width: tw, height: 3), angle: 0)
-            }
-            tx += tw + 18
-            return rect
-        }
+        // The notice, or the focused row's or page's information, in up to two lines.
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byWordWrapping
+        NSAttributedString(string: notice ?? (inPage ? rows[row].info : page.info),
+                           attributes: [.font: infoFont, .foregroundColor: rgb(216, 202, 188), .paragraphStyle: style])
+            .draw(with: NSRect(x: inset, y: LauncherView.infoY, width: panelW - 2 * inset, height: 36), // two 14 pt lines
+                  options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 }
 
