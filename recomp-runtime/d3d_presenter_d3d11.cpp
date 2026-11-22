@@ -4518,6 +4518,11 @@ RecompD3dPresenterError d3d_backend_destroy(
     return RECOMP_D3D_PRESENTER_OK;
 }
 
+uint64_t d3d_backend_idle(RecompD3dPresenter *)
+{
+    return UINT64_MAX;
+}
+
 void d3d_backend_set_immediate_present(bool enabled)
 {
     immediate_present = enabled;
