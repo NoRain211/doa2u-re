@@ -66,7 +66,7 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
                 self.assertEqual(saved, expected)
 
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
-    def test_launcher_held_down_enters_a_page_without_changing_a_value(self):
+    def test_launcher_arrows_move_rows_change_values_and_reach_the_tabs(self):
         script = r'''
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -74,17 +74,15 @@ $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
 $flags = [Reflection.BindingFlags]'NonPublic, Instance'
 $type.GetField('menu', $flags).SetValue($form, 0)
+$type.GetField('row', $flags).SetValue($form, 0)
 $keyDown = $type.GetMethod('OnKeyDown', $flags)
-$keyUp = $type.GetMethod('OnKeyUp', $flags)
-$down = [Windows.Forms.KeyEventArgs]::new([Windows.Forms.Keys]::Down)
-$row = $type.GetField('resolution', $flags).GetValue($form)
-$row.Index = 2
-$keyDown.Invoke($form, @($down))
-$keyDown.Invoke($form, @($down))
-$held = $row.Index
-$keyUp.Invoke($form, @($down))
-$keyDown.Invoke($form, @($down))
-"$($type.GetField('inPage', $flags).GetValue($form)) $held $($row.Index)"
+function Press($key) { $keyDown.Invoke($form, @([Windows.Forms.KeyEventArgs]::new([Windows.Forms.Keys]::$key))) }
+$resolution = $type.GetField('resolution', $flags).GetValue($form)
+$resolution.Index = 2
+Press E; Press Right; Press Down
+$afterDown = $type.GetField('row', $flags).GetValue($form)
+Press Up; Press Up; Press Right
+"$($resolution.Index) $afterDown $($type.GetField('inPage', $flags).GetValue($form)) $($type.GetField('menu', $flags).GetValue($form))"
 '''
         with tempfile.TemporaryDirectory() as folder:
             build_launchers(Path(folder))
@@ -93,8 +91,9 @@ $keyDown.Invoke($form, @($down))
                                      "-ExecutionPolicy", "Bypass", "-Command", script],
                                     env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
-            # Entered the page; the repeat left 1080p alone; a fresh press stepped down to 720p.
-            self.assertEqual(result.stdout.split(), ["True", "2", "1"])
+            # E opened VIDEO, Right stepped 1080p to 1440p, Down moved to MSAA,
+            # Up twice reached the tabs, where Right turned to AUDIO.
+            self.assertEqual(result.stdout.split(), ["3", "1", "False", "2"])
 
     @unittest.skipUnless(os.name == "nt", "The launchers are Windows executables")
     def test_launcher_logs_show_the_home_folder_and_user_as_tilde(self):

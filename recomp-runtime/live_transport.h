@@ -69,6 +69,13 @@ void recomp_live_transport_set_local(uint32_t virtual_ina);
    connects); receive returns the size, or -1 when none is queued. */
 int recomp_live_transport_guest_send(uint32_t virtual_ina, uint16_t port, const uint8_t *data, size_t size);
 int recomp_live_transport_guest_receive(uint8_t *data, size_t capacity, uint32_t *virtual_ina, uint16_t *port);
+/* Whether a datagram is shaped as the game's own senders build it; the
+   guest's recvfrom drops any other, since the game's handlers trust them. */
+bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size);
+/* Whether a dropped datagram is one of the game's own empty type-15 replies
+   (not chosen yet, handlers 0-3; not ready, handler 5), which it resends
+   every second; recvfrom drops these without a log line. */
+bool recomp_live_game_datagram_expected_drop(const uint8_t *datagram, size_t size);
 
 /* The rollback session's channel to the opponent: fills net so netplay.c's
    send goes to the opponent's route and its receive reads the rollback queue. */
