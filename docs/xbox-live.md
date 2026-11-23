@@ -11,7 +11,7 @@ have only run in unit tests. Voice chat is not supported.
 
 Live is on unless the runner starts with `RECOMP_LIVE=0`. Off, the Live pages
 report no account, as before. A Loopback test session (`RECOMP_ROLLBACK=loopback`)
-keeps Live off.
+or a synctest (`RECOMP_SYNCTEST`) keeps Live off.
 
 - **Matchmaker.** Live uses the built-in matchmaker.
   `RECOMP_LIVE_SERVER=host:port` (or just `host`) overrides it.

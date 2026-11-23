@@ -193,7 +193,7 @@ shift their viewport offset in c59. The projections live in guest RAM,
 outside the ranges a Live fight's desync check hashes, so each player keeps
 their own shape.
 
-The Windows build includes pinned upstream SMAA shader and lookup tables.
+Both presenters include the pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability
 fallback; `RECOMP_D3D_SMAA=1` applies SMAA 1x Ultra to the resolved image
 before gamma. Both can run together. `RECOMP_D3D_SHARPEN=0.3`, `0.6` or `1`
@@ -218,7 +218,7 @@ presenters. A possible cause, not confirmed: the stages request point mip
 filtering, and that turns anisotropy off. Scaling the depthless effect targets
 (shadow map, bloom, heat haze) with the main scale on SDL_GPU remains open but
 has low priority. At 2160 lines only the fighters' shadows look soft; bloom
-looks the same as at 480. Above-60 fps rendering and SDL_GPU parity (VRR, MSAA
+looks the same as at 480. Above-60 fps rendering and SDL_GPU parity (MSAA
 above 8x) are separate work.
 
 Textures aliasing either embedded frame-buffer surface use host-rendered
@@ -247,12 +247,15 @@ with the existing D24 depth surfaces. Scaled main targets reconstruct slope
 per guest pixel in the receiver pixel shader, independently for X and Y, after
 clipping; constant bias remains in the native rasterizer. With multisampling,
 sample positions restore each sample depth while color and alpha retain their
-pixel-center evaluation. This scaled MSAA path requires feature level 10.1.
-Adapter, queued-capture and native pixel tests cover parameter transfer, sign,
-slope, scaling, 4x sample visibility and restoration.
+pixel-center evaluation. This scaled MSAA path requires feature level 10.1 on
+Direct3D 11. Adapter, queued-capture and native pixel tests cover parameter
+transfer, sign, slope, scaling, 4x sample visibility and restoration.
 
-`d3d8_adapter.c` owns the whole 5849 CreateDevice boundary and uses the
-committed sister-project D3D11 presenter. The plain device, frame and tile
+`d3d8_adapter.c` owns the whole 5849 CreateDevice boundary and creates the
+presenter ported from the sister project: Direct3D 11 on the default Windows
+runner, and SDL_GPU on the others: Vulkan on the Windows Vulkan runner (or
+Direct3D 12 under `SDL_GPU_DRIVER=direct3d12`) and on Linux, Metal on macOS.
+The plain device, frame and tile
 models remain callable independently of interception. Creation accepts the
 verified 720x480 linear BGRA8/D24S8 mode and two caller-provided color headers
 plus depth. It validates their storage before creating the host device and
@@ -304,14 +307,14 @@ The XPR loader (FUN_00289f80) registers volume textures (a 64x64x8 A8R8G8B8
 map appears after a Story fight), so Register invalidates a swizzled,
 uncompressed volume's full span: width x height x depth per level, each
 axis halving to 1. Stage-0 fixed-function FVF 0x142 draws can sample a
-single-level A8R8G8B8 volume through a native D3D11 Texture3D. The upload
+single-level A8R8G8B8 volume through a native 3D texture. The upload
 unswizzles all three axes; UV0 supplies S/T, with R zero unless COUNT3's
 texture matrix supplies it. U/V/W addressing and point or linear min/mag
 filtering apply. Other volume formats, mip chains, coordinate generators, locks
 and views remain guarded.
 
 `d3d8_draw_adapter.c` binds DrawVertices, DrawVerticesUP and
-DrawIndexedVertices to the existing D3D11 presenter. It snapshots fixed-function
+DrawIndexedVertices to the shared presenter. It snapshots fixed-function
 layouts, transforms, viewport, depth/blend state, stage-0 texture and palette.
 Supported combinations include texture/diffuse modulation, white diffuse alpha
 selection, texture alpha selection and texture factors. Stage-0 min and mag
@@ -770,8 +773,9 @@ EndVisibilityTest(index) (`0x345860`, stdcall), then inserts a WRITE callback
 (`0x276b50`) that marks the index ready. Next frame it polls
 GetVisibilityTestResult(index, &result, NULL) (`0x344450`, stdcall) while it
 returns D3DERR_TESTINCOMPLETE. The visible/total ratio of two tests feeds the
-fade, so only relative counts matter. The presenter wraps the draws in a
-D3D11 occlusion query per END and resolves it on its worker without waiting.
+fade, so only relative counts matter. The presenter counts each END's draws in
+a Direct3D 11 occlusion query, or on SDL_GPU in a count target whose mip
+levels sum the samples, and resolves it without waiting.
 Counts are normalized to guest target pixels and scaled by the back buffer's
 supersample factor, as Xbox reports count samples. A pending poll publishes
 queued work, as the SDK's fence kick does. No guest report slot is written.
@@ -789,8 +793,9 @@ PC). Pending callbacks are part of the D3D8 rollback state.
 
 Game logic runs as up to 24 XAPI fibers, resumed each frame by a task
 scheduler. `fiber_adapter.c` replaces XAPI 5849 CreateFiber, DeleteFiber,
-SwitchToFiber and ConvertThreadToFiber with native Windows fibers, ported
-from DOA3. 5849 keeps DOA3's 16-byte fiber object but moves the TLS slots:
+SwitchToFiber and ConvertThreadToFiber with Windows fibers, or
+`fiber_switch_*.S` stack switches on Linux and macOS, ported from DOA3. 5849
+keeps DOA3's 16-byte fiber object but moves the TLS slots:
 the current fiber is TLS block +0xC and the converted main fiber +0x10.
 Guest FS refers to the PCR block. The guest-thread scheduler saves and
 restores each thread's current fiber. Without this binding, the tasks never
@@ -1283,12 +1288,14 @@ order of work to feature complete, and the
 flows each platform must pass.
 
 Online libraries and dashboard/update binaries are present on the disc.
-The initial scope is offline DOA2; any online behavior needs its own design.
-The verified XNetStartup boundary returns the native offline policy error
-WSASYSNOTREADY without creating a console network stack. The game handles
-its helper's failure; this seam does not report successful network startup.
-PHY initialization reports hardware unavailable, and link queries return
-disconnected flags, including after the game's failed network startup.
+`live_xapi.c` replaces the game's XOnline and XNet libraries, and Live fights
+run on the rollback session; `docs/xbox-live.md` covers the matchmaker,
+identity and limits. Live starts unless the runner has `RECOMP_LIVE=0`, and a
+Loopback session (`RECOMP_ROLLBACK=loopback`) or a synctest (`RECOMP_SYNCTEST`)
+keeps it off. Off, XNetStartup returns the native
+offline policy error WSASYSNOTREADY without creating a console network stack,
+link queries return disconnected flags and the game handles that failure. PHY
+initialization reports hardware unavailable either way.
 
 Record each observed frontier privately. A public model-test pass or a
 completed lift alone is not a gameplay result.
