@@ -21,6 +21,7 @@ enum RecompPcSetting {
     RECOMP_PC_SCREEN,        /* 4:3, 16:9, 16:10, 21:9, 32:9 */
     RECOMP_PC_RENDERER,      /* Direct3D 11, Vulkan */
     RECOMP_PC_VRR,           /* Off, On */
+    RECOMP_PC_FRAME_RATE,    /* Original, Display */
     RECOMP_PC_AUDIO,         /* Stereo, 5.1 Surround */
     RECOMP_PC_INTRO,         /* Play, Skip */
     RECOMP_PC_UNLOCKS,       /* Everything, Earn */

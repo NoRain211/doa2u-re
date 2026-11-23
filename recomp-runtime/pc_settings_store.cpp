@@ -66,6 +66,7 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
         if (RECOMP_PC_SCREENS[i] != nullptr && screen == RECOMP_PC_SCREENS[i]) choices[RECOMP_PC_SCREEN] = i;
     choices[RECOMP_PC_RENDERER] = boolean(entries, "vulkan", false) ? 1u : 0u;
     choices[RECOMP_PC_VRR] = boolean(entries, "vrr", false) ? 1u : 0u;
+    choices[RECOMP_PC_FRAME_RATE] = text(entries, "frameRate", "original") == "display" ? 1u : 0u;
     choices[RECOMP_PC_AUDIO] = boolean(entries, "surround", false) ? 1u : 0u;
     choices[RECOMP_PC_INTRO] = boolean(entries, "skipIntro", false) ? 1u : 0u;
     choices[RECOMP_PC_UNLOCKS] = boolean(entries, "unlockAll", true) ? 0u : 1u;
@@ -147,6 +148,7 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
         put(&entries, "screen", "\"" + store.ultrawideShape + "\"");
     put(&entries, "vulkan", flag(choices[RECOMP_PC_RENDERER] == 1u));
     put(&entries, "vrr", flag(choices[RECOMP_PC_VRR] == 1u));
+    put(&entries, "frameRate", choices[RECOMP_PC_FRAME_RATE] == 1u ? "\"display\"" : "\"original\"");
     put(&entries, "surround", flag(choices[RECOMP_PC_AUDIO] == 1u));
     put(&entries, "skipIntro", flag(choices[RECOMP_PC_INTRO] == 1u));
     put(&entries, "unlockAll", flag(choices[RECOMP_PC_UNLOCKS] == 0u));

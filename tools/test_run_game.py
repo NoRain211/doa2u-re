@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera', 'dedication') {
+foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'frameRate', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera', 'dedication') {
     $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
     $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
 }
@@ -46,10 +46,10 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             (root / "private").mkdir()
             for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, vrr=True,
                                                 skip_intro=True, surround=True, unlock_all=False, vulkan=True,
-                                                free_camera=True, random_cpu_costumes=True)),
+                                                free_camera=True, random_cpu_costumes=True, framegen=True)),
                                    (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False, vrr=False,
                                                 skip_intro=False, surround=False, unlock_all=True, vulkan=False,
-                                                free_camera=False, random_cpu_costumes=False))):
+                                                free_camera=False, random_cpu_costumes=False, framegen=False))):
                 env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
                            RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"),
                            RECOMP_LAUNCHER_TEST_LAST="1" if last else "0")
@@ -162,16 +162,18 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_FREE_CAMERA"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_RANDOM_CPU_COSTUMES"], "1")
-                self.assertEqual(run(None, vrr=True), 0)
+                self.assertEqual(run(None, vrr=True, framegen=True), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_VRR"], "1")
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_LAUNCHER_SETTINGS"],
                                  str(root / "private/launcher.json"))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_KEYBOARD_SETTINGS"],
                                  str(root / "private/keyboard.json"))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_CONTROLLER_SETTINGS"],
                                  str(root / "private/controller.json"))
-                self.assertEqual(run(None, vulkan=True), 0)
+                self.assertEqual(run(None, vulkan=True, framegen=False), 0)
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "0")
                 (root / "private/dedication.bmp").write_bytes(b"card")
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_DEDICATION_CARD"],
@@ -240,11 +242,11 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(saved_settings(), {})
                 settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False,
                     "widescreen": True, "vrr": True, "skipIntro": True, "surround": True, "unlockAll": False,
-                    "freeCamera": True, "randomCpuCostumes": True}),
+                    "freeCamera": True, "randomCpuCostumes": True, "frameRate": "display"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
                     "widescreen": True, "vrr": True, "skip_intro": True, "surround": True, "unlock_all": False,
-                    "free_camera": True, "random_cpu_costumes": True})
+                    "free_camera": True, "random_cpu_costumes": True, "framegen": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})
@@ -252,6 +254,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                                          ("16:9", "16:9"), ("5:1", True), ("wide", True)):
                     settings.write_text(json.dumps({"widescreen": True, "screen": screen}), encoding="utf-8")
                     self.assertEqual(saved_settings(), {"widescreen": expected}, screen)
+                settings.write_text(json.dumps({"frameRate": "bogus"}), encoding="utf-8")
+                self.assertEqual(saved_settings(), {"framegen": False})
                 settings.write_text("{", encoding="utf-8")
                 self.assertEqual(saved_settings(), {})
 

@@ -23,8 +23,9 @@
    row count.
 
    PC SETTINGS becomes top-list row 5, after Video, and opens page 19, which
-   no table uses. Its settings are split over four views of four, under a
-   Page row (1 / 4 to 4 / 4) that left, right or confirm turns. Its label is made from letters cut out of the other labels'
+   no table uses. Its settings are split over five views of four, under a
+   Page row (1 / 5 to 5 / 5) that left, right or confirm turns; the last view
+   holds fewer. Its label is made from letters cut out of the other labels'
    own art (group 3), with the same blue glow, as two runner sprites; its
    text is runner text (runner_assets.c). The Controller page's Rebind row and
    the Button Config screen it opens are button_config.c.
@@ -41,8 +42,8 @@ enum {
     PC_PAGE = 19,
     PC_ROWS = RECOMP_PC_SETTING_COUNT,
     PER_VIEW = 4,
-    VIEWS = 4,
-    SHOWN = PER_VIEW + 1,          /* the Page row, then a view's settings */
+    VIEWS = 5,
+    SHOWN = PER_VIEW + 1,          /* the Page row, then the most settings a view shows */
     VALUE_KIND = 0x7e00,           /* 0x910a0 keys for each row's values, outside its 1-28 */
 
     CURSORS = 0x00df4ac8u,
@@ -122,7 +123,7 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
+    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
     [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_FIGHT_HUD] = true,
@@ -130,7 +131,8 @@ static const bool ALWAYS_LIVE[PC_ROWS] = {
 };
 static bool live[PC_ROWS], after_online[PC_ROWS];
 enum { MAX_CHOICES = 18, HELP_TOP = 0, HELP_NOW = 1, HELP_NEXT = 2, HELP_PAGE = 3, HELP_LEAVE = 4, HELPS = 5 };
-_Static_assert(PER_VIEW * VIEWS == PC_ROWS, "every setting is on one view");
+_Static_assert(PC_ROWS > PER_VIEW * (VIEWS - 1) && PC_ROWS <= PER_VIEW * VIEWS,
+    "the views hold every setting and the last one is not empty");
 
 typedef struct Language {
     const recomp_utf16 *label;  /* the top-list row, in capitals */
@@ -139,7 +141,7 @@ typedef struct Language {
     const recomp_utf16 *help[HELPS];
     const recomp_utf16 *page;   /* the Page row */
 } Language;
-static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 4", u"2 / 4", u"3 / 4", u"4 / 4"};
+static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 5", u"2 / 5", u"3 / 5", u"4 / 5", u"5 / 5"};
 
 /* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
@@ -150,11 +152,11 @@ static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 4", u"2 / 4", u"3 / 4
 /* English, French, German, Italian and Spanish; Japanese shows English. */
 static const Language LANGUAGES[5] = {
     {u"PC SETTINGS",
-     {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Audio Output",
+     {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Frame rate", u"Audio Output",
       u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera", u"Dedication",
       u"Life Bar", u"Fight HUD", u"Hit Voices", u"KO Replay"},
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
-      {u"Off", u"On"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
+      {u"Off", u"On"}, {u"Original", u"Display"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"}, {u"Show", u"Hide"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
        u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Original", u"Damage", u"Stun Meter", u"Both"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}},
@@ -164,11 +166,11 @@ static const Language LANGUAGES[5] = {
       u"Takes effect when you leave DOA ONLINE."},
      u"Page"},
     {u"PARAM\u00c8TRES PC",
-     {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Sortie audio",
+     {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Images/s", u"Sortie audio",
       u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre", u"D\u00e9dicace",
       u"Barre de vie", u"Affichage combat", u"Voix des coups", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
-      {u"Non", u"Oui"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
+      {u"Non", u"Oui"}, {u"Original", u"\u00c9cran"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"}, {u"Afficher", u"Masquer"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
        u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Original", u"D\u00e9g\u00e2ts", u"\u00c9tourdissement", u"Les deux"}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}},
@@ -178,11 +180,11 @@ static const Language LANGUAGES[5] = {
       u"Pris en compte en quittant DOA ONLINE."},
      u"Page"},
     {u"PC-EINSTELLUNGEN",
-     {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Audioausgabe",
+     {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Bildrate", u"Audioausgabe",
       u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera", u"Widmung",
       u"Lebensleiste", u"Kampfanzeige", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
-      {u"Aus", u"Ein"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
+      {u"Aus", u"Ein"}, {u"Original", u"Bildschirm"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"}, {u"Anzeigen", u"Ausblenden"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
        u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Original", u"Schaden", u"Bet\u00e4ubung", u"Beides"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}},
@@ -192,11 +194,11 @@ static const Language LANGUAGES[5] = {
       u"Wirkt beim Verlassen von DOA ONLINE."},
      u"Seite"},
     {u"IMPOSTAZIONI PC",
-     {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Uscita audio",
+     {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Frame rate", u"Uscita audio",
       u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera", u"Dedica",
       u"Barra vita", u"HUD combattimento", u"Voci dei colpi", u"Replay K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
-      {u"No", u"S\u00ec"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
+      {u"No", u"S\u00ec"}, {u"Originale", u"Schermo"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"}, {u"Mostra", u"Nascondi"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
        u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"Originale", u"Danni", u"Stordimento", u"Entrambi"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}},
@@ -206,11 +208,11 @@ static const Language LANGUAGES[5] = {
       u"Effettivo all'uscita da DOA ONLINE."},
      u"Pagina"},
     {u"CONFIG. PC",
-     {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Salida de audio",
+     {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Fotogramas", u"Salida de audio",
       u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre", u"Dedicatoria",
       u"Barra de vida", u"HUD de combate", u"Voces de golpes", u"Repetici\u00f3n K.O."},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
-      {u"No", u"S\u00ed"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
+      {u"No", u"S\u00ed"}, {u"Original", u"Pantalla"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"}, {u"Mostrar", u"Ocultar"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
        u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"Original", u"Da\u00f1o", u"Aturdimiento", u"Ambos"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}},
@@ -255,7 +257,7 @@ static RecompPcSettingsHost host;
 static uint32_t values;          /* guest u16 per setting: the choices */
 static uint32_t shown;           /* guest u16 per shown row: the view, then its settings' choices */
 static unsigned view;            /* which four settings page 19 shows */
-static uint32_t layout;          /* guest page layout: LAYOUT_RECORDS of 28 bytes, then 0 */
+static uint32_t layout;          /* guest page layout: up to LAYOUT_RECORDS of 28 bytes, then 0 */
 static bool drawing_top;
 static bool drawing_pc;          /* page 19's own draw is running */
 static int label_language = -1; /* the language the label sprites were made in */
@@ -294,18 +296,42 @@ uint8_t recomp_pc_settings_choice(unsigned setting)
     return setting < PC_ROWS && values != 0u ? (uint8_t)u16(values + 2u * setting) : 0u;
 }
 
+/* The settings the current view holds: the last view may hold fewer than PER_VIEW. */
+static unsigned view_settings(void)
+{
+    return PC_ROWS - view * PER_VIEW < PER_VIEW ? PC_ROWS - view * PER_VIEW : PER_VIEW;
+}
+
+/* The shown rows: the Page row, then the view's settings. */
+static unsigned page_rows(void) { return jukebox_mode ? JB_ROWS : 1u + view_settings(); }
+
 /* The setting a shown row stands for, or -1 for the Page row. */
-static int setting_at(unsigned row) { return row == 0u || row >= SHOWN ? -1 : (int)(view * PER_VIEW + row - 1u); }
+static int setting_at(unsigned row)
+{
+    return row == 0u || row > view_settings() ? -1 : (int)(view * PER_VIEW + row - 1u);
+}
 
 static void refresh_shown(void)
 {
     set_u16(shown, (uint16_t)view);
-    for (unsigned row = 1u; row < SHOWN; ++row) set_u16(shown + 2u * row, u16(values + 2u * (unsigned)setting_at(row)));
+    for (unsigned row = 1u; row <= view_settings(); ++row)
+        set_u16(shown + 2u * row, u16(values + 2u * (unsigned)setting_at(row)));
 }
 
+/* The view's records, 26 apart, then the end word: a short last view ends sooner. */
 static void reset_layout(void)
 {
-    for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) set_u32(layout + record * 28u + 0xcu, 0u);
+    const unsigned rows = page_rows();
+    for (unsigned record = 0u; record < 2u * rows; ++record) {
+        const unsigned row = record % rows;
+        const bool value = record >= rows;
+        const uint32_t to = layout + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
+        memcpy(recomp_memory(to, 28u), recomp_memory(LAYOUT_TEMPLATE + 28u * (value ? 4u : 0u), 28u), 28u);
+        set_u32(to, at);
+        set_u32(to + 4u, at);
+        set_u32(to + 0xcu, 0u);
+    }
+    set_u32(layout + 28u * rows * 2u, 0u);
 }
 
 static void reset_jb_layout(void)
@@ -331,8 +357,6 @@ static uint32_t put_text(uint32_t buffer, unsigned size, const char *text)
     return buffer;
 }
 
-static unsigned page_rows(void) { return jukebox_mode ? JB_ROWS : SHOWN; }
-
 static void refresh_jukebox(void)
 {
     for (unsigned row = 0u; row < JB_ROWS; ++row) set_u16(jb_values + 2u * row, (uint16_t)recomp_jukebox_choice(row));
@@ -344,6 +368,7 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
     drawing_top = false;
     drawing_pc = false;
     label_language = -1;
+    jukebox_mode = jukebox_from_menu = false;
     memcpy(live, ALWAYS_LIVE, sizeof live);
     view = 0u;
     values = recomp_runner_alloc(2u * PC_ROWS, 4u);
@@ -353,15 +378,7 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
         set_u16(values + 2u * row, choices[row] < CHOICES[row] ? choices[row] : 0u);
 
     /* Page 8's row record (0) and value record (4), 26 apart, then the end. */
-    for (unsigned record = 0u; record < LAYOUT_RECORDS; ++record) {
-        const unsigned row = record % SHOWN;
-        const bool value = record >= SHOWN;
-        const uint32_t to = layout + 28u * record, at = (0x5du + 26u * row) << 16 | (value ? 0x1e0u : 0x10au);
-        memcpy(recomp_memory(to, 28u), recomp_memory(LAYOUT_TEMPLATE + 28u * (value ? 4u : 0u), 28u), 28u);
-        set_u32(to, at);
-        set_u32(to + 4u, at);
-    }
-    set_u32(layout + 28u * LAYOUT_RECORDS, 0u);
+    reset_layout();
 
     for (unsigned m = 0u; m < MSG_COUNT; ++m) {
         if (message_text(&LANGUAGES[0], m) == NULL) continue; /* a row's unused value */
@@ -381,7 +398,6 @@ void recomp_pc_settings_install(const RecompPcSettingsHost *with, const uint8_t 
     /* As page 8: start and enter reset the layout, draw shows the page, and
        in and leave draw it sliding. 0x95a70 waits on a null entry forever. */
     /* The Jukebox's buffers and layout, as PC Settings' for its rows. */
-    jukebox_mode = jukebox_from_menu = false;
     jb_values = recomp_runner_alloc(2u * JB_ROWS, 4u);
     jb_layout = recomp_runner_alloc(28u * 2u * JB_ROWS + 4u, 4u);
     jb_labels = recomp_runner_alloc(2u * JB_TEXT * JB_ROWS, 4u);
@@ -626,7 +642,7 @@ static void top_input(void)
 
 static void pc_input(void)
 {
-    const uint32_t count = SHOWN;
+    const uint32_t count = page_rows();
     const uint32_t navigate[2] = {CURSORS + 2u, count};
     kernel_call_lifted(sub_0011B8D0, navigate, 2u);
     const uint16_t row = u16(CURSORS + 2u);
@@ -637,7 +653,7 @@ static void pc_input(void)
         if (host.closed != NULL) host.closed(host.context);
         return;
     }
-    if (row >= SHOWN) return;
+    if (row >= page_rows()) return;
     const int setting = setting_at(row);
     if (setting < 0) {
         /* The Page row: left, right or confirm turns to the next view. */
@@ -908,12 +924,12 @@ static void page_text(void)
     }
     if (drawing_pc) {
         const uint16_t key = (uint16_t)kernel_arg(1u);
-        if (key == PC_PAGE && kernel_arg(2u) < SHOWN) {
+        if (key == PC_PAGE && kernel_arg(2u) < page_rows()) {
             const int setting = setting_at(kernel_arg(2u));
             kernel_return_caller_cleanup(text_for(setting < 0 ? MSG_PAGE : MSG_ROWS + (unsigned)setting));
             return;
         }
-        if (key >= VALUE_KIND && key < VALUE_KIND + SHOWN) {
+        if (key >= VALUE_KIND && key < VALUE_KIND + page_rows()) {
             const int setting = setting_at(key - VALUE_KIND);
             const uint32_t choice = kernel_arg(2u) & 0xffffu;
             if (setting < 0) {

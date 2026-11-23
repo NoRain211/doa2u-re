@@ -51,17 +51,18 @@ int main()
     expect("defaults", c[RECOMP_PC_RESOLUTION] == 3u && c[RECOMP_PC_MSAA] == 5u && c[RECOMP_PC_SMAA] == 1u &&
         c[RECOMP_PC_SCREEN] == 1u && c[RECOMP_PC_RENDERER] == 0u && c[RECOMP_PC_INTRO] == 0u &&
         c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u && c[RECOMP_PC_DEDICATION] == 0u &&
-        c[RECOMP_PC_FIGHT_HUD] == 3u);
+        c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u);
 
     // A launcher's file, with keys the page does not own.
     write(path, "{\"height\":2160,\"msaa\":8,\"smaa\":false,\"widescreen\":true,\"screen\":\"2560:1080\","
-        "\"vulkan\":true,\"vrr\":false,\"skipIntro\":true,\"surround\":true,\"unlockAll\":false,"
+        "\"vulkan\":true,\"vrr\":false,\"frameRate\":\"display\",\"skipIntro\":true,\"surround\":true,\"unlockAll\":false,"
         "\"freeCamera\":true,\"randomCpuCostumes\":true,\"dedicationCard\":false,\"checkUpdates\":true,"
         "\"comboHud\":false,"
         "\"game_source\":\"D:\\\\Games\\\\doa2.iso\",\"window\":{\"x\":1,\"y\":[2,3]}}");
     expect("read", recomp_pc_settings_read(path, store, c));
     expect("values", c[RECOMP_PC_RESOLUTION] == 4u && c[RECOMP_PC_MSAA] == 3u && c[RECOMP_PC_SMAA] == 0u &&
         c[RECOMP_PC_SCREEN] == 3u && c[RECOMP_PC_RENDERER] == 1u && c[RECOMP_PC_VRR] == 0u &&
+        c[RECOMP_PC_FRAME_RATE] == 1u &&
         c[RECOMP_PC_AUDIO] == 1u && c[RECOMP_PC_INTRO] == 1u && c[RECOMP_PC_UNLOCKS] == 1u &&
         c[RECOMP_PC_CPU_COSTUMES] == 1u && c[RECOMP_PC_FREE_CAMERA] == 1u && c[RECOMP_PC_DEDICATION] == 1u &&
         c[RECOMP_PC_FIGHT_HUD] == 0u); /* an older file's comboHud Off */
@@ -78,9 +79,11 @@ int main()
     expect("fight hud", saved.find("\"fightHud\":\"original\"") != std::string::npos);
     expect("msaa off", saved.find("\"msaa\":1") != std::string::npos);
     expect("no temporary file", !std::filesystem::exists(path + ".tmp"));
+    expect("frame rate saved", saved.find("\"frameRate\":\"display\"") != std::string::npos);
     std::uint8_t again[RECOMP_PC_SETTING_COUNT];
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
-        again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u && again[RECOMP_PC_DEDICATION] == 1u);
+        again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u && again[RECOMP_PC_DEDICATION] == 1u &&
+        again[RECOMP_PC_FRAME_RATE] == 1u);
 
     // A life bar colour saves by name and reads back.
     c[RECOMP_PC_LIFE_BAR] = 10u;
@@ -88,6 +91,17 @@ int main()
     expect("life bar saved", read(path).find("\"lifeBarColour\":\"blue\"") != std::string::npos);
     expect("life bar read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_LIFE_BAR] == 10u);
     expect("custom colour default", recomp_pc_settings_custom_life_bar(path) == 0xffffffu);
+
+    // Frame rate round trips as original or display; any other value reads as original.
+    c[RECOMP_PC_FRAME_RATE] = 0u;
+    recomp_pc_settings_write(path, store, c);
+    expect("frame rate original", read(path).find("\"frameRate\":\"original\"") != std::string::npos);
+    expect("frame rate original read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_FRAME_RATE] == 0u);
+    c[RECOMP_PC_FRAME_RATE] = 1u;
+    recomp_pc_settings_write(path, store, c);
+    expect("frame rate display read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_FRAME_RATE] == 1u);
+    write(path, "{\"frameRate\":\"bogus\"}");
+    expect("unknown frame rate", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_FRAME_RATE] == 0u);
 
     // 32:9, then 21:9 again: the monitor's own shape.
     c[RECOMP_PC_SCREEN] = 4u;
