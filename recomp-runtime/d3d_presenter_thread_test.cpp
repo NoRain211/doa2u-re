@@ -3571,9 +3571,10 @@ static unsigned framePixel(const std::vector<unsigned char> &pixels, unsigned x,
    a quality request turns it off by the third frame. */
 static bool testAmbientOcclusion(bool live)
 {
-    char folder[MAX_PATH], on_path[MAX_PATH], off_path[MAX_PATH];
+    char folder[MAX_PATH], on_path[MAX_PATH], off_path[MAX_PATH], msaa_path[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "ao", 0, on_path) ||
-        !GetTempFileNameA(folder, "ao", 0, off_path)) return false;
+        !GetTempFileNameA(folder, "ao", 0, off_path) ||
+        !GetTempFileNameA(folder, "ao", 0, msaa_path)) return false;
     // A floor and a wall at a right angle, then a pretransformed white band.
     const auto drawScene = [](RecompD3dPresenter *presenter) {
         struct Vertex { float x, y, z; uint32_t color; };
@@ -3648,6 +3649,15 @@ static bool testAmbientOcclusion(bool live)
     };
     bool passed = run(off_path, "1", "0", false);
     passed &= run(on_path, live ? "3" : "1", "1", live);
+#ifdef RECOMP_TEST_D3D11
+    /* Direct3D 11 reads sample 0 of its multisampled depth; the crease darkens
+       the same way with MSAA on. SDL_GPU has no MSAA depth to sample. */
+    if (!live) {
+        _putenv_s("RECOMP_D3D_MSAA", "4");
+        passed &= run(msaa_path, "1", "1", false);
+        _putenv_s("RECOMP_D3D_MSAA", "");
+    }
+#endif
     std::vector<unsigned char> off, on;
     passed &= readFrame(off_path, off) && readFrame(on_path, on);
     const auto at = [](const std::vector<unsigned char> &pixels, unsigned x, unsigned y) {
@@ -3666,12 +3676,18 @@ static bool testAmbientOcclusion(bool live)
         passed &= crease_on + 8u < crease_off;  // the crease darkens
         passed &= close(flat_on, flat_off) && close(floor_on, floor_off);  // open surfaces stay
         passed &= band_on == band_off && band_off > 200u;  // the later 2D layer is untouched
+#ifdef RECOMP_TEST_D3D11
+        // The same scene with 4x MSAA reads the scene depth's sample 0.
+        std::vector<unsigned char> msaa;
+        passed &= readFrame(msaa_path, msaa) && framePixel(msaa, 160, 157) + 8u < crease_off;
+#endif
     }
     _putenv_s("RECOMP_D3D_AO", "");
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
     _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", "");
     DeleteFileA(on_path);
     DeleteFileA(off_path);
+    DeleteFileA(msaa_path);
     std::fprintf(passed ? stdout : stderr,
         "%s ambient occlusion live=%d crease %u->%u flat %u->%u floor %u->%u band %u->%u\n",
         passed ? "PASS" : "FAIL", live, crease_off, crease_on, flat_off, flat_on, floor_off, floor_on,
