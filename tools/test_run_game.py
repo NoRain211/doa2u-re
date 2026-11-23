@@ -141,7 +141,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             with patch("run_game.ROOT", root), patch("run_game.selected_xbe", return_value=selected), \
                     patch("run_game.program_manifest", return_value=("hash", 0)), \
                     patch("run_game.sha256", return_value="hash"), \
-                    patch("run_game.subprocess.Popen") as execute:
+                    patch("run_game.subprocess.Popen") as execute, patch.dict(os.environ):
+                os.environ.pop("RECOMP_SHADER_CACHE", None)
                 execute.return_value = runner(0, [f"open {Path.home() / 'doa2u'}\n"])
                 for height in (480, 720, 1080, 1440, 2160):
                     self.assertEqual(run(None, widescreen=True, msaa=32, smaa=True,
@@ -167,6 +168,9 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_LAUNCHER_SETTINGS"],
                                  str(root / "private/launcher.json"))
+                # The shader cache follows the root like every other private path.
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_SHADER_CACHE"],
+                                 str(root / "private/shader-cache"))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_KEYBOARD_SETTINGS"],
                                  str(root / "private/keyboard.json"))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_CONTROLLER_SETTINGS"],

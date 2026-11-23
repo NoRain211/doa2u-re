@@ -1713,7 +1713,7 @@ bool precompileBootShader(const RecompD3dDrawShaderKey &key, uint8_t output)
     RecompD3dVertexLayout layout;
     std::string source;
     if (!recomp_d3d_draw_shader_source(key, layout, source) || !applyDrawOutput(source, output)) return false;
-    // createDrawPipeline's pair: the sample-depth-bias variant needs ps_4_1.
+    // createDrawPipeline's shaders: the sample-depth-bias variant needs ps_4_1, and XYZ|DIFFUSE lines gs_main.
     ID3DBlob *blob = nullptr;
     const bool vertex = compileDrawShader(source.c_str(), "vs_main", "vs_4_0", &blob);
     releaseCom(blob);
@@ -1721,7 +1721,13 @@ bool precompileBootShader(const RecompD3dDrawShaderKey &key, uint8_t output)
     const bool fragment = compileDrawShader(source.c_str(), "ps_main",
         key.sample_depth_bias ? "ps_4_1" : "ps_4_0", &blob);
     releaseCom(blob);
-    return vertex && fragment;
+    blob = nullptr;
+    bool geometry = true;
+    if (key.fvf == 0x42u && key.program_count == 0u && !key.coverage_only) {
+        geometry = compileDrawShader(source.c_str(), "gs_main", "gs_4_0", &blob);
+        releaseCom(blob);
+    }
+    return vertex && fragment && geometry;
 }
 
 /* Loads every shader an earlier launch compiled, including vertex-program ones,
@@ -4737,6 +4743,11 @@ RecompD3dPresenterError d3d_backend_release_memory(
             presenter->render_targets.size(), presenter->depth_targets.size());
     }
     return RECOMP_D3D_PRESENTER_OK;
+}
+
+void d3d_backend_join_precompile(RecompD3dPresenter *presenter)
+{
+    if (presenter->precompile.joinable()) presenter->precompile.join();
 }
 
 RecompD3dPresenterError d3d_backend_destroy(

@@ -138,9 +138,9 @@ def runner_path(root=ROOT, vulkan=False):
     return root / "build/recomp-program/recomp_program_runner"
 
 
-def shader_cache():
+def shader_cache(root=ROOT):
     """The folder both presenters keep compiled draw shaders in; run_game.py sets it too."""
-    return ROOT / "private/shader-cache"
+    return root / "private/shader-cache"
 
 
 def precompile_shaders(logs):
@@ -150,7 +150,7 @@ def precompile_shaders(logs):
     """
     xbe = selected_xbe()
     env = os.environ.copy()
-    env["RECOMP_SHADER_CACHE"] = str(shader_cache())
+    env["RECOMP_SHADER_CACHE"] = str(shader_cache(ROOT))
     runners = [runner_path()] + ([runner_path(vulkan=True)] if sys.platform == "win32" else [])
     for runner in runners:
         log_path = logs / f"precompile-{runner.stem}.log"

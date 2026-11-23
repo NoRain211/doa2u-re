@@ -382,9 +382,8 @@ static bool testPrecompileBootShaders()
     RecompD3dPresenter *presenter = nullptr;
     passed &= expect("create precompiled", d3d_backend_create(&boot_config, &presenter));
     if (presenter != nullptr) {
-#ifndef RECOMP_TEST_D3D11
-        d3d_backend_draw_shader_count(presenter); // joins the boot precompile
-#endif
+        // Destroy would stop the boot precompile; it must finish to prove it finds every entry.
+        d3d_backend_join_precompile(presenter);
         passed &= expect("destroy precompiled", d3d_backend_destroy(&presenter));
     }
     const auto after = entries();

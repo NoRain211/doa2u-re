@@ -10,3 +10,8 @@ unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter)
     std::lock_guard<std::mutex> lock(presenter->shader_lock);
     return static_cast<unsigned>(presenter->shaders.size());
 }
+
+void d3d_backend_join_precompile(RecompD3dPresenter *presenter)
+{
+    if (presenter->precompile.joinable()) presenter->precompile.join();
+}
