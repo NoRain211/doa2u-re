@@ -317,7 +317,10 @@ if __name__ == "__main__":
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
                              pick("surround", args.surround), pick("vrr", args.vrr),
-                             bool(pick("vulkan", args.vulkan)), bool(pick("d3d12", args.d3d12)),
+                             bool(pick("vulkan", args.vulkan)),
+                             # An explicit --vulkan or --no-vulkan replaces a saved Direct3D 12 choice.
+                             bool(args.d3d12 if args.d3d12 is not None
+                                  else args.vulkan is None and saved.get("d3d12")),
                              pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
                              args.no_dedication_card, pick("framegen", args.framegen)))
