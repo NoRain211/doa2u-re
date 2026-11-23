@@ -276,7 +276,9 @@ struct VisibilityQuery {
 } // namespace
 
 struct RecompD3dPresenter {
-    RecompD3dPresenterConfig config{};
+    RecompD3dPresenterConfig config{};  // its programs point at the copies below
+    RecompD3dBootProgram programs[RECOMP_D3D_BOOT_PROGRAMS] = {};
+    uint32_t program_count = 0u;
     std::thread::id owner_thread;
     SDL_Window *window = nullptr;
     SDL_GPUDevice *device = nullptr;
@@ -1367,7 +1369,7 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     return inserted.first->second;
 }
 
-/* ponytail: fixed list; vertex-program shaders and unlisted FVFs still compile on first use.
+/* ponytail: unlisted FVFs still compile on first use.
    The quality arguments are a snapshot from creation: applyQuality changes the live ones. */
 void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples, bool framegen)
 {
@@ -1380,6 +1382,7 @@ void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t 
             boot.depth_bias && samples > 1u, boot.projected_stages};
         compiled += lookupShaders(presenter, key, boot.output, samples).vertex != nullptr;
     }
+    compiled += precompileProgramShaders(presenter, scaled, samples);
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
@@ -4145,6 +4148,9 @@ RecompD3dPresenterError checkOwner(RecompD3dPresenter *presenter)
 
 } // namespace
 
+// The guest vertex programs' boot shaders.
+#include "d3d_boot_programs_sdl_gpu.h"
+
 RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *config, RecompD3dPresenter **presenter)
 {
     if (config == nullptr || presenter == nullptr || config->width == 0u || config->height == 0u ||
@@ -4164,6 +4170,11 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         return RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
     }
     created->config = *config;
+    // The caller's programs need not outlive this call; keep at most the limit.
+    created->program_count = config->programs ? (std::min)(config->program_count, RECOMP_D3D_BOOT_PROGRAMS) : 0u;
+    std::copy_n(config->programs, created->program_count, created->programs);
+    created->config.programs = created->programs;
+    created->config.program_count = created->program_count;
     created->owner_thread = std::this_thread::get_id();
     unsigned aspect_w = 16u, aspect_h = 9u;
     created->widescreen = recomp_widescreen(&aspect_w, &aspect_h);

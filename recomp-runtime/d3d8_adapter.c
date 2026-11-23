@@ -537,6 +537,53 @@ static void validate_storage(const RecompD3dSurfaceHeader *surface)
     (void)recomp_memory(surface->data, (size_t)pitch * height);
 }
 
+/* The six vertex programs the game creates, as constant token blocks in the
+   verified executable: a header word (count << 16 | 0x2078), then count NV2A
+   instructions. The FVFs are the ones attach_program derives from each
+   declaration; the 26, 28 and 14 instruction programs draw with the scaled
+   receiver depth bias on a scaled target. */
+static const struct {
+    uint32_t address, count, fvf;
+    bool depth_bias;
+} boot_programs[] = {
+    {0x73df80u, 17u, 0x112u, false},
+    {0x7add80u, 26u, 0x142u, true},
+    {0x7ae238u, 8u, 0x142u, false},
+    {0x7af0f0u, 30u, 0x112u, false},
+    {0x7af4e0u, 14u, 0x012u, true},
+    {0x7afb48u, 28u, 0x442u, true},
+};
+_Static_assert(sizeof boot_programs / sizeof boot_programs[0] <= RECOMP_D3D_BOOT_PROGRAMS,
+    "the boot program table outgrows the presenter's config");
+
+static RecompD3dBootProgram boot_program_copies[RECOMP_D3D_BOOT_PROGRAMS];
+
+/* Reads those blocks for the presenter's boot precompile. A block whose header
+   or instruction end bits do not match is skipped: its shader compiles on
+   first use, as before. The copy keeps guest memory out of that thread. */
+static void load_boot_programs(RecompD3dPresenterConfig *config)
+{
+    config->programs = boot_program_copies;
+    config->program_count = 0u;
+    for (size_t i = 0u; i < sizeof boot_programs / sizeof boot_programs[0]; ++i) {
+        const uint32_t count = boot_programs[i].count;
+        const uint32_t header = *recomp_memory_u32(boot_programs[i].address);
+        const uint32_t *tokens = (const uint32_t *)(const void *)recomp_memory(
+            boot_programs[i].address + 4u, count * 16u);
+        bool valid = (header & 0xffffu) == 0x2078u && (header >> 16u) == count;
+        /* recomp_d3d_vertex_program_source rejects any other end bits. */
+        for (uint32_t instruction = 0u; valid && instruction < count; ++instruction)
+            valid = (tokens[instruction * 4u + 3u] & 3u) ==
+                (instruction + 1u == count ? 1u : 0u);
+        if (!valid) continue;
+        RecompD3dBootProgram *program = &boot_program_copies[config->program_count++];
+        program->fvf = boot_programs[i].fvf;
+        program->count = count;
+        program->depth_bias = boot_programs[i].depth_bias;
+        memcpy(program->tokens, tokens, count * 16u);
+    }
+}
+
 static void create_device(void)
 {
     const uint32_t entry = recomp_runtime.registers.esp;
@@ -569,7 +616,10 @@ static void create_device(void)
     for (uint32_t i = 0; i < 2u; ++i) validate_storage(&colors[i]);
     validate_storage(&depth);
     if (presenter == NULL) { // a reboot keeps the window
-        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&candidate.presenter_config, &presenter);
+        // Only this copy names the programs: device_state is rewound every frame.
+        RecompD3dPresenterConfig config = candidate.presenter_config;
+        load_boot_programs(&config);
+        const RecompD3dPresenterError host_error = recomp_d3d_presenter_create(&config, &presenter);
         if (host_error != RECOMP_D3D_PRESENTER_OK) {
             result = host_error == RECOMP_D3D_PRESENTER_OUT_OF_MEMORY ? RECOMP_D3D_OUT_OF_MEMORY : RECOMP_D3D_FAIL;
             goto returned;
