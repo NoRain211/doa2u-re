@@ -596,9 +596,9 @@ void recomp_d3d_presenter_set_immediate_present(bool enabled)
     d3d_backend_set_immediate_present(enabled);
 }
 
-void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen)
+void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen, bool ao)
 {
-    d3d_backend_set_quality(scale, msaa, smaa, sharpen);
+    d3d_backend_set_quality(scale, msaa, smaa, sharpen, ao);
 }
 
 bool recomp_d3d_presenter_quality_live()

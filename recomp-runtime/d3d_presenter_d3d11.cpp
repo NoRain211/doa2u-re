@@ -1,4 +1,5 @@
 #include "d3d_presenter_backend.h"
+#include "d3d_ao.h"
 #include "d3d_boot_shaders.h"
 #include "d3d_cas.h"
 #include "d3d_draw_model.h"
@@ -333,6 +334,26 @@ struct RecompD3dPresenter {
     float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
     RecompOutputPass gamma_constants{};       // what gamma_uploaded holds
     ID3D11Buffer *gamma_uploaded = nullptr;   // gamma_buffer when gamma_constants went to it
+    /* RECOMP_D3D_AO: screen-space ambient occlusion (d3d_ao.h). */
+    bool ao = false;
+    bool ao_scene = false;   // this frame drew depth-tested geometry into the main target
+    bool ao_done = false;    // the frame's occlusion has been baked into the main target
+    float ao_projection[16]{};  // the last scene draw's projection
+    ID3D11ShaderResourceView *depth_sample = nullptr;  // main depth, sampleable
+    ID3D11VertexShader *ao_vertex_shader = nullptr;
+    ID3D11PixelShader *ao_occlusion_pixel = nullptr;
+    ID3D11PixelShader *ao_blur_pixel = nullptr;
+    ID3D11PixelShader *ao_apply_pixel = nullptr;
+    ID3D11Buffer *ao_buffer = nullptr;
+    ID3D11SamplerState *ao_sampler = nullptr;
+    ID3D11RasterizerState *ao_raster = nullptr;
+    ID3D11BlendState *ao_blend = nullptr;
+    ID3D11DepthStencilState *ao_depth_state = nullptr;
+    ID3D11Texture2D *ao_texture[2]{};        // half size: occlusion, blurred
+    ID3D11RenderTargetView *ao_target[2]{};
+    ID3D11ShaderResourceView *ao_view[2]{};
+    uint32_t ao_width = 0u, ao_height = 0u;
+    uint32_t ao_samples = 0u;  // main depth samples the occlusion shaders were built for
     ID3D11Texture2D *back_buffer_copy = nullptr;
     ID3D11ShaderResourceView *back_buffer_sample = nullptr;
     ID3D11Texture2D *previous_frame = nullptr;
@@ -474,6 +495,10 @@ void framegenQueueCover(RecompD3dPresenter *presenter, const RecompD3dPresenterD
     const void *indices, UINT index_bytes, UINT index_count, const float *constants);
 void framegenDiscardCover(RecompD3dPresenter *presenter);
 unsigned framegenPresents(RecompD3dPresenter *presenter);
+/* d3d_ao.h: runs before the frame's 2D layers and at PRESENT. */
+void aoDrawBoundary(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
+    const RecompD3dVertexLayout &layout);
+bool runAo(RecompD3dPresenter *presenter);
 
 /* PC Settings' quality, set from the game thread and applied by the
    presenter after a present (applyQuality). */
@@ -482,6 +507,7 @@ struct QualityRequest {
     uint32_t msaa = 1u;
     bool smaa = false;
     float sharpen = 0.0f;
+    bool ao = false;
     unsigned generation = 0u;
 };
 static std::mutex quality_lock;
@@ -649,6 +675,23 @@ void releaseSmaa(RecompD3dPresenter *presenter)
     for (auto &sampler : presenter->smaa_samplers) releaseCom(sampler);
 }
 
+void releaseAo(RecompD3dPresenter *presenter)
+{
+    releaseCom(presenter->ao_vertex_shader);
+    releaseCom(presenter->ao_occlusion_pixel);
+    releaseCom(presenter->ao_blur_pixel);
+    releaseCom(presenter->ao_apply_pixel);
+    releaseCom(presenter->ao_buffer);
+    releaseCom(presenter->ao_sampler);
+    releaseCom(presenter->ao_raster);
+    releaseCom(presenter->ao_blend);
+    releaseCom(presenter->ao_depth_state);
+    for (auto &texture : presenter->ao_texture) releaseCom(texture);
+    for (auto &target : presenter->ao_target) releaseCom(target);
+    for (auto &view : presenter->ao_view) releaseCom(view);
+    presenter->ao_width = presenter->ao_height = presenter->ao_samples = 0u;
+}
+
 void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
 {
     releaseCom(presenter->visibility_active);
@@ -673,9 +716,11 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     releaseCom(presenter->gamma_pixel_shader);
     releaseCom(presenter->gamma_buffer);
     releaseSmaa(presenter);
+    releaseAo(presenter);
     for (auto &entry : presenter->raster_states) releaseCom(entry.state);
     presenter->raster_state_count = presenter->next_raster_state_slot = 0u;
     releaseCom(presenter->draw_constant_buffer);
+    presenter->constant_last_offset = ~0u;
     releaseCom(presenter->constant_ring);
     presenter->constant_last_offset = ~0u;
     releaseCom(presenter->context1);
@@ -739,6 +784,7 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     presenter->draw_index_used = 0u;
     presenter->draw_shared_ready = false;
     releaseCom(presenter->depth_view);
+    releaseCom(presenter->depth_sample);
     releaseCom(presenter->depth_texture);
     releaseCom(presenter->render_target_view);
     releaseCom(presenter->back_buffer_sample);
@@ -1054,7 +1100,8 @@ HRESULT createColorTarget(RecompD3dPresenter *presenter, UINT width, UINT height
 /* The main target at the current scale and MSAA, its single-sample output and
    its depth. They replace the presenter's only once all of them exist. The
    window blit picks the output's mip by its own scale, so a CRT mode below the
-   render resolution averages the pixels it drops. */
+   render resolution averages the pixels it drops. The depth is typeless so
+   ambient occlusion can sample the values it holds. */
 HRESULT createMainTargets(RecompD3dPresenter *presenter)
 {
     const UINT width = mainWidth(presenter), height = mainHeight(presenter);
@@ -1062,6 +1109,7 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
     ID3D11ShaderResourceView *main_sample = nullptr, *output_sample = nullptr;
     ID3D11Texture2D *depth_texture = nullptr;
     ID3D11DepthStencilView *depth_view = nullptr;
+    ID3D11ShaderResourceView *depth_sample = nullptr;
     HRESULT result = createColorTarget(presenter, width, height, presenter->msaa, main, main_sample);
     releaseCom(main_sample); // the main target is sampled through its copies
     if (SUCCEEDED(result)) result = createColorTarget(presenter, width, height, 1u, output, output_sample, true);
@@ -1070,17 +1118,34 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
         desc.Width = width;
         desc.Height = height;
         desc.MipLevels = desc.ArraySize = 1u;
-        desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
         desc.SampleDesc.Count = presenter->msaa;
         desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
         result = presenter->device->CreateTexture2D(&desc, nullptr, &depth_texture);
-        if (SUCCEEDED(result)) result = presenter->device->CreateDepthStencilView(depth_texture, nullptr, &depth_view);
+        if (SUCCEEDED(result)) {
+            // A typeless resource needs explicit views; null would name no format.
+            D3D11_DEPTH_STENCIL_VIEW_DESC view{};
+            view.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+            view.ViewDimension = presenter->msaa > 1u
+                ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
+            result = presenter->device->CreateDepthStencilView(depth_texture, &view, &depth_view);
+        }
+        if (SUCCEEDED(result)) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+            view.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+            view.ViewDimension = presenter->msaa > 1u
+                ? D3D11_SRV_DIMENSION_TEXTURE2DMS : D3D11_SRV_DIMENSION_TEXTURE2D;
+            view.Texture2D.MostDetailedMip = 0u;
+            view.Texture2D.MipLevels = 0xffffffffu;
+            result = presenter->device->CreateShaderResourceView(depth_texture, &view, &depth_sample);
+        }
     }
     if (FAILED(result)) {
         releaseCom(main);
         releaseCom(output);
         releaseCom(output_sample);
+        releaseCom(depth_sample);
         releaseCom(depth_view);
         releaseCom(depth_texture);
         return result;
@@ -1088,6 +1153,7 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
     releaseCom(presenter->render_target_view);
     releaseCom(presenter->vrr_target_view);
     releaseCom(presenter->vrr_source);
+    releaseCom(presenter->depth_sample);
     releaseCom(presenter->depth_view);
     releaseCom(presenter->depth_texture);
     presenter->render_target_view = main;
@@ -1095,6 +1161,7 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
     presenter->vrr_source = output_sample;
     presenter->depth_texture = depth_texture;
     presenter->depth_view = depth_view;
+    presenter->depth_sample = depth_sample;
     return S_OK;
 }
 
@@ -1459,6 +1526,8 @@ RecompD3dPresenterError submitCopyMainColor(
         destination.height != presenter->config.height) {
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
+    // The snapshot keeps what the frame shows, so the scene is occluded first.
+    if (presenter->ao && presenter->ao_scene && !presenter->ao_done) runAo(presenter);
     RecompD3dPresenterTarget target{};
     target.offscreen = true;
     target.no_depth = true;
@@ -1485,6 +1554,8 @@ RecompD3dPresenterError submitClear(
         (clear.clear_stencil && clear.stencil > 0xffu)) {
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
+    // A main-target clear starts the frame's scene again.
+    if (clear.clear_color && !clear.target.offscreen) presenter->ao_scene = presenter->ao_done = false;
 
     ID3D11RenderTargetView *color_view;
     ID3D11DepthStencilView *depth_view;
@@ -2897,6 +2968,9 @@ RecompD3dPresenterError submitDraw(
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
 
+    // Before the layer this draw starts, so ambient occlusion cannot touch it.
+    aoDrawBoundary(presenter, draw, layout);
+
     D3D11_PRIMITIVE_TOPOLOGY topology;
     switch (draw.primitive_type) {
     case 2u:
@@ -3622,6 +3696,232 @@ bool gammaPassOn(RecompD3dPresenter *presenter)
     return true;
 }
 
+/* Ambient occlusion (d3d_ao.h): builds the half-resolution targets, shaders
+   and states for the current main target size and sample count. */
+bool ensureAo(RecompD3dPresenter *presenter)
+{
+    const uint32_t width = (mainWidth(presenter) + 1u) / 2u;
+    const uint32_t height = (mainHeight(presenter) + 1u) / 2u;
+    if (presenter->ao_occlusion_pixel != nullptr && presenter->ao_width == width &&
+        presenter->ao_height == height && presenter->ao_samples == presenter->msaa) return true;
+    releaseAo(presenter);
+    static const char vertex_source[] =
+        "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
+        " float2 p = float2((id << 1) & 2, id & 2);\n"
+        " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n";
+    static const char occlusion_source[] =
+        "Texture2D<float4> ao_depth : register(t0);\n"
+        "cbuffer Ao : register(b0) { " RECOMP_AO_FIELDS " };\n"
+        RECOMP_AO_COMMON_HLSL
+        RECOMP_AO_OCCLUSION_HLSL
+        "float4 ps(float4 p : SV_Position) : SV_Target { return recompAoOcclusion(p); }\n";
+    static const char blur_source[] =
+        "Texture2D<float4> ao_depth : register(t0);\n"
+        "Texture2D<float4> ao_value : register(t1);\n"
+        "cbuffer Ao : register(b0) { " RECOMP_AO_FIELDS " };\n"
+        "float recompAoAt(int2 p) { return ao_value.Load(int3(p, 0)).x; }\n"
+        RECOMP_AO_COMMON_HLSL
+        RECOMP_AO_BLUR_HLSL
+        "float4 ps(float4 p : SV_Position) : SV_Target { return recompAoBlur(p); }\n";
+    static const char apply_source[] =
+        "Texture2D<float4> ao_value : register(t0);\n"
+        "SamplerState ao_sampler : register(s0);\n"
+        "cbuffer Ao : register(b0) { " RECOMP_AO_FIELDS " };\n"
+        RECOMP_AO_APPLY_HLSL
+        "float4 ps(float4 p : SV_Position) : SV_Target { return recompAoApply(p.xy / ao_screen.xy); }\n";
+    const D3D_SHADER_MACRO msaa_macro[] = {{"RECOMP_AO_MSAA", "1"}, {nullptr, nullptr}};
+    const D3D_SHADER_MACRO *macros = presenter->msaa > 1u ? msaa_macro : nullptr;
+    const auto compile = [&](const char *source, size_t size, const char *entry, const char *profile,
+        const D3D_SHADER_MACRO *defines, ID3DBlob **blob) {
+        ID3DBlob *errors = nullptr;
+        const HRESULT result = D3DCompile(source, size, nullptr, defines, nullptr, entry, profile,
+            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0u, blob, &errors);
+        if (FAILED(result) && errors != nullptr) {
+            std::fprintf(stderr, "recomp d3d presenter: ambient occlusion %s: %s\n", entry,
+                static_cast<const char *>(errors->GetBufferPointer()));
+        }
+        releaseCom(errors);
+        return SUCCEEDED(result);
+    };
+    ID3DBlob *vertex = nullptr, *occlusion = nullptr, *blur = nullptr, *apply = nullptr;
+    HRESULT result = E_FAIL;
+    if (compile(vertex_source, sizeof vertex_source - 1u, "vs", "vs_4_0", nullptr, &vertex)) {
+        result = presenter->device->CreateVertexShader(
+            vertex->GetBufferPointer(), vertex->GetBufferSize(), nullptr, &presenter->ao_vertex_shader);
+    }
+    if (SUCCEEDED(result) && compile(occlusion_source, sizeof occlusion_source - 1u, "ps", "ps_4_0", macros, &occlusion)) {
+        result = presenter->device->CreatePixelShader(
+            occlusion->GetBufferPointer(), occlusion->GetBufferSize(), nullptr, &presenter->ao_occlusion_pixel);
+    }
+    if (SUCCEEDED(result) && compile(blur_source, sizeof blur_source - 1u, "ps", "ps_4_0", macros, &blur)) {
+        result = presenter->device->CreatePixelShader(
+            blur->GetBufferPointer(), blur->GetBufferSize(), nullptr, &presenter->ao_blur_pixel);
+    }
+    if (SUCCEEDED(result) && compile(apply_source, sizeof apply_source - 1u, "ps", "ps_4_0", nullptr, &apply)) {
+        result = presenter->device->CreatePixelShader(
+            apply->GetBufferPointer(), apply->GetBufferSize(), nullptr, &presenter->ao_apply_pixel);
+    }
+    releaseCom(vertex);
+    releaseCom(occlusion);
+    releaseCom(blur);
+    releaseCom(apply);
+    if (SUCCEEDED(result)) {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = desc.ArraySize = 1u;
+        desc.Format = DXGI_FORMAT_R8_UNORM;
+        desc.SampleDesc.Count = 1u;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        for (unsigned i = 0u; i < 2u && SUCCEEDED(result); ++i) {
+            result = presenter->device->CreateTexture2D(&desc, nullptr, &presenter->ao_texture[i]);
+            if (SUCCEEDED(result)) result = presenter->device->CreateRenderTargetView(
+                presenter->ao_texture[i], nullptr, &presenter->ao_target[i]);
+            if (SUCCEEDED(result)) result = presenter->device->CreateShaderResourceView(
+                presenter->ao_texture[i], nullptr, &presenter->ao_view[i]);
+        }
+    }
+    if (SUCCEEDED(result)) {
+        D3D11_BUFFER_DESC buffer{};
+        buffer.ByteWidth = sizeof(RecompAoConstants);
+        buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        result = presenter->device->CreateBuffer(&buffer, nullptr, &presenter->ao_buffer);
+    }
+    if (SUCCEEDED(result)) {
+        D3D11_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler.MaxLOD = D3D11_FLOAT32_MAX;
+        result = presenter->device->CreateSamplerState(&sampler, &presenter->ao_sampler);
+    }
+    if (SUCCEEDED(result)) {
+        D3D11_RASTERIZER_DESC raster{};
+        raster.FillMode = D3D11_FILL_SOLID;
+        raster.CullMode = D3D11_CULL_NONE;
+        raster.ScissorEnable = TRUE;
+        result = presenter->device->CreateRasterizerState(&raster, &presenter->ao_raster);
+    }
+    if (SUCCEEDED(result)) {
+        D3D11_BLEND_DESC blend{};
+        D3D11_RENDER_TARGET_BLEND_DESC &target = blend.RenderTarget[0];
+        target.BlendEnable = TRUE;
+        target.SrcBlend = D3D11_BLEND_ZERO;
+        target.DestBlend = D3D11_BLEND_SRC_COLOR;  // dst * occlusion
+        target.BlendOp = D3D11_BLEND_OP_ADD;
+        target.SrcBlendAlpha = D3D11_BLEND_ZERO;
+        target.DestBlendAlpha = D3D11_BLEND_ONE;
+        target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        result = presenter->device->CreateBlendState(&blend, &presenter->ao_blend);
+    }
+    if (SUCCEEDED(result)) {
+        D3D11_DEPTH_STENCIL_DESC depth{};
+        depth.DepthEnable = FALSE;
+        depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+        depth.StencilEnable = FALSE;
+        result = presenter->device->CreateDepthStencilState(&depth, &presenter->ao_depth_state);
+    }
+    if (FAILED(result)) {
+        std::fprintf(stderr, "recomp d3d presenter: ambient occlusion unavailable hr=0x%08lX\n",
+            static_cast<unsigned long>(result));
+        releaseAo(presenter);
+        return false;
+    }
+    presenter->ao_width = width;
+    presenter->ao_height = height;
+    presenter->ao_samples = presenter->msaa;
+    std::fprintf(stderr, "recomp d3d presenter: ambient occlusion %ux%u\n", width, height);
+    return true;
+}
+
+/* Applies one frame's occlusion to the main target's RGB. The main depth is
+   read with sample 0, so MSAA edges stay as the scene drew them. */
+bool runAo(RecompD3dPresenter *presenter)
+{
+    presenter->ao_done = true;
+    if (!recomp_ao_projection(presenter->ao_projection)) {
+        static bool reported;
+        if (!reported) {
+            reported = true;
+            std::fprintf(stderr, "recomp d3d presenter: ambient occlusion needs the scene's projection;"
+                " this frame's draws carried none\n");
+        }
+        return false;
+    }
+    if (!ensureAo(presenter)) {
+        presenter->ao = false;
+        return false;
+    }
+    auto *context = presenter->context;
+    const RecompAoConstants constants = recomp_ao_constants(presenter->ao_projection,
+        mainWidth(presenter), mainHeight(presenter), presenter->ao_width, presenter->ao_height);
+    context->UpdateSubresource(presenter->ao_buffer, 0u, nullptr, &constants, 0u, 0u);
+    const D3D11_VIEWPORT half = {
+        0.0f, 0.0f, static_cast<float>(presenter->ao_width), static_cast<float>(presenter->ao_height),
+        0.0f, 1.0f};
+    const D3D11_RECT whole = {0, 0,
+        static_cast<LONG>(presenter->ao_width), static_cast<LONG>(presenter->ao_height)};
+    const D3D11_VIEWPORT full = fullViewport(mainWidth(presenter), mainHeight(presenter));
+    // The depth view doubles as a texture, so it must leave the output merger first.
+    context->OMSetRenderTargets(0u, nullptr, nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->IASetInputLayout(nullptr);
+    context->VSSetShader(presenter->ao_vertex_shader, nullptr, 0u);
+    context->PSSetConstantBuffers(0u, 1u, &presenter->ao_buffer);
+    context->OMSetDepthStencilState(presenter->ao_depth_state, 0u);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
+    context->RSSetState(presenter->ao_raster);
+    context->RSSetScissorRects(1u, &whole);
+    context->RSSetViewports(1u, &half);
+    ID3D11ShaderResourceView *depth = presenter->depth_sample;
+    context->OMSetRenderTargets(1u, &presenter->ao_target[0], nullptr);
+    context->PSSetShader(presenter->ao_occlusion_pixel, nullptr, 0u);
+    context->PSSetShaderResources(0u, 1u, &depth);
+    context->Draw(3u, 0u);
+    context->OMSetRenderTargets(1u, &presenter->ao_target[1], nullptr);
+    context->PSSetShader(presenter->ao_blur_pixel, nullptr, 0u);
+    ID3D11ShaderResourceView *views[2] = {presenter->depth_sample, presenter->ao_view[0]};
+    context->PSSetShaderResources(0u, 2u, views);
+    context->Draw(3u, 0u);
+    // Multiply the scene: dst * occlusion, alpha untouched.
+    ID3D11ShaderResourceView *occlusion = presenter->ao_view[1];
+    context->OMSetRenderTargets(1u, &presenter->render_target_view, nullptr);
+    context->RSSetViewports(1u, &full);
+    const D3D11_RECT whole_full = {0, 0, static_cast<LONG>(mainWidth(presenter)),
+        static_cast<LONG>(mainHeight(presenter))};
+    context->RSSetScissorRects(1u, &whole_full);
+    context->PSSetShader(presenter->ao_apply_pixel, nullptr, 0u);
+    context->PSSetSamplers(0u, 1u, &presenter->ao_sampler);
+    context->PSSetShaderResources(0u, 1u, &occlusion);
+    context->OMSetBlendState(presenter->ao_blend, nullptr, 0xffffffffu);
+    context->Draw(3u, 0u);
+    return true;
+}
+
+/* A draw that writes the scene's depth into the main target is the scene the
+   occlusion covers. Everything else that follows one, before the frame ends,
+   is a layer the game drew on top: run the pass before it so the HUD, menus,
+   fonts and full-screen effects keep their pixels. */
+bool aoSceneDraw(const RecompD3dPresenterDrawCommand &draw, const RecompD3dVertexLayout &layout)
+{
+    return !draw.target.offscreen && !draw.target.no_depth && !layout.pretransformed &&
+        (draw.has_transform || draw.program_count != 0u) &&
+        draw.depth.depth_test_enable && draw.depth.depth_write_enable;
+}
+
+void aoDrawBoundary(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
+    const RecompD3dVertexLayout &layout)
+{
+    if (!presenter->ao) return;
+    if (aoSceneDraw(draw, layout)) {
+        presenter->ao_scene = true;
+        std::memcpy(presenter->ao_projection, draw.projection, sizeof presenter->ao_projection);
+    } else if (presenter->ao_scene && !presenter->ao_done && !draw.target.offscreen) {
+        runAo(presenter);
+    }
+}
+
 /* SMAA 1x (iryoku/smaa, ultra preset) on the final resolved image. */
 bool createSmaa(RecompD3dPresenter *presenter)
 {
@@ -3931,6 +4231,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     const bool old_smaa = presenter->smaa;
     presenter->smaa = want.smaa;
     presenter->sharpen = want.sharpen;
+    presenter->ao = want.ao;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const UINT msaa = supportedSamples(presenter, std::clamp(want.msaa, 1u, 32u));
     if (scale == presenter->scale && msaa == presenter->msaa) {
@@ -4021,6 +4322,7 @@ void applyQuality(RecompD3dPresenter *presenter)
         // Frame generation's history and HUD mask are main-sized; the next frame starts them again.
         framegenRelease(presenter);
         releaseSmaa(presenter);
+        releaseAo(presenter);  // it pairs with the rebuilt depth
         // A 480-line picture is windowed and a scaled one fills the screen, as at start.
         if ((old_scale > 1.0f) != (scale > 1.0f) && presenter->fullscreen != (scale > 1.0f))
             toggleFullscreen(presenter);
@@ -4191,6 +4493,10 @@ RecompD3dPresenterError submitPresent(
        diagnostic block shows it later, which would leave the first frame out
        of the history). */
     if (!presenter->first_present_reported) ShowWindow(presenter->window, SW_SHOW);
+    /* A frame that never drew a 2D layer ends with the scene; occlude it now,
+       before frame generation and the output read the picture. */
+    if (presenter->ao && presenter->ao_scene && !presenter->ao_done) runAo(presenter);
+    presenter->ao_scene = presenter->ao_done = false;
     const bool generated = framegenRecord(presenter, shown);
     if (generated) {
         /* The window, its overlay and the frame dumps belong to the slots. */
@@ -4464,6 +4770,7 @@ RecompD3dPresenterError d3d_backend_create(
     const char *smaa = std::getenv("RECOMP_D3D_SMAA");
     created->smaa = smaa != nullptr && std::strcmp(smaa, "0") != 0;
     created->sharpen = recomp_cas_env_sharpness();
+    created->ao = recomp_ao_env_enabled();
     /* VRR shows each frame when it is presented, so any VRR display paces 60 Hz
        evenly. DXGI cannot tell whether VRR is active; without it this tears. */
     const char *vrr = std::getenv("RECOMP_D3D_VRR");
@@ -4896,16 +5203,17 @@ void d3d_backend_flush(RecompD3dPresenter *presenter)
     presenter->context->Flush();
 }
 
-void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen, bool ao)
 {
     std::lock_guard<std::mutex> lock(quality_lock);
     quality_request.scale = scale;
     quality_request.msaa = msaa;
     quality_request.smaa = smaa;
     quality_request.sharpen = sharpen;
+    quality_request.ao = ao;
     ++quality_request.generation;
-    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f\n",
-        scale, msaa, smaa ? 1 : 0, sharpen);
+    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f ao=%d\n",
+        scale, msaa, smaa ? 1 : 0, sharpen, ao ? 1 : 0);
 }
 
 bool d3d_backend_quality_live()

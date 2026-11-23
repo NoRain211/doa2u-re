@@ -2722,12 +2722,12 @@ static bool testLiveQuality()
         present.data.present = {5,1};
         passed &= expect("red frame", d3d_backend_submit(presenter, &clear));
         passed &= expect("first present", d3d_backend_submit(presenter, &present));
-        d3d_backend_set_quality(2.0f, 1u, false, 0.0f);
+        d3d_backend_set_quality(2.0f, 1u, false, 0.0f, false);
         passed &= expect("present then rebuild", d3d_backend_submit(presenter, &present));
         passed &= expect("carried present", d3d_backend_submit(presenter, &present));
     }
     d3d_backend_destroy(&presenter);
-    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
     if (passed) {
         FILE *file = std::fopen(path, "rb");
         int32_t size[2]{};
@@ -3491,7 +3491,7 @@ static bool testSharpen(bool ramp, bool live)
         passed &= expect("sharpen gamma", d3d_backend_submit(presenter, &gamma));
     }
     for (unsigned frame = 0u; passed && frame < (live ? 3u : 1u); ++frame) {
-        if (live && frame == 1u) d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+        if (live && frame == 1u) d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
         auto clear = clearCommand();
         clear.data.clear.color = 0xff404040u;
         passed &= expect("sharpen clear", d3d_backend_submit(presenter, &clear));
@@ -3543,6 +3543,139 @@ static bool testSharpen(bool ramp, bool live)
     DeleteFileA(path);
     std::fprintf(passed ? stdout : stderr, "%s sharpen ramp=%d live=%d step %u|%u -> %u|%u\n",
         passed ? "PASS" : "FAIL", ramp, live, dark, light, dark_rim, light_rim);
+    return passed;
+}
+
+/* A frame dump read back as 320x240 BGR rows, bottom-up as BMP stores them. */
+static bool readFrame(const char *path, std::vector<unsigned char> &pixels)
+{
+    FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) return false;
+    uint32_t width = 0u, height = 0u;
+    std::fseek(file, 18, SEEK_SET);
+    bool ok = std::fread(&width, 4, 1, file) == 1 && std::fread(&height, 4, 1, file) == 1 &&
+        width == 320u && height == 240u;
+    pixels.resize(320u * 240u * 3u);
+    ok = ok && std::fread(pixels.data(), pixels.size(), 1, file) == 1;
+    std::fclose(file);
+    return ok;
+}
+
+static unsigned framePixel(const std::vector<unsigned char> &pixels, unsigned x, unsigned y)
+{
+    return pixels[((239u - y) * 320u + x) * 3u + 1u];  // BGR, the scene is grey
+}
+
+/* Ambient occlusion darkens the crease where a wall meets the floor and leaves
+   an open floor, the wall's flat middle and a later 2D draw alone. With live,
+   a quality request turns it off by the third frame. */
+static bool testAmbientOcclusion(bool live)
+{
+    char folder[MAX_PATH], on_path[MAX_PATH], off_path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "ao", 0, on_path) ||
+        !GetTempFileNameA(folder, "ao", 0, off_path)) return false;
+    // A floor and a wall at a right angle, then a pretransformed white band.
+    const auto drawScene = [](RecompD3dPresenter *presenter) {
+        struct Vertex { float x, y, z; uint32_t color; };
+        const Vertex floor[] = {{-4,-1,2,~0u}, {4,-1,2,~0u}, {4,-1,6,~0u}, {-4,-1,6,~0u}};
+        const uint16_t floor_indices[] = {0,1,2, 0,2,3};
+        const Vertex wall[] = {{-2,-1,3,~0u}, {2,-1,3,~0u}, {2,0.6f,3,~0u}, {-2,0.6f,3,~0u}};
+        const uint16_t wall_indices[] = {0,1,2, 0,2,3};
+        const auto triangle = [](const void *vertices, size_t stride, const uint16_t *indices) {
+            RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+            auto &draw = command.data.draw;
+            draw.fvf = 0x42u;
+            draw.vertex_stride = static_cast<uint32_t>(stride);
+            draw.vertex_bytes = vertices;
+            draw.index_bytes = indices;
+            draw.index_count = 6u;
+            draw.triangle_count = 2u;
+            draw.vertex_count = 4u;
+            draw.primitive_type = RECOMP_D3D_PT_TRIANGLELIST;
+            draw.cull_mode = RECOMP_D3D_CULL_NONE;
+            draw.blend.color_write_mask = 15u;
+            draw.depth.depth_test_enable = draw.depth.depth_write_enable = true;
+            draw.depth.depth_func = RECOMP_D3D_COMPARE_LESS_EQUAL;
+            draw.has_transform = true;
+            // Near 0.5 and far 100 in the game's row-vector projection.
+            float *m = draw.transform;
+            m[0] = m[5] = 1.0f;
+            m[10] = 100.0f / 99.5f;
+            m[11] = 1.0f;
+            m[14] = -0.5f * 100.0f / 99.5f;
+            m[15] = 0.0f;
+            std::memcpy(draw.projection, m, sizeof draw.transform);
+            return command;
+        };
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff808080u;
+        bool ok = expect("ao clear", d3d_backend_submit(presenter, &clear));
+        ok &= expect("ao floor", d3d_backend_submit(presenter, &triangle(floor, sizeof floor[0], floor_indices)));
+        ok &= expect("ao wall", d3d_backend_submit(presenter, &triangle(wall, sizeof wall[0], wall_indices)));
+        struct ScreenVertex { float x, y, z, rhw; uint32_t color; };
+        const ScreenVertex band[] = {{20,30,0.5f,1,~0u}, {300,30,0.5f,1,~0u},
+            {20,70,0.5f,1,~0u}, {300,70,0.5f,1,~0u}};
+        const uint16_t band_indices[] = {0,1,2,3};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.fvf = 0x44u;
+        draw.vertex_stride = sizeof(ScreenVertex);
+        draw.vertex_bytes = band;
+        draw.index_bytes = band_indices;
+        draw.index_count = draw.vertex_count = 4u;
+        draw.triangle_count = 2u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.blend.color_write_mask = 15u;
+        ok &= expect("ao band", d3d_backend_submit(presenter, &command));
+        return ok;
+    };
+    const auto run = [&](const char *path, const char *at, const char *ao, bool turnOff) {
+        _putenv_s("RECOMP_D3D_AO", ao);
+        _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+        _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", at);
+        RecompD3dPresenter *presenter = nullptr;
+        bool ok = expect("create ao", d3d_backend_create(&config, &presenter));
+        const unsigned frames = turnOff ? 3u : 1u;
+        for (unsigned frame = 0u; ok && frame < frames; ++frame) {
+            if (turnOff && frame == 1u) d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
+            ok &= drawScene(presenter);
+            RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+            present.data.present = {5, frame + 1u};
+            ok &= expect("ao present", d3d_backend_submit(presenter, &present));
+        }
+        d3d_backend_destroy(&presenter);
+        return ok;
+    };
+    bool passed = run(off_path, "1", "0", false);
+    passed &= run(on_path, live ? "3" : "1", "1", live);
+    std::vector<unsigned char> off, on;
+    passed &= readFrame(off_path, off) && readFrame(on_path, on);
+    const auto at = [](const std::vector<unsigned char> &pixels, unsigned x, unsigned y) {
+        return pixels.empty() ? 0u : framePixel(pixels, x, y);
+    };
+    const unsigned crease_off = at(off, 160, 157), crease_on = at(on, 160, 157);
+    const unsigned flat_off = at(off, 160, 120), flat_on = at(on, 160, 120);
+    const unsigned floor_off = at(off, 280, 175), floor_on = at(on, 280, 175);
+    const unsigned band_off = at(off, 160, 50), band_on = at(on, 160, 50);
+    const auto close = [](unsigned a, unsigned b) { return a + 2u >= b && a <= b + 2u; };
+    if (live) {
+        // A quality request turns it off by the third frame: back to baseline.
+        passed &= close(crease_on, crease_off) && close(flat_on, flat_off) && close(floor_on, floor_off);
+        passed &= band_on == band_off;
+    } else {
+        passed &= crease_on + 8u < crease_off;  // the crease darkens
+        passed &= close(flat_on, flat_off) && close(floor_on, floor_off);  // open surfaces stay
+        passed &= band_on == band_off && band_off > 200u;  // the later 2D layer is untouched
+    }
+    _putenv_s("RECOMP_D3D_AO", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", "");
+    DeleteFileA(on_path);
+    DeleteFileA(off_path);
+    std::fprintf(passed ? stdout : stderr,
+        "%s ambient occlusion live=%d crease %u->%u flat %u->%u floor %u->%u band %u->%u\n",
+        passed ? "PASS" : "FAIL", live, crease_off, crease_on, flat_off, flat_on, floor_off, floor_on,
+        band_off, band_on);
     return passed;
 }
 
@@ -4261,7 +4394,7 @@ static bool testFramegenWarpEdges()
     _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create framegen warp edges", d3d_backend_create(&config, &presenter));
-    d3d_backend_set_quality(6.75f, 1u, false, 0.0f);
+    d3d_backend_set_quality(6.75f, 1u, false, 0.0f, false);
     const int w = 2160, h = 1620;
     std::vector<uint32_t> a(320u * 240u), b[2], truth_picture[2], out, from, to, truth;
     for (std::vector<uint32_t> *picture : {&b[0], &b[1], &truth_picture[0], &truth_picture[1]}) picture->resize(a.size());
@@ -4323,7 +4456,7 @@ static bool testFramegenWarpEdges()
         passed = cut == 0u;
         if (!passed) std::fprintf(stderr, "FAIL framegen warp cuts edges in scene %u\n", scene);
     }
-    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     if (passed) {
@@ -4521,7 +4654,7 @@ static bool testFramegenCuts()
         passed = flowFrame(presenter, a, 0x100000u, ++swap);
         if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
         if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
-        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false, 0.0f);  // applied after the next real frame
+        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false, 0.0f, false);  // applied after the next real frame
         if (way == 2u) {
             d3d_backend_framegen_set_late_ns(25000000);
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -4542,7 +4675,7 @@ static bool testFramegenCuts()
         passed = passed && off == 0u;
         if (!passed) std::fprintf(stderr, "FAIL framegen mixes real frames across a %s\n", restarts[way]);
     }
-    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     if (passed) {
@@ -4647,7 +4780,7 @@ static void benchFramegenFlow()
     for (const float scale : {1.0f, 1.5f, 4.5f}) {
         RecompD3dPresenter *presenter = nullptr;
         if (d3d_backend_create(&wide, &presenter) == RECOMP_D3D_PRESENTER_OK) {
-            d3d_backend_set_quality(scale, 1u, false, 0.0f);
+            d3d_backend_set_quality(scale, 1u, false, 0.0f, false);
             for (uint32_t swap = 1u; swap <= 3u; ++swap) {
                 auto clear = clearCommand();
                 RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
@@ -4689,7 +4822,7 @@ static void benchFramegenFlow()
         }
         d3d_backend_destroy(&presenter);
     }
-    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f, false);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
 }
@@ -4827,7 +4960,8 @@ int main()
         !testStageWater(false) || !testStageWater(true) ||
         !testVisibility() ||
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
-        !testLiveQuality() || !testSharpen(false, true)) return 1;
+        !testLiveQuality() || !testSharpen(false, true) ||
+        !testAmbientOcclusion(false) || !testAmbientOcclusion(true)) return 1;
     // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
     d3d_backend_framegen_set_late_ns(INT64_MAX);
     if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() ||

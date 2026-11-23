@@ -169,7 +169,7 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
         const unsigned samples = RECOMP_PC_SAMPLES[recomp_pc_settings_choice(RECOMP_PC_MSAA)];
         const float sharpen = RECOMP_PC_SHARPNESS[recomp_pc_settings_choice(RECOMP_PC_SHARPEN)];
         recomp_d3d_presenter_set_quality(static_cast<float>(height) / 480.0f, samples,
-            recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u, sharpen);
+            recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u, sharpen, false);
         break;
     }
     default: break;

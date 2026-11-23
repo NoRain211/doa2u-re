@@ -9,6 +9,7 @@
    counts come from an additive pass. RECOMP_D3D_PRESENT_LOG is Direct3D 11
    only. */
 #include "d3d_presenter_backend.h"
+#include "d3d_ao.h"
 #include "d3d_boot_shaders.h"
 #include "d3d_cas.h"
 #include "d3d_draw_model.h"
@@ -423,6 +424,18 @@ struct RecompD3dPresenter {
     float gamma_ramp[256][4]{};
     bool smaa = false;  // RECOMP_D3D_SMAA: post-process the output
     float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
+    /* RECOMP_D3D_AO: screen-space ambient occlusion (d3d_ao.h). SDL_GPU cannot
+       sample a multisampled depth target, so it runs at 1x. */
+    bool ao = false;
+    bool ao_scene = false;   // this frame drew depth-tested geometry into the main target
+    bool ao_done = false;    // the frame's occlusion has been baked into the main target
+    bool ao_reported = false;
+    float ao_projection[16]{};
+    SDL_GPUGraphicsPipeline *ao_occlusion_pipeline = nullptr;
+    SDL_GPUGraphicsPipeline *ao_blur_pipeline = nullptr;
+    SDL_GPUGraphicsPipeline *ao_apply_pipeline = nullptr;
+    SDL_GPUTexture *ao_texture[2]{};  // half size: occlusion, blurred
+    uint32_t ao_width = 0u, ao_height = 0u;
     SDL_GPUGraphicsPipeline *smaa_pipelines[3]{};  // edges, weights, blend
     SDL_GPUTexture *smaa_textures[5]{};  // edges, area, search, weights, output
     SDL_GPUGraphicsPipeline *gamma_pipeline = nullptr;
@@ -478,6 +491,7 @@ struct QualityRequest {
     uint32_t msaa = 1u;
     bool smaa = false;
     float sharpen = 0.0f;
+    bool ao = false;
     unsigned generation = 0u;
 };
 std::mutex quality_lock;
@@ -657,6 +671,10 @@ void resolveTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *source, SDL_GP
 
 void flushSegment(RecompD3dPresenter *presenter);
 void applyQuality(RecompD3dPresenter *presenter);
+/* d3d_ao.h: runs before the frame's 2D layers and at PRESENT. */
+void aoDrawBoundary(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
+    const RecompD3dVertexLayout &layout);
+bool runAo(RecompD3dPresenter *presenter);
 void clearTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *color, const SDL_FColor *clear_color,
     SDL_GPUTexture *depth, const float *clear_depth, const uint8_t *clear_stencil);
 
@@ -779,6 +797,20 @@ void releaseColorTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *&render, 
     render = resolve = nullptr;
 }
 
+void releaseAo(RecompD3dPresenter *presenter)
+{
+    for (SDL_GPUGraphicsPipeline *pipeline : {presenter->ao_occlusion_pipeline,
+            presenter->ao_blur_pipeline, presenter->ao_apply_pipeline}) {
+        if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
+    }
+    presenter->ao_occlusion_pipeline = presenter->ao_blur_pipeline = presenter->ao_apply_pipeline = nullptr;
+    for (SDL_GPUTexture *texture : presenter->ao_texture) {
+        if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
+    }
+    presenter->ao_texture[0] = presenter->ao_texture[1] = nullptr;
+    presenter->ao_width = presenter->ao_height = 0u;
+}
+
 /* A colour target and, when multisampled, the texture it resolves to (the
    target itself otherwise). False, keeping neither, when one fails. */
 bool createColorTarget(RecompD3dPresenter *presenter, uint32_t width, uint32_t height,
@@ -802,8 +834,11 @@ bool createMainTargets(RecompD3dPresenter *presenter, uint32_t width, uint32_t h
 {
     depth = nullptr;
     if (!createColorTarget(presenter, width, height, msaa, color, resolve)) return false;
+    // Ambient occlusion samples the depth, which needs a single sample to bind.
     depth = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, presenter->depth_format,
-        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, width, height, 1u, 1u, msaa);
+        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+            (msaa == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0u),
+        width, height, 1u, 1u, msaa);
     if (depth != nullptr) return true;
     releaseColorTarget(presenter, color, resolve);
     return false;
@@ -1034,6 +1069,8 @@ RecompD3dPresenterError submitCopyMainColor(RecompD3dPresenter *presenter, const
 {
     if (destination.width != presenter->config.width || destination.height != presenter->config.height)
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
+    // The snapshot keeps what the frame shows, so the scene is occluded first.
+    if (presenter->ao && presenter->ao_scene && !presenter->ao_done) runAo(presenter);
     RecompD3dPresenterTarget target{};
     target.offscreen = true;
     target.no_depth = true;
@@ -1859,6 +1896,8 @@ RecompD3dPresenterError submitClear(RecompD3dPresenter *presenter, const RecompD
         (clear.clear_stencil && clear.stencil > 0xffu)) {
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
+    // A main-target clear starts the frame's scene again.
+    if (clear.clear_color && !clear.target.offscreen) presenter->ao_scene = presenter->ao_done = false;
     BoundTarget bound;
     const RecompD3dPresenterError error = bindTarget(presenter, clear.target, bound);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
@@ -2152,6 +2191,8 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
         (draw.blend_weight_count != 0u && layout.blend_weight_count != draw.blend_weight_count)) {
         return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
     }
+    // Before the layer this draw starts, so ambient occlusion cannot touch it.
+    aoDrawBoundary(presenter, draw, layout);
     SDL_GPUPrimitiveType primitive;
     switch (draw.primitive_type) {
     case 2u:
@@ -3074,6 +3115,8 @@ SDL_GPUTexture *applyGamma(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *
     return picture;
 }
 
+#include "d3d_ao_sdl.h"
+
 /* Blits the picture to the window's acquired image in the game's aspect and
    draws the overlay over it. */
 void showPicture(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *shown,
@@ -3757,6 +3800,10 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     pumpEvents(presenter);
     if (presenter->close_requested) return RECOMP_D3D_PRESENTER_CLOSED;
     flushSegment(presenter);
+    /* A frame that never drew a 2D layer ends with the scene; occlude it now,
+       before the resolve, frame generation and the output read the picture. */
+    if (presenter->ao && presenter->ao_scene && !presenter->ao_done) runAo(presenter);
+    presenter->ao_scene = presenter->ao_done = false;
     framegenCover(presenter);
     resolveMain(presenter);
     SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
@@ -3918,6 +3965,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
         if (sampler != nullptr) SDL_ReleaseGPUSampler(presenter->device, sampler);
     }
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
+    releaseAo(presenter);
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     releaseFramegenFlow(presenter);
     if (presenter->fg_capture_index != nullptr) std::fclose(presenter->fg_capture_index);
@@ -4089,10 +4137,15 @@ void applyQuality(RecompD3dPresenter *presenter)
     }
     presenter->smaa = want.smaa;
     presenter->sharpen = want.sharpen;
+    const bool old_ao = presenter->ao;
+    presenter->ao = want.ao;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const SDL_GPUSampleCount msaa = supportedSamples(presenter->device, presenter->depth_format,
         std::clamp(want.msaa, 1u, 32u));
-    if (scale == presenter->scale && msaa == presenter->msaa) return;
+    /* SDL_GPU cannot sample a multisampled depth, so AO needs the main depth
+       made with SAMPLER usage: at 1x, turning it on rebuilds the target once. */
+    const bool depth_changed = want.ao != old_ao && presenter->msaa_count == 1u;
+    if (scale == presenter->scale && msaa == presenter->msaa && !depth_changed) return;
 
     flushSegment(presenter);
     resolveMain(presenter);
@@ -4118,6 +4171,12 @@ void applyQuality(RecompD3dPresenter *presenter)
         presenter->scale = old_scale;
         presenter->msaa = old_msaa;
         presenter->msaa_count = sampleCount(old_msaa);
+        presenter->ao = old_ao;
+        if (want.ao && !old_ao) {
+            // The GPU refused a sampleable depth; leave AO off instead of retrying.
+            presenter->ao = false;
+            std::fprintf(stderr, "recomp d3d presenter: ambient occlusion unavailable on this depth format\n");
+        }
         submitCommands(presenter);
         return;
     }
@@ -4175,6 +4234,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     presenter->fg_blend = nullptr;
     releaseFramegenFlow(presenter);
+    releaseAo(presenter);
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     presenter->gamma_pipeline = nullptr;
     if (presenter->gamma_enabled && !ensureGammaPass(presenter)) presenter->gamma_enabled = false;
@@ -4286,6 +4346,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     created->draw_log_trigger = std::getenv("RECOMP_D3D_DRAW_LOG");
     created->smaa = envFlag("RECOMP_D3D_SMAA");
     created->sharpen = recomp_cas_env_sharpness();
+    created->ao = recomp_ao_env_enabled();
     if (const char *scale = std::getenv("RECOMP_D3D_SCALE")) {
         const float value = static_cast<float>(std::atof(scale));
         if (std::isfinite(value)) created->scale = std::clamp(value, 1.0f, 8.0f);
@@ -4629,16 +4690,17 @@ RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter)
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen, bool ao)
 {
     std::lock_guard<std::mutex> lock(quality_lock);
     quality_request.scale = scale;
     quality_request.msaa = msaa;
     quality_request.smaa = smaa;
     quality_request.sharpen = sharpen;
+    quality_request.ao = ao;
     ++quality_request.generation;
-    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f\n",
-        scale, msaa, smaa ? 1 : 0, sharpen);
+    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f ao=%d\n",
+        scale, msaa, smaa ? 1 : 0, sharpen, ao ? 1 : 0);
 }
 
 bool d3d_backend_quality_live()
