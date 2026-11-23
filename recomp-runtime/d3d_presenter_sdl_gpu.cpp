@@ -2352,7 +2352,13 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
         ? draw.reflection_stage2_mip_lod_bias : 0.0f);
     bindings.sampler_bias[3] = bindings.sampler_bias[0];
     for (SDL_GPUSampler *sampler : bindings.samplers) {
-        if (sampler == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+        if (sampler == nullptr) {
+            // Each later draw repeats it; the worker's decline line counts them.
+            static bool logged = false;
+            if (!logged) std::fprintf(stderr, "recomp d3d presenter: sampler create failed: %s\n", SDL_GetError());
+            logged = true;
+            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+        }
     }
     {
         const uint32_t color = draw.blend.constant_color;
@@ -2467,6 +2473,7 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
         if (query.download == nullptr) query.download = SDL_CreateGPUTransferBuffer(presenter->device, &info);
         SDL_GPUCopyPass *pass = query.download != nullptr ? SDL_BeginGPUCopyPass(commands) : nullptr;
         if (pass == nullptr) {
+            std::fprintf(stderr, "recomp d3d presenter: visibility download failed: %s\n", SDL_GetError());
             releaseQuery(presenter, query);
             return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
@@ -2480,6 +2487,7 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
         query.fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
         presenter->command_buffer = nullptr;
         if (query.fence == nullptr) {
+            std::fprintf(stderr, "recomp d3d presenter: visibility submit failed: %s\n", SDL_GetError());
             releaseQuery(presenter, query);
             return RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
@@ -2969,7 +2977,10 @@ RecompD3dPresenterError submitGamma(RecompD3dPresenter *presenter, const uint8_t
             enabled |= ramp[channel][i] != i;
         }
     }
-    if (enabled && !ensureGammaPass(presenter)) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    if (enabled && !ensureGammaPass(presenter)) {
+        std::fprintf(stderr, "recomp d3d presenter: gamma pass create failed: %s\n", SDL_GetError());
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
     std::memcpy(presenter->gamma_ramp, values, sizeof values);
     presenter->gamma_enabled = enabled;
     return RECOMP_D3D_PRESENTER_OK;
@@ -3708,7 +3719,10 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     framegenCover(presenter);
     resolveMain(presenter);
     SDL_GPUCommandBuffer *commands = commandBuffer(presenter);
-    if (commands == nullptr) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    if (commands == nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: present command buffer failed: %s\n", SDL_GetError());
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
     SDL_GPUTexture *shown = presenter->main_resolve;
     if (presenter->smaa && presenter->smaa_pipelines[0] == nullptr && !createSmaa(presenter)) {
         presenter->smaa = false;
@@ -4159,7 +4173,10 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         return RECOMP_D3D_PRESENTER_INVALID_ARGUMENT;
     }
     if (*presenter != nullptr || active_presenter != nullptr) return RECOMP_D3D_PRESENTER_ALREADY_INITIALIZED;
-    if (!recomp_shader_compiler_available()) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    if (!recomp_shader_compiler_available()) {
+        std::fprintf(stderr, "recomp d3d presenter: the shader compiler is unavailable\n");
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "recomp d3d presenter: SDL video failed: %s\n", SDL_GetError());
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
@@ -4540,6 +4557,18 @@ void d3d_backend_set_immediate_present(bool enabled)
     if (presenter == nullptr || presenter->window == nullptr) return;
     SDL_SetGPUSwapchainParameters(presenter->device, presenter->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
         presentMode(presenter));
+}
+
+bool d3d_backend_paces_present(RecompD3dPresenter *presenter)
+{
+    return immediate_present || presenter->vrr;
+}
+
+void d3d_backend_flush(RecompD3dPresenter *presenter)
+{
+    // submitPresent flushes the segment first too, so its HUD mask and resolve see the same state.
+    flushSegment(presenter);
+    submitCommands(presenter);
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(RecompD3dPresenter *presenter, uint32_t *index, uint32_t *pixels)

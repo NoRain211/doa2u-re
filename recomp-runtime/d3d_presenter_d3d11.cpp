@@ -4809,6 +4809,18 @@ void d3d_backend_set_immediate_present(bool enabled)
     immediate_present = enabled;
 }
 
+bool d3d_backend_paces_present(RecompD3dPresenter *presenter)
+{
+    /* VRR waits for the game's 60 Hz grid, and interval 2 or 4 holds each frame
+       refresh / 60, so a second pacing on top would drop frames. */
+    return presenter->vrr || presenter->sync_interval != 1u || immediatePresent(presenter);
+}
+
+void d3d_backend_flush(RecompD3dPresenter *presenter)
+{
+    presenter->context->Flush();
+}
+
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
 {
     std::lock_guard<std::mutex> lock(quality_lock);

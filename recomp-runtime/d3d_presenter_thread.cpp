@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -109,6 +110,9 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
         const auto &record = packet.record(i);
         RecompD3dPresenterError error = RECOMP_D3D_PRESENTER_OK;
         bool draw = false;
+        // A draw's exception logs with its decline line, at power-of-two counts.
+        const unsigned next_decline = thread.draw_declines + 1u;
+        const auto log_exception = [&] { return !draw || (next_decline & (next_decline - 1u)) == 0u; };
         try {
             switch (record.kind) {
             case D3dCapturePacket::COMMAND: {
@@ -119,7 +123,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
                     error = d3d_backend_draw_coverage(backend, &command.data.draw, &covered);
                     std::lock_guard<std::mutex> lock(thread.mutex);
                     thread.covered = covered;
-                } else error = d3d_backend_submit(backend, &command);
+                } else {
+                    if (command.type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT &&
+                        !d3d_backend_paces_present(backend)) recomp_d3d_pace_present(d3d_backend_flush, backend);
+                    error = d3d_backend_submit(backend, &command);
+                }
                 break;
             }
             case D3dCapturePacket::RELEASE:
@@ -133,7 +141,11 @@ void execute(PresenterThread &thread, RecompD3dPresenter *backend,
             }
         } catch (const std::bad_alloc &) {
             error = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+        } catch (const std::exception &exception) {
+            if (log_exception()) std::fprintf(stderr, "recomp d3d presenter: host exception: %s\n", exception.what());
+            error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         } catch (...) {
+            if (log_exception()) std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type\n");
             error = RECOMP_D3D_PRESENTER_HOST_FAILURE;
         }
         if (draw && error != RECOMP_D3D_PRESENTER_OK &&
@@ -244,7 +256,11 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         created = d3d_backend_create(&config, &backend);
     } catch (const std::bad_alloc &) {
         created = RECOMP_D3D_PRESENTER_OUT_OF_MEMORY;
+    } catch (const std::exception &exception) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception at create: %s\n", exception.what());
+        created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     } catch (...) {
+        std::fprintf(stderr, "recomp d3d presenter: host exception of unknown type at create\n");
         created = RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     {
