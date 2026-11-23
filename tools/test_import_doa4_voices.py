@@ -91,17 +91,16 @@ class ArchiveTests(unittest.TestCase):
 
 
 class BankTests(unittest.TestCase):
-    def test_a_poisoned_cue_name_writes_nothing(self):
+    def test_a_poisoned_cue_name_stays_in_the_output_folder(self):
         with tempfile.TemporaryDirectory() as root:
             wave = make_wave_bank([(1, 48000, 4)])
             afs, entries = voice_entries(wave, sound_bank_image([("../../escaped", 0)]))
             out = os.path.join(root, "out")
             with mock.patch.object(voices.subprocess, "run") as run:
-                with self.assertRaises(ValueError):
-                    voices.decode_bank(afs, entries, "zac", out, "ffmpeg")
-            run.assert_not_called()
-            self.assertFalse(os.path.exists(out))
-            self.assertEqual(os.listdir(root), [])
+                files = voices.decode_bank(afs, entries, "zac", out, "ffmpeg")
+            self.assertEqual(files, {0: "zac_000_______escaped.wav"})
+            self.assertEqual(run.call_args.args[0][-1], os.path.join(out, files[0]))
+            self.assertEqual(os.listdir(root), ["out"])
 
     def test_a_valid_bank_is_decoded(self):
         afs, entries = voice_entries(make_wave_bank([(1, 48000, 4)]), sound_bank_image([("zac_068_down", 0)]))
@@ -174,11 +173,18 @@ class CueTests(unittest.TestCase):
         bank = sound_bank_image([("left_hit", 3), ("theme", [1, 2]), ("right_hit", 9)])
         self.assertEqual(voices.cue_waves(bank), {"left_hit": 3, "right_hit": 9})
 
-    def test_cue_names_that_could_leave_the_output_folder_are_rejected(self):
-        for name in ("../../escape", "a/b", "a\\b", "..", "x..y", "", "sp ace", "\x01no"):
+    def test_cue_names_become_safe_file_names(self):
+        # DOA4's own Tina bank has "tin_y01_tag dead"; the import must not stop on it.
+        bank = sound_bank_image([("tin_y01_tag dead", 0), ("tin_hit", 1)])
+        self.assertEqual(voices.cue_waves(bank), {"tin_y01_tag dead": 0, "tin_hit": 1})
+        with tempfile.TemporaryDirectory() as root:
+            afs, entries = voice_entries(make_wave_bank([(1, 48000, 4)]), sound_bank_image([("tin_y01_tag dead", 0)]))
+            with mock.patch.object(voices.subprocess, "run"):
+                self.assertEqual(voices.decode_bank(afs, entries, "zac", root, "ffmpeg"),
+                                 {0: "zac_000_tin_y01_tag_dead.wav"})
+        for name in ("../../escape", "a/b", "a\\b", "..", "x..y", "sp ace", "\x01no"):
             with self.subTest(name=name):
-                with self.assertRaises(ValueError):
-                    voices.cue_waves(sound_bank_image([(name, 0)]))
+                self.assertRegex(voices.safe_cue(name), r"^[A-Za-z0-9_-]+$")
 
 
 class AfsTests(unittest.TestCase):
