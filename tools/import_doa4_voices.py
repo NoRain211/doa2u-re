@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 
-from import_soundtrack import Folder, Xdvdfs, detect, open_source, resolve_ffmpeg
+from import_soundtrack import Folder, Xdvdfs, detect, open_source, resolve_ffmpeg, safe_cue
 from xact import afs_table, cue_tracks, wave_bank, xma1_riff
 
 # The 15 DOA2U fighters' DOA4 voice prefixes and their sound bank's AFS index;
@@ -49,16 +49,6 @@ FIGHTER_NAMES = {
     "jan": "Jann Lee", "kas": "Kasumi", "kor": "Hitomi", "lei": "Leifang", "leo": "Leon",
     "ryu": "Ryu Hayabusa", "tin": "Tina", "tng": "Tengu", "zac": "Zack",
 }
-
-
-CUE_NAME = re.compile(r"[A-Za-z0-9_.-]+")
-
-
-def cue_label(label):
-    """A cue name used in an output file name: plain, so it cannot leave the output folder."""
-    if not CUE_NAME.fullmatch(label) or ".." in label:
-        raise ValueError(f"unusable cue name {label!r} in the voice bank")
-    return label
 
 
 class ArchiveView:
@@ -123,7 +113,7 @@ def read_afs_entries(file):
 
 def cue_waves(data):
     """Cue name -> wave index for a big-endian XACT 2 sound bank's simple cues."""
-    return {cue_label(cue): wave for cue, wave, _loop, complex_sound in cue_tracks(data) if not complex_sound}
+    return {cue: wave for cue, wave, _loop, complex_sound in cue_tracks(data) if not complex_sound}
 
 
 def validate_banks(afs, entries):
@@ -168,7 +158,8 @@ def decode_bank(afs, entries, prefix, out_folder, ffmpeg, rows=None, only=None):
             source = os.path.join(scratch, "clip.wav")
             with open(source, "wb") as file:
                 file.write(xma1_riff(bank[offset:offset + length], channels, rate))
-            name = f"{prefix}_{n:03d}" + (f"_{cue_label(labels[0])}" if labels else "") + ".wav"
+            # A cue name may hold any character (Tina's has a space), so its file name keeps only safe ones.
+            name = f"{prefix}_{n:03d}" + (f"_{safe_cue(labels[0])}" if labels else "") + ".wav"
             target = os.path.join(out_folder, name)
             subprocess.run([ffmpeg, "-v", "error", "-y", "-i", source, "-ac", "1", "-ar", "48000",
                 "-c:a", "pcm_s16le", target], check=True,
