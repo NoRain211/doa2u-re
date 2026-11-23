@@ -6,8 +6,8 @@ Windows build; only the host layer differs:
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| Rendering | Direct3D 11, or Vulkan through SDL_GPU | Metal through SDL_GPU | Vulkan through SDL_GPU |
-| Draw shaders | HLSL, D3DCompile (Vulkan: shaderc) | the same HLSL, shaderc and SPIRV-Cross | the same HLSL, shaderc |
+| Rendering | Direct3D 11, or Vulkan or Direct3D 12 through SDL_GPU | Metal through SDL_GPU | Vulkan through SDL_GPU |
+| Draw shaders | HLSL, D3DCompile (SDL_GPU: shaderc, then SDL_shadercross for Direct3D 12) | the same HLSL, shaderc and SPIRV-Cross | the same HLSL, shaderc |
 | Audio | XAudio2 | SDL3 (CoreAudio) | SDL3 (PipeWire, PulseAudio or ALSA) |
 | Input | SDL3 gamepads, keyboard | same | same |
 | Fibers and threads | Win32 | `win32_compat.c` and `fiber_switch_*.S` | same |
@@ -16,11 +16,16 @@ Both presenters build their draw shaders from one HLSL source
 (`recomp-runtime/d3d_draw_shader.cpp`), so a shading fix reaches every
 platform. Windows builds a second runner, `recomp_program_runner_vulkan.exe`,
 with the SDL_GPU presenter; the launcher's Renderer setting picks it, and the
-build fetches LWJGL's `shaderc.dll` for it. The rendering differences listed
-below apply to it too; it keeps XAudio2. The macOS and Linux host layer comes
-from the sister projects
+build fetches LWJGL's `shaderc.dll` for it, plus SDL_shadercross and
+Microsoft's `dxcompiler.dll` and `dxil.dll` for Direct3D 12. The rendering
+differences listed below apply to it too; it keeps XAudio2. The macOS and
+Linux host layer comes from the sister projects
 [doaxbv-re](https://github.com/NoRain211/doaxbv-re) and
 [doa3-re](https://github.com/NoRain211/doa3-re).
+
+That runner starts on Vulkan. Setting `SDL_GPU_DRIVER=direct3d12` runs it on
+Direct3D 12 instead, which needs the two DXC DLLs beside it; the default run
+stays on Vulkan whether or not they are present.
 
 ## Build from the launcher
 

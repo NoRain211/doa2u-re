@@ -6,6 +6,8 @@
 #include "d3d_framegen_capture.h"
 #endif
 #include "xapi_time_adapter.h"
+#include "d3d_draw_shader.h"
+#include "d3d_shader_compiler.h"
 
 /* Both Windows presenters, Direct3D 11 and Vulkan, run on their own window
    thread; SDL_GPU on macOS and Linux runs inline on the caller's. */
@@ -4553,18 +4555,103 @@ static void benchFramegenFlow()
 }
 #endif
 
+#if defined(_WIN32) && !defined(RECOMP_TEST_D3D11)
+/* Direct3D 12 takes only DXIL, so the shaders the game's first frames use and
+   SMAA's three passes compile through SDL_shadercross and become SDL_GPU
+   shaders on a Direct3D 12 device. */
+static bool testDxilShaders()
+{
+    if (!recomp_shader_dxil_available()) {
+        std::puts("SKIP dxil shaders: no dxcompiler.dll and dxil.dll beside the test");
+        return true;
+    }
+    SDL_GPUDevice *device = SDL_InitSubSystem(SDL_INIT_VIDEO)
+        ? SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL, false, "direct3d12") : nullptr;
+    if (device == nullptr) {
+        std::printf("SKIP dxil shaders: no Direct3D 12 device: %s\n", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return true;
+    }
+    bool passed = true;
+    const auto create = [device, &passed](const std::string &source, const char *entry, bool vertex,
+                             const std::vector<std::string> &defines, Uint32 samplers,
+                             Uint32 uniform_buffers) {
+        RecompCompiledShader compiled;
+        std::string error;
+        if (!recomp_shader_compile(source, entry, vertex, RecompShaderTarget::Dxil, defines, compiled,
+                error)) {
+            std::fprintf(stderr, "FAIL dxil %s compile: %s\n", entry, error.c_str());
+            passed = false;
+            return false;
+        }
+        SDL_GPUShaderCreateInfo info{};
+        info.code = compiled.code.data();
+        info.code_size = compiled.code.size();
+        info.entrypoint = compiled.entry_point.c_str();
+        info.format = SDL_GPU_SHADERFORMAT_DXIL;
+        info.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        info.num_samplers = samplers;
+        info.num_uniform_buffers = uniform_buffers;
+        SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
+        if (shader == nullptr) {
+            std::fprintf(stderr, "FAIL dxil %s create: %s\n", entry, SDL_GetError());
+            passed = false;
+            return false;
+        }
+        SDL_ReleaseGPUShader(device, shader);
+        return true;
+    };
+    unsigned draws = 0u;
+    for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
+        const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
+        RecompD3dVertexLayout layout{};
+        std::string source;
+        if (!recomp_d3d_draw_shader_source(key, layout, source)) {
+            std::fprintf(stderr, "FAIL dxil draw shader fvf=0x%03X has no source\n", fvf);
+            passed = false;
+            continue;
+        }
+        source = recomp_shader_draw_bindings(source);
+        source = recomp_shader_keep_interpolants(source);
+        const bool vertex = create(source, "vs_main", true, {}, 0u, 2u);
+        const bool fragment = create(source, "ps_main", false, {}, 4u, 1u);
+        if (vertex && fragment) ++draws;
+    }
+    std::string smaa;
+    std::vector<std::string> smaa_defines;
+    d3d_backend_smaa_source(1920u, 1080u, smaa, smaa_defines);
+    static const char *const passes[3] = {"edges", "weights", "blend"};
+    for (const char *pass : passes) {
+        const std::string vertex = std::string("vs_") + pass;
+        const std::string fragment = std::string("ps_") + pass;
+        passed &= create(smaa, vertex.c_str(), true, smaa_defines, 0u, 0u);
+        passed &= create(smaa, fragment.c_str(), false, smaa_defines, 5u, 0u);
+    }
+    SDL_DestroyGPUDevice(device);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    if (passed) {
+        std::printf("PASS dxil: %u boot draw shaders and SMAA's three passes\n", draws);
+    }
+    return passed;
+}
+#endif
+
 int main()
 {
 #if defined(_WIN32) && !defined(RECOMP_TEST_D3D11)
-    // Hosted Windows CI has no Vulkan driver; ctest counts this as a skip.
-    SDL_GPUDevice *vulkan = SDL_InitSubSystem(SDL_INIT_VIDEO)
-        ? SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr) : nullptr;
-    if (vulkan == nullptr) {
-        std::printf("SKIP no Vulkan device: %s\n", SDL_GetError());
+    // Hosted Windows CI has no GPU driver; ctest counts this as a skip. A run
+    // that asked for Direct3D 12 creates that device instead of Vulkan.
+    SDL_GPUDevice *gpu = SDL_InitSubSystem(SDL_INIT_VIDEO)
+        ? SDL_CreateGPUDevice(recomp_shader_dxil_requested()
+            ? SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr) : nullptr;
+    if (gpu == nullptr) {
+        std::printf("SKIP no SDL_GPU device: %s\n", SDL_GetError());
         return 77;
     }
-    SDL_DestroyGPUDevice(vulkan);
+    std::printf("SDL_GPU driver: %s\n", SDL_GetGPUDeviceDriver(gpu));
+    SDL_DestroyGPUDevice(gpu);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    if (!testDxilShaders()) return 1;
 #endif
     recomp_d3d_presenter_set_immediate_present(false);
     if (!testShaderCacheFolder() || !testResampledMsaaTarget() ||

@@ -46,9 +46,76 @@ if(WIN32)
     file(ARCHIVE_EXTRACT INPUT "${_shaderc_jar}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/shaderc"
         PATTERNS windows/x64/org/lwjgl/shaderc/shaderc.dll ${_shaderc_touch})
     set(RECOMP_SHADERC_DLL "${CMAKE_CURRENT_BINARY_DIR}/shaderc/windows/x64/org/lwjgl/shaderc/shaderc.dll")
+    # SDL_shadercross (zlib; see NOTICE) turns the presenter's SPIR-V into DXIL
+    # for SDL_GPU's Direct3D 12 backend, through Microsoft's DXC. Both are
+    # fetched at pinned revisions; the prebuilt DXC is the release shadercross
+    # pins in build-scripts/download-prebuilt-DirectXShaderCompiler.cmake.
+    set(_shadercross_root
+        "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross/SDL_shadercross-1ff05bec573988a98ef9e0260b4da44f512b8367")
+    file(DOWNLOAD
+        https://codeload.github.com/libsdl-org/SDL_shadercross/tar.gz/1ff05bec573988a98ef9e0260b4da44f512b8367
+        "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross.tar.gz"
+        EXPECTED_HASH SHA256=60aae35ff71bd1d5f85b363e9d077a86bb27dd36333c42685e56c2fd541174d2)
+    if(NOT EXISTS "${_shadercross_root}/CMakeLists.txt")
+        file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross.tar.gz"
+            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross")
+    endif()
+    # shadercross's SPIR-V to HLSL step is SPIRV-Cross's C API, at the revision
+    # shadercross pins (Apache-2.0; see NOTICE).
+    set(_spirv_cross_root
+        "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross/SPIRV-Cross-1a6169566c73d3da552748fc372fe2bbb856e46e")
+    file(DOWNLOAD
+        https://codeload.github.com/KhronosGroup/SPIRV-Cross/tar.gz/1a6169566c73d3da552748fc372fe2bbb856e46e
+        "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross.tar.gz"
+        EXPECTED_HASH SHA256=0f295b214b164e42a1d21537c8da7b44569806c16220dda9798558edfaacd11e)
+    if(NOT EXISTS "${_spirv_cross_root}/CMakeLists.txt")
+        file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross.tar.gz"
+            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross")
+    endif()
+    # shadercross looks for the prebuilt DXC in external/DirectXShaderCompiler-binaries.
+    set(_dxc_dir "${_shadercross_root}/external/DirectXShaderCompiler-binaries/windows")
+    file(DOWNLOAD
+        https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip
+        "${CMAKE_CURRENT_BINARY_DIR}/dxc_2026_02_20.zip"
+        EXPECTED_HASH SHA256=a1e89031421cf3c1fca6627766ab3020ca4f962ac7e2caa7fab2b33a8436151e)
+    if(NOT EXISTS "${_dxc_dir}/bin/x64/dxcompiler.dll")
+        file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/dxc_2026_02_20.zip" DESTINATION "${_dxc_dir}")
+    endif()
+    set(RECOMP_DXC_DLLS "${_dxc_dir}/bin/x64/dxcompiler.dll" "${_dxc_dir}/bin/x64/dxil.dll")
+    set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+    set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+    set(SPIRV_CROSS_SHARED OFF CACHE BOOL "" FORCE)
+    set(SPIRV_CROSS_STATIC ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(spirv_cross SOURCE_DIR "${_spirv_cross_root}")
+    FetchContent_MakeAvailable(spirv_cross)
+    # shadercross looks for the installed package's target name; the fetched
+    # target is spirv-cross-c, so name it what that check expects.
+    if(NOT TARGET spirv_cross_c)
+        add_library(spirv_cross_c INTERFACE)
+        target_link_libraries(spirv_cross_c INTERFACE spirv-cross-c)
+    endif()
+    # shadercross exports its static library unconditionally, which needs its
+    # SPIRV-Cross dependencies in an export set too.
+    get_property(_recomp_spirv_cross_targets DIRECTORY "${_spirv_cross_root}"
+        PROPERTY BUILDSYSTEM_TARGETS)
+    export(TARGETS ${_recomp_spirv_cross_targets}
+        FILE "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross-targets.cmake")
+    set(SDLSHADERCROSS_DXC ON CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_SPIRVCROSS_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_STATIC ON CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_CLI OFF CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDLSHADERCROSS_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(sdl_shadercross SOURCE_DIR "${_shadercross_root}")
+    FetchContent_MakeAvailable(sdl_shadercross)
     function(recomp_use_shader_compiler target)
         add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
             copy_if_different "${RECOMP_SHADERC_DLL}" "$<TARGET_FILE_DIR:${target}>")
+        # DXC's DLLs load from beside the runner and nowhere else.
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
+            copy_if_different ${RECOMP_DXC_DLLS} "$<TARGET_FILE_DIR:${target}>")
     endfunction()
 else()
     # macOS builds need SDL3 (brew install sdl3). Linux uses the system SDL3,
@@ -535,6 +602,8 @@ if(WIN32)
     # Tests tell the SDL_GPU presenter from the Direct3D 11 one.
     target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)
     target_link_libraries(${_sdl_gpu_presenter} PUBLIC SDL3::SDL3 user32)
+    # d3d_shader_compiler.cpp turns SPIR-V into DXIL for the Direct3D 12 backend.
+    target_link_libraries(${_sdl_gpu_presenter} PRIVATE SDL3_shadercross::SDL3_shadercross-static)
 else()
     recomp_use_sdl3(${_sdl_gpu_presenter})
     recomp_use_shader_compiler(${_sdl_gpu_presenter})
