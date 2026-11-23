@@ -5,12 +5,12 @@
 #include <initializer_list>
 #include <string>
 
-/* Frame generation's HLSL. The SDL_GPU presenter compiles it with shaderc,
-   to SPIR-V and Metal; the vk = false form is for a planned Direct3D 11 port
-   (D3DCompile). Shaderc needs [[vk::binding]] attributes to place each
-   texture and constant buffer where SDL_GPU binds it; FXC cannot parse them,
-   and its registers (t0.., s0.., b0) already name the same slots, so that
-   form leaves the attributes out. Every pass draws one fullscreen triangle
+/* Frame generation's HLSL, shared by the SDL_GPU presenter (shaderc, to
+   SPIR-V and Metal) and the Direct3D 11 one (D3DCompile). Shaderc needs
+   [[vk::binding]] attributes to place each texture and constant buffer where
+   SDL_GPU binds it; FXC cannot parse them, and its registers (t0.., s0.., b0)
+   already name the same slots, so the Direct3D 11 presenter asks for the same
+   shaders without the attributes. Every pass draws one fullscreen triangle
    (vs_main of blendShader) and reads its inputs with Load, the warp's
    pictures with SampleLevel; Flow.info and Flow.weights vary by pass.
    These are fragment shaders within Shader Model 4, so Direct3D 11 runs them

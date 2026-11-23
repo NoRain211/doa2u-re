@@ -58,7 +58,7 @@ static const unsigned char kSmaaSource[] = {
 
 namespace {
 
-// Frame generation's shaders and pass descriptions, kept apart for a planned Direct3D 11 port.
+// Frame generation's shaders and pass descriptions are shared with the Direct3D 11 presenter.
 using namespace recomp_framegen;
 
 constexpr uint32_t kTextureSlots = 4096u;
@@ -3143,7 +3143,7 @@ void framegenCopy(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands,
 }
 
 /* Frame generation's passes and shaders live in d3d_framegen_shaders.h, which
-   a planned Direct3D 11 port can compile with FXC too. */
+   the Direct3D 11 presenter compiles with FXC too. */
 
 
 /* Main target pixels per finest pyramid pixel: the finest level is at most 720

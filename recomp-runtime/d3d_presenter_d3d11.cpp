@@ -1,15 +1,19 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
+#include "d3d_framegen_schedule.h"
+#include "d3d_framegen_shaders.h"
 #include "d3d_vblank.h"
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
 #include "texture_upscale.h"
 #include "widescreen.h"
+#include "xapi_time_adapter.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <timeapi.h>
 
 #include <d3d11.h>
 #include <d3d11_1.h>
@@ -117,6 +121,7 @@ struct DrawPipeline {
     bool sample_depth_bias;
     bool coverage_only;
     bool projected_stages;
+    uint8_t output;  // frame generation's HUD mask variant (kFgOutputOne..), 0 shaded
     ID3D11VertexShader *vertex_shader;
     ID3D11GeometryShader *geometry_shader;
     ID3D11PixelShader *pixel_shader;
@@ -242,6 +247,38 @@ struct DepthTargetEntry {
     uint32_t host_width;
 };
 
+/* Frame generation's textures and one of its HUD mask draws
+   (d3d_framegen_d3d11.h). */
+struct FramegenTexture {
+    ID3D11Texture2D *texture = nullptr;
+    ID3D11RenderTargetView *target = nullptr;
+    ID3D11ShaderResourceView *view = nullptr;
+};
+
+/* One 2D layer draw kept for the HUD mask: the state it went to the frame
+   with, and copies of its vertices, indices and constants. */
+struct FramegenCoverDraw {
+    ID3D11PixelShader *pixel_shader = nullptr;
+    ID3D11VertexShader *vertex_shader = nullptr;
+    ID3D11InputLayout *input_layout = nullptr;
+    ID3D11ShaderResourceView *views[4]{};
+    ID3D11SamplerState *samplers[3]{};
+    ID3D11RasterizerState *raster = nullptr;
+    D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    D3D11_VIEWPORT viewport{};
+    D3D11_RECT scissor{};
+    std::vector<uint8_t> vertices;
+    std::vector<uint8_t> indices;
+    uint32_t vertex_stride = 0u;
+    uint32_t index_count = 0u;
+    float constants[kRecompD3dDrawConstantFloats]{};
+};
+
+/* What a cover draw returns, matching the output column of
+   kRecompD3dBootDrawShaders: one, the draw's alpha, its brightness, or its
+   brightness times alpha. */
+constexpr uint8_t kFgOutputOne = 1u, kFgOutputAlpha = 2u, kFgOutputLight = 3u, kFgOutputLightAlpha = 4u;
+
 } // namespace
 
 struct RecompD3dPresenter {
@@ -363,8 +400,13 @@ struct RecompD3dPresenter {
     FILE *present_log = nullptr;
     UINT sync_interval = 1u;
     std::chrono::steady_clock::time_point next_refresh_check{};
+    /* Signaled while the swap chain has a buffer for another present; frame
+       generation's slots skip one that has none instead of waiting. Fetched
+       only for frame generation; releaseGraphics closes it with the chain. */
+    HANDLE frame_latency = nullptr;
     bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
     long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
+    bool fg_timer_raised = false;  // timeBeginPeriod(1) for frame generation's presents
     bool first_present_reported = false;
     unsigned frame_dump_count = 0u;
     ULONGLONG next_frame_dump_ms = 0u;
@@ -373,6 +415,35 @@ struct RecompD3dPresenter {
     const char *draw_log_trigger = nullptr;
     bool draw_log_active = false;
     unsigned draw_log_index = 0u;
+    /* RECOMP_D3D_FRAMEGEN (d3d_framegen_d3d11.h): real frames N-1 and N before
+       gamma, an in-between picture and the HUD mask. fg_k is the window
+       presents per guest frame, 0 when it is off. */
+    unsigned fg_k = 0u;
+    bool fg_flow_view = false;     // RECOMP_D3D_FRAMEGEN=flow
+    bool fg_history = false;       // fg_prev and fg_cur hold real frames
+    unsigned fg_next_slot = 0u;    // first slot of real frame N neither shown nor skipped
+    long long fg_present_ns = 0;   // when N arrived
+    float fg_aspect = 0.0f;
+    bool fg_restarted = false;     // N started the history again
+    bool fg_failed = false;        // the history cannot be made; frame generation is off
+    bool fg_flow_failed = false;   // the flow cannot be made; the crossfade runs instead
+    FramegenTexture fg_picture, fg_smaa;  // the frame resolved, before gamma, and SMAA's output
+    FramegenTexture fg_prev, fg_cur, fg_out;  // history, and the in-between picture
+    FramegenTexture fg_luma[2][recomp_framegen::kFlowLevels], fg_search[2][recomp_framegen::kFlowLevels];
+    FramegenTexture fg_flow[2], fg_motion, fg_cut_blocks, fg_cut[2], fg_cover[2];
+    ID3D11VertexShader *fg_vertex_shader = nullptr;   // every fullscreen pass
+    ID3D11PixelShader *fg_blend_pixel_shader = nullptr;
+    ID3D11PixelShader *fg_flow_pixel[9]{};  // recomp_framegen::FlowPipeline
+    ID3D11Buffer *fg_flow_buffer = nullptr;
+    ID3D11SamplerState *fg_point_sampler = nullptr, *fg_linear_sampler = nullptr;
+    ID3D11BlendState *fg_cover_blend = nullptr;
+    ID3D11DepthStencilState *fg_cover_depth = nullptr;
+    std::vector<FramegenCoverDraw> fg_cover_draws;  // this frame's 2D layer draws
+    // RECOMP_PERF_COUNTER: this second's window presents under frame generation.
+    std::vector<double> fg_intervals;
+    long long fg_last_window_ns = 0, fg_second_ns = 0;
+    unsigned fg_real = 0u, fg_generated = 0u, fg_late = 0u, fg_not_ready = 0u, fg_unshown = 0u;
+    double fg_window_max_ms = 0.0;
 };
 
 namespace {
@@ -380,6 +451,18 @@ namespace {
 RecompD3dPresenter *active_presenter;
 
 static bool immediate_present;
+
+/* d3d_framegen_d3d11.h: frame generation (RECOMP_D3D_FRAMEGEN), defined after
+   the present helpers it reuses. */
+bool framegenActive(const RecompD3dPresenter *presenter);
+bool framegenRecord(RecompD3dPresenter *presenter, float aspect);
+uint64_t framegenIdle(RecompD3dPresenter *presenter);
+void framegenRelease(RecompD3dPresenter *presenter);
+void framegenQueueCover(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
+    const RecompD3dVertexLayout &layout, const void *vertices, UINT vertex_bytes,
+    const void *indices, UINT index_bytes, UINT index_count, const float *constants);
+void framegenDiscardCover(RecompD3dPresenter *presenter);
+unsigned framegenPresents(RecompD3dPresenter *presenter);
 
 /* PC Settings' quality, set from the game thread and applied by the
    presenter after a present (applyQuality). */
@@ -567,6 +650,7 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
         presenter->context->Flush();
     }
     recomp_overlay_d3d11_shutdown();
+    framegenRelease(presenter);
     releaseCom(presenter->present_target_view);
     releaseCom(presenter->vrr_target_view);
     releaseCom(presenter->vrr_source);
@@ -650,6 +734,8 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     releaseCom(presenter->previous_frame_sample);
     releaseCom(presenter->previous_frame);
     releaseCom(presenter->swap_chain);
+    if (presenter->frame_latency != nullptr) CloseHandle(presenter->frame_latency);
+    presenter->frame_latency = nullptr;
     releaseCom(presenter->context);
     if (keep_device) presenter->device = nullptr;
     else releaseCom(presenter->device);
@@ -658,6 +744,11 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
 void releasePresenter(RecompD3dPresenter *presenter, bool keep_device = false)
 {
     releaseGraphics(presenter, keep_device);
+    // Not in releaseGraphics: a failed hardware create retries on the same timer.
+    if (presenter->fg_timer_raised) {
+        timeEndPeriod(1u);
+        presenter->fg_timer_raised = false;
+    }
     if (presenter->present_log != nullptr) {
         std::fclose(presenter->present_log);
         presenter->present_log = nullptr;
@@ -825,7 +916,12 @@ HRESULT createDeviceWithDriver(
     swap_chain_desc.SampleDesc.Count = 1u;
     swap_chain_desc.SampleDesc.Quality = 0u;
     swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swap_chain_desc.BufferCount = immediate ? 1u : 2u;
+    /* Frame generation presents k pictures per guest frame, one refresh
+       apart. Three buffers keep an in-between from waiting for the buffer the
+       real frame was drawn into, as SDL_GPU's three frames in flight do; two
+       buffers and a latency of one make every second present wait a refresh. */
+    const bool framegen = presenter->fg_k != 0u;
+    swap_chain_desc.BufferCount = immediate ? 1u : framegen ? 3u : 2u;
     swap_chain_desc.OutputWindow = presenter->window;
     swap_chain_desc.Windowed = TRUE;
     swap_chain_desc.SwapEffect = immediate
@@ -857,7 +953,9 @@ HRESULT createDeviceWithDriver(
     if (SUCCEEDED(result) && !immediate) {
         IDXGISwapChain2 *chain = nullptr;
         result = presenter->swap_chain->QueryInterface(IID_PPV_ARGS(&chain));
-        if (SUCCEEDED(result)) result = chain->SetMaximumFrameLatency(1u);
+        if (SUCCEEDED(result)) result = chain->SetMaximumFrameLatency(framegen ? 2u : 1u);
+        if (SUCCEEDED(result) && framegen)
+            presenter->frame_latency = chain->GetFrameLatencyWaitableObject();
         releaseCom(chain);
     }
     return result;
@@ -1584,6 +1682,24 @@ bool compileDrawShader(
     return SUCCEEDED(result);
 }
 
+/* Frame generation's HUD mask wants the fragment's coverage, not its color:
+   the same shader returns one, its alpha, its brightness, or its brightness
+   times alpha instead of the shaded color. False when the shader has no
+   shaded result to replace. */
+bool applyDrawOutput(std::string &source, uint8_t output)
+{
+    if (output == 0u) return true;
+    static const std::string result = "    return shaded;\n";
+    static const char *const outputs[] = {"", "    return float4(1, 1, 1, 1);\n", "    return shaded.aaaa;\n",
+        "    return max(shaded.r, max(shaded.g, shaded.b)).xxxx;\n",
+        "    return (max(shaded.r, max(shaded.g, shaded.b)) * shaded.a).xxxx;\n"};
+    if (output >= sizeof outputs / sizeof outputs[0]) return false;
+    const size_t at = source.rfind(result);
+    if (at == std::string::npos) return false;
+    source.replace(at, result.size(), outputs[output]);
+    return true;
+}
+
 /* Loads every shader an earlier launch compiled, including vertex-program ones,
    then compiles the fixed FVF list and the guest vertex programs; anything else
    still compiles on first use. */
@@ -1618,6 +1734,23 @@ void precompileDrawShaders(const std::atomic<bool> *stop, const RecompD3dPresent
                 releaseCom(blob);
             }
         }
+        /* Frame generation's HUD mask variants: without them the first 2D
+           layer draw of a scene compiles its cover shader on the render thread. */
+        const char *framegen = std::getenv("RECOMP_D3D_FRAMEGEN");
+        if (framegen != nullptr && std::strcmp(framegen, "0") != 0 && framegen[0] != '\0') {
+            for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
+                if (boot.output == 0u) continue;
+                const RecompD3dDrawShaderKey key{boot.fvf, 0u, nullptr, false, false, false, boot.projected_stages};
+                RecompD3dVertexLayout layout;
+                std::string source;
+                if (!recomp_d3d_draw_shader_source(key, layout, source) ||
+                    !applyDrawOutput(source, boot.output)) continue;
+                if (stop->load()) return;
+                ID3DBlob *blob = nullptr;
+                compiled += compileDrawShader(source.c_str(), "ps_main", "ps_4_0", &blob);
+                releaseCom(blob);
+            }
+        }
     } catch (const std::exception &) {
         return;  // Remaining shaders compile on first use.
     }
@@ -1640,6 +1773,10 @@ bool createDrawPipeline(
     if (!recomp_d3d_draw_shader_source(key, layout, compiled_source)) {
         return false;
     }
+    /* Frame generation's HUD mask wants the fragment's coverage, not its
+       color: the same shader returns one, its alpha, its brightness, or its
+       brightness times alpha instead of the shaded color. */
+    if (!applyDrawOutput(compiled_source, pipeline.output)) return false;
 
     ID3DBlob *vertex_blob = nullptr;
     ID3DBlob *pixel_blob = nullptr;
@@ -1816,7 +1953,8 @@ bool ensureSharedDrawState(RecompD3dPresenter *presenter)
    draw and does not affect any other FVF. */
 const DrawPipeline *lookupDrawPipeline(
     RecompD3dPresenter *presenter,
-    uint32_t fvf, const RecompD3dPresenterDrawCommand *draw = nullptr, bool coverage_only = false)
+    uint32_t fvf, const RecompD3dPresenterDrawCommand *draw = nullptr, bool coverage_only = false,
+    uint8_t output = 0u)
 {
     const uint32_t count = draw ? draw->program_count : 0u;
     const bool scaled_bias = draw && presenter->scale != 1.0f &&
@@ -1830,6 +1968,7 @@ const DrawPipeline *lookupDrawPipeline(
 
         if (pipeline.used && pipeline.fvf == fvf && pipeline.program_count == count &&
             pipeline.coverage_only == coverage_only &&
+            pipeline.output == output &&
             pipeline.scaled_depth_bias == scaled_bias &&
             pipeline.projected_stages == projected &&
             (!count || std::memcmp(pipeline.program, draw->program, count * 16u) == 0)) {
@@ -1852,6 +1991,7 @@ const DrawPipeline *lookupDrawPipeline(
     }
     pipeline.fvf = fvf;
     pipeline.coverage_only = coverage_only;
+    pipeline.output = output;
     pipeline.scaled_depth_bias = scaled_bias;
     pipeline.sample_depth_bias = scaled_bias && presenter->msaa > 1u;
     pipeline.projected_stages = projected;
@@ -3111,6 +3251,10 @@ RecompD3dPresenterError submitDraw(
     presenter->context->GSSetShader(nullptr, nullptr, 0u);
     if (sub_viewport) presenter->context->RSSetViewports(1u, &whole);
     if (coverage_only) return RECOMP_D3D_PRESENTER_OK;
+    /* Frame generation's HUD mask keeps this 2D layer draw's coverage, as the
+       SDL_GPU presenter queues it for framegenCover. */
+    framegenQueueCover(presenter, draw, layout, draw.vertex_bytes, vertex_size,
+        upload_indices, index_size, draw_index_count, draw_constants);
     static const char *program_dump = std::getenv("RECOMP_D3D_PROGRAM_TEXTURE_DUMP");
     static unsigned program_dump_count = 0;
     if (draw.program_count && program_dump && program_dump_count < 2 &&
@@ -3834,6 +3978,8 @@ void applyQuality(RecompD3dPresenter *presenter)
             desc.height = presenter->config.height;
             lookupBackBufferTexture(presenter, desc, true); // remade from this picture
         }
+        // Frame generation's history and HUD mask are main-sized; the next frame starts them again.
+        framegenRelease(presenter);
         releaseSmaa(presenter);
         // A 480-line picture is windowed and a scaled one fills the screen, as at start.
         if ((old_scale > 1.0f) != (scale > 1.0f) && presenter->fullscreen != (scale > 1.0f))
@@ -3845,6 +3991,94 @@ void applyQuality(RecompD3dPresenter *presenter)
     bindMainTarget(presenter);
     std::fprintf(stderr, "recomp d3d presenter: quality target=%ux%u msaa=%u smaa=%d\n",
         mainWidth(presenter), mainHeight(presenter), presenter->msaa, presenter->smaa ? 1 : 0);
+}
+
+/* The frame dump and the draw log of the picture the window shows, taken
+   before the overlay and Present so both read what this program rendered.
+   Frame generation takes them at the real frame's own slot, from its
+   main-sized picture. */
+void capturePresentedFrame(RecompD3dPresenter *presenter, ID3D11Texture2D *frame, uint32_t frame_index)
+{
+    dumpBackBufferOnce(presenter, frame_index, frame);
+    if (presenter->draw_log_active) {
+        char path[1024];
+        std::snprintf(path, sizeof path, "%s-%u.bmp", presenter->draw_log_trigger, frame_index);
+        writeBackBufferBmp(presenter, path, frame_index, frame);
+        // Offscreen targets too (reflections, glow), as their single-sample views hold them.
+        for (RenderTargetEntry &entry : presenter->render_targets) {
+            ID3D11Resource *resource = nullptr;
+            entry.sample_view->GetResource(&resource);
+            if (entry.multisampled && !entry.resolved) {
+                ID3D11Resource *rendered = nullptr;
+                entry.render_view->GetResource(&rendered);
+                presenter->context->ResolveSubresource(resource, 0u, rendered, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
+                releaseCom(rendered);
+                entry.resolved = true;
+            }
+            std::snprintf(path, sizeof path, "%s-%u-rt%08x.bmp", presenter->draw_log_trigger,
+                frame_index, entry.desc.data);
+            writeBackBufferBmp(presenter, path, frame_index,
+                static_cast<ID3D11Texture2D *>(resource));
+            releaseCom(resource);
+        }
+        std::fprintf(stderr, "recomp draw log: end present=%u draws=%u\n",
+            frame_index, presenter->draw_log_index);
+        presenter->draw_log_active = false;
+        DeleteFileA(presenter->draw_log_trigger);
+    }
+}
+
+// Starts the draw log when its trigger file appears, for the frame about to be drawn.
+void beginDrawLogIfRequested(RecompD3dPresenter *presenter)
+{
+    if (presenter->draw_log_trigger != nullptr && !presenter->draw_log_active &&
+        GetFileAttributesA(presenter->draw_log_trigger) != INVALID_FILE_ATTRIBUTES) {
+        presenter->draw_log_active = true;
+        presenter->draw_log_index = 0u;
+        std::fprintf(stderr, "recomp draw log: begin present=%u\n", presenter->present_count + 1u);
+    }
+}
+
+// Frame generation's resources, passes and presents (RECOMP_D3D_FRAMEGEN).
+#include "d3d_framegen_d3d11.h"
+
+// Once, at the first present: the window takes the focus and is checked.
+RecompD3dPresenterError reportFirstPresent(RecompD3dPresenter *presenter, HRESULT present_result)
+{
+    if (presenter->first_present_reported) return RECOMP_D3D_PRESENTER_OK;
+    ShowWindow(presenter->window, SW_SHOW);
+    SetForegroundWindow(presenter->window); // take the focus from the launcher
+    UpdateWindow(presenter->window);
+    if (quitPending()) {
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    if (presenter->close_requested) {
+        return RECOMP_D3D_PRESENTER_CLOSED;
+    }
+    if (!IsWindow(presenter->window)) {
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    RECT client_rect{};
+    if (!GetClientRect(presenter->window, &client_rect) ||
+        !IsWindowVisible(presenter->window)) {
+        std::fprintf(stderr,
+            "recomp d3d presenter: first present window not visible\n");
+        return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    }
+    std::fprintf(
+        stderr,
+        "recomp d3d presenter: creation/first-present hwnd=%p "
+        "client=%ldx%ld visible=1 driver=%s create_hr=0x%08lX "
+        "present_hr=0x%08lX count=%u\n",
+        static_cast<void *>(presenter->window),
+        client_rect.right - client_rect.left,
+        client_rect.bottom - client_rect.top,
+        presenter->driver_name,
+        static_cast<unsigned long>(presenter->create_result),
+        static_cast<unsigned long>(present_result),
+        static_cast<unsigned>(presenter->present_count));
+    presenter->first_present_reported = true;
+    return RECOMP_D3D_PRESENTER_OK;
 }
 
 RecompD3dPresenterError submitPresent(
@@ -3911,6 +4145,32 @@ RecompD3dPresenterError submitPresent(
     const D3D11_VIEWPORT viewport = drawn
         ? fitViewport(shown, chain.BufferDesc.Width, chain.BufferDesc.Height)
         : D3D11_VIEWPORT{};
+    /* Frame generation keeps this real frame's picture now and shows it at its
+       last slot, after the generated ones, so a real frame is never delayed.
+       The window becomes visible before this decision (the first present's
+       diagnostic block shows it later, which would leave the first frame out
+       of the history). */
+    if (!presenter->first_present_reported) ShowWindow(presenter->window, SW_SHOW);
+    const bool generated = framegenRecord(presenter, shown);
+    if (generated) {
+        /* The window, its overlay and the frame dumps belong to the slots. */
+        if (presenter->previous_frame != nullptr) {
+            ID3D11ShaderResourceView *none = nullptr;
+            presenter->context->PSSetShaderResources(0u, 1u, &none);
+            copyGuestBuffer(presenter, presenter->previous_frame);
+            if (presenter->scale != 1.0f) presenter->context->GenerateMips(presenter->previous_frame_sample);
+        }
+        ++presenter->present_count;
+        beginDrawLogIfRequested(presenter);
+        /* Slot 0 is due now; the worker's d3d_backend_idle presents it as soon
+           as this packet's records are done, outside the guest's present, so
+           the first present's report has no Present result yet. */
+        const RecompD3dPresenterError first = reportFirstPresent(presenter, S_OK);
+        if (first != RECOMP_D3D_PRESENTER_OK) return first;
+        applyQuality(presenter);
+        return RECOMP_D3D_PRESENTER_OK;
+    }
+    framegenDiscardCover(presenter);
     if (!renderOutput(presenter, drawn ? presenter->vrr_target_view : presenter->present_target_view)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
@@ -3933,34 +4193,7 @@ RecompD3dPresenterError submitPresent(
         output->QueryInterface(IID_PPV_ARGS(&frame));
         releaseCom(output);
     }
-    dumpBackBufferOnce(presenter, presenter->present_count + 1u, frame);
-    if (presenter->draw_log_active) {
-        char path[1024];
-        std::snprintf(path, sizeof path, "%s-%u.bmp",
-            presenter->draw_log_trigger, presenter->present_count + 1u);
-        writeBackBufferBmp(presenter, path, presenter->present_count + 1u, frame);
-        // Offscreen targets too (reflections, glow), as their single-sample views hold them.
-        for (RenderTargetEntry &entry : presenter->render_targets) {
-            ID3D11Resource *resource = nullptr;
-            entry.sample_view->GetResource(&resource);
-            if (entry.multisampled && !entry.resolved) {
-                ID3D11Resource *rendered = nullptr;
-                entry.render_view->GetResource(&rendered);
-                presenter->context->ResolveSubresource(resource, 0u, rendered, 0u, DXGI_FORMAT_B8G8R8A8_UNORM);
-                releaseCom(rendered);
-                entry.resolved = true;
-            }
-            std::snprintf(path, sizeof path, "%s-%u-rt%08x.bmp", presenter->draw_log_trigger,
-                presenter->present_count + 1u, entry.desc.data);
-            writeBackBufferBmp(presenter, path, presenter->present_count + 1u,
-                static_cast<ID3D11Texture2D *>(resource));
-            releaseCom(resource);
-        }
-        std::fprintf(stderr, "recomp draw log: end present=%u draws=%u\n",
-            presenter->present_count + 1u, presenter->draw_log_index);
-        presenter->draw_log_active = false;
-        DeleteFileA(presenter->draw_log_trigger);
-    }
+    capturePresentedFrame(presenter, frame, presenter->present_count + 1u);
     /* Keep the presented guest frame for GetBackBuffer(-1) once a draw has used it. */
     if (presenter->previous_frame != nullptr) {
         ID3D11ShaderResourceView *none = nullptr;
@@ -4018,12 +4251,7 @@ RecompD3dPresenterError submitPresent(
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     ++presenter->present_count;
-    if (presenter->draw_log_trigger != nullptr && !presenter->draw_log_active &&
-        GetFileAttributesA(presenter->draw_log_trigger) != INVALID_FILE_ATTRIBUTES) {
-        presenter->draw_log_active = true;
-        presenter->draw_log_index = 0u;
-        std::fprintf(stderr, "recomp draw log: begin present=%u\n", presenter->present_count + 1u);
-    }
+    beginDrawLogIfRequested(presenter);
     DXGI_FRAME_STATISTICS stats{};
     const HRESULT stats_result = presenter->present_log != nullptr || presenter->performance_counter
         ? presenter->swap_chain->GetFrameStatistics(&stats) : E_FAIL;
@@ -4087,40 +4315,8 @@ RecompD3dPresenterError submitPresent(
        run can "pass" on desktop pixels. Reading the back buffer here measures
        what this program actually rendered. Opt-in, and off by default. */
 
-    if (!presenter->first_present_reported) {
-        ShowWindow(presenter->window, SW_SHOW);
-        SetForegroundWindow(presenter->window); // take the focus from the launcher
-        UpdateWindow(presenter->window);
-        if (quitPending()) {
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        if (presenter->close_requested) {
-            return RECOMP_D3D_PRESENTER_CLOSED;
-        }
-        if (!IsWindow(presenter->window)) {
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        RECT client_rect{};
-        if (!GetClientRect(presenter->window, &client_rect) ||
-            !IsWindowVisible(presenter->window)) {
-            std::fprintf(stderr,
-                "recomp d3d presenter: first present window not visible\n");
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-        std::fprintf(
-            stderr,
-            "recomp d3d presenter: creation/first-present hwnd=%p "
-            "client=%ldx%ld visible=1 driver=%s create_hr=0x%08lX "
-            "present_hr=0x%08lX count=%u\n",
-            static_cast<void *>(presenter->window),
-            client_rect.right - client_rect.left,
-            client_rect.bottom - client_rect.top,
-            presenter->driver_name,
-            static_cast<unsigned long>(presenter->create_result),
-            static_cast<unsigned long>(present_result),
-            static_cast<unsigned>(presenter->present_count));
-        presenter->first_present_reported = true;
-    }
+    const RecompD3dPresenterError first = reportFirstPresent(presenter, present_result);
+    if (first != RECOMP_D3D_PRESENTER_OK) return first;
     applyQuality(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
@@ -4229,6 +4425,17 @@ RecompD3dPresenterError d3d_backend_create(
         delete created;
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
+    // Frame generation's presents also size the swap chain, so it is decided before it.
+    created->fg_k = framegenPresents(created);
+    created->fg_flow_view = created->fg_k != 0u &&
+        std::strcmp(std::getenv("RECOMP_D3D_FRAMEGEN"), "flow") == 0;
+    if (created->fg_k != 0u && std::getenv("RECOMP_D3D_FRAMEGEN_CAPTURE") != nullptr) {
+        // shortcut: capture reads back the history with fences; the SDL_GPU presenter owns it.
+        std::fprintf(stderr, "recomp d3d presenter: framegen capture is unsupported on Direct3D 11\n");
+    }
+    // Frame generation's presents are due 1/k of a guest frame apart, so the
+    // host's own sleeps must be finer than the default 15.6 ms timer.
+    if (created->fg_k != 0u && timeBeginPeriod(1u) == TIMERR_NOERROR) created->fg_timer_raised = true;
     const HRESULT create_result = createGraphics(created);
     if (FAILED(create_result)) {
         releasePresenter(created);
@@ -4535,9 +4742,61 @@ RecompD3dPresenterError d3d_backend_destroy(
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-uint64_t d3d_backend_idle(RecompD3dPresenter *)
+uint64_t d3d_backend_idle(RecompD3dPresenter *presenter)
 {
-    return UINT64_MAX;
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return UINT64_MAX;
+    return framegenIdle(presenter);
+}
+
+unsigned d3d_backend_framegen_probe(RecompD3dPresenter *presenter, unsigned slot, uint32_t pixels[3])
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return 0u;
+    return framegenProbe(presenter, slot, pixels);
+}
+
+double d3d_backend_framegen_flow(RecompD3dPresenter *presenter, unsigned repeat, unsigned size[2],
+    float *fields, size_t capacity)
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return -1.0;
+    return framegenFlowBench(presenter, repeat, size, fields, capacity);
+}
+
+double d3d_backend_framegen_generate(RecompD3dPresenter *presenter, float t, unsigned repeat,
+    unsigned size[2], uint32_t *pixels, size_t capacity)
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return -1.0;
+    return framegenGenerateBench(presenter, t, repeat, size, pixels, capacity);
+}
+
+double d3d_backend_framegen_cover(RecompD3dPresenter *presenter, unsigned repeat, unsigned *draws)
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return -1.0;
+    return framegenCoverBench(presenter, repeat, draws);
+}
+
+bool d3d_backend_framegen_push(RecompD3dPresenter *presenter, const uint32_t *picture,
+    const uint8_t *hud, bool restart)
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return false;
+    return framegenPush(presenter, picture, hud, restart);
+}
+
+void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter)
+{
+    if (presenter == nullptr || presenter != active_presenter ||
+        GetCurrentThreadId() != presenter->owner_thread) return;
+    framegenCrossfade(presenter);
+}
+
+void d3d_backend_framegen_set_late_ns(int64_t late_ns)
+{
+    fgStallNs = late_ns;
 }
 
 void d3d_backend_set_immediate_present(bool enabled)

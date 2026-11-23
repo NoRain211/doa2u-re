@@ -485,10 +485,11 @@ set(RECOMP_PRESENTER_SHARED ${RECOMP_PRESENTER_SHARED} overlay_imgui_panel.cpp o
 if(WIN32)
     add_library(recomp_d3d_presenter STATIC
         d3d_presenter_d3d11.cpp d3d_presenter_thread.cpp d3d_presenter_capture.cpp overlay_d3d11.cpp
+        d3d_framegen_schedule.c
         ${RECOMP_PRESENTER_SHARED})
     target_include_directories(recomp_d3d_presenter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     # screenshot.c asks the shell for the Pictures folder.
-    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid
+    target_link_libraries(recomp_d3d_presenter PUBLIC d3d11 d3dcompiler dxgi user32 shell32 ole32 uuid winmm
         recomp_keyboard recomp_imgui)
     set(_sdl_gpu_presenter recomp_d3d_presenter_vulkan)
     # Vulkan runs on the Direct3D 11 presenter's worker thread; macOS keeps its window on the main thread.

@@ -3503,7 +3503,6 @@ static bool testResampledMsaaTarget()
     return passed;
 }
 
-#ifndef RECOMP_TEST_D3D11
 /* Four real frames that each blend the previous one (GetBackBuffer(-1)) over
    a new color, through a gamma ramp, with frame generation's slots presented
    between them.
@@ -4359,6 +4358,7 @@ static bool testFramegenCuts()
     return passed;
 }
 
+#ifndef RECOMP_TEST_D3D11
 /* RECOMP_D3D_FRAMEGEN_CAPTURE keeps what frame generation got for each real
    frame; pushed into a new presenter, the capture gives the in-process
    generated frames bit for bit: A twice, A moved by 13,9, then a cut to
@@ -4546,11 +4546,12 @@ int main()
         !testVisibility() ||
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
         !testLiveQuality()) return 1;
-#ifndef RECOMP_TEST_D3D11
     // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
     d3d_backend_framegen_set_late_ns(INT64_MAX);
-    if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() || !testFramegenWarp() ||
-        !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts() || !testFramegenCapture()) return 1;
+    if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() ||
+        !testFramegenWarp() || !testFramegenWarpEdges() || !testFramegenHud() || !testFramegenCuts()) return 1;
+#ifndef RECOMP_TEST_D3D11
+    if (!testFramegenCapture()) return 1;
     benchFramegenFlow();
 #endif
     std::puts("PASS presenter render thread");
