@@ -17,6 +17,11 @@ The Windows presenter builds SMAA by Jorge Jimenez and coauthors from
 iryoku/smaa, revision 71c806a838bdd7d517df19192a20f0c61b3ca29d, under its MIT
 license. Its original notices and LICENSE.txt remain in the fetched source.
 
+Both presenters sharpen with a port of the CasFilter of AMD FidelityFX CAS
+(GPUOpen-Effects/FidelityFX-CAS, revision
+9fabcc9a2c45f958aff55ddfda337e74ef894b7f) in recomp-runtime/d3d_cas.h, under
+its MIT license, whose text is in recomp-runtime/licenses/FidelityFX-CAS.txt.
+
 The Windows Vulkan renderer loads shaderc.dll from LWJGL 3.4.3
 (org.lwjgl:lwjgl-shaderc, natives-windows), which records source revision
 2c8cae7. The build fetches it. shaderc and the SPIRV-Tools code it contains

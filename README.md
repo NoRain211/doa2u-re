@@ -208,16 +208,17 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside offline Tag, and in Live Tag and Team Battle; played in Sparring only, other modes and Live not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
-| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra, CAS sharpening | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
+| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
+| CAS sharpening | New, chosen in the launcher or PC SETTINGS; the presenter tests pass on Direct3D 11, Vulkan and Direct3D 12; not yet played through or tried on Metal |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
 | Xbox Live menus | On by default: the game's own Live pages run on the matchmaker, with rollback fights; logging on switches the run to online mode and back. `RECOMP_LIVE=0` turns it off, and the pages then report no account, where **Yes** quits to the desktop in place of the Dashboard. Test build ([Xbox Live](docs/xbox-live.md)) |
 | Hand-written game logic | Not started; the game runs as generated code |
-| macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x, SMAA and CAS sharpening ([building](docs/building.md)) |
+| macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
 **Known issues:** a demanding moment on The Burai Zenin can still drop a
 single frame; the safari stage's heat haze does not ripple yet, and its water

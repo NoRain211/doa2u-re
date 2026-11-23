@@ -4799,7 +4799,7 @@ int main()
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||
         !testWidescreenAntialiasing(false, true) || !testWidescreenAntialiasing(true, true) ||
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||
-        !testSharpen(false, false) || !testSharpen(true, false) || !testSharpen(false, true) ||
+        !testSharpen(false, false) || !testSharpen(true, false) ||
         !testDrawCoverage() || !testDrawCoverage(true) || !testQueuedDrawCoverage() ||
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) || !testOneFrameInFlight() ||
@@ -4827,7 +4827,7 @@ int main()
         !testStageWater(false) || !testStageWater(true) ||
         !testVisibility() ||
         !testClose(false) || !testClose(true) || !testPresentDownscale() ||
-        !testLiveQuality()) return 1;
+        !testLiveQuality() || !testSharpen(false, true)) return 1;
     // These tests push frames unpaced; only testFramegenCuts' late frame keeps the 25 ms rule.
     d3d_backend_framegen_set_late_ns(INT64_MAX);
     if (!testFramegenKeepsRealFrames() || !testFramegenKeepsOpenCommands() || !testFramegenFlow() ||
