@@ -123,7 +123,7 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
+    COUNT(RECOMP_PC_SCREENS), 3u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
     [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_FIGHT_HUD] = true,
@@ -147,7 +147,7 @@ static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 5", u"2 / 5", u"3 / 5
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
 #define SAMPLES(off) off, u"2x", u"4x", u"8x", u"16x", u"32x"
 #define SHAPES(wide) u"4:3", u"16:9", u"16:10", wide, u"32:9"
-#define RENDERERS u"Direct3D 11", u"Vulkan"
+#define RENDERERS u"Direct3D 11", u"Vulkan", u"Direct3D 12"
 
 /* English, French, German, Italian and Spanish; Japanese shows English. */
 static const Language LANGUAGES[5] = {

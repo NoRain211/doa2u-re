@@ -323,7 +323,8 @@ int main(void)
     expect("choices kept", recomp_pc_settings_choice(RECOMP_PC_SCREEN) == 4u &&
         recomp_pc_settings_choice(RECOMP_PC_INTRO) == 1u);
     expect("choice counts", recomp_pc_settings_choices(RECOMP_PC_MSAA) == 6u &&
-        recomp_pc_settings_choices(RECOMP_PC_FRAME_RATE) == 2u && recomp_pc_settings_choices(99u) == 0u);
+        recomp_pc_settings_choices(RECOMP_PC_FRAME_RATE) == 2u &&
+        recomp_pc_settings_choices(RECOMP_PC_RENDERER) == 3u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
         recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
