@@ -4142,10 +4142,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const SDL_GPUSampleCount msaa = supportedSamples(presenter->device, presenter->depth_format,
         std::clamp(want.msaa, 1u, 32u));
-    /* SDL_GPU cannot sample a multisampled depth, so AO needs the main depth
-       made with SAMPLER usage: at 1x, turning it on rebuilds the target once. */
-    const bool depth_changed = want.ao != old_ao && presenter->msaa_count == 1u;
-    if (scale == presenter->scale && msaa == presenter->msaa && !depth_changed) return;
+    if (scale == presenter->scale && msaa == presenter->msaa) return;
 
     flushSegment(presenter);
     resolveMain(presenter);
@@ -4172,11 +4169,6 @@ void applyQuality(RecompD3dPresenter *presenter)
         presenter->msaa = old_msaa;
         presenter->msaa_count = sampleCount(old_msaa);
         presenter->ao = old_ao;
-        if (want.ao && !old_ao) {
-            // The GPU refused a sampleable depth; leave AO off instead of retrying.
-            presenter->ao = false;
-            std::fprintf(stderr, "recomp d3d presenter: ambient occlusion unavailable on this depth format\n");
-        }
         submitCommands(presenter);
         return;
     }
