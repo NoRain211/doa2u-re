@@ -601,9 +601,27 @@ final class LauncherView: NSView {
     }
 }
 
+// Keeps the fixed 960x540 scene centred and scaled on black when the window grows or goes fullscreen.
+final class Letterbox: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.setFill()
+        bounds.fill()
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        guard let scene = subviews.first else { return }
+        let s = min(bounds.width / 960, bounds.height / 540)
+        scene.frame = NSRect(x: (bounds.width - 960 * s) / 2, y: (bounds.height - 540 * s) / 2,
+                             width: 960 * s, height: 540 * s)
+        scene.setBoundsSize(NSSize(width: 960, height: 540))
+    }
+}
+
 final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 540),
-                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                          // The traffic lights give close, minimize and fullscreen.
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                          backing: .buffered, defer: false)
     let view = LauncherView(frame: NSRect(x: 0, y: 0, width: 960, height: 540))
     var launched = false
 
@@ -612,7 +630,10 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if view.checkAtStart.index == 1 { view.update(quiet: true) }
         window.title = "Dead or Alive 2 Ultimate"
         window.delegate = self
-        window.contentView = view
+        let letterbox = Letterbox(frame: view.frame)
+        letterbox.addSubview(view)
+        window.contentView = letterbox
+        window.contentAspectRatio = view.frame.size
         window.acceptsMouseMovedEvents = true
         window.makeFirstResponder(view)
         window.center()
