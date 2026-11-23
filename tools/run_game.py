@@ -96,6 +96,8 @@ def saved_settings():
         options["resolution"] = saved["height"]
     if saved.get("msaa") in (1, 2, 4, 8, 16, 32):
         options["msaa"] = saved["msaa"]
+    if saved.get("sharpen") in ("off", "low", "medium", "high"):
+        options["sharpen"] = saved["sharpen"]
     for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("vrr", "vrr"), ("skipIntro", "skip_intro"),
                         ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan"),
                         ("d3d12", "d3d12"), ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
@@ -126,13 +128,15 @@ def open_launcher():
 
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
-        widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
+        widescreen=None, msaa=None, smaa=None, sharpen=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, d3d12=False,
         free_camera=None, random_cpu_costumes=None, hide_dedication=False, framegen=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
         raise ValueError("MSAA must be 1, 2, 4, 8, 16 or 32")
+    if sharpen is not None and sharpen not in ("off", "low", "medium", "high"):
+        raise ValueError("Sharpen must be off, low, medium or high")
     if resolution is not None and resolution not in (480, 720, 1080, 1440, 2160):
         raise ValueError("Resolution must be 480, 720, 1080, 1440 or 2160")
     env = os.environ.copy()
@@ -146,6 +150,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
                         ("RECOMP_D3D_FRAMEGEN", framegen)):
         if value is not None:
             env[name] = value if isinstance(value, str) else str(int(value))
+    if sharpen is not None:
+        env["RECOMP_D3D_SHARPEN"] = {"off": "0", "low": "0.3", "medium": "0.6", "high": "1.0"}[sharpen]
     if resolution is not None:
         env["RECOMP_D3D_SCALE"] = str(resolution / 480)
     # The game's Rebind screen (Options, Controller) saves both files here.
@@ -270,6 +276,8 @@ if __name__ == "__main__":
                         help="MSAA samples (1 disables); falls back to GPU support")
     parser.add_argument("--smaa", action=argparse.BooleanOptionalAction, default=None,
                         help="Apply SMAA Ultra after MSAA resolve")
+    parser.add_argument("--sharpen", choices=("off", "low", "medium", "high"),
+                        help="Sharpens after anti-aliasing with AMD FidelityFX CAS")
     parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
                         help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
@@ -315,7 +323,7 @@ if __name__ == "__main__":
                              args.input_a_pulse_at, args.isolated, args.input_buttons_pulse_at,
                              args.input_analog_pulse_at,
                              args.screen if args.screen is not None else pick("widescreen", args.widescreen),
-                             pick("msaa", args.msaa), pick("smaa", args.smaa),
+                             pick("msaa", args.msaa), pick("smaa", args.smaa), pick("sharpen", args.sharpen),
                              pick("resolution", args.resolution), args.story_finale,
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),

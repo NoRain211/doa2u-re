@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, Direct3D 12 or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12), SMAA Ultra and AMD FidelityFX CAS sharpening. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -70,10 +70,10 @@ keeps running.
 - **Free camera.** Take the game's camera in fights and cutscenes and fly it
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
-- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, widescreen, the
-  renderer, VRR, an optional intro-movie skip, 5.1 surround, the unlock
-  setting, random CPU costumes, the free camera and the staff-roll dedication
-  card, and remembers them. `DOA2U.exe` plays with the same choices. On release
+- **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, sharpening,
+  widescreen, the renderer, VRR, an optional intro-movie skip, 5.1 surround,
+  the unlock setting, random CPU costumes, the free camera and the staff-roll
+  dedication card, and remembers them. `DOA2U.exe` plays with the same choices. On release
   ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
   for a newer release and install it from its **UPDATE** page; **Check At
   Start** turns the start-up check off.
@@ -83,9 +83,9 @@ keeps running.
   (left, right or confirm) turns between the display, audio, gameplay and
   HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
   **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
-  **KO Replay** change at once, and so do **Resolution**, **MSAA** and
-  **SMAA**, on any renderer; the others say they apply the next
-  time the game starts. Leaving the page saves them for the launcher too.
+  **KO Replay** change at once, and so do **Resolution**, **MSAA**,
+  **SMAA** and **Sharpening**, on any renderer; the others say they apply the
+  next time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
@@ -208,7 +208,7 @@ keeps running.
 | Other characters, Versus, Tag, Survival, Time Attack, Sparring | Not yet played through |
 | Tengu's stage, The Miyama | In Stage Select, before Random, outside offline Tag, and in Live Tag and Team Battle; played in Sparring only, other modes and Live not yet played through |
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
-| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
+| Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra, CAS sharpening | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
 | Audio, including 3D voices and reverb | Working |
@@ -217,7 +217,7 @@ keeps running.
 | Free camera, scene freeze, screenshots | Working in the attract demo on macOS; a frozen stage's leaves and branches still move |
 | Xbox Live menus | On by default: the game's own Live pages run on the matchmaker, with rollback fights; logging on switches the run to online mode and back. `RECOMP_LIVE=0` turns it off, and the pages then report no account, where **Yes** quits to the desktop in place of the Dashboard. Test build ([Xbox Live](docs/xbox-live.md)) |
 | Hand-written game logic | Not started; the game runs as generated code |
-| macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
+| macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x, SMAA and CAS sharpening ([building](docs/building.md)) |
 
 **Known issues:** a demanding moment on The Burai Zenin can still drop a
 single frame; the safari stage's heat haze does not ripple yet, and its water
@@ -248,9 +248,9 @@ SHA-256 check.
    **GAME** page); the build starts at once. Wait for **Build complete**
    (about 10 minutes). The build stops unless it reproduces the exact program
    the developers tested.
-3. Pick resolution, MSAA, SMAA, widescreen, the renderer, VRR, the frame rate
-   and the intro skip on **VIDEO**, stereo or 5.1 on **AUDIO** and **Earn** on
-   **GAMEPLAY** to leave unlocks to play, then choose **Start Game** on the
+3. Pick resolution, MSAA, SMAA, sharpening, widescreen, the renderer, VRR, the
+   frame rate and the intro skip on **VIDEO**, stereo or 5.1 on **AUDIO** and
+   **Earn** on **GAMEPLAY** to leave unlocks to play, then choose **Start Game** on the
    **GAME** page. A controller, the keyboard or the mouse all work. Your
    choices are remembered, and `DOA2U.exe` plays with them later.
 
@@ -371,8 +371,8 @@ accepts the registry path as its first argument. Names outside
 `--seconds <n>` runs a bounded probe instead of `--play`:
 
 ```powershell
-python tools/run_game.py --play --resolution 2160 --widescreen --msaa 32 --smaa
-python tools/run_game.py --play --no-widescreen --msaa 1 --no-smaa
+python tools/run_game.py --play --resolution 2160 --widescreen --msaa 32 --smaa --sharpen medium
+python tools/run_game.py --play --no-widescreen --msaa 1 --no-smaa --sharpen off
 python tools/run_game.py --play --resolution 1440 --screen 3440:1440
 ```
 
@@ -389,7 +389,10 @@ keeps their own shape there; the presenter fits the game's 4:3 or 16:9
 picture into the window. Above 480p the Direct3D 11 window fills the screen borderless in
 any shape, with black bars around a picture of another shape; the SDL_GPU
 window is resizable and fits the picture the same way. MSAA resolves before
-SMAA, and gamma applies last; unsupported MSAA counts fall back to the
+SMAA, and gamma applies last; **Sharpening** adds AMD FidelityFX CAS after
+anti-aliasing, from **Off** through **Low**, **Medium** and **High**
+(`--sharpen off|low|medium|high`, or `RECOMP_D3D_SHARPEN=0`, `0.3`, `0.6` or
+`1`). Unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3,
 [upstream SMAA](https://github.com/iryoku/smaa) and

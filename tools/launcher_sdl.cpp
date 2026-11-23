@@ -32,14 +32,17 @@ constexpr float kPanelW = 320, kPad = 14, kTabY = 44, kRowY = 72, kRowH = 24, kI
 const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "21:9", "32:9"};
+const char *const kSharpens[] = {"off", "low", "medium", "high"};
+const char *const kSharpenLabels[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
 
-enum Item { RESOLUTION, MSAA, SMAA, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, UPDATE, CHECK_UPDATES, CHOOSE_ISO, BUILD, PLAY, ITEM_COUNT };
+enum Item { RESOLUTION, MSAA, SMAA, SHARPEN, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, UPDATE, CHECK_UPDATES, CHOOSE_ISO, BUILD, PLAY, ITEM_COUNT };
 // One row per Item, in Item order: its label, how many values it steps through and what it does.
 struct Row { const char *label; int count; const char *info; };
 const Row kRows[] = {
     {"RESOLUTION", static_cast<int>(std::size(kHeights)), "Sets the render height; the width follows the screen shape"},
     {"MSAA", static_cast<int>(std::size(kSamples)), "Smooths polygon edges, up to SDL_GPU's 8x"},
     {"SMAA", 2, "Smooths edges with SMAA Ultra after MSAA"},
+    {"SHARPENING", static_cast<int>(std::size(kSharpens)), "Sharpens the picture with AMD FidelityFX CAS after anti-aliasing"},
     {"SCREEN", static_cast<int>(std::size(kScreens)), "Widescreen widens the game's camera; its 16:9 menus keep their shape"},
     {"OUTPUT", 2, "5.1 plays the game's own surround mix"},
     {"INTRO MOVIES", 2, "Skip goes straight to the title screen at boot"},
@@ -59,7 +62,7 @@ struct Page { const char *name, *info; std::vector<int> rows; };
 // Tab names are short: all five must fit the 320-pixel panel.
 const Page kPages[] = {
     {"GAME", "Starts the game, or builds it from your own Disc 2 ISO", {PLAY, CHOOSE_ISO, BUILD}},
-    {"VIDEO", "Sets resolution, anti-aliasing, screen shape and the intro movies", {RESOLUTION, MSAA, SMAA, WIDESCREEN, SKIP_INTRO}},
+    {"VIDEO", "Sets resolution, anti-aliasing, sharpening, screen shape and the intro movies", {RESOLUTION, MSAA, SMAA, SHARPEN, WIDESCREEN, SKIP_INTRO}},
     {"AUDIO", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
     {"GAMEPLAY", "Chooses the unlocks, CPU costumes, free camera and dedication card", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION}},
     {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
@@ -68,11 +71,12 @@ constexpr int kPageCount = static_cast<int>(std::size(kPages)), kGamePage = 0, k
 // The GAME page's rows.
 constexpr int kPlayRow = 0, kDiscRow = 1, kBuildRow = 2;
 
-// launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
+// launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on, sharpening off.
 struct Settings {
     int height = 0;
     int msaa = 8;
     bool smaa = true;
+    std::string sharpen = "off"; // "off", "low", "medium" or "high"
     std::string screen = "16:9"; // "4:3", "16:9", "16:10", "32:9" or a 21:9 "W:H"
     bool surround = false;
     bool skip_intro = false;
@@ -132,6 +136,8 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "height", value)) settings.height = std::atoi(value.c_str());
     if (jsonValue(text, "msaa", value)) settings.msaa = std::atoi(value.c_str());
     if (jsonValue(text, "smaa", value)) settings.smaa = value == "true";
+    std::string sharpen;
+    if (jsonText(text, "sharpen", sharpen)) settings.sharpen = sharpen;
     // Settings saved before 16:10 hold only a widescreen flag.
     if (jsonValue(text, "widescreen", value)) settings.screen = value == "true" ? "16:9" : "4:3";
     if (jsonValue(text, "screen", value) && value.size() > 2) settings.screen = value.substr(1, value.size() - 2);
@@ -231,6 +237,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
     put("height", std::to_string(settings.height));
     put("msaa", std::to_string(settings.msaa));
     put("smaa", settings.smaa ? "true" : "false");
+    put("sharpen", std::string("\"") + settings.sharpen + "\"");
     put("widescreen", settings.screen != "4:3" ? "true" : "false");
     put("screen", std::string("\"") + settings.screen + "\"");
     put("skipIntro", settings.skip_intro ? "true" : "false");
@@ -351,6 +358,7 @@ struct Launcher {
         switch (item) {
         case RESOLUTION: return std::to_string(kHeights[choice[item]]) + "P";
         case MSAA: return kSamples[choice[item]] == 1 ? "OFF" : std::to_string(kSamples[choice[item]]) + "X";
+        case SHARPEN: return kSharpenLabels[choice[item]];
         case WIDESCREEN: return kScreens[choice[item]];
         case SURROUND: return choice[item] ? "5.1" : "STEREO";
         case SKIP_INTRO: return choice[item] ? "SKIP" : "PLAY";
@@ -829,6 +837,9 @@ int main(int argc, char **argv)
     launcher.choice[MSAA] = static_cast<int>(std::upper_bound(std::begin(kSamples), std::end(kSamples),
         std::max(settings.msaa, 1)) - std::begin(kSamples)) - 1;
     launcher.choice[SMAA] = settings.smaa ? 1 : 0;
+    for (int i = 0; i < static_cast<int>(std::size(kSharpens)); ++i) {
+        if (settings.sharpen == kSharpens[i]) launcher.choice[SHARPEN] = i;
+    }
     launcher.choice[WIDESCREEN] = 3; // a saved 21:9 "W:H"
     for (int i = 0; i < static_cast<int>(std::size(kScreens)); ++i) {
         if (settings.screen == kScreens[i]) launcher.choice[WIDESCREEN] = i;
@@ -961,6 +972,7 @@ int main(int argc, char **argv)
         settings.height = kHeights[launcher.choice[RESOLUTION]];
         settings.msaa = kSamples[launcher.choice[MSAA]];
         settings.smaa = launcher.choice[SMAA] != 0;
+        settings.sharpen = kSharpens[launcher.choice[SHARPEN]];
         settings.screen = kScreens[launcher.choice[WIDESCREEN]];
         if (launcher.choice[WIDESCREEN] == 3) {
             // The primary screen's own shape when it is a 21:9 display (wider than 16:9,
