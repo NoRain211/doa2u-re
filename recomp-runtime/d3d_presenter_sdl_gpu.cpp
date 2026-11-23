@@ -286,7 +286,7 @@ struct RecompD3dPresenter {
     SDL_GPUShaderFormat shader_format = SDL_GPU_SHADERFORMAT_SPIRV;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
     bool close_requested = false;
-    // The last two presents' GPU work, oldest first: SDL keeps two frames in flight.
+    // The last two presents' GPU work, oldest first. Swap waits for the newer one, so one frame is in flight.
     SDL_GPUFence *present_fences[2] = {};
     bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
     long long vrr_slot_ns = 0;  // steady_clock time of the last VRR present slot
@@ -4243,6 +4243,9 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     if (created->window == nullptr) return fail("window");
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
+    // Swap's guest wait already holds one frame in flight; this holds it under the frame clock too.
+    // framegenPresents raises it to 3 when frame generation runs.
+    SDL_SetGPUAllowedFramesInFlight(created->device, 1u);
     if (!SDL_ClaimWindowForGPUDevice(created->device, created->window)) return fail("swapchain");
     /* IMMEDIATE shows each frame when it is presented, so any VRR display paces
        60 Hz evenly. SDL cannot tell whether VRR is active; without it this tears. */
@@ -4564,6 +4567,11 @@ bool d3d_backend_paces_present(RecompD3dPresenter *presenter)
     return immediate_present || presenter->vrr;
 }
 
+bool d3d_backend_framegen_on(RecompD3dPresenter *presenter)
+{
+    return presenter->fg_k != 0u;
+}
+
 void d3d_backend_flush(RecompD3dPresenter *presenter)
 {
     // submitPresent flushes the segment first too, so its HUD mask and resolve see the same state.
@@ -4817,8 +4825,8 @@ bool d3d_backend_present_ready(RecompD3dPresenter *presenter)
         const long long now = steadyNs();
         if (recomp_d3d_vrr_slot(presenter->vrr_slot_ns, now) - now > 2000000) return false;
     }
-    return presenter->present_fences[0] == nullptr ||
-        SDL_QueryGPUFence(presenter->device, presenter->present_fences[0]);
+    return presenter->present_fences[1] == nullptr ||
+        SDL_QueryGPUFence(presenter->device, presenter->present_fences[1]);
 }
 
 void d3d_backend_report_draw_textures()

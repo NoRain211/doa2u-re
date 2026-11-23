@@ -156,6 +156,33 @@ static bool testFullscreenKeys(bool start_fullscreen = false)
     if (passed) std::puts(start_fullscreen ? "PASS F11 leaves fullscreen centered" : "PASS F11 and Alt+Enter toggle fullscreen");
     return passed;
 }
+
+// Swap's guest wait ends only once the worker has run the last frame: the error
+// that frame's bad CLEAR raises is already visible when it does.
+static bool testOneFrameInFlight()
+{
+    RecompD3dPresenter *presenter = nullptr;
+    if (!expect("create in flight", recomp_d3d_presenter_create(&config, &presenter))) return false;
+    bool passed = expect("in-flight tick", tick(presenter, 1));
+    auto clear = clearCommand();
+    clear.data.clear.z = 2.0f;
+    passed &= expect("bad clear", recomp_d3d_presenter_submit(presenter, &clear));
+    RecompD3dPresenterCommand present{};
+    present.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
+    present.data.present = {5u, 2u};
+    passed &= expect("bad clear present", recomp_d3d_presenter_submit(presenter, &present));
+    const auto ready_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!recomp_d3d_presenter_present_ready(presenter) && std::chrono::steady_clock::now() < ready_by) {
+        std::this_thread::yield();
+    }
+    clear = clearCommand();
+    passed &= expect("frame ran before ready", recomp_d3d_presenter_submit(presenter, &clear),
+        RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND);
+    passed &= expect("destroy in flight", recomp_d3d_presenter_destroy(&presenter),
+        RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND);
+    if (passed) std::puts("PASS present ready waits for the last frame");
+    return passed;
+}
 #endif
 
 static bool testTicks()
@@ -4546,7 +4573,7 @@ int main()
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||
         !testDrawCoverage() || !testDrawCoverage(true) || !testQueuedDrawCoverage() ||
 #ifdef RECOMP_TEST_D3D11
-        !testFullscreenKeys() || !testFullscreenKeys(true) ||
+        !testFullscreenKeys() || !testFullscreenKeys(true) || !testOneFrameInFlight() ||
 #endif
         !testTicks() || !testFrameClockPacing() ||
         !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||

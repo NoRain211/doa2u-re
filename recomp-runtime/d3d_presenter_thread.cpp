@@ -1,6 +1,7 @@
 #include "d3d_presenter_capture.h"
 #include "d3d_presenter_backend.h"
 #include "d3d_vblank.h"
+#include "xapi_time_adapter.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -32,6 +33,8 @@ struct PresenterThread {
     unsigned open = 0;
     unsigned front = 0;
     unsigned pending = 0; // Includes the packet executing outside the mutex.
+    // Frames the guest may queue: one, or two while frame generation runs.
+    unsigned frames_in_flight = 1u;
     bool started = false;
     bool shutdown = false;
     bool finished = false; // run() has released the backend
@@ -268,6 +271,8 @@ void run(PresenterThread &thread, RecompD3dPresenterConfig config)
         thread.created = created;
         thread.status = created;
         thread.started = true;
+        // Frame generation's slots were tuned with a spare queued frame; keep it.
+        if (created == RECOMP_D3D_PRESENTER_OK && d3d_backend_framegen_on(backend)) thread.frames_in_flight = 2u;
     }
     thread.changed.notify_all();
     if (created != RECOMP_D3D_PRESENTER_OK) return;
@@ -353,17 +358,20 @@ void notePacing(PresenterThread &thread, double wait_start_ms, double wait_end_m
     thread.queue_wait_ms = 0.0;
 }
 
-/* Caller holds thread.mutex. Both publish and Swap's guest wait use this test. */
-bool canPublish(const PresenterThread &thread, bool destroying)
+/* Caller holds thread.mutex. Both publish and Swap's guest wait use this test.
+   One frame in flight: a frame waits until the worker has run the last packet.
+   A mid-frame flush may queue behind it: the game's visibility polls flush
+   in a loop, and a host wait there blocked every guest thread. */
+bool canPublish(const PresenterThread &thread, bool destroying, unsigned limit = 1u)
 {
-    return thread.pending < 2 || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
+    return thread.pending < limit || (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK);
 }
 
-RecompD3dPresenterError publish(PresenterThread &thread, bool destroying)
+RecompD3dPresenterError publish(PresenterThread &thread, bool destroying, unsigned limit = 1u)
 {
     const double wait_start_ms = thread.pacing ? clock_ms() : 0.0;
     std::unique_lock<std::mutex> lock(thread.mutex);
-    thread.changed.wait(lock, [&] { return canPublish(thread, destroying); });
+    thread.changed.wait(lock, [&] { return canPublish(thread, destroying, limit); });
     if (thread.pacing) notePacing(thread, wait_start_ms, clock_ms());
     if (!destroying && thread.status != RECOMP_D3D_PRESENTER_OK) return thread.status;
     thread.packets[thread.open].seal();
@@ -445,8 +453,11 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     if (thread.pacing && command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT)
         recomp_d3d_submit_mb = thread.packets[thread.open].bytes() / 1048576.0;
+    /* Under the frame clock Swap skips its guest wait, so this publish blocks
+       the host: the spare queued frame absorbs a slow one and keeps netplay at speed. */
     return command->type == RECOMP_D3D_PRESENTER_COMMAND_PRESENT
-        ? publish(thread, false) : RECOMP_D3D_PRESENTER_OK;
+        ? publish(thread, false, recomp_xapi_frame_clock_enabled() ? 2u : thread.frames_in_flight)
+        : RECOMP_D3D_PRESENTER_OK;
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_release_memory(
@@ -458,7 +469,7 @@ RecompD3dPresenterError recomp_d3d_presenter_release_memory(
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     // Standing texture bytes live in every packet, and the worker may still be
-    // reading two of them; none may hand out bytes this range just released.
+    // reading one of them; none may hand out bytes this range just released.
     // addRelease drops the open packet, the only one this scan can skip.
     for (size_t i = 0u; i < 3u; ++i) {
         if (i != thread.open) thread.packets[i].dropResident(base, size);
@@ -489,7 +500,7 @@ RecompD3dPresenterError recomp_d3d_presenter_flush(RecompD3dPresenter *presenter
     error = status(thread);
     if (error != RECOMP_D3D_PRESENTER_OK) return error;
     if (thread.packets[thread.open].count() != 0u) {
-        error = publish(thread, false);
+        error = publish(thread, false, 2u);
         if (error != RECOMP_D3D_PRESENTER_OK) return error;
     }
     if (!wait) return RECOMP_D3D_PRESENTER_OK;
@@ -504,7 +515,7 @@ bool recomp_d3d_presenter_present_ready(RecompD3dPresenter *presenter)
 {
     if (validate(presenter) != RECOMP_D3D_PRESENTER_OK) return true;
     std::lock_guard<std::mutex> lock(active_thread->mutex);
-    return canPublish(*active_thread, false);
+    return canPublish(*active_thread, false, active_thread->frames_in_flight);
 }
 
 RecompD3dPresenterError recomp_d3d_presenter_draw_coverage(
