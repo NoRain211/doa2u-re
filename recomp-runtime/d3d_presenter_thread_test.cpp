@@ -2722,12 +2722,12 @@ static bool testLiveQuality()
         present.data.present = {5,1};
         passed &= expect("red frame", d3d_backend_submit(presenter, &clear));
         passed &= expect("first present", d3d_backend_submit(presenter, &present));
-        d3d_backend_set_quality(2.0f, 1u, false);
+        d3d_backend_set_quality(2.0f, 1u, false, 0.0f);
         passed &= expect("present then rebuild", d3d_backend_submit(presenter, &present));
         passed &= expect("carried present", d3d_backend_submit(presenter, &present));
     }
     d3d_backend_destroy(&presenter);
-    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
     if (passed) {
         FILE *file = std::fopen(path, "rb");
         int32_t size[2]{};
@@ -3472,6 +3472,80 @@ static bool testWidescreenAntialiasing(bool smaa, bool msaa, unsigned height = 4
     return passed;
 }
 
+/* CAS in the gamma pass gives a gray step a darker and a lighter rim and
+   leaves flat gray alone. With ramp, an inverting gamma ramp applies after
+   it; with live, a quality request turns it off by the third frame. */
+static bool testSharpen(bool ramp, bool live)
+{
+    char folder[MAX_PATH], path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, folder) || !GetTempFileNameA(folder, "cas", 0, path)) return false;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", path);
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", live ? "3" : "1");
+    _putenv_s("RECOMP_D3D_SHARPEN", "1");
+    RecompD3dPresenter *presenter = nullptr;
+    bool passed = expect("create sharpen", d3d_backend_create(&config, &presenter));
+    if (passed && ramp) {
+        RecompD3dPresenterCommand gamma{RECOMP_D3D_PRESENTER_COMMAND_GAMMA};
+        for (auto &channel : gamma.data.gamma)
+            for (unsigned i = 0u; i < 256u; ++i) channel[i] = static_cast<uint8_t>(255u - i);
+        passed &= expect("sharpen gamma", d3d_backend_submit(presenter, &gamma));
+    }
+    for (unsigned frame = 0u; passed && frame < (live ? 3u : 1u); ++frame) {
+        if (live && frame == 1u) d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
+        auto clear = clearCommand();
+        clear.data.clear.color = 0xff404040u;
+        passed &= expect("sharpen clear", d3d_backend_submit(presenter, &clear));
+        struct Vertex { float x, y, z, rhw; uint32_t color; };
+        const Vertex quad[] = {{160,0,0.5f,1,0xffc0c0c0u}, {320,0,0.5f,1,0xffc0c0c0u},
+            {160,240,0.5f,1,0xffc0c0c0u}, {320,240,0.5f,1,0xffc0c0c0u}};
+        const uint16_t indices[] = {0,1,2,3};
+        RecompD3dPresenterCommand command{RECOMP_D3D_PRESENTER_COMMAND_DRAW};
+        auto &draw = command.data.draw;
+        draw.fvf = 0x44u;
+        draw.vertex_stride = sizeof(Vertex);
+        draw.vertex_count = draw.index_count = 4u;
+        draw.triangle_count = 2u;
+        draw.primitive_type = RECOMP_D3D_PT_TRIANGLESTRIP;
+        draw.vertex_bytes = quad;
+        draw.index_bytes = indices;
+        draw.blend.color_write_mask = 15u;
+        passed &= expect("sharpen step", d3d_backend_submit(presenter, &command));
+        RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
+        present.data.present = {5u,1u};
+        passed &= expect("sharpen present", d3d_backend_submit(presenter, &present));
+    }
+    d3d_backend_destroy(&presenter);
+    unsigned dark = 0u, dark_rim = 0u, light_rim = 0u, light = 0u;
+    if (FILE *file = std::fopen(path, "rb")) {
+        uint32_t width = 0u, height = 0u;
+        std::fseek(file, 18, SEEK_SET);
+        passed &= std::fread(&width, 4, 1, file) == 1 && std::fread(&height, 4, 1, file) == 1 &&
+            width == 320u && height == 240u;
+        std::vector<unsigned char> row((width * 3u + 3u) & ~3u);
+        std::fseek(file, static_cast<long>(54u + row.size() * 120u), SEEK_SET);
+        passed &= std::fread(row.data(), row.size(), 1, file) == 1;
+        std::fclose(file);
+        dark = row[80u * 3u];
+        dark_rim = row[159u * 3u];
+        light_rim = row[160u * 3u];
+        light = row[240u * 3u];
+    } else passed = false;
+    const auto within1 = [](unsigned value, unsigned want) { return value + 1u >= want && value <= want + 1u; };
+    // An inverting ramp swaps which side is dark; the rims still overshoot outwards.
+    const unsigned low = ramp ? 191u : 64u, high = ramp ? 63u : 192u;
+    passed &= within1(dark, low) && within1(light, high);
+    if (live) passed &= within1(dark_rim, low) && within1(light_rim, high);
+    else if (ramp) passed &= dark_rim > low + 8u && light_rim + 8u < high;
+    else passed &= dark_rim + 8u < low && light_rim > high + 8u;
+    _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
+    _putenv_s("RECOMP_D3D_FRAME_DUMP_AT", "");
+    _putenv_s("RECOMP_D3D_SHARPEN", "");
+    DeleteFileA(path);
+    std::fprintf(passed ? stdout : stderr, "%s sharpen ramp=%d live=%d step %u|%u -> %u|%u\n",
+        passed ? "PASS" : "FAIL", ramp, live, dark, light, dark_rim, light_rim);
+    return passed;
+}
+
 static bool testQueuedDrawCoverage()
 {
     RecompD3dPresenter *presenter = nullptr;
@@ -4187,7 +4261,7 @@ static bool testFramegenWarpEdges()
     _putenv_s("RECOMP_D3D_FRAMEGEN", "1");
     RecompD3dPresenter *presenter = nullptr;
     bool passed = expect("create framegen warp edges", d3d_backend_create(&config, &presenter));
-    d3d_backend_set_quality(6.75f, 1u, false);
+    d3d_backend_set_quality(6.75f, 1u, false, 0.0f);
     const int w = 2160, h = 1620;
     std::vector<uint32_t> a(320u * 240u), b[2], truth_picture[2], out, from, to, truth;
     for (std::vector<uint32_t> *picture : {&b[0], &b[1], &truth_picture[0], &truth_picture[1]}) picture->resize(a.size());
@@ -4249,7 +4323,7 @@ static bool testFramegenWarpEdges()
         passed = cut == 0u;
         if (!passed) std::fprintf(stderr, "FAIL framegen warp cuts edges in scene %u\n", scene);
     }
-    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     if (passed) {
@@ -4447,7 +4521,7 @@ static bool testFramegenCuts()
         passed = flowFrame(presenter, a, 0x100000u, ++swap);
         if (way == 0u) recomp_xapi_fast_forward = fastForwardOn;
         if (way == 1u) recomp_xapi_frame_clock_set_enabled(true);
-        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false);  // applied after the next real frame
+        if (way == 3u) d3d_backend_set_quality(1.0f, 2u, false, 0.0f);  // applied after the next real frame
         if (way == 2u) {
             d3d_backend_framegen_set_late_ns(25000000);
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -4468,7 +4542,7 @@ static bool testFramegenCuts()
         passed = passed && off == 0u;
         if (!passed) std::fprintf(stderr, "FAIL framegen mixes real frames across a %s\n", restarts[way]);
     }
-    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
     d3d_backend_destroy(&presenter);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     if (passed) {
@@ -4573,7 +4647,7 @@ static void benchFramegenFlow()
     for (const float scale : {1.0f, 1.5f, 4.5f}) {
         RecompD3dPresenter *presenter = nullptr;
         if (d3d_backend_create(&wide, &presenter) == RECOMP_D3D_PRESENTER_OK) {
-            d3d_backend_set_quality(scale, 1u, false);
+            d3d_backend_set_quality(scale, 1u, false, 0.0f);
             for (uint32_t swap = 1u; swap <= 3u; ++swap) {
                 auto clear = clearCommand();
                 RecompD3dPresenterCommand present{RECOMP_D3D_PRESENTER_COMMAND_PRESENT};
@@ -4615,7 +4689,7 @@ static void benchFramegenFlow()
         }
         d3d_backend_destroy(&presenter);
     }
-    d3d_backend_set_quality(1.0f, 1u, false);
+    d3d_backend_set_quality(1.0f, 1u, false, 0.0f);
     _putenv_s("RECOMP_D3D_FRAMEGEN", "");
     _putenv_s("RECOMP_D3D_WIDESCREEN", "");
 }
@@ -4725,6 +4799,7 @@ int main()
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||
         !testWidescreenAntialiasing(false, true) || !testWidescreenAntialiasing(true, true) ||
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||
+        !testSharpen(false, false) || !testSharpen(true, false) || !testSharpen(false, true) ||
         !testDrawCoverage() || !testDrawCoverage(true) || !testQueuedDrawCoverage() ||
 #ifdef RECOMP_TEST_D3D11
         !testFullscreenKeys() || !testFullscreenKeys(true) || !testOneFrameInFlight() ||

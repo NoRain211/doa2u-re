@@ -419,10 +419,11 @@ RecompD3dPresenterError recomp_d3d_presenter_invalidate_textures(
 void recomp_d3d_presenter_set_immediate_present(bool enabled);
 
 /* PC Settings: asks for a new resolution scale (1-8, as RECOMP_D3D_SCALE),
-   MSAA sample count and SMAA while the game runs. The renderer applies them
+   MSAA sample count, SMAA and CAS sharpness (0-1, as RECOMP_D3D_SHARPEN)
+   while the game runs. The renderer applies them
    after its next presented frame, keeping what targets show, when
    recomp_d3d_presenter_quality_live says it can; otherwise at the next start. */
-void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa);
+void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen);
 /* Whether this renderer applies recomp_d3d_presenter_set_quality live. */
 bool recomp_d3d_presenter_quality_live(void);
 

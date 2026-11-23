@@ -1,5 +1,6 @@
 #include "d3d_presenter_backend.h"
 #include "d3d_boot_shaders.h"
+#include "d3d_cas.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
 #include "d3d_framegen_schedule.h"
@@ -328,6 +329,8 @@ struct RecompD3dPresenter {
     ID3D11PixelShader *gamma_pixel_shader = nullptr;
     ID3D11Buffer *gamma_buffer = nullptr;
     bool gamma_enabled = false;
+    float gamma_ramp[256][4]{};
+    float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
     ID3D11Texture2D *back_buffer_copy = nullptr;
     ID3D11ShaderResourceView *back_buffer_sample = nullptr;
     ID3D11Texture2D *previous_frame = nullptr;
@@ -476,6 +479,7 @@ struct QualityRequest {
     float scale = 1.0f;
     uint32_t msaa = 1u;
     bool smaa = false;
+    float sharpen = 0.0f;
     unsigned generation = 0u;
 };
 static std::mutex quality_lock;
@@ -3531,6 +3535,52 @@ void writeBackBufferBmp(
     back_buffer->Release();
 }
 
+// The output pass: CAS sharpening (d3d_cas.h), then the game's gamma ramp.
+bool ensureGammaPass(RecompD3dPresenter *presenter)
+{
+    if (presenter->gamma_buffer != nullptr) return true;
+    static const char shader[] =
+        "Texture2D pixels : register(t0);\n"
+        "cbuffer Gamma : register(b0) { " RECOMP_OUTPUT_PASS_FIELDS " };\n"
+        "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
+        " float2 p = float2((id << 1) & 2, id & 2);\n"
+        " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n"
+        RECOMP_OUTPUT_PASS_HLSL
+        "float4 ps(float4 p : SV_Position) : SV_Target { return outputPixel(p); }\n";
+    ID3DBlob *vertex = nullptr, *pixel = nullptr, *errors = nullptr;
+    HRESULT result = D3DCompile(shader, sizeof shader - 1u, nullptr,
+        nullptr, nullptr, "vs", "vs_4_0", 0u, 0u, &vertex, nullptr);
+    if (SUCCEEDED(result)) result = D3DCompile(shader, sizeof shader - 1u,
+        nullptr, nullptr, nullptr, "ps", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0u, &pixel, &errors);
+    if (FAILED(result) && errors != nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: gamma pass compile: %s\n",
+            static_cast<const char *>(errors->GetBufferPointer()));
+    }
+    if (SUCCEEDED(result)) result = presenter->device->CreateVertexShader(
+        vertex->GetBufferPointer(), vertex->GetBufferSize(), nullptr,
+        &presenter->gamma_vertex_shader);
+    if (SUCCEEDED(result)) result = presenter->device->CreatePixelShader(
+        pixel->GetBufferPointer(), pixel->GetBufferSize(), nullptr,
+        &presenter->gamma_pixel_shader);
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth = sizeof(RecompOutputPass);
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    if (SUCCEEDED(result)) result = presenter->device->CreateBuffer(
+        &desc, nullptr, &presenter->gamma_buffer);
+    releaseCom(vertex);
+    releaseCom(pixel);
+    releaseCom(errors);
+    if (FAILED(result)) {
+        std::fprintf(stderr, "recomp d3d presenter: gamma pass unavailable hr=0x%08lX\n",
+            static_cast<unsigned long>(result));
+        releaseCom(presenter->gamma_vertex_shader);
+        releaseCom(presenter->gamma_pixel_shader);
+        releaseCom(presenter->gamma_buffer);
+        return false;
+    }
+    return true;
+}
+
 RecompD3dPresenterError submitGamma(
     RecompD3dPresenter *presenter, const uint8_t (&ramp)[3][256])
 {
@@ -3542,46 +3592,25 @@ RecompD3dPresenterError submitGamma(
             enabled |= ramp[channel][i] != i;
         }
     }
-    if (enabled && presenter->gamma_buffer == nullptr) {
-        static const char shader[] =
-            "Texture2D pixels : register(t0);\n"
-            "cbuffer Gamma : register(b0) { float4 ramp[256]; };\n"
-            "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
-            " float2 p = float2((id << 1) & 2, id & 2);\n"
-            " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n"
-            "float4 ps(float4 p : SV_Position) : SV_Target {\n"
-            " float4 c = pixels.Load(int3(p.xy,0));\n"
-            " uint3 i = (uint3)(saturate(c.rgb) * 255 + 0.5);\n"
-            " return float4(ramp[i.r].r,ramp[i.g].g,ramp[i.b].b,c.a); }\n";
-        ID3DBlob *vertex = nullptr, *pixel = nullptr;
-        HRESULT result = D3DCompile(shader, sizeof shader - 1u, nullptr,
-            nullptr, nullptr, "vs", "vs_4_0", 0u, 0u, &vertex, nullptr);
-        if (SUCCEEDED(result)) result = D3DCompile(shader, sizeof shader - 1u,
-            nullptr, nullptr, nullptr, "ps", "ps_4_0", 0u, 0u, &pixel, nullptr);
-        if (SUCCEEDED(result)) result = presenter->device->CreateVertexShader(
-            vertex->GetBufferPointer(), vertex->GetBufferSize(), nullptr,
-            &presenter->gamma_vertex_shader);
-        if (SUCCEEDED(result)) result = presenter->device->CreatePixelShader(
-            pixel->GetBufferPointer(), pixel->GetBufferSize(), nullptr,
-            &presenter->gamma_pixel_shader);
-        D3D11_BUFFER_DESC desc{};
-        desc.ByteWidth = sizeof values;
-        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        if (SUCCEEDED(result)) result = presenter->device->CreateBuffer(
-            &desc, nullptr, &presenter->gamma_buffer);
-        releaseCom(vertex);
-        releaseCom(pixel);
-        if (FAILED(result)) {
-            releaseCom(presenter->gamma_vertex_shader);
-            releaseCom(presenter->gamma_pixel_shader);
-            releaseCom(presenter->gamma_buffer);
-            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
-        }
-    }
-    if (enabled) presenter->context->UpdateSubresource(
-        presenter->gamma_buffer, 0u, nullptr, values, 0u, 0u);
+    if (enabled && !ensureGammaPass(presenter)) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+    std::memcpy(presenter->gamma_ramp, values, sizeof values);
     presenter->gamma_enabled = enabled;
     return RECOMP_D3D_PRESENTER_OK;
+}
+
+/* True when the gamma pass runs this frame, for the ramp or CAS sharpening,
+   with its constants written. */
+bool gammaPassOn(RecompD3dPresenter *presenter)
+{
+    if (!presenter->gamma_enabled && !(presenter->sharpen > 0.0f)) return false;
+    if (!ensureGammaPass(presenter)) {
+        presenter->sharpen = 0.0f;
+        return false;
+    }
+    const RecompOutputPass constants = recomp_output_pass(presenter->gamma_ramp, presenter->gamma_enabled,
+        presenter->sharpen, mainWidth(presenter), mainHeight(presenter));
+    presenter->context->UpdateSubresource(presenter->gamma_buffer, 0u, nullptr, &constants, 0u, 0u);
+    return true;
 }
 
 /* SMAA 1x (iryoku/smaa, ultra preset) on the final resolved image. */
@@ -3748,7 +3777,8 @@ bool renderOutput(RecompD3dPresenter *presenter, ID3D11RenderTargetView *output)
         std::fprintf(stderr, "recomp d3d presenter: smaa unavailable\n");
         presenter->smaa = false;
     }
-    if (!presenter->gamma_enabled && !presenter->smaa) {
+    const bool gamma = gammaPassOn(presenter);
+    if (!gamma && !presenter->smaa) {
         ID3D11Resource *target = nullptr;
         output->GetResource(&target);
         copyGuestBuffer(presenter, target);
@@ -3764,8 +3794,8 @@ bool renderOutput(RecompD3dPresenter *presenter, ID3D11RenderTargetView *output)
     if (source == nullptr) return false;
     if (presenter->smaa) {
         runSmaa(presenter, source,
-            presenter->gamma_enabled ? presenter->smaa_targets[2] : output);
-        if (!presenter->gamma_enabled) {
+            gamma ? presenter->smaa_targets[2] : output);
+        if (!gamma) {
             context->ClearState();
             return true;
         }
@@ -3891,6 +3921,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     if (want.generation == presenter->quality_retry_generation && now < presenter->quality_retry_at) return;
     const bool old_smaa = presenter->smaa;
     presenter->smaa = want.smaa;
+    presenter->sharpen = want.sharpen;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const UINT msaa = supportedSamples(presenter, std::clamp(want.msaa, 1u, 32u));
     if (scale == presenter->scale && msaa == presenter->msaa) {
@@ -4423,6 +4454,7 @@ RecompD3dPresenterError d3d_backend_create(
     }
     const char *smaa = std::getenv("RECOMP_D3D_SMAA");
     created->smaa = smaa != nullptr && std::strcmp(smaa, "0") != 0;
+    created->sharpen = recomp_cas_env_sharpness();
     /* VRR shows each frame when it is presented, so any VRR display paces 60 Hz
        evenly. DXGI cannot tell whether VRR is active; without it this tears. */
     const char *vrr = std::getenv("RECOMP_D3D_VRR");
@@ -4855,15 +4887,16 @@ void d3d_backend_flush(RecompD3dPresenter *presenter)
     presenter->context->Flush();
 }
 
-void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen)
 {
     std::lock_guard<std::mutex> lock(quality_lock);
     quality_request.scale = scale;
     quality_request.msaa = msaa;
     quality_request.smaa = smaa;
+    quality_request.sharpen = sharpen;
     ++quality_request.generation;
-    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d\n",
-        scale, msaa, smaa ? 1 : 0);
+    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f\n",
+        scale, msaa, smaa ? 1 : 0, sharpen);
 }
 
 bool d3d_backend_quality_live()
