@@ -547,7 +547,8 @@ if(NOT WIN32)
 endif()
 if(WIN32 OR SDL3_FOUND)
     add_test(NAME recomp-runtime-d3d-presenter COMMAND recomp_d3d_presenter_test)
-    set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES TIMEOUT 60)
+    # Compiling every boot shader (testPrecompileBootShaders) is most of the run.
+    set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES TIMEOUT 300)
 endif()
 if(WIN32)
     add_executable(recomp_d3d_presenter_vulkan_test d3d_presenter_thread_test.cpp xapi_clock.cpp d3d_card_model.c)
@@ -555,8 +556,9 @@ if(WIN32)
     recomp_use_sdl3(recomp_d3d_presenter_vulkan_test)
     recomp_use_shader_compiler(recomp_d3d_presenter_vulkan_test)
     add_test(NAME recomp-runtime-d3d-presenter-vulkan COMMAND recomp_d3d_presenter_vulkan_test)
-    # The two presenter tests share the GPU; side by side they pass their timeouts.
-    set_tests_properties(recomp-runtime-d3d-presenter-vulkan PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77
+    # The two presenter tests share the GPU; side by side they pass their timeouts,
+    # which the boot shader precompile test makes most of.
+    set_tests_properties(recomp-runtime-d3d-presenter-vulkan PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77
         RESOURCE_LOCK gpu)
     set_tests_properties(recomp-runtime-d3d-presenter PROPERTIES RESOURCE_LOCK gpu)
     # Renders a RECOMP_D3D_FRAMEGEN_CAPTURE offline (docs/frame-generation.md).

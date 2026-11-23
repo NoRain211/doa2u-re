@@ -44,6 +44,7 @@ static ULONGLONG GetTickCount64()
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <thread>
 #include <string>
 #include <vector>
@@ -333,6 +334,72 @@ static bool testShaderCacheFolder()
     }
     std::filesystem::remove_all(root, error);
     if (passed) std::puts("PASS the shader cache makes its folder");
+    return passed;
+}
+
+/* The build's precompile pass fills the cache with every boot shader a launch
+   may ask for, so the boot precompile that launch runs compiles nothing new.
+   A scaled 4x MSAA run picks the depth-bias variants, and one synthetic guest
+   vertex program covers the program walk. */
+static bool testPrecompileBootShaders()
+{
+    char temp[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, temp)) return false;
+    const std::filesystem::path root =
+        std::filesystem::path(temp) / ("recomp-precompile-" + std::to_string(GetCurrentProcessId()) + "-" +
+            std::to_string(GetTickCount64()));
+    const std::filesystem::path folder = root / "cache";
+    _putenv_s("RECOMP_SHADER_CACHE", folder.string().c_str());
+    _putenv_s("RECOMP_D3D_SCALE", "2");
+    _putenv_s("RECOMP_D3D_MSAA", "4");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "0");
+    _putenv_s("RECOMP_D3D_FRAMEGEN", "");
+    // One instruction writing o9, encoded as testBootProgramShaders does.
+    RecompD3dBootProgram programs[1] = {};
+    programs[0].fvf = 0x012u;
+    programs[0].count = 1u;
+    programs[0].tokens[0][1] = (11u << 21) | (2u << 9) | (2u << 13) | 0x1bu;
+    programs[0].tokens[0][2] = (2u << 26) | (3u << 11) | (0x1bu << 17);
+    programs[0].tokens[0][3] = (15u << 12) | (9u << 3) | 2048u | 1u;
+    RecompD3dPresenterConfig boot_config = config;
+    boot_config.programs = programs;
+    boot_config.program_count = 1u;
+    const auto entries = [&folder] {
+        std::map<std::string, std::filesystem::file_time_type> found;
+        std::error_code error;
+        for (const auto &entry : std::filesystem::directory_iterator(folder, error))
+            found.emplace(entry.path().filename().string(), entry.last_write_time());
+        return found;
+    };
+    const unsigned compiled = d3d_backend_precompile_boot_shaders(&boot_config);
+    if (compiled == 0u) std::fprintf(stderr, "FAIL the precompile compiled no boot shaders\n");
+    bool passed = compiled != 0u;
+    const auto before = entries();
+    if (before.empty()) {
+        std::fprintf(stderr, "FAIL the precompile wrote no cache entries\n");
+        passed = false;
+    }
+    RecompD3dPresenter *presenter = nullptr;
+    passed &= expect("create precompiled", d3d_backend_create(&boot_config, &presenter));
+    if (presenter != nullptr) {
+#ifndef RECOMP_TEST_D3D11
+        d3d_backend_draw_shader_count(presenter); // joins the boot precompile
+#endif
+        passed &= expect("destroy precompiled", d3d_backend_destroy(&presenter));
+    }
+    const auto after = entries();
+    if (after != before) {
+        std::fprintf(stderr, "FAIL the boot precompile wrote %d new cache entries\n",
+            static_cast<int>(after.size()) - static_cast<int>(before.size()));
+        passed = false;
+    }
+    _putenv_s("RECOMP_SHADER_CACHE", "");
+    _putenv_s("RECOMP_D3D_SCALE", "");
+    _putenv_s("RECOMP_D3D_MSAA", "");
+    _putenv_s("RECOMP_D3D_WIDESCREEN", "");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    if (passed) std::puts("PASS the precompile fills the cache the boot precompile reads");
     return passed;
 }
 
@@ -4567,7 +4634,7 @@ int main()
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 #endif
     recomp_d3d_presenter_set_immediate_present(false);
-    if (!testShaderCacheFolder() || !testResampledMsaaTarget() ||
+    if (!testShaderCacheFolder() || !testPrecompileBootShaders() || !testResampledMsaaTarget() ||
         !testWidescreenAntialiasing(false, false) || !testWidescreenAntialiasing(true, false) ||
         !testWidescreenAntialiasing(false, true) || !testWidescreenAntialiasing(true, true) ||
         !testWidescreenAntialiasing(false, false, 1080u) || !testWidescreenAntialiasing(true, true, 1080u, 32u) ||

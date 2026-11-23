@@ -2,6 +2,7 @@
 #include "host_diagnostics.h"
 #include "d3d8_adapter.h"
 #include "d3d_presenter.h"
+#include "d3d_presenter_backend.h"
 #include "dsound_api_adapter.h"
 #include "dsound_buffer_adapter.h"
 #include "guest_snapshot.h"
@@ -360,6 +361,9 @@ static void noteRead(const char *hostPath, std::uint64_t offset)
    between fights) at 0x87ae54. Changing either during fight setup crashed. */
 static bool storyFinale;
 
+/* --precompile-shaders fills the shader cache and exits; see precompileBootShaders. */
+static bool precompileShaders;
+
 static void applyStoryFinale()
 {
     static bool fightLive;
@@ -531,6 +535,32 @@ static bool loadImage()
     return true;
 }
 
+/* --precompile-shaders fills RECOMP_SHADER_CACHE with every boot draw shader
+   and exits, with no window and no GPU device: tools/build_game.py runs it
+   after building, so the first launch finds them compiled. Only the loaded
+   executable is needed, because the boot programs' tokens are its static
+   data. */
+static int precompileBootShaders()
+{
+    const char *folder = std::getenv("RECOMP_SHADER_CACHE");
+    if (folder == nullptr || *folder == '\0') {
+        std::cerr << "recomp runner: RECOMP_SHADER_CACHE names no folder for --precompile-shaders\n";
+        return 1;
+    }
+    static RecompMemoryRegion region;
+    region = {0u, RECOMP_XBOX_RAM_SIZE, guestRam};
+    recomp_runtime_init(&region, 1u, nullptr, 0u, nullptr, 0u);
+    RecompD3dPresenterConfig config = {};
+    recomp_d3d8_load_boot_programs(&config);
+    const auto start = std::chrono::steady_clock::now();
+    const unsigned compiled = d3d_backend_precompile_boot_shaders(&config);
+    std::fprintf(stderr, "recomp runner: precompiled %u draw shaders (%u boot programs) into %s in %lld ms\n",
+        compiled, config.program_count, folder,
+        static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count()));
+    return compiled == 0u ? 1 : 0;
+}
+
 static void bootGuest();
 
 int main(int argc, char **argv)
@@ -553,6 +583,10 @@ int main(int argc, char **argv)
         }
         if (argument == "--no-unlock-all") {
             unlockAll = false;
+            continue;
+        }
+        if (argument == "--precompile-shaders") {
+            precompileShaders = true;
             continue;
         }
         if (argument == "--skip-intro") {
@@ -641,7 +675,8 @@ int main(int argc, char **argv)
                 " [--input-buttons-pulse-at <poll> <decimal-mask>]"
                 " [--input-analog-pulse-at <poll> <button-index>]"
                 " [--input-analog-pulse-every <first-poll> <period> <last-poll> <button-index>]"
-                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]\n";
+                " [--input-script-only] [--story-finale] [--skip-intro] [--no-unlock-all]"
+                " [--precompile-shaders]\n";
             return 64;
         }
         const std::string value = argv[++i];
@@ -673,6 +708,7 @@ int main(int argc, char **argv)
         return 1;
     }
     if (!loadImage()) return 1;
+    if (precompileShaders) return precompileBootShaders();
     if (discRoot.empty()) discRoot = std::filesystem::absolute(std::filesystem::u8path(xbePath)).parent_path().string();
     const auto discPath = std::filesystem::u8path(discRoot);
     std::error_code filesystemError;

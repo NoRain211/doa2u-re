@@ -15,6 +15,10 @@ extern "C" {
 
 RecompFunction recomp_d3d8_lookup_manual(uint32_t address);
 uint32_t recomp_d3d8_require_device(void);
+/* Copies the six guest vertex programs out of the loaded executable into
+   config, as device creation does for the boot precompile. A block whose
+   header or end bits do not match is skipped. */
+void recomp_d3d8_load_boot_programs(RecompD3dPresenterConfig *config);
 void recomp_d3d8_target(RecompD3dPresenterTarget *target);
 void recomp_d3d8_submit(const RecompD3dPresenterCommand *command);
 bool recomp_d3d8_draw_has_coverage(const RecompD3dPresenterDrawCommand *draw);

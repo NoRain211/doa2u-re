@@ -20,14 +20,13 @@ RecompD3dPresenterError d3d_backend_draw_coverage(
 RecompD3dPresenterError d3d_backend_release_memory(
     RecompD3dPresenter *presenter, uint32_t base, uint32_t size, bool targets);
 RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
-/* SDL_GPU only: builds the config's vertex program shaders after the fixed
-   list, returning how many compiled. d3d_boot_programs_sdl_gpu.h defines it
-   among the presenter's internals it needs. scaled and samples are the boot
-   precompile's quality snapshot. */
-unsigned precompileProgramShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples);
 /* SDL_GPU only, for tests: waits for the boot precompile and returns the draw
    shaders it holds. */
 unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
+/* Compiles every boot shader this run may use into RECOMP_SHADER_CACHE, with no
+   window and no GPU device: tools/build_game.py runs it after a build so the
+   first launch finds them cached. Returns how many compiled. */
+unsigned d3d_backend_precompile_boot_shaders(const RecompD3dPresenterConfig *config);
 void d3d_backend_set_immediate_present(bool enabled);
 /* True when the presenter must not pace PRESENT: the backend paces it itself
    (on a VRR display, or Direct3D 11 holding each frame 2 or 4 refreshes) or

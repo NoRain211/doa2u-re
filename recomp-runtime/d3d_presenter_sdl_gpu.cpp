@@ -8,6 +8,7 @@
    counts come from an additive pass. RECOMP_D3D_PRESENT_LOG is Direct3D 11
    only. */
 #include "d3d_presenter_backend.h"
+#include "d3d_boot_shaders.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
 #include "d3d_framegen_schedule.h"
@@ -1306,6 +1307,35 @@ SDL_GPUShader *createShader(RecompD3dPresenter *presenter, const std::string &hl
    (queueCover) how much of the scene the fragment hides. */
 enum DrawOutput : uint8_t { kOutputShaded, kOutputOne, kOutputAlpha, kOutputLight, kOutputLightAlpha };
 
+/* The draw shader's HLSL for one key and output, with SDL_GPU's bindings and
+   the defines the host compile needs. A GPU device is not needed to build it,
+   so the build's precompile pass uses this too. Failures are cached by callers. */
+bool drawShaderSource(const RecompD3dDrawShaderKey &draw_key, uint8_t output, uint32_t samples,
+    RecompShaderTarget target, RecompD3dVertexLayout &layout, std::string &hlsl,
+    std::vector<std::string> &defines)
+{
+    if (!recomp_d3d_draw_shader_source(draw_key, layout, hlsl)) {
+        if (draw_key.program_count) {
+            std::fprintf(stderr, "recomp d3d presenter: vertex program untranslated fvf=%03x count=%u\n",
+                draw_key.fvf, draw_key.program_count);
+        }
+        return false;
+    }
+    hlsl = recomp_shader_draw_bindings(hlsl);
+    if (target == RecompShaderTarget::Msl) hlsl = recomp_shader_emulate_sampler_bias(hlsl);
+    if (output != kOutputShaded) {
+        static const std::string result = "    return shaded;\n";
+        static const char *const outputs[] = {"", "    return float4(1, 1, 1, 1);\n", "    return shaded.aaaa;\n",
+            "    return max(shaded.r, max(shaded.g, shaded.b)).xxxx;\n",
+            "    return (max(shaded.r, max(shaded.g, shaded.b)) * shaded.a).xxxx;\n"};
+        const size_t at = hlsl.rfind(result);
+        if (at == std::string::npos) return false;
+        hlsl.replace(at, result.size(), outputs[output]);
+    }
+    if (draw_key.sample_depth_bias) defines.push_back("RECOMP_SAMPLE_COUNT=" + std::to_string(samples));
+    return true;
+}
+
 /* The draw shader for one key and output, with samples as the MSAA count of
    a depth-bias key. Failures are cached too, so a shader that cannot build is
    not retried every draw. */
@@ -1330,19 +1360,8 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     const auto start = std::chrono::steady_clock::now();
     ShaderPair pair;
     std::string hlsl;
-    if (recomp_d3d_draw_shader_source(draw_key, pair.layout, hlsl)) {
-        hlsl = recomp_shader_draw_bindings(hlsl);
-        if (presenter->shader_target == RecompShaderTarget::Msl) hlsl = recomp_shader_emulate_sampler_bias(hlsl);
-        if (output != kOutputShaded) {
-            static const std::string result = "    return shaded;\n";
-            static const char *const outputs[] = {"", "    return float4(1, 1, 1, 1);\n", "    return shaded.aaaa;\n",
-                "    return max(shaded.r, max(shaded.g, shaded.b)).xxxx;\n",
-                "    return (max(shaded.r, max(shaded.g, shaded.b)) * shaded.a).xxxx;\n"};
-            const size_t at = hlsl.rfind(result);
-            if (at != std::string::npos) hlsl.replace(at, result.size(), outputs[output]);
-        }
-        std::vector<std::string> defines;
-        if (draw_key.sample_depth_bias) defines.push_back("RECOMP_SAMPLE_COUNT=" + std::to_string(samples));
+    std::vector<std::string> defines;
+    if (drawShaderSource(draw_key, output, samples, presenter->shader_target, pair.layout, hlsl, defines)) {
         pair.vertex = createShader(presenter, hlsl, true, defines, 0u, 2u);
         pair.fragment = pair.vertex ? createShader(presenter, hlsl, false, defines, 4u,
             presenter->shader_target == RecompShaderTarget::Msl ? 2u : 1u) : nullptr;
@@ -1350,9 +1369,6 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
             SDL_ReleaseGPUShader(presenter->device, pair.vertex);
             pair.vertex = nullptr;
         }
-    } else if (draw_key.program_count) {
-        std::fprintf(stderr, "recomp d3d presenter: vertex program untranslated fvf=%03x count=%u\n",
-            draw_key.fvf, draw_key.program_count);
     }
     std::fprintf(stderr, "recomp d3d presenter: draw shader fvf=0x%03X program=%u%s%s in %lld ms\n",
         draw_key.fvf, draw_key.program_count, output == kOutputOne ? " count" : output ? " cover" : "",
@@ -1375,14 +1391,12 @@ void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t 
 {
     const auto start = std::chrono::steady_clock::now();
     unsigned compiled = 0u;
-    for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
-        if (presenter->precompile_stop.load()) return;
-        if ((boot.depth_bias && !scaled) || (boot.output > kOutputOne && !framegen)) continue;
-        const RecompD3dDrawShaderKey key{boot.fvf, 0u, nullptr, false, boot.depth_bias,
-            boot.depth_bias && samples > 1u, boot.projected_stages};
-        compiled += lookupShaders(presenter, key, boot.output, samples).vertex != nullptr;
-    }
-    compiled += precompileProgramShaders(presenter, scaled, samples);
+    recomp_d3d_for_each_boot_shader(&presenter->config, scaled, samples, framegen,
+        [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
+            if (presenter->precompile_stop.load()) return false;
+            compiled += lookupShaders(presenter, key, output, samples).vertex != nullptr;
+            return true;
+        });
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
@@ -4162,8 +4176,48 @@ RecompD3dPresenterError checkOwner(RecompD3dPresenter *presenter)
 
 } // namespace
 
-// The guest vertex programs' boot shaders.
-#include "d3d_boot_programs_sdl_gpu.h"
+// The presenter's test hooks.
+#include "d3d_presenter_sdl_gpu_test.h"
+
+/* The build's precompile pass (tools/build_game.py): every boot shader any
+   launch of this build may ask for, for every scale, MSAA count and frame
+   generation choice, compiled into RECOMP_SHADER_CACHE. No window, device or
+   SDL_GPUShader is made, so it also runs on a host without a GPU. */
+unsigned d3d_backend_precompile_boot_shaders(const RecompD3dPresenterConfig *config)
+{
+    if (config == nullptr) return 0u;
+#ifdef __APPLE__
+    const RecompShaderTarget target = RecompShaderTarget::Msl;
+#else
+    const RecompShaderTarget target = RecompShaderTarget::Spirv;
+#endif
+    if (!recomp_shader_compiler_available()) return 0u;
+    unsigned compiled = 0u;
+    for (const bool scaled : {false, true}) {
+        for (const bool framegen : {false, true}) {
+            for (const uint32_t samples : {1u, 2u, 4u, 8u}) {
+                recomp_d3d_for_each_boot_shader(config, scaled, samples, framegen,
+                    [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
+                        RecompD3dVertexLayout layout;
+                        std::string hlsl, error;
+                        std::vector<std::string> defines;
+                        if (!drawShaderSource(key, output, samples, target, layout, hlsl, defines)) return true;
+                        for (const bool vertex : {true, false}) {
+                            RecompCompiledShader shader;
+                            if (recomp_shader_compile(hlsl, vertex ? "vs_main" : "ps_main", vertex,
+                                    target, defines, shader, error)) ++compiled;
+                            else std::fprintf(stderr, "recomp d3d presenter: boot shader %s failed: %s\n",
+                                vertex ? "vs_main" : "ps_main", error.c_str());
+                        }
+                        return true;
+                    });
+            }
+        }
+    }
+    std::fprintf(stderr, "recomp d3d presenter: precompiled %u boot shaders into the shader cache\n",
+        compiled);
+    return compiled;
+}
 
 RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *config, RecompD3dPresenter **presenter)
 {
