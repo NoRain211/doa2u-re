@@ -80,8 +80,7 @@ have not been tried. A draw the port cannot render yet stops the game, and the l
 says why. Online play is a test: two players across the internet, and players on
 different systems, have not played each other yet, and voice chat is not
 supported. If the two games stop matching, the fight ends and the game says a player left.
-A demanding moment on The Burai Zenin can still drop a single frame, and
-the safari stage's heat haze does not ripple yet.
+A demanding moment on The Burai Zenin can still drop a single frame.
 
 Reporting problems: open an issue at
 https://github.com/NoRain211/doa2u-re/issues and say what you did and what

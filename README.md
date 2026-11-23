@@ -221,8 +221,8 @@ keeps running.
 | macOS and Linux | Boot, menus and the attract demo render at 60 fps through Metal and Vulkan, with MSAA up to 8x and SMAA ([building](docs/building.md)) |
 
 **Known issues:** a demanding moment on The Burai Zenin can still drop a
-single frame; the safari stage's heat haze does not ripple yet, and its water
-leaves a gap between the elephants' reflections. The game's bloom glows
+single frame, and the safari stage's water leaves a gap between the
+elephants' reflections. The game's bloom glows
 around bright surfaces as on the Xbox, which reads more strongly on a sharp
 4K image.
 
