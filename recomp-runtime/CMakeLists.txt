@@ -58,7 +58,7 @@ if(WIN32)
         EXPECTED_HASH SHA256=60aae35ff71bd1d5f85b363e9d077a86bb27dd36333c42685e56c2fd541174d2)
     if(NOT EXISTS "${_shadercross_root}/CMakeLists.txt")
         file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross.tar.gz"
-            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross")
+            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/sdl_shadercross" ${_shaderc_touch})
     endif()
     # shadercross's SPIR-V to HLSL step is SPIRV-Cross's C API, at the revision
     # shadercross pins (Apache-2.0; see NOTICE).
@@ -70,7 +70,7 @@ if(WIN32)
         EXPECTED_HASH SHA256=0f295b214b164e42a1d21537c8da7b44569806c16220dda9798558edfaacd11e)
     if(NOT EXISTS "${_spirv_cross_root}/CMakeLists.txt")
         file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross.tar.gz"
-            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross")
+            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/spirv_cross" ${_shaderc_touch})
     endif()
     # shadercross looks for the prebuilt DXC in external/DirectXShaderCompiler-binaries.
     set(_dxc_dir "${_shadercross_root}/external/DirectXShaderCompiler-binaries/windows")
@@ -79,7 +79,8 @@ if(WIN32)
         "${CMAKE_CURRENT_BINARY_DIR}/dxc_2026_02_20.zip"
         EXPECTED_HASH SHA256=a1e89031421cf3c1fca6627766ab3020ca4f962ac7e2caa7fab2b33a8436151e)
     if(NOT EXISTS "${_dxc_dir}/bin/x64/dxcompiler.dll")
-        file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/dxc_2026_02_20.zip" DESTINATION "${_dxc_dir}")
+        file(ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/dxc_2026_02_20.zip" DESTINATION "${_dxc_dir}"
+            ${_shaderc_touch})
     endif()
     set(RECOMP_DXC_DLLS "${_dxc_dir}/bin/x64/dxcompiler.dll" "${_dxc_dir}/bin/x64/dxil.dll")
     set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
