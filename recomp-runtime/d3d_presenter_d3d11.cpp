@@ -1594,8 +1594,10 @@ void precompileDrawShaders(const std::atomic<bool> *stop)
     try {
         loaded = loadCachedDrawShaders(stop);
         std::vector<RecompD3dDrawShaderKey> keys;
-        for (const uint32_t fvf : kRecompD3dBootDrawFvfs) keys.push_back({fvf, 0u, nullptr, false, false, false});
-        keys.push_back({0x142u, 0u, nullptr, false, false, false, true});
+        // shortcut: no depth-bias variants, this thread has no presenter to ask for scale and MSAA.
+        for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
+            if (!boot.output && !boot.depth_bias) keys.push_back({boot.fvf, 0u, nullptr, false, false, false, boot.projected_stages});
+        }
         for (const RecompD3dDrawShaderKey &key : keys) {
             RecompD3dVertexLayout layout;
             std::string source;

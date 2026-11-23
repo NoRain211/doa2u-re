@@ -1304,10 +1304,11 @@ SDL_GPUShader *createShader(RecompD3dPresenter *presenter, const std::string &hl
    (queueCover) how much of the scene the fragment hides. */
 enum DrawOutput : uint8_t { kOutputShaded, kOutputOne, kOutputAlpha, kOutputLight, kOutputLightAlpha };
 
-/* The draw shader for one key and output. Failures are cached too, so a
-   shader that cannot build is not retried every draw. */
+/* The draw shader for one key and output, with samples as the MSAA count of
+   a depth-bias key. Failures are cached too, so a shader that cannot build is
+   not retried every draw. */
 ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShaderKey &draw_key,
-    uint8_t output)
+    uint8_t output, uint32_t samples)
 {
     ShaderKey key{};
     key.fvf = draw_key.fvf;
@@ -1317,7 +1318,7 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     key.scaled_depth_bias = draw_key.scaled_depth_bias;
     key.sample_depth_bias = draw_key.sample_depth_bias;
     key.output = output;
-    key.samples = static_cast<uint16_t>(draw_key.sample_depth_bias ? presenter->msaa_count : 0u);
+    key.samples = static_cast<uint16_t>(draw_key.sample_depth_bias ? samples : 0u);
     key.projected_stages = draw_key.projected_stages;
     {
         std::lock_guard<std::mutex> lock(presenter->shader_lock);
@@ -1339,7 +1340,7 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
             if (at != std::string::npos) hlsl.replace(at, result.size(), outputs[output]);
         }
         std::vector<std::string> defines;
-        if (draw_key.sample_depth_bias) defines.push_back("RECOMP_SAMPLE_COUNT=" + std::to_string(presenter->msaa_count));
+        if (draw_key.sample_depth_bias) defines.push_back("RECOMP_SAMPLE_COUNT=" + std::to_string(samples));
         pair.vertex = createShader(presenter, hlsl, true, defines, 0u, 2u);
         pair.fragment = pair.vertex ? createShader(presenter, hlsl, false, defines, 4u,
             presenter->shader_target == RecompShaderTarget::Msl ? 2u : 1u) : nullptr;
@@ -1366,18 +1367,19 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
     return inserted.first->second;
 }
 
-// ponytail: fixed list; vertex-program shaders and unlisted FVFs still compile on first use.
-void precompileDrawShaders(RecompD3dPresenter *presenter)
+/* ponytail: fixed list; vertex-program shaders and unlisted FVFs still compile on first use.
+   The quality arguments are a snapshot from creation: applyQuality changes the live ones. */
+void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples, bool framegen)
 {
     const auto start = std::chrono::steady_clock::now();
     unsigned compiled = 0u;
-    for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
+    for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
         if (presenter->precompile_stop.load()) return;
-        const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
-        compiled += lookupShaders(presenter, key, false).vertex != nullptr;
+        if ((boot.depth_bias && !scaled) || (boot.output > kOutputOne && !framegen)) continue;
+        const RecompD3dDrawShaderKey key{boot.fvf, 0u, nullptr, false, boot.depth_bias,
+            boot.depth_bias && samples > 1u, boot.projected_stages};
+        compiled += lookupShaders(presenter, key, boot.output, samples).vertex != nullptr;
     }
-    const RecompD3dDrawShaderKey projected{0x142u, 0u, nullptr, false, false, false, true};
-    if (!presenter->precompile_stop.load()) compiled += lookupShaders(presenter, projected, false).vertex != nullptr;
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
@@ -2027,7 +2029,7 @@ void queueCover(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawComma
         : blend.dst_factor != RECOMP_D3D_BLEND_ONE ? kOutputOne
         : blend.src_factor == RECOMP_D3D_BLEND_SRC_ALPHA ? kOutputLightAlpha : kOutputLight;
     PipelineState cover = state;
-    cover.shaders = lookupShaders(presenter, shader_key, output);
+    cover.shaders = lookupShaders(presenter, shader_key, output, presenter->msaa_count);
     cover.color_format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
     cover.depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     cover.samples = SDL_GPU_SAMPLECOUNT_1;
@@ -2094,7 +2096,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     const RecompD3dDrawShaderKey shader_key{shader_fvf, draw.program_count,
         draw.program_count ? draw.program : nullptr, false, scaled_bias,
         scaled_bias && presenter->msaa_count > 1u, draw.projected_stage_count != 0u};
-    const ShaderPair shaders = lookupShaders(presenter, shader_key, false);
+    const ShaderPair shaders = lookupShaders(presenter, shader_key, false, presenter->msaa_count);
     if (shaders.vertex == nullptr) return RECOMP_D3D_PRESENTER_UNSUPPORTED_COMMAND;
 
     BoundTarget bound;
@@ -2376,7 +2378,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     /* An open visibility test counts this draw's passing samples first, before
        its own depth writes, into the test's counting target. */
     if (presenter->visibility_open && prepareCount(presenter, bound)) {
-        const ShaderPair counting = lookupShaders(presenter, shader_key, true);
+        const ShaderPair counting = lookupShaders(presenter, shader_key, true, presenter->msaa_count);
         PipelineState count_state = state;
         count_state.shaders = counting;
         count_state.color_format = kCountFormat;
@@ -4244,7 +4246,8 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         SDL_GetGPUDeviceDriver(created->device), main_width, main_height, created->msaa_count,
         fit.width, fit.height);
     try {
-        created->precompile = std::thread(precompileDrawShaders, created);
+        created->precompile = std::thread(precompileDrawShaders, created, created->scale != 1.0f, created->msaa_count,
+            created->fg_k != 0u);
     } catch (const std::system_error &) {
         // Shaders then compile on first use.
     }
