@@ -1,7 +1,7 @@
 /* Frame generation for the Direct3D 11 presenter (RECOMP_D3D_FRAMEGEN=1).
    Included by d3d_presenter_d3d11.cpp inside its anonymous namespace, after
    the draw, resolve and present helpers it reuses, the way
-   d3d_boot_programs_sdl_gpu.h is included by the SDL_GPU presenter. The
+   d3d_presenter_sdl_gpu_test.h is included by the SDL_GPU presenter. The
    passes are d3d_framegen_shaders.h's and the slot schedule is
    d3d_framegen_schedule.h's; this file owns the Direct3D 11 resources, the
    HUD mask replay and the window presents. */

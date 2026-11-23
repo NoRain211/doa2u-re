@@ -138,6 +138,39 @@ def runner_path(root=ROOT, vulkan=False):
     return root / "build/recomp-program/recomp_program_runner"
 
 
+def shader_cache(root=ROOT):
+    """The folder both presenters keep compiled draw shaders in; run_game.py sets it too."""
+    return root / "private/shader-cache"
+
+
+def precompile_shaders(logs):
+    """Fill the shader cache the next launch reads, so no draw shader compiles during play.
+
+    The game compiles the same shaders at boot when this fails, so a failure only warns.
+    """
+    xbe = selected_xbe()
+    env = os.environ.copy()
+    env["RECOMP_SHADER_CACHE"] = str(shader_cache(ROOT))
+    runners = [runner_path()] + ([runner_path(vulkan=True)] if sys.platform == "win32" else [])
+    for runner in runners:
+        log_path = logs / f"precompile-{runner.stem}.log"
+        start = time.monotonic()
+        try:
+            with log_path.open("wb") as log:
+                code = subprocess.call([str(runner), "--xbe", str(xbe), "--precompile-shaders"],
+                                       stdout=log, stderr=subprocess.STDOUT, env=env)
+        except OSError as error:
+            print(f"Warning: could not run {runner.name} to fill the shader cache ({error}); "
+                  "the game compiles its draw shaders at the next launch.", flush=True)
+            continue
+        elapsed = time.monotonic() - start
+        if code:
+            print(f"Warning: {runner.name} could not fill the shader cache (exit code {code}); "
+                  f"the game compiles its draw shaders at the next launch (log: {log_path}).", flush=True)
+        else:
+            print(f"Precompiled draw shaders for {runner.name} in {elapsed:.1f} s (log: {log_path})", flush=True)
+
+
 def program_manifest(generated):
     chunks = sorted(generated.glob("recomp_[0-9][0-9][0-9][0-9].c"))
     if not chunks or [p.name for p in chunks] != [f"recomp_{i:04d}.c" for i in range(len(chunks))]:
@@ -397,6 +430,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     if windows:
         receipt["vulkan_runner_sha256"] = sha256(runner_path(vulkan=True))
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    precompile_shaders(logs)
     if iso is not None and not build_only:
         drop_owned_extraction()
 

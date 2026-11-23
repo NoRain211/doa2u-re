@@ -27,6 +27,15 @@ The Renderer setting's D3D 12 choice starts that runner with
 `SDL_GPU_DRIVER=direct3d12`, which needs the two DXC DLLs beside it; its Vulkan
 choice stays on Vulkan whether or not they are present.
 
+Both presenters keep every compiled draw shader in `private/shader-cache` and
+load it at the next start. The build now fills that folder itself: after the
+runners link, `tools/build_game.py` runs each one with `--precompile-shaders`,
+which compiles the boot shaders for every resolution, MSAA count and frame
+generation choice without opening a window or a GPU device, so the first
+launch after a build or update compiles nothing during play. A failed pass
+only warns; the game then compiles those shaders at boot as before.
+`RECOMP_SHADER_CACHE` names a different folder.
+
 ## Build from the launcher
 
 `./launcher.sh` opens on its GAME page. Choose

@@ -10,7 +10,7 @@ import sys
 import threading
 import uuid
 
-from build_game import ROOT, program_manifest, runner_path, selected_xbe
+from build_game import ROOT, program_manifest, runner_path, selected_xbe, shader_cache
 import dedication_card as card_builder
 from extract_iso import redact_private, sha256
 
@@ -154,9 +154,9 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     # The game's PC SETTINGS page saves the launchers' choices here.
     env["RECOMP_LAUNCHER_SETTINGS"] = str(ROOT / "private/launcher.json")
     # Both presenters keep compiled draw shaders here and load them at the next start.
-    shader_cache = ROOT / "private/shader-cache"
-    shader_cache.mkdir(parents=True, exist_ok=True)
-    env.setdefault("RECOMP_SHADER_CACHE", str(shader_cache))
+    cache = shader_cache(ROOT)
+    cache.mkdir(parents=True, exist_ok=True)
+    env.setdefault("RECOMP_SHADER_CACHE", str(cache))
     if len(start_polls) > 4 or any(poll <= 0 or poll > 2**64 - 1 for poll in start_polls):
         raise ValueError("Start polls must be positive uint64 values, at most four")
     if len(a_polls) > 192 or any(poll <= 0 or poll > 2**64 - 1 for poll in a_polls):

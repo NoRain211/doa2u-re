@@ -1,4 +1,5 @@
 #include "d3d_presenter_backend.h"
+#include "d3d_boot_shaders.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
 #include "d3d_framegen_schedule.h"
@@ -1705,10 +1706,35 @@ bool applyDrawOutput(std::string &source, uint8_t output)
     return true;
 }
 
+/* Builds one boot key's exported shader, or its fragment variant for frame
+   generation's HUD mask, into the shader cache. */
+bool precompileBootShader(const RecompD3dDrawShaderKey &key, uint8_t output)
+{
+    RecompD3dVertexLayout layout;
+    std::string source;
+    if (!recomp_d3d_draw_shader_source(key, layout, source) || !applyDrawOutput(source, output)) return false;
+    // createDrawPipeline's shaders: the sample-depth-bias variant needs ps_4_1, and XYZ|DIFFUSE lines gs_main.
+    ID3DBlob *blob = nullptr;
+    const bool vertex = compileDrawShader(source.c_str(), "vs_main", "vs_4_0", &blob);
+    releaseCom(blob);
+    blob = nullptr;
+    const bool fragment = compileDrawShader(source.c_str(), "ps_main",
+        key.sample_depth_bias ? "ps_4_1" : "ps_4_0", &blob);
+    releaseCom(blob);
+    blob = nullptr;
+    bool geometry = true;
+    if (key.fvf == 0x42u && key.program_count == 0u && !key.coverage_only) {
+        geometry = compileDrawShader(source.c_str(), "gs_main", "gs_4_0", &blob);
+        releaseCom(blob);
+    }
+    return vertex && fragment && geometry;
+}
+
 /* Loads every shader an earlier launch compiled, including vertex-program ones,
-   then compiles the fixed FVF list and the guest vertex programs; anything else
-   still compiles on first use. */
-void precompileDrawShaders(const std::atomic<bool> *stop, const RecompD3dPresenterConfig *config)
+   then compiles the fixed FVF list and the guest vertex programs for this run's
+   settings; anything else still compiles on first use. */
+void precompileDrawShaders(const std::atomic<bool> *stop, const RecompD3dPresenterConfig *config,
+    bool scaled, uint32_t samples)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     precompiling = true;
@@ -1717,45 +1743,14 @@ void precompileDrawShaders(const std::atomic<bool> *stop, const RecompD3dPresent
     unsigned loaded = 0u;
     try {
         loaded = loadCachedDrawShaders(stop);
-        std::vector<RecompD3dDrawShaderKey> keys;
-        // shortcut: no depth-bias variants, this thread has no presenter to ask for scale and MSAA.
-        for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
-            if (!boot.output && !boot.depth_bias) keys.push_back({boot.fvf, 0u, nullptr, false, false, false, boot.projected_stages});
-        }
-        for (uint32_t i = 0u; i < config->program_count; ++i) {
-            const RecompD3dBootProgram &program = config->programs[i];
-            keys.push_back({program.fvf, program.count, program.tokens, false, false, false, false});
-        }
-        for (const RecompD3dDrawShaderKey &key : keys) {
-            RecompD3dVertexLayout layout;
-            std::string source;
-            if (!recomp_d3d_draw_shader_source(key, layout, source)) continue;
-            for (const char *stage : {"vs", "ps"}) {
-                if (stop->load()) return;
-                ID3DBlob *blob = nullptr;
-                const bool vertex = stage[0] == 'v';
-                compiled += compileDrawShader(source.c_str(), vertex ? "vs_main" : "ps_main",
-                    vertex ? "vs_4_0" : "ps_4_0", &blob);
-                releaseCom(blob);
-            }
-        }
-        /* Frame generation's HUD mask variants: without them the first 2D
-           layer draw of a scene compiles its cover shader on the render thread. */
         const char *framegen = std::getenv("RECOMP_D3D_FRAMEGEN");
-        if (framegen != nullptr && std::strcmp(framegen, "0") != 0 && framegen[0] != '\0') {
-            for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
-                if (boot.output == 0u) continue;
-                const RecompD3dDrawShaderKey key{boot.fvf, 0u, nullptr, false, false, false, boot.projected_stages};
-                RecompD3dVertexLayout layout;
-                std::string source;
-                if (!recomp_d3d_draw_shader_source(key, layout, source) ||
-                    !applyDrawOutput(source, boot.output)) continue;
-                if (stop->load()) return;
-                ID3DBlob *blob = nullptr;
-                compiled += compileDrawShader(source.c_str(), "ps_main", "ps_4_0", &blob);
-                releaseCom(blob);
-            }
-        }
+        const bool cover = framegen != nullptr && std::strcmp(framegen, "0") != 0 && framegen[0] != '\0';
+        recomp_d3d_for_each_boot_shader(config, scaled, samples, cover,
+            [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
+                if (stop->load()) return false;
+                compiled += precompileBootShader(key, output);
+                return true;
+            });
     } catch (const std::exception &) {
         return;  // Remaining shaders compile on first use.
     }
@@ -4361,6 +4356,34 @@ RecompD3dPresenterError endVisibility(RecompD3dPresenter *presenter, uint32_t in
 
 } // namespace
 
+/* The build's precompile pass (tools/build_game.py): every boot shader any
+   launch of this build may ask for, for every scale, MSAA count and frame
+   generation choice, compiled into RECOMP_SHADER_CACHE without a device. */
+unsigned d3d_backend_precompile_boot_shaders(const RecompD3dPresenterConfig *config)
+{
+    if (config == nullptr) return 0u;
+    unsigned compiled = 0u;
+    try {
+        for (const bool scaled : {false, true}) {
+            for (const bool framegen : {false, true}) {
+                // ps_4_1's sample-depth-bias shader serves every count; repeats hit the cache.
+                for (const uint32_t samples : {1u, 2u, 4u, 8u, 16u, 32u}) {
+                    recomp_d3d_for_each_boot_shader(config, scaled, samples, framegen,
+                        [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
+                            compiled += precompileBootShader(key, output);
+                            return true;
+                        });
+                }
+            }
+        }
+    } catch (const std::exception &) {
+        return compiled;  // What the game misses compiles at boot.
+    }
+    std::fprintf(stderr, "recomp d3d presenter: precompiled %u boot shaders into the shader cache\n",
+        compiled);
+    return compiled;
+}
+
 RecompD3dPresenterError d3d_backend_create(
     const RecompD3dPresenterConfig *config,
     RecompD3dPresenter **presenter)
@@ -4448,7 +4471,8 @@ RecompD3dPresenterError d3d_backend_create(
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     try {
-        created->precompile = std::thread(precompileDrawShaders, &created->precompile_stop, &created->config);
+        created->precompile = std::thread(precompileDrawShaders, &created->precompile_stop, &created->config,
+            created->scale != 1.0f, created->msaa);
     } catch (const std::system_error &) {
         // Shaders then compile on first use, as before.
     }
@@ -4719,6 +4743,11 @@ RecompD3dPresenterError d3d_backend_release_memory(
             presenter->render_targets.size(), presenter->depth_targets.size());
     }
     return RECOMP_D3D_PRESENTER_OK;
+}
+
+void d3d_backend_join_precompile(RecompD3dPresenter *presenter)
+{
+    if (presenter->precompile.joinable()) presenter->precompile.join();
 }
 
 RecompD3dPresenterError d3d_backend_destroy(

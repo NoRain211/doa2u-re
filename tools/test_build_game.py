@@ -7,12 +7,13 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import types
 import unittest
 from unittest.mock import Mock, patch
 
 from build_game import (STEPS, build, build_fraction, drop_owned_extraction, failure_excerpt, import_disc,
-                        lifter_revision, main, merge_functions, program_manifest, selected_xbe,
-                        use_windows_newlines, write_functions)
+                        lifter_revision, main, merge_functions, precompile_shaders, program_manifest,
+                        selected_xbe, use_windows_newlines, write_functions)
 from extract_iso import sha256
 
 
@@ -253,6 +254,78 @@ class BuildTests(unittest.TestCase):
             (root / "public-export.json").write_text(json.dumps(dict(gitlinks=links)))
             with patch("build_game.ROOT", root), patch("build_game.LIFTER", root / "lifter"):
                 self.assertEqual(lifter_revision(), "a" * 40)
+
+
+class PrecompileTests(unittest.TestCase):
+    """The precompile-only runner pass a build runs, so the next launch finds its shaders."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        (self.root / "private").mkdir()
+        self.logs = self.root / "private/build-logs/abc"
+        self.logs.mkdir(parents=True)
+        self.xbe = self.root / "private/game.xbe"
+        self.xbe.write_bytes(b"synthetic game")
+        self.runners = {False: self.root / "build/runner.exe", True: self.root / "build/runner_vulkan.exe"}
+
+    def run_precompile(self, code=0):
+        def runner(root=None, vulkan=False):
+            return self.runners[vulkan]
+
+        output = io.StringIO()
+        with patch("build_game.ROOT", self.root), patch("build_game.sys.platform", "win32"), \
+                patch("build_game.selected_xbe", return_value=self.xbe), \
+                patch("build_game.runner_path", runner), \
+                patch("build_game.subprocess.call", return_value=code) as call, \
+                contextlib.redirect_stdout(output):
+            precompile_shaders(self.logs)
+        return call, output.getvalue()
+
+    def test_every_runner_fills_the_cache_a_launch_reads(self):
+        call, output = self.run_precompile()
+        self.assertEqual(len(call.call_args_list), 2)
+        for called, runner in zip(call.call_args_list, self.runners.values()):
+            self.assertEqual(called.args[0][0], str(runner))
+            self.assertEqual(called.args[0][1:], ["--xbe", str(self.xbe), "--precompile-shaders"])
+            self.assertEqual(called.kwargs["env"]["RECOMP_SHADER_CACHE"],
+                             str(self.root / "private/shader-cache"))
+        self.assertEqual(sorted(path.name for path in self.logs.iterdir()),
+                         ["precompile-runner.log", "precompile-runner_vulkan.log"])
+        self.assertIn("Precompiled draw shaders for runner.exe", output)
+
+    def test_a_failed_runner_only_warns_and_the_next_one_still_runs(self):
+        call, output = self.run_precompile(code=5)
+        self.assertEqual(len(call.call_args_list), 2)
+        self.assertIn("Warning", output)
+        self.assertIn("exit code 5", output)
+        self.assertIn("next launch", output)
+
+    def test_lift_only_skips_the_precompile(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "private/program/generated").mkdir(parents=True)
+            (root / "private/program/functions.json").write_text("[]")
+            runner = root / "build/recomp-program/recomp_program_runner"
+            runner.parent.mkdir(parents=True)
+            runner.write_bytes(b"runner")
+            xbe = root / "private/game.xbe"
+            xbe.write_bytes(b"game")
+            capstone = types.SimpleNamespace(__version__="5.0.7")
+            with patch("build_game.ROOT", root), patch("build_game.sys.platform", "darwin"), \
+                    patch("build_game.Progress"), patch("build_game.selected_xbe", return_value=xbe), \
+                    patch("build_game.runner_path", return_value=runner), \
+                    patch("build_game.lifter_revision", return_value="a" * 40), \
+                    patch("build_game.merge_functions"), \
+                    patch("build_game.program_manifest", return_value=("0" * 64, 0)), \
+                    patch.dict("sys.modules", {"capstone": capstone}), \
+                    patch("build_game.precompile_shaders") as precompile, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                build(lift_only=True)
+                precompile.assert_not_called()
+                build()
+                precompile.assert_called_once()
 
 
 class SoundtrackTests(unittest.TestCase):
