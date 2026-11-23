@@ -439,16 +439,21 @@ std::string recomp_shader_keep_interpolants(const std::string &hlsl)
        register in the pixel stage alone and the pipeline will not create. This
        reads them all behind a branch the draw constants never satisfy, which
        keeps both stages' interfaces identical. */
-    static const char *const anchor = "    return shaded;\n";
-    const size_t at = text.rfind(anchor);
-    if (at != std::string::npos) {
-        text.insert(at,
-            "    if (filter_flags.z < -1.0e30f) shaded +=\n"
-            "        input.color + float4(input.texcoord, input.volume_coord, input.table_fog) +\n"
-            "        float4(input.reflection_coord, input.projected_q, 0) +\n"
-            "        float4(input.lit_specular, 0) + float4(input.reflection_coord2, 0, 0) +\n"
-            "        float4(input.projected_eye, 0);\n");
+    const size_t start = text.find("struct VSOut {");
+    const size_t at = text.rfind("    return shaded;\n");
+    if (start == std::string::npos || at == std::string::npos) return text;
+    const size_t close = text.find("};", start);
+    // Every member VSOut declares, including the FVF's extra UVs and a program's outputs.
+    std::string reads;
+    for (size_t member = start + 14u, end; (end = text.find(';', member)) < close; member = end + 1u) {
+        const std::string declaration = text.substr(member, end - member);
+        const size_t colon = declaration.rfind(':');
+        if (colon == std::string::npos || declaration.find("SV_", colon) != std::string::npos) continue;
+        const size_t name_end = declaration.find_last_not_of(" \t", colon - 1u) + 1u;
+        const size_t name_start = declaration.find_last_of(" \t]", name_end - 1u) + 1u;
+        reads += " + length(input." + declaration.substr(name_start, name_end - name_start) + ")";
     }
+    if (!reads.empty()) text.insert(at, "    if (filter_flags.z < -1.0e30f) shaded.x +=" + reads.substr(2u) + ";\n");
     return text;
 }
 
