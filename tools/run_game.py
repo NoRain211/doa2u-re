@@ -101,6 +101,9 @@ def saved_settings():
                         ("d3d12", "d3d12"), ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
+    # Direct3D 12 is SDL_GPU on another driver, so like the launchers it needs "vulkan" too.
+    if options.get("d3d12") and not options.get("vulkan"):
+        options["d3d12"] = False
     # Frame rate: Display turns on frame generation; anything else is Original.
     if isinstance(saved.get("frameRate"), str):
         options["framegen"] = saved["frameRate"] == "display"

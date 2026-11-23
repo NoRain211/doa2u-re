@@ -259,6 +259,9 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                     "free_camera": True, "random_cpu_costumes": True, "framegen": True})
                 settings.write_text(json.dumps({"vulkan": True, "d3d12": True}), encoding="utf-8")
                 self.assertEqual(saved_settings(), {"vulkan": True, "d3d12": True})
+                # An older PC SETTINGS page wrote only "vulkan", so Direct3D 11 there can leave d3d12 behind.
+                settings.write_text(json.dumps({"vulkan": False, "d3d12": True}), encoding="utf-8")
+                self.assertEqual(saved_settings(), {"vulkan": False, "d3d12": False})
                 settings.write_text(json.dumps({"vulkan": True}), encoding="utf-8")
                 self.assertEqual(saved_settings(), {"vulkan": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),

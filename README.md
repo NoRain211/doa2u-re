@@ -51,7 +51,7 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, Direct3D 12 or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
