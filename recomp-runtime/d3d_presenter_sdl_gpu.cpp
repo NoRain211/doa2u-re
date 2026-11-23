@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-/* The presenter backend for macOS (Metal), and Linux and Windows (Vulkan),
-   through SDL_GPU. It follows the Direct3D 11 backend (d3d_presenter_d3d11.cpp) call
-   for call: the same draw shader and constants (d3d_draw_shader.cpp), target
-   sizes, declines and resource lifetimes. Where SDL_GPU lacks a Direct3D 11
+/* The presenter backend for macOS (Metal), and Linux and Windows (Vulkan, or
+   Direct3D 12 when SDL_GPU_DRIVER asks for it), through SDL_GPU. It follows
+   the Direct3D 11 backend (d3d_presenter_d3d11.cpp) call for call: the same
+   draw shader and constants (d3d_draw_shader.cpp), target sizes, declines and
+   resource lifetimes. Where SDL_GPU lacks a Direct3D 11
    feature this file says so: widened lines are expanded on the CPU instead of
    in a geometry shader, coverage probes rasterize on the CPU, and occlusion
    counts come from an additive pass. RECOMP_D3D_PRESENT_LOG is Direct3D 11
@@ -56,6 +57,65 @@ static const unsigned char kSmaaSource[] = {
 #include "smaa_hlsl.inc"
 };
 #endif
+
+/* SMAA 1x (iryoku/smaa, ultra preset) on the final resolved image, from the
+   same HLSL as the Direct3D 11 presenter. Textures 0-4 are color, edges,
+   area, search and weights; slots 0 and 1 also carry the linear and point
+   samplers the shader names. The presenter and the DXIL test compile this one
+   source. */
+void d3d_backend_smaa_source(uint32_t width, uint32_t height, std::string &source,
+    std::vector<std::string> &defines)
+{
+#ifdef RECOMP_SMAA
+    static const char prefix[] =
+        "#define SMAA_CUSTOM_SL\n#define SMAA_PRESET_ULTRA\n"
+        "[[vk::binding(0, 2)]] SamplerState LinearSampler : register(s0);\n"
+        "[[vk::binding(1, 2)]] SamplerState PointSampler : register(s1);\n"
+        "#define SMAATexture2D(tex) Texture2D tex\n"
+        "#define SMAATexturePass2D(tex) tex\n"
+        "#define SMAASampleLevelZero(tex, coord) tex.SampleLevel(LinearSampler, coord, 0)\n"
+        "#define SMAASampleLevelZeroPoint(tex, coord) tex.SampleLevel(PointSampler, coord, 0)\n"
+        "#define SMAASampleLevelZeroOffset(tex, coord, offset) tex.SampleLevel(LinearSampler, coord, 0, offset)\n"
+        "#define SMAASample(tex, coord) tex.Sample(LinearSampler, coord)\n"
+        "#define SMAASamplePoint(tex, coord) tex.Sample(PointSampler, coord)\n"
+        "#define SMAASampleOffset(tex, coord, offset) tex.Sample(LinearSampler, coord, offset)\n"
+        "#define SMAA_FLATTEN [flatten]\n#define SMAA_BRANCH [branch]\n";
+    static const char suffix[] =
+        "\n[[vk::binding(0, 2)]] Texture2D colorTex : register(t0);\n"
+        "[[vk::binding(1, 2)]] Texture2D edgesTex : register(t1);\n"
+        "[[vk::binding(2, 2)]] Texture2D areaTex : register(t2);\n"
+        "[[vk::binding(3, 2)]] Texture2D searchTex : register(t3);\n"
+        "[[vk::binding(4, 2)]] Texture2D blendTex : register(t4);\n"
+        "void fullscreen(uint id, out float4 pos, out float2 uv) {\n"
+        " uv = float2((id << 1) & 2, id & 2); pos = float4(uv * float2(2,-2) + float2(-1,1), 0, 1); }\n"
+        "void vs_edges(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
+        " out float4 offset[3] : TEXCOORD1) { fullscreen(id, pos, uv); SMAAEdgeDetectionVS(uv, offset); }\n"
+        "float2 ps_edges(float4 pos : SV_Position, float2 uv : TEXCOORD0, float4 offset[3] : TEXCOORD1)\n"
+        " : SV_Target { return SMAALumaEdgeDetectionPS(uv, offset, colorTex); }\n"
+        "void vs_weights(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
+        " out float2 pix : TEXCOORD1, out float4 offset[3] : TEXCOORD2) {\n"
+        " fullscreen(id, pos, uv); SMAABlendingWeightCalculationVS(uv, pix, offset); }\n"
+        "float4 ps_weights(float4 pos : SV_Position, float2 uv : TEXCOORD0, float2 pix : TEXCOORD1,\n"
+        " float4 offset[3] : TEXCOORD2) : SV_Target {\n"
+        " return SMAABlendingWeightCalculationPS(uv, pix, offset, edgesTex, areaTex, searchTex, 0); }\n"
+        "void vs_blend(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
+        " out float4 offset : TEXCOORD1) { fullscreen(id, pos, uv); SMAANeighborhoodBlendingVS(uv, offset); }\n"
+        "float4 ps_blend(float4 pos : SV_Position, float2 uv : TEXCOORD0, float4 offset : TEXCOORD1)\n"
+        " : SV_Target { return SMAANeighborhoodBlendingPS(uv, offset, colorTex, blendTex); }\n";
+    char metrics[160];
+    std::snprintf(metrics, sizeof metrics, "SMAA_RT_METRICS=float4(1.0/%u.0,1.0/%u.0,%u.0,%u.0)",
+        width, height, width, height);
+    source = prefix;
+    source.append(reinterpret_cast<const char *>(kSmaaSource), sizeof kSmaaSource);
+    source += suffix;
+    defines.assign(1u, metrics);
+#else
+    (void)width;
+    (void)height;
+    source.clear();
+    defines.clear();
+#endif
+}
 
 namespace {
 
@@ -1323,6 +1383,7 @@ bool drawShaderSource(const RecompD3dDrawShaderKey &draw_key, uint8_t output, ui
     }
     hlsl = recomp_shader_draw_bindings(hlsl);
     if (target == RecompShaderTarget::Msl) hlsl = recomp_shader_emulate_sampler_bias(hlsl);
+    if (target == RecompShaderTarget::Dxil) hlsl = recomp_shader_keep_interpolants(hlsl);
     if (output != kOutputShaded) {
         static const std::string result = "    return shaded;\n";
         static const char *const outputs[] = {"", "    return float4(1, 1, 1, 1);\n", "    return shaded.aaaa;\n",
@@ -2811,49 +2872,10 @@ const char kGammaShader[] =
 bool createSmaa(RecompD3dPresenter *presenter)
 {
 #ifdef RECOMP_SMAA
-    static const char prefix[] =
-        "#define SMAA_CUSTOM_SL\n#define SMAA_PRESET_ULTRA\n"
-        "[[vk::binding(0, 2)]] SamplerState LinearSampler : register(s0);\n"
-        "[[vk::binding(1, 2)]] SamplerState PointSampler : register(s1);\n"
-        "#define SMAATexture2D(tex) Texture2D tex\n"
-        "#define SMAATexturePass2D(tex) tex\n"
-        "#define SMAASampleLevelZero(tex, coord) tex.SampleLevel(LinearSampler, coord, 0)\n"
-        "#define SMAASampleLevelZeroPoint(tex, coord) tex.SampleLevel(PointSampler, coord, 0)\n"
-        "#define SMAASampleLevelZeroOffset(tex, coord, offset) tex.SampleLevel(LinearSampler, coord, 0, offset)\n"
-        "#define SMAASample(tex, coord) tex.Sample(LinearSampler, coord)\n"
-        "#define SMAASamplePoint(tex, coord) tex.Sample(PointSampler, coord)\n"
-        "#define SMAASampleOffset(tex, coord, offset) tex.Sample(LinearSampler, coord, offset)\n"
-        "#define SMAA_FLATTEN [flatten]\n#define SMAA_BRANCH [branch]\n";
-    static const char suffix[] =
-        "\n[[vk::binding(0, 2)]] Texture2D colorTex : register(t0);\n"
-        "[[vk::binding(1, 2)]] Texture2D edgesTex : register(t1);\n"
-        "[[vk::binding(2, 2)]] Texture2D areaTex : register(t2);\n"
-        "[[vk::binding(3, 2)]] Texture2D searchTex : register(t3);\n"
-        "[[vk::binding(4, 2)]] Texture2D blendTex : register(t4);\n"
-        "void fullscreen(uint id, out float4 pos, out float2 uv) {\n"
-        " uv = float2((id << 1) & 2, id & 2); pos = float4(uv * float2(2,-2) + float2(-1,1), 0, 1); }\n"
-        "void vs_edges(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
-        " out float4 offset[3] : TEXCOORD1) { fullscreen(id, pos, uv); SMAAEdgeDetectionVS(uv, offset); }\n"
-        "float2 ps_edges(float4 pos : SV_Position, float2 uv : TEXCOORD0, float4 offset[3] : TEXCOORD1)\n"
-        " : SV_Target { return SMAALumaEdgeDetectionPS(uv, offset, colorTex); }\n"
-        "void vs_weights(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
-        " out float2 pix : TEXCOORD1, out float4 offset[3] : TEXCOORD2) {\n"
-        " fullscreen(id, pos, uv); SMAABlendingWeightCalculationVS(uv, pix, offset); }\n"
-        "float4 ps_weights(float4 pos : SV_Position, float2 uv : TEXCOORD0, float2 pix : TEXCOORD1,\n"
-        " float4 offset[3] : TEXCOORD2) : SV_Target {\n"
-        " return SMAABlendingWeightCalculationPS(uv, pix, offset, edgesTex, areaTex, searchTex, 0); }\n"
-        "void vs_blend(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0,\n"
-        " out float4 offset : TEXCOORD1) { fullscreen(id, pos, uv); SMAANeighborhoodBlendingVS(uv, offset); }\n"
-        "float4 ps_blend(float4 pos : SV_Position, float2 uv : TEXCOORD0, float4 offset : TEXCOORD1)\n"
-        " : SV_Target { return SMAANeighborhoodBlendingPS(uv, offset, colorTex, blendTex); }\n";
     const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
-    char metrics[160];
-    std::snprintf(metrics, sizeof metrics, "SMAA_RT_METRICS=float4(1.0/%u.0,1.0/%u.0,%u.0,%u.0)",
-        width, height, width, height);
-    std::string source = prefix;
-    source.append(reinterpret_cast<const char *>(kSmaaSource), sizeof kSmaaSource);
-    source += suffix;
-    const std::vector<std::string> defines = {metrics};
+    std::string source;
+    std::vector<std::string> defines;
+    d3d_backend_smaa_source(width, height, source, defines);
     static const char *const passes[3] = {"edges", "weights", "blend"};
     const SDL_GPUTextureFormat formats[3] = {SDL_GPU_TEXTUREFORMAT_R8G8_UNORM,
         SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM};
@@ -4265,11 +4287,17 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     };
-    created->device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+    created->device = SDL_CreateGPUDevice(
+        SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV |
+            (recomp_shader_dxil_requested() ? SDL_GPU_SHADERFORMAT_DXIL : 0u), false, nullptr);
     if (created->device == nullptr) return fail("SDL_GPU device");
-    if (SDL_GetGPUShaderFormats(created->device) & SDL_GPU_SHADERFORMAT_SPIRV) {
+    const SDL_GPUShaderFormat shader_formats = SDL_GetGPUShaderFormats(created->device);
+    if (shader_formats & SDL_GPU_SHADERFORMAT_SPIRV) {
         created->shader_target = RecompShaderTarget::Spirv;
         created->shader_format = SDL_GPU_SHADERFORMAT_SPIRV;
+    } else if (shader_formats & SDL_GPU_SHADERFORMAT_DXIL) {
+        created->shader_target = RecompShaderTarget::Dxil;
+        created->shader_format = SDL_GPU_SHADERFORMAT_DXIL;
     } else {
         created->shader_target = RecompShaderTarget::Msl;
         created->shader_format = SDL_GPU_SHADERFORMAT_MSL;

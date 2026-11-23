@@ -50,8 +50,8 @@ keeps running.
   Apple Silicon and Intel Macs, Linux PCs and the Steam Deck, from the same
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
-- **Native renderer.** Direct3D 11, or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan) and SMAA Ultra. Water
+- **Native renderer.** Direct3D 11, Direct3D 12 or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12) and SMAA Ultra. Water
   reflections render at the output resolution; bloom and lighting follow the
   game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
@@ -84,7 +84,7 @@ keeps running.
   HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
   **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
   **KO Replay** change at once, and so do **Resolution**, **MSAA** and
-  **SMAA**, on either renderer; the others say they apply the next
+  **SMAA**, on any renderer; the others say they apply the next
   time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
@@ -210,6 +210,7 @@ keeps running.
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
 | Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
+| Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |

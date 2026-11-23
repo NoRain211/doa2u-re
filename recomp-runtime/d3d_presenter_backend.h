@@ -3,6 +3,9 @@
 
 #include "d3d_presenter.h"
 
+#include <string>
+#include <vector>
+
 /* The Windows presenter worker (d3d_presenter_thread.cpp) or, on macOS and
    Linux, d3d_presenter_inline.cpp calls these. The backend is
    d3d_presenter_d3d11.cpp or, for Vulkan and on other hosts,
@@ -98,5 +101,10 @@ void d3d_backend_framegen_crossfade(RecompD3dPresenter *presenter);
    starts frame generation's history again. 25 ms by default on SDL_GPU,
    40 ms on Direct3D 11; tests that push frames unpaced widen it. */
 void d3d_backend_framegen_set_late_ns(int64_t late_ns);
+
+/* SDL_GPU backend only: SMAA's three passes' HLSL and its defines for a frame
+   of this size, so the presenter and the DXIL test compile the same source. */
+void d3d_backend_smaa_source(uint32_t width, uint32_t height, std::string &source,
+    std::vector<std::string> &defines);
 
 #endif
