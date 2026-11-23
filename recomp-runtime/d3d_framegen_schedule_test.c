@@ -2,8 +2,26 @@
 #include "d3d_framegen_schedule.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
+
+/* One display: the presents per guest frame, how they reach it, and why frame
+   generation stays off when k is 0 (a NULL reason means it runs). */
+static void checkPlan(const char *name, float refresh_hz, int vrr, unsigned k,
+    RecompFramegenSlotMode mode, const char *reason)
+{
+    const RecompFramegenPlan plan = recomp_framegen_plan(refresh_hz, vrr);
+    if (plan.k != k || plan.mode != mode ||
+        (plan.reason != NULL) != (reason != NULL) ||
+        (reason != NULL && strcmp(plan.reason, reason) != 0)) {
+        fprintf(stderr, "framegen plan %s: %.2f Hz vrr=%d got k=%u mode=%d reason=%s, "
+            "want k=%u mode=%d reason=%s\n", name, refresh_hz, vrr, plan.k,
+            (int)plan.mode, plan.reason != NULL ? plan.reason : "(runs)", k, (int)mode,
+            reason != NULL ? reason : "(runs)");
+        ++failures;
+    }
+}
 
 static void check(const char *name, unsigned k, int64_t now_ns, unsigned next_slot, int slot, unsigned missed)
 {
@@ -43,5 +61,40 @@ int main(void)
         fprintf(stderr, "framegen schedule: until is wrong\n");
         ++failures;
     }
+    if (recomp_framegen_slot_ns(2u) != 8333333 || recomp_framegen_slot_ns(4u) != 4166666) {
+        fprintf(stderr, "framegen schedule: slot_ns is wrong\n");
+        ++failures;
+    }
+    /* A whole multiple of 60 Hz keeps VSYNC slots with or without VRR. */
+    checkPlan("120 vrr", 120.0f, 1, 2u, RECOMP_FRAMEGEN_SLOT_VSYNC, NULL);
+    checkPlan("120", 120.0f, 0, 2u, RECOMP_FRAMEGEN_SLOT_VSYNC, NULL);
+    checkPlan("240 vrr", 240.0f, 1, 4u, RECOMP_FRAMEGEN_SLOT_VSYNC, NULL);
+    checkPlan("240", 240.0f, 0, 4u, RECOMP_FRAMEGEN_SLOT_VSYNC, NULL);
+    /* VRR at another rate times its slots just below the panel's ceiling. */
+    checkPlan("144 vrr", 144.0f, 1, 2u, RECOMP_FRAMEGEN_SLOT_TIMED, NULL);
+    checkPlan("165 vrr", 165.0f, 1, 2u, RECOMP_FRAMEGEN_SLOT_TIMED, NULL);
+    checkPlan("200 vrr", 200.0f, 1, 3u, RECOMP_FRAMEGEN_SLOT_TIMED, NULL);
+    checkPlan("280 vrr", 280.0f, 1, 4u, RECOMP_FRAMEGEN_SLOT_TIMED, NULL);
+    /* Without VRR those rates are refused, as they were. */
+    checkPlan("144", 144.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is not a whole multiple of 60 Hz");
+    checkPlan("165", 165.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is not a whole multiple of 60 Hz");
+    checkPlan("200", 200.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is not a whole multiple of 60 Hz");
+    checkPlan("280", 280.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is not a whole multiple of 60 Hz");
+    /* 122 Hz has one slot below its ceiling, and everything below 120 Hz none. */
+    checkPlan("122 vrr", 122.0f, 1, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh has no two slots below its maximum");
+    checkPlan("122", 122.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is not a whole multiple of 60 Hz");
+    checkPlan("100 vrr", 100.0f, 1, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh has no two slots below its maximum");
+    checkPlan("60 vrr", 60.0f, 1, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is below 120 Hz");
+    checkPlan("60", 60.0f, 0, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC,
+        "the refresh is below 120 Hz");
+    checkPlan("unknown", 0.0f, 1, 0u, RECOMP_FRAMEGEN_SLOT_VSYNC, "unknown refresh");
     return failures == 0 ? 0 : 1;
 }

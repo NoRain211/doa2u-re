@@ -57,7 +57,10 @@ keeps running.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
   60 fps, including heavy rain-stage fights at 4K. **VRR: On** is for G-SYNC
   or FreeSync displays and tears on fixed-refresh ones; it is not yet verified
-  on a VRR monitor.
+  on a VRR monitor. **Frame rate: Display** fills a screen at a whole multiple
+  of 60 Hz (120, 180, 240, 360) with generated frames. On Direct3D 11 it also
+  works with VRR: a whole multiple of 60 Hz keeps VSYNC slots, and another
+  rate runs just below the panel's ceiling.
 - **Audio and movies.** Music and voices through XAudio2, with 3D voices
   through the game's HRTF tables and I3DL2 reverb, in stereo or the game's
   own 5.1 surround mix. The intro and story movies play.
