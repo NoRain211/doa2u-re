@@ -123,7 +123,7 @@ extern void sub_00090F00(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SCREENS), 3u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
+    COUNT(RECOMP_PC_SHARPNESS), COUNT(RECOMP_PC_SCREENS), 3u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
     [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_FIGHT_HUD] = true,
@@ -143,19 +143,22 @@ typedef struct Language {
 } Language;
 static const recomp_utf16 *const VIEW_TEXT[VIEWS] = {u"1 / 5", u"2 / 5", u"3 / 5", u"4 / 5", u"5 / 5"};
 
-/* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES and RECOMP_PC_SCREENS. */
+/* The labels of RECOMP_PC_HEIGHTS, RECOMP_PC_SAMPLES, RECOMP_PC_SHARPNESS and
+   RECOMP_PC_SCREENS. */
 #define RESOLUTIONS u"480p", u"720p", u"1080p", u"1440p", u"4K"
 #define SAMPLES(off) off, u"2x", u"4x", u"8x", u"16x", u"32x"
+#define SHARPEN(off, low, medium, high) off, low, medium, high
 #define SHAPES(wide) u"4:3", u"16:9", u"16:10", wide, u"32:9"
 #define RENDERERS u"Direct3D 11", u"Vulkan", u"Direct3D 12"
 
 /* English, French, German, Italian and Spanish; Japanese shows English. */
 static const Language LANGUAGES[5] = {
     {u"PC SETTINGS",
-     {u"Resolution", u"MSAA", u"SMAA", u"Screen", u"Renderer", u"VRR", u"Frame rate", u"Audio Output",
+     {u"Resolution", u"MSAA", u"SMAA", u"Sharpening", u"Screen", u"Renderer", u"VRR", u"Frame rate", u"Audio Output",
       u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera", u"Dedication",
       u"Life Bar", u"Fight HUD", u"Hit Voices", u"KO Replay"},
-     {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHAPES(u"21:9")}, {RENDERERS},
+     {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHARPEN(u"Off", u"Low", u"Medium", u"High")},
+      {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Original", u"Display"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"}, {u"Show", u"Hide"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
@@ -166,10 +169,11 @@ static const Language LANGUAGES[5] = {
       u"Takes effect when you leave DOA ONLINE."},
      u"Page"},
     {u"PARAM\u00c8TRES PC",
-     {u"R\u00e9solution", u"MSAA", u"SMAA", u"\u00c9cran", u"Rendu", u"VRR", u"Images/s", u"Sortie audio",
+     {u"R\u00e9solution", u"MSAA", u"SMAA", u"Nettet\u00e9", u"\u00c9cran", u"Rendu", u"VRR", u"Images/s", u"Sortie audio",
       u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre", u"D\u00e9dicace",
       u"Barre de vie", u"Affichage combat", u"Voix des coups", u"Replay K.O."},
-     {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHAPES(u"21:9")}, {RENDERERS},
+     {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHARPEN(u"Non", u"Faible", u"Moyenne", u"\u00c9lev\u00e9e")},
+      {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"Original", u"\u00c9cran"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"}, {u"Afficher", u"Masquer"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
@@ -180,10 +184,11 @@ static const Language LANGUAGES[5] = {
       u"Pris en compte en quittant DOA ONLINE."},
      u"Page"},
     {u"PC-EINSTELLUNGEN",
-     {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Bildschirm", u"Renderer", u"VRR", u"Bildrate", u"Audioausgabe",
+     {u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Sch\u00e4rfe", u"Bildschirm", u"Renderer", u"VRR", u"Bildrate", u"Audioausgabe",
       u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera", u"Widmung",
       u"Lebensleiste", u"Kampfanzeige", u"Treffer-Stimmen", u"K.O.-Wiederholung"},
-     {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHAPES(u"21:9")}, {RENDERERS},
+     {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHARPEN(u"Aus", u"Niedrig", u"Mittel", u"Hoch")},
+      {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Original", u"Bildschirm"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"}, {u"Anzeigen", u"Ausblenden"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
@@ -194,10 +199,11 @@ static const Language LANGUAGES[5] = {
       u"Wirkt beim Verlassen von DOA ONLINE."},
      u"Seite"},
     {u"IMPOSTAZIONI PC",
-     {u"Risoluzione", u"MSAA", u"SMAA", u"Schermo", u"Renderer", u"VRR", u"Frame rate", u"Uscita audio",
+     {u"Risoluzione", u"MSAA", u"SMAA", u"Nitidezza", u"Schermo", u"Renderer", u"VRR", u"Frame rate", u"Uscita audio",
       u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera", u"Dedica",
       u"Barra vita", u"HUD combattimento", u"Voci dei colpi", u"Replay K.O."},
-     {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHAPES(u"21:9")}, {RENDERERS},
+     {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHARPEN(u"No", u"Bassa", u"Media", u"Alta")},
+      {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Originale", u"Schermo"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"}, {u"Mostra", u"Nascondi"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
@@ -208,10 +214,11 @@ static const Language LANGUAGES[5] = {
       u"Effettivo all'uscita da DOA ONLINE."},
      u"Pagina"},
     {u"CONFIG. PC",
-     {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Pantalla", u"Renderizador", u"VRR", u"Fotogramas", u"Salida de audio",
+     {u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Nitidez", u"Pantalla", u"Renderizador", u"VRR", u"Fotogramas", u"Salida de audio",
       u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre", u"Dedicatoria",
       u"Barra de vida", u"HUD de combate", u"Voces de golpes", u"Repetici\u00f3n K.O."},
-     {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHAPES(u"21:9")}, {RENDERERS},
+     {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHARPEN(u"No", u"Baja", u"Media", u"Alta")},
+      {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Original", u"Pantalla"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"}, {u"Mostrar", u"Ocultar"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",

@@ -60,9 +60,9 @@ Extract this ZIP under your home folder and, in Desktop Mode, either run
 To play in Game Mode, add launcher.sh with "Add a Non-Steam Game" in Desktop
 Mode. If one controller drives two players, turn Steam Input off for it.
 
-Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA, widescreen
-and the intro skip on VIDEO, stereo or 5.1 on AUDIO and the unlocks and free
-camera on GAMEPLAY, then choose START GAME on the GAME page.
+Play: ./launcher.sh opens a menu: pick resolution, MSAA, SMAA, sharpening,
+widescreen and the intro skip on VIDEO, stereo or 5.1 on AUDIO and the unlocks
+and free camera on GAMEPLAY, then choose START GAME on the GAME page.
 A controller, the mouse or touch work; on the keyboard, arrows move and
 change values, Q and E switch pages, Enter selects and Esc goes back. It saves the choices
 and starts the game.

@@ -18,6 +18,7 @@ enum RecompPcSetting {
     RECOMP_PC_RESOLUTION,    /* 480p, 720p, 1080p, 1440p, 4K */
     RECOMP_PC_MSAA,          /* Off, 2x, 4x, 8x, 16x, 32x */
     RECOMP_PC_SMAA,          /* Off, On */
+    RECOMP_PC_SHARPEN,       /* Off, Low, Medium, High */
     RECOMP_PC_SCREEN,        /* 4:3, 16:9, 16:10, 21:9, 32:9 */
     RECOMP_PC_RENDERER,      /* Direct3D 11, Vulkan, Direct3D 12 */
     RECOMP_PC_VRR,           /* Off, On */
@@ -35,10 +36,12 @@ enum RecompPcSetting {
     RECOMP_PC_SETTING_COUNT
 };
 
-/* The launcher's values behind the Resolution, MSAA and Screen choices, in
-   the rows' order. 21:9 (NULL) saves the monitor's own shape. */
+/* The launcher's values behind the Resolution, MSAA, Sharpening and Screen
+   choices, in the rows' order. 21:9 (NULL) saves the monitor's own shape.
+   Sharpening is AMD FidelityFX CAS sharpness, 0 being off. */
 static const uint16_t RECOMP_PC_HEIGHTS[] = {480u, 720u, 1080u, 1440u, 2160u};
 static const uint8_t RECOMP_PC_SAMPLES[] = {1u, 2u, 4u, 8u, 16u, 32u};
+static const float RECOMP_PC_SHARPNESS[] = {0.0f, 0.3f, 0.6f, 1.0f};
 static const char *const RECOMP_PC_SCREENS[] = {"4:3", "16:9", "16:10", NULL, "32:9"};
 enum { RECOMP_PC_ULTRAWIDE = 3 };
 

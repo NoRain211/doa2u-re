@@ -196,7 +196,9 @@ their own shape.
 The Windows build includes pinned upstream SMAA shader and lookup tables.
 `RECOMP_D3D_MSAA=1/2/4/8/16/32` selects main-target samples, with GPU capability
 fallback; `RECOMP_D3D_SMAA=1` applies SMAA 1x Ultra to the resolved image
-before gamma. Both can run together. Native GPU tests compare each mode
+before gamma. Both can run together. `RECOMP_D3D_SHARPEN=0.3`, `0.6` or `1`
+adds AMD FidelityFX CAS sharpening after anti-aliasing; unset or 0 leaves it
+off. Native GPU tests compare each mode
 against the same AA-disabled image and cover widescreen window/target size,
 scaled shared-depth offscreen rendering, resolve, gamma and resource release.
 The launcher exposes 480p through 2160p, mapped to `RECOMP_D3D_SCALE` as
