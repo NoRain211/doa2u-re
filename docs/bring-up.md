@@ -251,8 +251,9 @@ transfer, sign, slope, scaling, 4x sample visibility and restoration.
 
 `d3d8_adapter.c` owns the whole 5849 CreateDevice boundary and creates the
 presenter ported from the sister project: Direct3D 11 on the default Windows
-runner, and SDL_GPU (Vulkan, or Direct3D 12 under `SDL_GPU_DRIVER=direct3d12`)
-on the Vulkan runner and other hosts. The plain device, frame and tile
+runner, and SDL_GPU on the others: Vulkan on the Windows Vulkan runner (or
+Direct3D 12 under `SDL_GPU_DRIVER=direct3d12`) and on Linux, Metal on macOS.
+The plain device, frame and tile
 models remain callable independently of interception. Creation accepts the
 verified 720x480 linear BGRA8/D24S8 mode and two caller-provided color headers
 plus depth. It validates their storage before creating the host device and
@@ -1288,7 +1289,8 @@ Online libraries and dashboard/update binaries are present on the disc.
 `live_xapi.c` replaces the game's XOnline and XNet libraries, and Live fights
 run on the rollback session; `docs/xbox-live.md` covers the matchmaker,
 identity and limits. Live starts unless the runner has `RECOMP_LIVE=0`, and a
-Loopback or SyncTest run keeps it off. Off, XNetStartup returns the native
+Loopback session (`RECOMP_ROLLBACK=loopback`) or a synctest (`RECOMP_SYNCTEST`)
+keeps it off. Off, XNetStartup returns the native
 offline policy error WSASYSNOTREADY without creating a console network stack,
 link queries return disconnected flags and the game handles that failure. PHY
 initialization reports hardware unavailable either way.
