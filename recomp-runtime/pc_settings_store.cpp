@@ -64,7 +64,9 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     choices[RECOMP_PC_SCREEN] = RECOMP_PC_ULTRAWIDE; // any other W:H is an ultrawide shape
     for (std::uint8_t i = 0u; i < std::size(RECOMP_PC_SCREENS); ++i)
         if (RECOMP_PC_SCREENS[i] != nullptr && screen == RECOMP_PC_SCREENS[i]) choices[RECOMP_PC_SCREEN] = i;
-    choices[RECOMP_PC_RENDERER] = boolean(entries, "vulkan", false) ? 1u : 0u;
+    choices[RECOMP_PC_RENDERER] = boolean(entries, "vulkan", false)
+        ? boolean(entries, "d3d12", false) ? 2u : 1u
+        : 0u;
     choices[RECOMP_PC_VRR] = boolean(entries, "vrr", false) ? 1u : 0u;
     choices[RECOMP_PC_FRAME_RATE] = text(entries, "frameRate", "original") == "display" ? 1u : 0u;
     choices[RECOMP_PC_AUDIO] = boolean(entries, "surround", false) ? 1u : 0u;
@@ -146,7 +148,8 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     if (screen != RECOMP_PC_ULTRAWIDE) put(&entries, "screen", std::string("\"") + RECOMP_PC_SCREENS[screen] + "\"");
     else if (saved[RECOMP_PC_SCREEN] != RECOMP_PC_ULTRAWIDE)
         put(&entries, "screen", "\"" + store.ultrawideShape + "\"");
-    put(&entries, "vulkan", flag(choices[RECOMP_PC_RENDERER] == 1u));
+    put(&entries, "vulkan", flag(choices[RECOMP_PC_RENDERER] != 0u));
+    put(&entries, "d3d12", flag(choices[RECOMP_PC_RENDERER] == 2u));
     put(&entries, "vrr", flag(choices[RECOMP_PC_VRR] == 1u));
     put(&entries, "frameRate", choices[RECOMP_PC_FRAME_RATE] == 1u ? "\"display\"" : "\"original\"");
     put(&entries, "surround", flag(choices[RECOMP_PC_AUDIO] == 1u));

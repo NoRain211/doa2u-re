@@ -30,8 +30,8 @@ Build (once, about 10 minutes):
 Play: open Launcher.exe, pick resolution, MSAA, SMAA, widescreen, the
 renderer, VRR, the frame rate and the intro skip on VIDEO, stereo or 5.1 on
 AUDIO and the unlocks and free camera on GAMEPLAY, then choose START GAME on
-the GAME page. Direct3D 11 is the default renderer; Vulkan is an
-alternative to try if it stutters. Turn VRR on only for a G-SYNC or FreeSync
+the GAME page. Direct3D 11 is the default renderer; Vulkan and
+Direct3D 12 are alternatives to try if it stutters. Turn VRR on only for a G-SYNC or FreeSync
 display. Frame rate: Display fills a screen at any multiple of 60 Hz from
 120 Hz with generated frames, other rates with VRR on Direct3D 11; it adds
 about 8 to 15 ms of input delay and is off online. A controller, the keyboard

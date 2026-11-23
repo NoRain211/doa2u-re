@@ -98,7 +98,7 @@ def saved_settings():
         options["msaa"] = saved["msaa"]
     for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("vrr", "vrr"), ("skipIntro", "skip_intro"),
                         ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan"),
-                        ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
+                        ("d3d12", "d3d12"), ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
         if isinstance(saved.get(key), bool):
             options[option] = saved[key]
     # Frame rate: Display turns on frame generation; anything else is Original.
@@ -124,8 +124,8 @@ def open_launcher():
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, resolution=None, story_finale=False,
-        skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, free_camera=None,
-        random_cpu_costumes=None, hide_dedication=False, framegen=None):
+        skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, d3d12=False,
+        free_camera=None, random_cpu_costumes=None, hide_dedication=False, framegen=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -133,6 +133,9 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     if resolution is not None and resolution not in (480, 720, 1080, 1440, 2160):
         raise ValueError("Resolution must be 480, 720, 1080, 1440 or 2160")
     env = os.environ.copy()
+    # Direct3D 12 is a choice of SDL_GPU's driver, set for this child only.
+    if d3d12 and sys.platform == "win32":
+        env["SDL_GPU_DRIVER"] = "direct3d12"
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
                         ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
                         ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr),
@@ -171,11 +174,13 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     if receipt["recipe"]["xbe_sha256"] != sha256(selected) or program_manifest(generated) != (
             receipt["manifest_sha256"], receipt["ebp_count"]):
         raise ValueError("Game or generated sources differ from the build receipt")
-    runner = runner_path(ROOT, vulkan)
-    use_vulkan = vulkan and sys.platform == "win32"
-    expected = receipt.get("vulkan_runner_sha256" if use_vulkan else "runner_sha256")
+    # Direct3D 12 runs SDL_GPU too, so it needs the same runner as Vulkan.
+    sdl_gpu = vulkan or d3d12
+    runner = runner_path(ROOT, sdl_gpu)
+    use_sdl_gpu = sdl_gpu and sys.platform == "win32"
+    expected = receipt.get("vulkan_runner_sha256" if use_sdl_gpu else "runner_sha256")
     if expected is None:
-        raise ValueError("This build has no Vulkan renderer; build the game again" if use_vulkan
+        raise ValueError("This build has no Vulkan renderer; build the game again" if use_sdl_gpu
                          else "This build has no runner; build the game again")
     if sha256(runner) != expected:
         raise ValueError("Runner differs from its successful build receipt")
@@ -272,6 +277,8 @@ if __name__ == "__main__":
                         help="Dress CPU opponents in random unlocked costumes (offline)")
     parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=None,
                         help="Windows: render through Vulkan (SDL_GPU) instead of Direct3D 11")
+    parser.add_argument("--d3d12", action=argparse.BooleanOptionalAction, default=None,
+                        help="Windows: render through Direct3D 12 (SDL_GPU) instead of Direct3D 11")
     parser.add_argument("--free-camera", action=argparse.BooleanOptionalAction, default=None,
                         help="Allow the free camera: F1, ` or a right-stick click takes it (docs/free-camera.md)")
     parser.add_argument("--input-start-pulse-at", type=int, action="append", default=[])
@@ -310,7 +317,8 @@ if __name__ == "__main__":
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
                              pick("surround", args.surround), pick("vrr", args.vrr),
-                             bool(pick("vulkan", args.vulkan)), pick("free_camera", args.free_camera),
+                             bool(pick("vulkan", args.vulkan)), bool(pick("d3d12", args.d3d12)),
+                             pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
                              args.no_dedication_card, pick("framegen", args.framegen)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

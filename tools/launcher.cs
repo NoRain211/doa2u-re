@@ -2,7 +2,8 @@
 // Windows launcher, built twice by tools/package_test.py with the C# compiler
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
-//     anti-aliasing, SMAA, widescreen, the renderer, VRR, the frame rate, the
+//     anti-aliasing, SMAA, widescreen, the renderer (Direct3D 11, Vulkan or
+//     Direct3D 12), VRR, the frame rate, the
 //     intro skip, 5.1 surround and the free camera, remembers them in
 //     private\launcher.json, then plays. An ISO dropped on it, or chosen on
 //     the GAME page, starts the build.
@@ -351,7 +352,9 @@ class LauncherForm : Form
         screen = new Row { Label = "Screen", Info = "Widescreen widens the game's own camera; its 16:9 menus keep their shape",
             Names = Screens, Index = savedScreen >= 0 ? savedScreen : 3, Default = 1 };
         savedShape = savedScreen >= 0 ? null : Game.ScreenShape(settings);
-        renderer = Choice("Renderer", "Vulkan can run smoother on some GPUs, such as AMD handhelds", new[] { "D3D 11", "Vulkan" }, Game.Bool(settings, "vulkan", false), 0);
+        renderer = new Row { Label = "Renderer", Info = "Vulkan and D3D 12 render through SDL_GPU; Vulkan can run smoother on some GPUs, such as AMD handhelds",
+            Names = new[] { "D3D 11", "Vulkan", "D3D 12" }, Default = 0,
+            Index = !Game.Bool(settings, "vulkan", false) ? 0 : Game.Bool(settings, "d3d12", false) ? 2 : 1 };
         vrr = Choice("VRR", "For G-SYNC and FreeSync displays; a fixed-refresh display tears", new[] { "Off", "On" }, Game.Bool(settings, "vrr", false), 0);
         frameRate = Choice("Frame rate", "Display adds generated frames at any multiple of 60 Hz from 120 Hz, other rates with VRR on D3D 11; about 8 to 15 ms more input delay; experimental",
             new[] { "Original", "Display" }, Game.Str(settings, "frameRate", "original") == "display", 0);
@@ -486,7 +489,7 @@ class LauncherForm : Form
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
-            { "vulkan", renderer.Index == 1 }, { "vrr", vrr.Index == 1 }, { "frameRate", frameRate.Index == 1 ? "display" : "original" }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
+            { "vulkan", renderer.Index != 0 }, { "d3d12", renderer.Index == 2 }, { "vrr", vrr.Index == 1 }, { "frameRate", frameRate.Index == 1 ? "display" : "original" }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
             { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },

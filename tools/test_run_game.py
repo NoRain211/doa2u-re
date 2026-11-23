@@ -46,10 +46,10 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             (root / "private").mkdir()
             for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, vrr=True,
                                                 skip_intro=True, surround=True, unlock_all=False, vulkan=True,
-                                                free_camera=True, random_cpu_costumes=True, framegen=True)),
+                                                d3d12=True, free_camera=True, random_cpu_costumes=True, framegen=True)),
                                    (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False, vrr=False,
                                                 skip_intro=False, surround=False, unlock_all=True, vulkan=False,
-                                                free_camera=False, random_cpu_costumes=False, framegen=False))):
+                                                d3d12=False, free_camera=False, random_cpu_costumes=False, framegen=False))):
                 env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
                            RECOMP_LAUNCHER_TEST_OUT=str(root / "private/launcher.json"),
                            RECOMP_LAUNCHER_TEST_LAST="1" if last else "0")
@@ -174,6 +174,16 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(run(None, vulkan=True, framegen=False), 0)
                 self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "0")
+                self.assertNotIn("SDL_GPU_DRIVER", execute.call_args.kwargs["env"])
+                # Direct3D 12 runs the SDL_GPU runner too, with SDL's driver chosen for this child only.
+                self.assertEqual(run(None, d3d12=True), 0)
+                if os.name == "nt":
+                    self.assertEqual(execute.call_args.args[0][0], str(runner_path(root, vulkan=True)))
+                    self.assertEqual(execute.call_args.kwargs["env"]["SDL_GPU_DRIVER"], "direct3d12")
+                else:
+                    self.assertEqual(execute.call_args.args[0][0], str(runner_path(root)))
+                    self.assertNotIn("SDL_GPU_DRIVER", execute.call_args.kwargs["env"])
+                self.assertNotIn("SDL_GPU_DRIVER", os.environ)
                 (root / "private/dedication.bmp").write_bytes(b"card")
                 self.assertEqual(run(None), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_DEDICATION_CARD"],
@@ -192,7 +202,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_count, 2)
             self.assertEqual(save.read_text(), "user save")
             logs = list((root / "private/play-logs").glob("*.log"))
-            self.assertEqual(len(logs), 14)
+            self.assertEqual(len(logs), 15)
             self.assertIn("runner_sha256=hash", logs[0].read_text())
             # glob's order is the file system's; the relaunch runs print nothing.
             self.assertTrue(any(f"open ~{os.sep}doa2u" in log.read_text() for log in logs))
@@ -247,6 +257,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
                     "widescreen": True, "vrr": True, "skip_intro": True, "surround": True, "unlock_all": False,
                     "free_camera": True, "random_cpu_costumes": True, "framegen": True})
+                settings.write_text(json.dumps({"vulkan": True, "d3d12": True}), encoding="utf-8")
+                self.assertEqual(saved_settings(), {"vulkan": True, "d3d12": True})
+                settings.write_text(json.dumps({"vulkan": True}), encoding="utf-8")
+                self.assertEqual(saved_settings(), {"vulkan": True})
                 settings.write_text(json.dumps({"height": 900, "msaa": 3, "widescreen": "yes"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

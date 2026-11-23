@@ -125,6 +125,26 @@ int main()
     expect("old flag", c[RECOMP_PC_SCREEN] == 0u);
     write(path, "{}");
     expect("empty", recomp_pc_settings_read(path, store, c) && c[RECOMP_PC_SCREEN] == 1u);
+    // Direct3D 12 saves both keys; a launcher's older file has only the Vulkan flag.
+    write(path, "{\"vulkan\":true,\"d3d12\":true}");
+    expect("d3d 12 read", recomp_pc_settings_read(path, store, c) && c[RECOMP_PC_RENDERER] == 2u);
+    c[RECOMP_PC_RENDERER] = 1u;
+    expect("vulkan write", recomp_pc_settings_write(path, store, c));
+    saved = read(path);
+    expect("vulkan keys", saved.find("\"vulkan\":true") != std::string::npos &&
+        saved.find("\"d3d12\":false") != std::string::npos);
+    write(path, "{\"vulkan\":true}");
+    expect("old Vulkan file", recomp_pc_settings_read(path, store, c) && c[RECOMP_PC_RENDERER] == 1u);
+    c[RECOMP_PC_RENDERER] = 2u;
+    recomp_pc_settings_write(path, store, c);
+    saved = read(path);
+    expect("d3d 12 keys", saved.find("\"vulkan\":true") != std::string::npos &&
+        saved.find("\"d3d12\":true") != std::string::npos);
+    c[RECOMP_PC_RENDERER] = 0u;
+    recomp_pc_settings_write(path, store, c);
+    saved = read(path);
+    expect("d3d 11 keys", saved.find("\"vulkan\":false") != std::string::npos &&
+        saved.find("\"d3d12\":false") != std::string::npos);
     std::filesystem::remove_all(folder);
     return fails == 0 ? 0 : 1;
 }
