@@ -453,7 +453,9 @@ std::string recomp_shader_keep_interpolants(const std::string &hlsl)
         const size_t name_start = declaration.find_last_of(" \t]", name_end - 1u) + 1u;
         reads += " + length(input." + declaration.substr(name_start, name_end - name_start) + ")";
     }
-    if (!reads.empty()) text.insert(at, "    if (filter_flags.z < -1.0e30f) shaded.x +=" + reads.substr(2u) + ";\n");
+    // A return, so the reads stay live when a variant replaces "return shaded;" with a constant.
+    if (!reads.empty())
+        text.insert(at, "    if (filter_flags.z < -1.0e30f) return float4(" + reads.substr(3u) + ", 0, 0, 0);\n");
     return text;
 }
 

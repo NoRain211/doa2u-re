@@ -4602,8 +4602,9 @@ static bool testDxilShaders()
         return true;
     };
     unsigned draws = 0u;
-    for (const uint32_t fvf : kRecompD3dBootDrawFvfs) {
-        const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, false, false};
+    for (const RecompD3dBootDrawShader &boot : kRecompD3dBootDrawShaders) {
+        const uint32_t fvf = boot.fvf;
+        const RecompD3dDrawShaderKey key{fvf, 0u, nullptr, false, boot.depth_bias, false, boot.projected_stages};
         RecompD3dVertexLayout layout{};
         std::string source;
         if (!recomp_d3d_draw_shader_source(key, layout, source)) {
