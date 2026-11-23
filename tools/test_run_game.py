@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Web.Extensions
 $type = [Reflection.Assembly]::LoadFile($env:RECOMP_LAUNCHER_TEST_EXE).GetType('LauncherForm')
 $form = $type.GetConstructor([type[]]@([string])).Invoke(@($null))
-foreach ($name in 'resolution', 'msaa', 'smaa', 'screen', 'renderer', 'vrr', 'frameRate', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera', 'dedication') {
+foreach ($name in 'resolution', 'msaa', 'smaa', 'sharpen', 'screen', 'renderer', 'vrr', 'frameRate', 'surround', 'intro', 'unlock', 'cpuCostumes', 'freeCamera', 'dedication') {
     $row = $type.GetField($name, [Reflection.BindingFlags]'NonPublic, Instance').GetValue($form)
     $row.Index = if ($env:RECOMP_LAUNCHER_TEST_LAST -eq '1') { $row.Names.Length - 1 } else { 0 }
 }
@@ -44,10 +44,10 @@ $json = (New-Object Web.Script.Serialization.JavaScriptSerializer).Serialize($ty
             build_launchers(root)
             self.assertTrue((root / "DOA2U.exe").is_file())
             (root / "private").mkdir()
-            for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, vrr=True,
+            for last, expected in ((True, dict(resolution=2160, msaa=32, smaa=True, sharpen="high", vrr=True,
                                                 skip_intro=True, surround=True, unlock_all=False, vulkan=True,
                                                 d3d12=True, free_camera=True, random_cpu_costumes=True, framegen=True)),
-                                   (False, dict(resolution=480, msaa=1, smaa=False, widescreen=False, vrr=False,
+                                   (False, dict(resolution=480, msaa=1, smaa=False, sharpen="off", widescreen=False, vrr=False,
                                                 skip_intro=False, surround=False, unlock_all=True, vulkan=False,
                                                 d3d12=False, free_camera=False, random_cpu_costumes=False, framegen=False))):
                 env = dict(os.environ, RECOMP_LAUNCHER_TEST_EXE=str(root / "Launcher.exe"),
@@ -145,11 +145,12 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 os.environ.pop("RECOMP_SHADER_CACHE", None)
                 execute.return_value = runner(0, [f"open {Path.home() / 'doa2u'}\n"])
                 for height in (480, 720, 1080, 1440, 2160):
-                    self.assertEqual(run(None, widescreen=True, msaa=32, smaa=True,
+                    self.assertEqual(run(None, widescreen=True, msaa=32, smaa=True, sharpen="low",
                                          resolution=height), 0)
                     env = execute.call_args.kwargs["env"]
                     self.assertEqual([env[name] for name in (
-                        "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA")], ["1", "32", "1"])
+                        "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA",
+                        "RECOMP_D3D_SHARPEN")], ["1", "32", "1", "0.3"])
                     self.assertEqual(float(env["RECOMP_D3D_SCALE"]), height / 480)
                 self.assertIsNone(execute.return_value.wait.call_args.kwargs["timeout"])
                 self.assertEqual(execute.call_args.args[0], [
@@ -232,10 +233,11 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(run(1, [30, 100], [200], isolated=True,
                                      buttons_polls=[(3800, 8), (4000, 1)],
                                      analog_polls=[(4500, 3), (4600, 1)],
-                                     widescreen=False, msaa=1, smaa=False), 0)
+                                     widescreen=False, msaa=1, smaa=False, sharpen="high"), 0)
                 env = execute.call_args.kwargs["env"]
                 self.assertEqual([env[name] for name in (
-                    "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA")], ["0", "1", "0"])
+                    "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA",
+                    "RECOMP_D3D_SHARPEN")], ["0", "1", "0", "1.0"])
                 command = execute.call_args.args[0]
                 self.assertEqual(command[command.index("--disc-root") + 1],
                                  str(root / "private/probe-disc"))
@@ -254,11 +256,12 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
             settings = root / "private/launcher.json"
             with patch("run_game.ROOT", root):
                 self.assertEqual(saved_settings(), {})
-                settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False,
+                settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False, "sharpen": "medium",
                     "widescreen": True, "vrr": True, "skipIntro": True, "surround": True, "unlockAll": False,
                     "freeCamera": True, "randomCpuCostumes": True, "frameRate": "display"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
+                    "sharpen": "medium",
                     "widescreen": True, "vrr": True, "skip_intro": True, "surround": True, "unlock_all": False,
                     "free_camera": True, "random_cpu_costumes": True, "framegen": True})
                 settings.write_text(json.dumps({"vulkan": True, "d3d12": True}), encoding="utf-8")
@@ -275,7 +278,7 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                                          ("16:9", "16:9"), ("5:1", True), ("wide", True)):
                     settings.write_text(json.dumps({"widescreen": True, "screen": screen}), encoding="utf-8")
                     self.assertEqual(saved_settings(), {"widescreen": expected}, screen)
-                settings.write_text(json.dumps({"frameRate": "bogus"}), encoding="utf-8")
+                settings.write_text(json.dumps({"frameRate": "bogus", "sharpen": "bogus"}), encoding="utf-8")
                 self.assertEqual(saved_settings(), {"framegen": False})
                 settings.write_text("{", encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

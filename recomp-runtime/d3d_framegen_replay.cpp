@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 
     // A hidden presenter whose main target is the capture's size, at scale 1.
     for (const char *name : {"RECOMP_D3D_SCALE", "RECOMP_D3D_WIDESCREEN", "RECOMP_D3D_MSAA", "RECOMP_D3D_SMAA",
-             "RECOMP_D3D_FRAMEGEN", "RECOMP_D3D_FRAMEGEN_CAPTURE"}) _putenv_s(name, "");
+             "RECOMP_D3D_SHARPEN", "RECOMP_D3D_FRAMEGEN", "RECOMP_D3D_FRAMEGEN_CAPTURE"}) _putenv_s(name, "");
     _putenv_s("RECOMP_HEADLESS", "1");
     const RecompD3dPresenterConfig config = {width, height, RECOMP_D3D_PRESENTER_COLOR_FORMAT_BGRA8_UNORM,
         RECOMP_D3D_PRESENTER_DEPTH_FORMAT_D24S8};

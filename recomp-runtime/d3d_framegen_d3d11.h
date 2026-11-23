@@ -870,7 +870,7 @@ int framegenShowPicture(RecompD3dPresenter *presenter, const FramegenTexture &pi
     presenter->vrr_source->GetResource(&output);
     /* The output keeps a mip chain for the window blit, and CopyResource
        refuses that against a single-level picture: copy level 0 only. */
-    if (presenter->gamma_enabled) {
+    if (gammaPassOn(presenter)) {
         fgGamma(presenter, picture.view, presenter->vrr_target_view);
     } else if (output != nullptr) {
         context->CopySubresourceRegion(output, 0u, 0u, 0u, 0u, picture.texture, 0u, nullptr);

@@ -10,6 +10,7 @@
    only. */
 #include "d3d_presenter_backend.h"
 #include "d3d_boot_shaders.h"
+#include "d3d_cas.h"
 #include "d3d_draw_model.h"
 #include "d3d_draw_shader.h"
 #include "d3d_framegen_schedule.h"
@@ -421,6 +422,7 @@ struct RecompD3dPresenter {
     bool gamma_enabled = false;
     float gamma_ramp[256][4]{};
     bool smaa = false;  // RECOMP_D3D_SMAA: post-process the output
+    float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
     SDL_GPUGraphicsPipeline *smaa_pipelines[3]{};  // edges, weights, blend
     SDL_GPUTexture *smaa_textures[5]{};  // edges, area, search, weights, output
     SDL_GPUGraphicsPipeline *gamma_pipeline = nullptr;
@@ -475,6 +477,7 @@ struct QualityRequest {
     float scale = 1.0f;
     uint32_t msaa = 1u;
     bool smaa = false;
+    float sharpen = 0.0f;
     unsigned generation = 0u;
 };
 std::mutex quality_lock;
@@ -2856,14 +2859,12 @@ const char *frameDumpPath(RecompD3dPresenter *presenter, uint32_t present_count,
 const char kGammaShader[] =
     "[[vk::binding(0, 2)]] Texture2D pixels : register(t0);\n"
     "[[vk::binding(0, 2)]] SamplerState pixel_sampler : register(s0);\n"
-    "[[vk::binding(0, RECOMP_UNIFORM_SET)]] cbuffer Gamma : register(b0) { float4 ramp[256]; };\n"
+    "[[vk::binding(0, RECOMP_UNIFORM_SET)]] cbuffer Gamma : register(b0) { " RECOMP_OUTPUT_PASS_FIELDS " };\n"
     "float4 vs_main(uint id : SV_VertexID) : SV_Position {\n"
     " float2 p = float2((id << 1) & 2, id & 2);\n"
     " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n"
-    "float4 ps_main(float4 p : SV_Position) : SV_Target {\n"
-    " float4 c = pixels.Load(int3(p.xy, 0));\n"
-    " uint3 i = (uint3)(saturate(c.rgb) * 255 + 0.5);\n"
-    " return float4(ramp[i.r].r, ramp[i.g].g, ramp[i.b].b, c.a); }\n";
+    RECOMP_OUTPUT_PASS_HLSL
+    "float4 ps_main(float4 p : SV_Position) : SV_Target { return outputPixel(p); }\n";
 
 /* SMAA 1x (iryoku/smaa, ultra preset) on the final resolved image, from the
    same HLSL as the Direct3D 11 presenter. Textures 0-4 are color, edges,
@@ -3051,7 +3052,9 @@ void reportPerformance(RecompD3dPresenter *presenter)
    back into later draws or compound when a frame is presented twice. */
 SDL_GPUTexture *applyGamma(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *commands, SDL_GPUTexture *picture)
 {
-    if (presenter->gamma_enabled) {
+    // The same pass sharpens with CAS, with or without a ramp.
+    if (presenter->sharpen > 0.0f && !ensureGammaPass(presenter)) presenter->sharpen = 0.0f;
+    if (presenter->gamma_enabled || presenter->sharpen > 0.0f) {
         SDL_GPUColorTargetInfo target{};
         target.texture = presenter->gamma_target;
         target.load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -3060,7 +3063,9 @@ SDL_GPUTexture *applyGamma(RecompD3dPresenter *presenter, SDL_GPUCommandBuffer *
             SDL_BindGPUGraphicsPipeline(pass, presenter->gamma_pipeline);
             const SDL_GPUTextureSamplerBinding pixels{picture, presenter->point_sampler};
             SDL_BindGPUFragmentSamplers(pass, 0u, &pixels, 1u);
-            SDL_PushGPUFragmentUniformData(commands, 0u, presenter->gamma_ramp, sizeof presenter->gamma_ramp);
+            const RecompOutputPass constants = recomp_output_pass(presenter->gamma_ramp, presenter->gamma_enabled,
+                presenter->sharpen, mainWidth(presenter), mainHeight(presenter));
+            SDL_PushGPUFragmentUniformData(commands, 0u, &constants, sizeof constants);
             SDL_DrawGPUPrimitives(pass, 3u, 1u, 0u, 0u);
             SDL_EndGPURenderPass(pass);
             picture = presenter->gamma_target;
@@ -4083,6 +4088,7 @@ void applyQuality(RecompD3dPresenter *presenter)
         quality_applied = want.generation;
     }
     presenter->smaa = want.smaa;
+    presenter->sharpen = want.sharpen;
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const SDL_GPUSampleCount msaa = supportedSamples(presenter->device, presenter->depth_format,
         std::clamp(want.msaa, 1u, 32u));
@@ -4279,6 +4285,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
     created->performance_counter = envFlag("RECOMP_PERF_COUNTER");
     created->draw_log_trigger = std::getenv("RECOMP_D3D_DRAW_LOG");
     created->smaa = envFlag("RECOMP_D3D_SMAA");
+    created->sharpen = recomp_cas_env_sharpness();
     if (const char *scale = std::getenv("RECOMP_D3D_SCALE")) {
         const float value = static_cast<float>(std::atof(scale));
         if (std::isfinite(value)) created->scale = std::clamp(value, 1.0f, 8.0f);
@@ -4622,15 +4629,16 @@ RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter)
     return RECOMP_D3D_PRESENTER_OK;
 }
 
-void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa)
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen)
 {
     std::lock_guard<std::mutex> lock(quality_lock);
     quality_request.scale = scale;
     quality_request.msaa = msaa;
     quality_request.smaa = smaa;
+    quality_request.sharpen = sharpen;
     ++quality_request.generation;
-    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d\n",
-        scale, msaa, smaa ? 1 : 0);
+    std::fprintf(stderr, "recomp d3d presenter: quality requested scale=%.3f msaa=%u smaa=%d sharpen=%.2f\n",
+        scale, msaa, smaa ? 1 : 0, sharpen);
 }
 
 bool d3d_backend_quality_live()

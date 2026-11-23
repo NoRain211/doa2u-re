@@ -60,6 +60,8 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     for (std::uint8_t i = 0u; i < std::size(RECOMP_PC_SAMPLES); ++i)
         if (RECOMP_PC_SAMPLES[i] == samples) choices[RECOMP_PC_MSAA] = i;
     choices[RECOMP_PC_SMAA] = boolean(entries, "smaa", true) ? 1u : 0u;
+    const std::string sharpen = text(entries, "sharpen", "off");
+    choices[RECOMP_PC_SHARPEN] = sharpen == "low" ? 1u : sharpen == "medium" ? 2u : sharpen == "high" ? 3u : 0u;
     const std::string screen = text(entries, "screen", boolean(entries, "widescreen", true) ? "16:9" : "4:3");
     choices[RECOMP_PC_SCREEN] = RECOMP_PC_ULTRAWIDE; // any other W:H is an ultrawide shape
     for (std::uint8_t i = 0u; i < std::size(RECOMP_PC_SCREENS); ++i)
@@ -142,6 +144,8 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     put(&entries, "height", std::to_string(RECOMP_PC_HEIGHTS[height]));
     put(&entries, "msaa", std::to_string(RECOMP_PC_SAMPLES[choices[RECOMP_PC_MSAA] % std::size(RECOMP_PC_SAMPLES)]));
     put(&entries, "smaa", flag(choices[RECOMP_PC_SMAA] == 1u));
+    static const char *const SHARPENS[4] = {"off", "low", "medium", "high"};
+    put(&entries, "sharpen", std::string("\"") + SHARPENS[choices[RECOMP_PC_SHARPEN] & 3u] + "\"");
     const unsigned screen = choices[RECOMP_PC_SCREEN] % std::size(RECOMP_PC_SCREENS);
     put(&entries, "widescreen", flag(screen != 0u));
     /* An ultrawide shape already saved stays; choosing Ultrawide saves the monitor's. */

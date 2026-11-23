@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
+// macOS launcher: pick resolution, anti-aliasing, sharpening, widescreen, 5.1 surround, the free camera,
 // the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs, its GAME page's build included,
 // with MSAA up to SDL_GPU's 8x: the backdrop under a top letterbox bar, and a panel
@@ -15,6 +15,7 @@ let settingsURL = root.appendingPathComponent("private/launcher.json")
 let heights = [480, 720, 1080, 1440, 2160]
 let samples = [1, 2, 4, 8]
 let screens = ["4:3", "16:9", "16:10", "21:9", "32:9"]
+let sharpens = ["off", "low", "medium", "high"]
 
 var settings: [String: Any] = [:]
 if let data = try? Data(contentsOf: settingsURL),
@@ -33,6 +34,9 @@ func intSetting(_ key: String, _ fallback: Int) -> Int {
 }
 func boolSetting(_ key: String, _ fallback: Bool) -> Bool {
     (settings[key] as? NSNumber)?.boolValue ?? fallback
+}
+func stringSetting(_ key: String, _ fallback: String) -> String {
+    settings[key] as? String ?? fallback
 }
 // "4:3", "16:9", "16:10", "32:9" or a 21:9 "W:H"; settings saved before 16:10
 // hold only a widescreen flag.
@@ -105,13 +109,15 @@ final class LauncherView: NSView {
     static let tabY: CGFloat = 56, tabH: CGFloat = 26, listY: CGFloat = 100, rowH: CGFloat = 36, infoY: CGFloat = 480
     static let gamePage = 0, updatePage = 4
 
-    // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on.
+    // launcher.cs's defaults: the screen height, the most MSAA, SMAA and widescreen on, sharpening off.
     let resolution = Row("Resolution", "Sets the render resolution. 480p opens in a window",
                          heights.map { "\($0)p" }, heights.lastIndex(where: { $0 <= intSetting("height", screenHeight) }) ?? 0)
     // Windows saves up to 32x; SDL_GPU stops at 8x.
     let msaa = Row("MSAA", "Smooths polygon edges; a count the GPU lacks falls back to its highest",
                    samples.map { $0 == 1 ? "Off" : "\($0)x" }, samples.lastIndex(where: { $0 <= intSetting("msaa", 8) }) ?? 0)
     let smaa = Row("SMAA", "Smooths edges with SMAA after MSAA", ["Off", "On"], boolSetting("smaa", true) ? 1 : 0)
+    let sharpen = Row("Sharpening", "Sharpens the picture with AMD FidelityFX CAS after anti-aliasing",
+                      ["Off", "Low", "Medium", "High"], sharpens.firstIndex(of: stringSetting("sharpen", "off")) ?? 0)
     let screen = Row("Screen", "Widescreen widens the game's own camera; its 16:9 menus keep their shape", screens,
                      screens.firstIndex(of: screenSetting()) ?? 3)
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
@@ -134,8 +140,8 @@ final class LauncherView: NSView {
     // No JUKEBOX page: this launcher has no jukebox rows.
     lazy var pages = [
         Page(name: "GAME", info: "Starts the game, or builds it from your own Disc 2 ISO", rows: [playRow, chooseGame, buildRow]),
-        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, screen shape and the intro movies",
-             rows: [resolution, msaa, smaa, screen, intro]),
+        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, sharpening, screen shape and the intro movies",
+             rows: [resolution, msaa, smaa, sharpen, screen, intro]),
         Page(name: "AUDIO", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
              rows: [unlock, cpuCostumes, freeCamera, dedication]),
@@ -190,6 +196,7 @@ final class LauncherView: NSView {
             "height": heights[resolution.index],
             "msaa": samples[msaa.index],
             "smaa": smaa.index == 1,
+            "sharpen": sharpens[sharpen.index],
             "widescreen": screen.index != 0,
             "screen": screen.index == 3 ? ultrawideShape() : screens[screen.index],
             "skipIntro": intro.index == 1,
