@@ -217,15 +217,22 @@ bool loadDxil()
     dxil_tried = true;
     dxcompiler_module = LoadLibraryExA("dxcompiler.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     const HMODULE dxil = LoadLibraryExA("dxil.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    // A failure frees both, so the DxcCreateInstance shim cannot reach a compiler declared unusable.
+    const auto fail = [dxil]() {
+        if (dxcompiler_module != nullptr) FreeLibrary(dxcompiler_module);
+        if (dxil != nullptr) FreeLibrary(dxil);
+        dxcompiler_module = nullptr;
+        return false;
+    };
     if (dxcompiler_module == nullptr || dxil == nullptr ||
         GetProcAddress(dxcompiler_module, "DxcCreateInstance") == nullptr) {
         std::fprintf(stderr, "recomp shaders: Direct3D 12 shaders need dxcompiler.dll and dxil.dll "
             "beside the runner, so Direct3D 12 is unavailable\n");
-        return false;
+        return fail();
     }
     if (!SDL_ShaderCross_Init()) {
         std::fprintf(stderr, "recomp shaders: SDL_shadercross failed to start: %s\n", SDL_GetError());
-        return false;
+        return fail();
     }
     dxil_ready = true;
     return true;
@@ -237,12 +244,11 @@ bool loadDxil()
 bool translateDxil(const std::vector<uint8_t> &spirv, const char *entry_point, bool vertex,
     RecompCompiledShader &out, std::string &error)
 {
-    {
-        std::lock_guard<std::mutex> lock(shaderc_lock);
-        if (!loadDxil()) {
-            error = "DXIL compiler unavailable";
-            return false;
-        }
+    // Serialised like shaderc: the boot precompile thread and the render thread both compile.
+    std::lock_guard<std::mutex> lock(shaderc_lock);
+    if (!loadDxil()) {
+        error = "DXIL compiler unavailable";
+        return false;
     }
     SDL_ShaderCross_SPIRV_Info info{};
     info.bytecode = spirv.data();
@@ -443,6 +449,7 @@ std::string recomp_shader_keep_interpolants(const std::string &hlsl)
     const size_t at = text.rfind("    return shaded;\n");
     if (start == std::string::npos || at == std::string::npos) return text;
     const size_t close = text.find("};", start);
+    if (close == std::string::npos) return text;
     // Every member VSOut declares, including the FVF's extra UVs and a program's outputs.
     std::string reads;
     for (size_t member = start + 14u, end; (end = text.find(';', member)) < close; member = end + 1u) {
@@ -451,6 +458,7 @@ std::string recomp_shader_keep_interpolants(const std::string &hlsl)
         if (colon == std::string::npos || declaration.find("SV_", colon) != std::string::npos) continue;
         const size_t name_end = declaration.find_last_not_of(" \t", colon - 1u) + 1u;
         const size_t name_start = declaration.find_last_of(" \t]", name_end - 1u) + 1u;
+        if (name_start >= name_end) continue;  // shortcut: no VSOut member is an array; read element 0 if one ever is
         reads += " + length(input." + declaration.substr(name_start, name_end - name_start) + ")";
     }
     // A return, so the reads stay live when a variant replaces "return shaded;" with a constant.
