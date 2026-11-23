@@ -331,6 +331,8 @@ struct RecompD3dPresenter {
     bool gamma_enabled = false;
     float gamma_ramp[256][4]{};
     float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
+    RecompOutputPass gamma_constants{};       // what gamma_uploaded holds
+    ID3D11Buffer *gamma_uploaded = nullptr;   // gamma_buffer when gamma_constants went to it
     ID3D11Texture2D *back_buffer_copy = nullptr;
     ID3D11ShaderResourceView *back_buffer_sample = nullptr;
     ID3D11Texture2D *previous_frame = nullptr;
@@ -3539,6 +3541,7 @@ void writeBackBufferBmp(
 bool ensureGammaPass(RecompD3dPresenter *presenter)
 {
     if (presenter->gamma_buffer != nullptr) return true;
+    presenter->gamma_uploaded = nullptr;  // a new buffer may reuse the old one's address
     static const char shader[] =
         "Texture2D pixels : register(t0);\n"
         "cbuffer Gamma : register(b0) { " RECOMP_OUTPUT_PASS_FIELDS " };\n"
@@ -3609,7 +3612,13 @@ bool gammaPassOn(RecompD3dPresenter *presenter)
     }
     const RecompOutputPass constants = recomp_output_pass(presenter->gamma_ramp, presenter->gamma_enabled,
         presenter->sharpen, mainWidth(presenter), mainHeight(presenter));
-    presenter->context->UpdateSubresource(presenter->gamma_buffer, 0u, nullptr, &constants, 0u, 0u);
+    // Frame generation presents each real frame several times; upload only a change.
+    if (presenter->gamma_uploaded != presenter->gamma_buffer ||
+        std::memcmp(&presenter->gamma_constants, &constants, sizeof constants) != 0) {
+        presenter->context->UpdateSubresource(presenter->gamma_buffer, 0u, nullptr, &constants, 0u, 0u);
+        presenter->gamma_constants = constants;
+        presenter->gamma_uploaded = presenter->gamma_buffer;
+    }
     return true;
 }
 
