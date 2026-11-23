@@ -23,9 +23,9 @@ Linux host layer comes from the sister projects
 [doaxbv-re](https://github.com/NoRain211/doaxbv-re) and
 [doa3-re](https://github.com/NoRain211/doa3-re).
 
-That runner starts on Vulkan. Setting `SDL_GPU_DRIVER=direct3d12` runs it on
-Direct3D 12 instead, which needs the two DXC DLLs beside it; the default run
-stays on Vulkan whether or not they are present.
+The Renderer setting's D3D 12 choice starts that runner with
+`SDL_GPU_DRIVER=direct3d12`, which needs the two DXC DLLs beside it; its Vulkan
+choice stays on Vulkan whether or not they are present.
 
 ## Build from the launcher
 

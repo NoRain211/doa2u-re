@@ -210,6 +210,7 @@ keeps running.
 | Every character and costume | Unlocked by default (the launcher's **Earn** option leaves them to play); profiles save only what was earned |
 | Native 16:9 widescreen, 16:10, 21:9 and 32:9, up to 4K, MSAA up to 32x, SMAA Ultra | Working, chosen in the launcher; 32:9 tried only in the attract demo and Story character select, on Direct3D 11 and Vulkan |
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
+| Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
