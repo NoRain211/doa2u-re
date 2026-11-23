@@ -24,6 +24,20 @@ are under the Apache License 2.0; its glslang code is under glslang's BSD,
 MIT and Apache 2.0 licenses. Each keeps its own notices. LWJGL's build is
 under the BSD 3-Clause license.
 
+The same renderer turns SPIR-V into DXIL for SDL_GPU's Direct3D 12 backend
+with SDL_shadercross (libsdl-org/SDL_shadercross, revision
+1ff05bec573988a98ef9e0260b4da44f512b8367), under the zlib license, whose text
+is in recomp-runtime/licenses/SDL_shadercross.txt. It needs SPIRV-Cross
+(KhronosGroup/SPIRV-Cross, revision
+1a6169566c73d3da552748fc372fe2bbb856e46e) under the Apache License 2.0, whose
+text is in recomp-runtime/licenses/SPIRV-Cross.txt, and Microsoft's
+DirectXShaderCompiler release v1.9.2602 (dxc_2026_02_20.zip): the build
+fetches it, checks its SHA-256 and copies dxcompiler.dll and dxil.dll beside
+the runner. DXC is under the University of Illinois/NCSA Open Source License
+and the MIT and Microsoft licenses whose texts are in
+recomp-runtime/licenses/DirectXShaderCompiler-*.txt. All three are fetched at
+build time and not redistributed by this repository.
+
 The runner decodes movie video with pl_mpeg by Dominic Szablewski
 (phoboslab/pl_mpeg, revision c871f2be022ece7ef4f64230b4fb8e1fb9eb6023), under
 the MIT license. The build fetches pl_mpeg.h, which carries its notice, and

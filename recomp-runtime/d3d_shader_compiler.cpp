@@ -19,8 +19,29 @@
 #else
 #include <dlfcn.h>
 #endif
+#ifdef _WIN32
+#include <SDL3_shadercross/SDL_shadercross.h>
+#endif
 #ifdef __APPLE__
 #include <spirv_cross/spirv_cross_c.h>
+#endif
+
+#ifdef _WIN32
+/* SDL_shadercross asks dxcompiler.dll for a DXC compiler through this export.
+   Defining it here instead of linking the DLL's import library keeps a runner
+   without the DLLs starting: DXIL then reports unavailable and Vulkan stays
+   usable. Only the copy beside the runner is loaded, never PATH's or a Windows
+   Kits install's. */
+static HMODULE dxcompiler_module;
+
+extern "C" long __stdcall DxcCreateInstance(void *clsid, void *iid, void **instance)
+{
+    using CreateInstance = long(__stdcall *)(void *, void *, void **);
+    const auto create = reinterpret_cast<CreateInstance>(
+        reinterpret_cast<void *>(GetProcAddress(dxcompiler_module, "DxcCreateInstance")));
+    if (create == nullptr) return static_cast<long>(0x80004005L);  // E_FAIL
+    return create(clsid, iid, instance);
+}
 #endif
 
 namespace {
@@ -184,7 +205,71 @@ bool compileSpirv(const std::string &hlsl, const char *entry_point, bool vertex,
     return compiled;
 }
 
-#ifdef __APPLE__
+#ifdef _WIN32
+bool dxil_tried, dxil_ready;
+
+/* Both DLLs come only from beside the runner, loaded before SDL_shadercross
+   makes its first DXC call. dxil.dll signs the DXIL container; DXC loads it by
+   name, so the application's copy must already be in the process. */
+bool loadDxil()
+{
+    if (dxil_tried) return dxil_ready;
+    dxil_tried = true;
+    dxcompiler_module = LoadLibraryExA("dxcompiler.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    const HMODULE dxil = LoadLibraryExA("dxil.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    // A failure frees both, so the DxcCreateInstance shim cannot reach a compiler declared unusable.
+    const auto fail = [dxil]() {
+        if (dxcompiler_module != nullptr) FreeLibrary(dxcompiler_module);
+        if (dxil != nullptr) FreeLibrary(dxil);
+        dxcompiler_module = nullptr;
+        return false;
+    };
+    if (dxcompiler_module == nullptr || dxil == nullptr ||
+        GetProcAddress(dxcompiler_module, "DxcCreateInstance") == nullptr) {
+        std::fprintf(stderr, "recomp shaders: Direct3D 12 shaders need dxcompiler.dll and dxil.dll "
+            "beside the runner, so Direct3D 12 is unavailable\n");
+        return fail();
+    }
+    if (!SDL_ShaderCross_Init()) {
+        std::fprintf(stderr, "recomp shaders: SDL_shadercross failed to start: %s\n", SDL_GetError());
+        return fail();
+    }
+    dxil_ready = true;
+    return true;
+}
+
+/* shadercross maps the SPIR-V descriptor sets to SDL_GPU's Direct3D 12 register
+   spaces (1, 2 and 3), names vertex inputs TEXCOORD<location>, and keeps the
+   entry point's name. */
+bool translateDxil(const std::vector<uint8_t> &spirv, const char *entry_point, bool vertex,
+    RecompCompiledShader &out, std::string &error)
+{
+    // Serialised like shaderc: the boot precompile thread and the render thread both compile.
+    std::lock_guard<std::mutex> lock(shaderc_lock);
+    if (!loadDxil()) {
+        error = "DXIL compiler unavailable";
+        return false;
+    }
+    SDL_ShaderCross_SPIRV_Info info{};
+    info.bytecode = spirv.data();
+    info.bytecode_size = spirv.size();
+    info.entrypoint = entry_point;
+    info.shader_stage = vertex ? SDL_SHADERCROSS_SHADERSTAGE_VERTEX : SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT;
+    size_t size = 0u;
+    void *code = SDL_ShaderCross_CompileDXILFromSPIRV(&info, &size);
+    if (code == nullptr) {
+        error = SDL_GetError();
+        return false;
+    }
+    const auto *bytes = static_cast<const uint8_t *>(code);
+    out.code.assign(bytes, bytes + size);
+    out.entry_point = entry_point;
+    SDL_free(code);
+    return true;
+}
+#endif
+
+#if defined(__APPLE__)
 /* SDL_GPU's Metal slots: [[buffer(n)]] for uniform buffer n, and
    [[texture(n)]] with [[sampler(n)]] for sampler slot n. */
 bool translateMsl(const std::vector<uint8_t> &spirv, bool vertex, RecompCompiledShader &out,
@@ -351,6 +436,37 @@ std::string recomp_shader_draw_bindings(const std::string &hlsl)
     return text;
 }
 
+std::string recomp_shader_keep_interpolants(const std::string &hlsl)
+{
+    std::string text = hlsl;
+    /* Direct3D 12 links the pixel shader's inputs to the vertex shader's
+       outputs by interpolation register. glslang keeps only the members a
+       stage reads, so one unread VSOut member moves every later interpolant's
+       register in the pixel stage alone and the pipeline will not create. This
+       reads them all behind a branch the draw constants never satisfy, which
+       keeps both stages' interfaces identical. */
+    const size_t start = text.find("struct VSOut {");
+    const size_t at = text.rfind("    return shaded;\n");
+    if (start == std::string::npos || at == std::string::npos) return text;
+    const size_t close = text.find("};", start);
+    if (close == std::string::npos) return text;
+    // Every member VSOut declares, including the FVF's extra UVs and a program's outputs.
+    std::string reads;
+    for (size_t member = start + 14u, end; (end = text.find(';', member)) < close; member = end + 1u) {
+        const std::string declaration = text.substr(member, end - member);
+        const size_t colon = declaration.rfind(':');
+        if (colon == std::string::npos || declaration.find("SV_", colon) != std::string::npos) continue;
+        const size_t name_end = declaration.find_last_not_of(" \t", colon - 1u) + 1u;
+        const size_t name_start = declaration.find_last_of(" \t]", name_end - 1u) + 1u;
+        if (name_start >= name_end) continue;  // shortcut: no VSOut member is an array; read element 0 if one ever is
+        reads += " + length(input." + declaration.substr(name_start, name_end - name_start) + ")";
+    }
+    // A return, so the reads stay live when a variant replaces "return shaded;" with a constant.
+    if (!reads.empty())
+        text.insert(at, "    if (filter_flags.z < -1.0e30f) return float4(" + reads.substr(3u) + ", 0, 0, 0);\n");
+    return text;
+}
+
 std::string recomp_shader_emulate_sampler_bias(const std::string &hlsl)
 {
     std::string text = hlsl;
@@ -391,6 +507,27 @@ bool recomp_shader_compiler_available()
     return loadShaderc();
 }
 
+bool recomp_shader_dxil_available()
+{
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(shaderc_lock);
+    return loadDxil();
+#else
+    return false;
+#endif
+}
+
+bool recomp_shader_dxil_requested()
+{
+#ifdef _WIN32
+    const char *driver = SDL_GetHint(SDL_HINT_GPU_DRIVER);
+    return driver != nullptr && SDL_strcasecmp(driver, "direct3d12") == 0 &&
+        recomp_shader_dxil_available();
+#else
+    return false;
+#endif
+}
+
 static bool compileUncached(const std::string &hlsl, const char *entry_point, bool vertex,
     RecompShaderTarget target, const std::vector<std::string> &defines,
     RecompCompiledShader &out, std::string &error);
@@ -416,8 +553,9 @@ std::string cachePath(const std::string &hlsl, const char *entry_point, bool ver
     mix(vertex ? "vertex" : "fragment");
     for (const std::string &define : defines) mix(define);
     char name[48];
-    std::snprintf(name, sizeof name, "/%016llx.%s", static_cast<unsigned long long>(hash),
-        target == RecompShaderTarget::Msl ? "msl" : "spv");
+    const char *extension = target == RecompShaderTarget::Msl ? "msl"
+        : target == RecompShaderTarget::Dxil ? "dxil" : "spv";
+    std::snprintf(name, sizeof name, "/%016llx.%s", static_cast<unsigned long long>(hash), extension);
     return std::string(folder) + name;
 }
 
@@ -472,6 +610,14 @@ static bool compileUncached(const std::string &hlsl, const char *entry_point, bo
         // shaderc names the SPIR-V entry point after the HLSL function.
         out.entry_point = entry_point;
         return true;
+    }
+    if (target == RecompShaderTarget::Dxil) {
+#ifdef _WIN32
+        return translateDxil(spirv, entry_point, vertex, out, error);
+#else
+        error = "DXIL output needs SDL_shadercross, built only for Windows hosts";
+        return false;
+#endif
     }
 #ifdef __APPLE__
     return translateMsl(spirv, vertex, out, error);

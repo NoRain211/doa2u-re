@@ -6,21 +6,32 @@
 #include <vector>
 
 /* Compiles the presenter's HLSL for SDL_GPU: shaderc (glslang's HLSL front
-   end) produces SPIR-V, which Vulkan takes as is and SPIRV-Cross turns into
-   MSL for Metal. Resources must already carry Vulkan bindings in SDL_GPU's
-   layout: vertex uniform buffers in set 1, fragment textures and samplers in
-   set 2 (each texture shares its sampler's binding), fragment uniform buffers
-   in set 3. */
+   end) produces SPIR-V, which Vulkan takes as is, SPIRV-Cross turns into MSL
+   for Metal, and SDL_shadercross turns into DXIL for Direct3D 12. Resources
+   must already carry Vulkan bindings in SDL_GPU's layout: vertex uniform
+   buffers in set 1, fragment textures and samplers in set 2 (each texture
+   shares its sampler's binding), fragment uniform buffers in set 3.
+   shadercross writes those descriptor sets to the register spaces SDL_GPU's
+   Direct3D 12 backend expects, and names vertex inputs TEXCOORD<location>. */
 
-enum class RecompShaderTarget { Spirv, Msl };
+enum class RecompShaderTarget { Spirv, Msl, Dxil };
 
 struct RecompCompiledShader {
-    std::vector<uint8_t> code;  // SPIR-V words, or MSL text without a terminator
+    std::vector<uint8_t> code;  // SPIR-V words, MSL text, or a DXIL container
     std::string entry_point;
 };
 
 /* Whether shaderc could be loaded; the first call reports why it could not. */
 bool recomp_shader_compiler_available();
+
+/* Whether this host can turn SPIR-V into DXIL: Windows with the pinned
+   dxcompiler.dll and dxil.dll beside the runner. */
+bool recomp_shader_dxil_available();
+
+/* Whether this run should offer DXIL to SDL_GPU: available, and SDL_GPU_DRIVER
+   names direct3d12. SDL prefers Direct3D 12 whenever a device can take DXIL,
+   so a run that did not ask for it must not offer it and keeps Vulkan. */
+bool recomp_shader_dxil_requested();
 
 /* Gives the draw shader from d3d_draw_shader.cpp SDL_GPU's bindings: the
    Transform constant buffer is slot 0 of its stage, the vertex program
@@ -36,6 +47,11 @@ std::string recomp_shader_draw_bindings(const std::string &hlsl);
    SamplerBias constant buffer (fragment slot 1) holds one bias per slot, and
    each Sample becomes SampleBias with it. */
 std::string recomp_shader_emulate_sampler_bias(const std::string &hlsl);
+
+/* Direct3D 12 links the pixel shader's inputs to the vertex shader's outputs
+   by interpolation register, so this keeps every VSOut member in the pixel
+   stage's interface. See the definition. */
+std::string recomp_shader_keep_interpolants(const std::string &hlsl);
 
 /* Vertex shaders see RECOMP_UNIFORM_SET as 1 and fragment shaders as 3, so
    [[vk::binding(n, RECOMP_UNIFORM_SET)]] places a constant buffer in either. */
