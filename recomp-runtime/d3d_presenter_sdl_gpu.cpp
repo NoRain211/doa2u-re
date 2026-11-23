@@ -4209,12 +4209,15 @@ unsigned d3d_backend_precompile_boot_shaders(const RecompD3dPresenterConfig *con
 {
     if (config == nullptr) return 0u;
 #ifdef __APPLE__
-    const RecompShaderTarget target = RecompShaderTarget::Msl;
+    std::vector<RecompShaderTarget> targets = {RecompShaderTarget::Msl};
 #else
-    const RecompShaderTarget target = RecompShaderTarget::Spirv;
+    std::vector<RecompShaderTarget> targets = {RecompShaderTarget::Spirv};
 #endif
     if (!recomp_shader_compiler_available()) return 0u;
+    // The Renderer setting's D3D 12 choice runs this runner on DXIL.
+    if (recomp_shader_dxil_available()) targets.push_back(RecompShaderTarget::Dxil);
     unsigned compiled = 0u;
+    for (const RecompShaderTarget target : targets)
     for (const bool scaled : {false, true}) {
         for (const bool framegen : {false, true}) {
             for (const uint32_t samples : {1u, 2u, 4u, 8u}) {
