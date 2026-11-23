@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// macOS launcher: pick resolution, anti-aliasing, sharpening, widescreen, 5.1 surround, the free camera,
+// macOS launcher: pick resolution, anti-aliasing, sharpening, ambient occlusion, widescreen, 5.1 surround, the free camera,
 // the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs, its GAME page's build included,
 // with MSAA up to SDL_GPU's 8x: the backdrop under a top letterbox bar, and a panel
@@ -118,6 +118,8 @@ final class LauncherView: NSView {
     let smaa = Row("SMAA", "Smooths edges with SMAA after MSAA", ["Off", "On"], boolSetting("smaa", true) ? 1 : 0)
     let sharpen = Row("Sharpening", "Sharpens the picture with AMD FidelityFX CAS after anti-aliasing",
                       ["Off", "Low", "Medium", "High"], sharpens.firstIndex(of: stringSetting("sharpen", "off")) ?? 0)
+    let ao = Row("Ambient Occlusion", "Darkens creases and contact areas; off leaves the picture as the game drew it",
+                 ["Off", "On"], boolSetting("ambientOcclusion", false) ? 1 : 0)
     let screen = Row("Screen", "Widescreen widens the game's own camera; its 16:9 menus keep their shape", screens,
                      screens.firstIndex(of: screenSetting()) ?? 3)
     let surround = Row("Output", "5.1 plays the game's own surround mix", ["Stereo", "5.1"], boolSetting("surround", false) ? 1 : 0)
@@ -140,8 +142,8 @@ final class LauncherView: NSView {
     // No JUKEBOX page: this launcher has no jukebox rows.
     lazy var pages = [
         Page(name: "GAME", info: "Starts the game, or builds it from your own Disc 2 ISO", rows: [playRow, chooseGame, buildRow]),
-        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, sharpening, screen shape and the intro movies",
-             rows: [resolution, msaa, smaa, sharpen, screen, intro]),
+        Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, sharpening, occlusion, screen shape and the intro movies",
+             rows: [resolution, msaa, smaa, sharpen, ao, screen, intro]),
         Page(name: "AUDIO", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
         Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
              rows: [unlock, cpuCostumes, freeCamera, dedication]),
@@ -197,6 +199,7 @@ final class LauncherView: NSView {
             "msaa": samples[msaa.index],
             "smaa": smaa.index == 1,
             "sharpen": sharpens[sharpen.index],
+            "ambientOcclusion": ao.index == 1,
             "widescreen": screen.index != 0,
             "screen": screen.index == 3 ? ultrawideShape() : screens[screen.index],
             "skipIntro": intro.index == 1,

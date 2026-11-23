@@ -89,8 +89,8 @@ the build before it compiles. The ISO is extracted once into
 once the build succeeds.
 
 `./launcher.sh` opens the same menu as the Windows launcher: resolution, MSAA,
-SMAA, sharpening, widescreen and the intro skip on **VIDEO** and stereo or 5.1
-on **AUDIO**. **Start Game** on the **GAME** page saves them to
+SMAA, sharpening, ambient occlusion, widescreen and the intro skip on **VIDEO**
+and stereo or 5.1 on **AUDIO**. **Start Game** on the **GAME** page saves them to
 `private/launcher.json` and starts the game. A
 `private/launcher-background.png` (or `.jpg` on macOS) replaces its backdrop.
 `./run_game.sh` starts the game with the saved choices, and
@@ -164,7 +164,8 @@ that shortcut.
 
 - MSAA stops at the 8x SDL_GPU supports (Apple GPUs at 4x); a higher choice
   falls back as on Windows. SMAA runs the same upstream shader, and CAS
-  sharpening follows it.
+  sharpening follows it. Ambient occlusion needs a single-sample depth to
+  sample, so it stays off while MSAA is above 1x here.
 - SDL_GPU has no geometry shaders or occlusion queries. Wide and antialiased
   lines are expanded on the CPU, a draw's coverage probe rasterizes on the
   CPU, and the glare fade's visibility tests count passing samples with an

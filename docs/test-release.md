@@ -27,9 +27,9 @@ Build (once, about 10 minutes):
    The launcher shows the elapsed time and the build's latest message; keep
    it open until it finishes.
 
-Play: open Launcher.exe, pick resolution, MSAA, SMAA, sharpening, widescreen,
-the renderer, VRR, the frame rate and the intro skip on VIDEO, stereo or 5.1
-on AUDIO and the unlocks and free camera on GAMEPLAY, then choose START GAME on
+Play: open Launcher.exe, pick resolution, MSAA, SMAA, sharpening, ambient
+occlusion, widescreen, the renderer, VRR, the frame rate and the intro skip on
+VIDEO, stereo or 5.1 on AUDIO and the unlocks and free camera on GAMEPLAY, then choose START GAME on
 the GAME page. Direct3D 11 is the default renderer; Vulkan and
 Direct3D 12 are alternatives to try if it stutters. Turn VRR on only for a G-SYNC or FreeSync
 display. Frame rate: Display fills a screen at any multiple of 60 Hz from

@@ -198,9 +198,21 @@ Both presenters include the pinned upstream SMAA shader and lookup tables.
 fallback; `RECOMP_D3D_SMAA=1` applies SMAA 1x Ultra to the resolved image
 before gamma. Both can run together. `RECOMP_D3D_SHARPEN=0.3`, `0.6` or `1`
 adds AMD FidelityFX CAS sharpening after anti-aliasing; unset or 0 leaves it
-off. Native GPU tests compare each mode
+off. `RECOMP_D3D_AO=1` (or the launcher's **Ambient Occlusion: On**) darkens
+creases and contact areas with screen-space ambient occlusion, off by default.
+It runs once per frame at the first pretransformed draw into the main target
+after depth-written 3D draws, or at PRESENT when the frame has none, so the HUD,
+menus, fonts, movies and the game's own full-screen effects drawn afterwards
+keep their pixels. It reconstructs view space from the main depth buffer and
+the projection the adapter attached to the scene's draws (`d3d_ao.h`), at half
+resolution with a depth-aware blur. Direct3D 11 reads sample 0 of its
+multisampled depth; SDL_GPU cannot sample a multisampled depth target, so the
+Vulkan, Direct3D 12 and Metal renderers leave AO off while MSAA is above 1x.
+Native GPU tests compare each mode
 against the same AA-disabled image and cover widescreen window/target size,
-scaled shared-depth offscreen rendering, resolve, gamma and resource release.
+scaled shared-depth offscreen rendering, resolve, gamma and resource release;
+a synthetic floor-and-wall frame checks that the crease darkens while an open
+floor, a flat wall and a later 2D layer do not.
 The launcher exposes 480p through 2160p, mapped to `RECOMP_D3D_SCALE` as
 height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output

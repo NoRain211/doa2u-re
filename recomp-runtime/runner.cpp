@@ -164,12 +164,14 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA:
-    case RECOMP_PC_SHARPEN: {
+    case RECOMP_PC_SHARPEN:
+    case RECOMP_PC_AO: {
         const unsigned height = RECOMP_PC_HEIGHTS[recomp_pc_settings_choice(RECOMP_PC_RESOLUTION)];
         const unsigned samples = RECOMP_PC_SAMPLES[recomp_pc_settings_choice(RECOMP_PC_MSAA)];
         const float sharpen = RECOMP_PC_SHARPNESS[recomp_pc_settings_choice(RECOMP_PC_SHARPEN)];
         recomp_d3d_presenter_set_quality(static_cast<float>(height) / 480.0f, samples,
-            recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u, sharpen, false);
+            recomp_pc_settings_choice(RECOMP_PC_SMAA) == 1u, sharpen,
+            recomp_pc_settings_choice(RECOMP_PC_AO) == 1u);
         break;
     }
     default: break;
@@ -265,7 +267,8 @@ static void installPcSettings(bool online)
     recomp_button_config_install(&rebind);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
     const bool quality = recomp_d3d_presenter_quality_live();
-    for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA, RECOMP_PC_SHARPEN})
+    for (unsigned setting : {RECOMP_PC_RESOLUTION, RECOMP_PC_MSAA, RECOMP_PC_SMAA, RECOMP_PC_SHARPEN,
+             RECOMP_PC_AO})
         recomp_pc_settings_set_live(setting, quality);
     /* Synctest and Loopback compare whole runs against themselves: no
        per-player HUD colour or voices there. */
