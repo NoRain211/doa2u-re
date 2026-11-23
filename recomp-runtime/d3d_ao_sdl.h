@@ -175,7 +175,8 @@ bool runAo(RecompD3dPresenter *presenter)
    fonts and full-screen effects keep their pixels. */
 bool aoSceneDraw(const RecompD3dPresenterDrawCommand &draw, const RecompD3dVertexLayout &layout)
 {
-    return !draw.target.offscreen && !draw.target.no_depth && !layout.pretransformed &&
+    return !draw.target.offscreen && !draw.target.no_depth && !draw.target.custom_depth &&
+        !layout.pretransformed &&
         (draw.has_transform || draw.program_count != 0u) &&
         draw.depth.depth_test_enable && draw.depth.depth_write_enable;
 }
