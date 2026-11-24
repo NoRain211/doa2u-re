@@ -3704,18 +3704,20 @@ bool ensureAo(RecompD3dPresenter *presenter)
     if (presenter->ao_occlusion_pixel != nullptr && presenter->ao_width == width &&
         presenter->ao_height == height && presenter->ao_samples == presenter->msaa) return true;
     releaseAo(presenter);
+#define RECOMP_AO_DEPTH_DECLARATION "#ifdef RECOMP_AO_MSAA\nTexture2DMS<float4> ao_depth : register(t0);\n" \
+    "#else\nTexture2D<float4> ao_depth : register(t0);\n#endif\n"
     static const char vertex_source[] =
         "float4 vs(uint id : SV_VertexID) : SV_Position {\n"
         " float2 p = float2((id << 1) & 2, id & 2);\n"
         " return float4(p * float2(2,-2) + float2(-1,1), 0, 1); }\n";
     static const char occlusion_source[] =
-        "Texture2D<float4> ao_depth : register(t0);\n"
+        RECOMP_AO_DEPTH_DECLARATION
         "cbuffer Ao : register(b0) { " RECOMP_AO_FIELDS " };\n"
         RECOMP_AO_COMMON_HLSL
         RECOMP_AO_OCCLUSION_HLSL
         "float4 ps(float4 p : SV_Position) : SV_Target { return recompAoOcclusion(p); }\n";
     static const char blur_source[] =
-        "Texture2D<float4> ao_depth : register(t0);\n"
+        RECOMP_AO_DEPTH_DECLARATION
         "Texture2D<float4> ao_value : register(t1);\n"
         "cbuffer Ao : register(b0) { " RECOMP_AO_FIELDS " };\n"
         "float recompAoAt(int2 p) { return ao_value.Load(int3(p, 0)).x; }\n"
@@ -3730,6 +3732,8 @@ bool ensureAo(RecompD3dPresenter *presenter)
         "float4 ps(float4 p : SV_Position) : SV_Target { return recompAoApply(p.xy / ao_screen.xy); }\n";
     const D3D_SHADER_MACRO msaa_macro[] = {{"RECOMP_AO_MSAA", "1"}, {nullptr, nullptr}};
     const D3D_SHADER_MACRO *macros = presenter->msaa > 1u ? msaa_macro : nullptr;
+    // An unsized Texture2DMS needs shader model 4.1, as does sampling a multisampled depth.
+    const char *const depth_profile = presenter->msaa > 1u ? "ps_4_1" : "ps_4_0";
     const auto compile = [&](const char *source, size_t size, const char *entry, const char *profile,
         const D3D_SHADER_MACRO *defines, ID3DBlob **blob) {
         ID3DBlob *errors = nullptr;
@@ -3748,15 +3752,21 @@ bool ensureAo(RecompD3dPresenter *presenter)
         result = presenter->device->CreateVertexShader(
             vertex->GetBufferPointer(), vertex->GetBufferSize(), nullptr, &presenter->ao_vertex_shader);
     }
-    if (SUCCEEDED(result) && compile(occlusion_source, sizeof occlusion_source - 1u, "ps", "ps_4_0", macros, &occlusion)) {
+    if (SUCCEEDED(result)) result = compile(occlusion_source, sizeof occlusion_source - 1u, "ps", depth_profile, macros, &occlusion)
+        ? S_OK : E_FAIL;
+    if (SUCCEEDED(result)) {
         result = presenter->device->CreatePixelShader(
             occlusion->GetBufferPointer(), occlusion->GetBufferSize(), nullptr, &presenter->ao_occlusion_pixel);
     }
-    if (SUCCEEDED(result) && compile(blur_source, sizeof blur_source - 1u, "ps", "ps_4_0", macros, &blur)) {
+    if (SUCCEEDED(result)) result = compile(blur_source, sizeof blur_source - 1u, "ps", depth_profile, macros, &blur)
+        ? S_OK : E_FAIL;
+    if (SUCCEEDED(result)) {
         result = presenter->device->CreatePixelShader(
             blur->GetBufferPointer(), blur->GetBufferSize(), nullptr, &presenter->ao_blur_pixel);
     }
-    if (SUCCEEDED(result) && compile(apply_source, sizeof apply_source - 1u, "ps", "ps_4_0", nullptr, &apply)) {
+    if (SUCCEEDED(result)) result = compile(apply_source, sizeof apply_source - 1u, "ps", "ps_4_0", nullptr, &apply)
+        ? S_OK : E_FAIL;
+    if (SUCCEEDED(result)) {
         result = presenter->device->CreatePixelShader(
             apply->GetBufferPointer(), apply->GetBufferSize(), nullptr, &presenter->ao_apply_pixel);
     }
