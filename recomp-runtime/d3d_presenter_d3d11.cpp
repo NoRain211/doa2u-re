@@ -10,6 +10,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
+#include "texture_pack.h"
 #include "texture_upscale.h"
 #include "widescreen.h"
 #include "xapi_time_adapter.h"
@@ -2687,6 +2688,111 @@ ID3D11ShaderResourceView *lookupTexture(
         return nullptr;
     }
 
+    /* The key is only worth hashing when a pack can change the result. */
+    uint64_t pack_key = 0u;
+    if ((recomp_texture_pack_replacing() || recomp_texture_pack_dumping()) &&
+        !volume && !desc.linear && !desc.depth &&
+        !desc.render_target && (!palettized || draw.palette_bytes != nullptr)) {
+        const uint32_t level0 =
+            recomp_texture_pack_level0_bytes(desc.format_byte, desc.width, desc.height);
+        if (level0 != 0u && level0 <= draw.texture_byte_count)
+            pack_key = recomp_texture_pack_key(desc.format_byte, desc.width, desc.height,
+                draw.texture_bytes, level0, palettized ? draw.palette_bytes : nullptr);
+    }
+
+    const auto storeTexture = [&](ID3D11ShaderResourceView *view) -> ID3D11ShaderResourceView * {
+        // ponytail: FIFO eviction; track recent use if upload churn is costly.
+        const uint32_t slot = presenter->next_texture_slot;
+        TextureEntry &entry = presenter->textures[slot];
+        if (entry.used) unindexTexture(presenter, slot);
+        releaseCom(entry.view);
+        presenter->next_texture_slot =
+            (presenter->next_texture_slot + 1u) % kTextureSlots;
+        if (presenter->texture_count < kTextureSlots) {
+            ++presenter->texture_count;
+        }
+        entry.used = true;
+        entry.data = desc.data;
+        entry.format_byte = desc.format_byte;
+        entry.width = desc.width;
+        entry.height = desc.height;
+        entry.volume_depth = desc.volume_depth;
+        entry.mip_levels = levels;
+        if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
+        entry.fingerprint = fingerprint;
+        entry.scale = scale;
+        entry.view = view;
+        try {
+            presenter->texture_index.emplace(desc.data, slot);
+        } catch (const std::bad_alloc &) {
+            releaseCom(entry.view);
+            entry.used = false;
+            return nullptr;
+        }
+        return view;
+    };
+
+    /* A replacement image wins over the guest copy and over xBRZ. A PNG gets
+       a generated host mip chain; a DDS keeps the levels it carries. */
+    if (pack_key != 0u) {
+        RecompTexturePackImage replacement;
+        if (recomp_texture_pack_find(pack_key, replacement) && !replacement.levels.empty() &&
+            replacement.width != 0u && replacement.height != 0u) {
+            DXGI_FORMAT replacement_format = DXGI_FORMAT_UNKNOWN;
+            switch (replacement.format) {
+            case RECOMP_TEXTURE_PACK_BGRA8: replacement_format = DXGI_FORMAT_B8G8R8A8_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC1: replacement_format = DXGI_FORMAT_BC1_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC2: replacement_format = DXGI_FORMAT_BC2_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC3: replacement_format = DXGI_FORMAT_BC3_UNORM; break;
+            }
+            if (replacement_format != DXGI_FORMAT_UNKNOWN &&
+                replacement.width <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION &&
+                replacement.height <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
+                D3D11_TEXTURE2D_DESC pack_desc{};
+                pack_desc.Width = replacement.width;
+                pack_desc.Height = replacement.height;
+                pack_desc.MipLevels = static_cast<UINT>(replacement.levels.size());
+                pack_desc.ArraySize = 1u;
+                pack_desc.Format = replacement_format;
+                pack_desc.SampleDesc.Count = 1u;
+                pack_desc.Usage = D3D11_USAGE_IMMUTABLE;
+                pack_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                std::vector<D3D11_SUBRESOURCE_DATA> pack_data(replacement.levels.size());
+                for (size_t i = 0u; i < replacement.levels.size(); ++i) {
+                    pack_data[i].pSysMem = replacement.levels[i].bytes.data();
+                    pack_data[i].SysMemPitch = replacement.levels[i].pitch;
+                }
+                const bool generated = replacement.generate_mips;
+                if (generated) {
+                    pack_desc.MipLevels = 0u;
+                    pack_desc.Usage = D3D11_USAGE_DEFAULT;
+                    pack_desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+                    pack_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+                }
+                ID3D11Texture2D *created = nullptr;
+                if (SUCCEEDED(presenter->device->CreateTexture2D(&pack_desc,
+                        generated ? nullptr : pack_data.data(), &created))) {
+                    if (generated) presenter->context->UpdateSubresource(created, 0u, nullptr,
+                        replacement.levels[0].bytes.data(), replacement.levels[0].pitch, 0u);
+                    ID3D11ShaderResourceView *pack_view = nullptr;
+                    const HRESULT view_result =
+                        presenter->device->CreateShaderResourceView(created, nullptr, &pack_view);
+                    releaseCom(created);
+                    if (SUCCEEDED(view_result) && pack_view != nullptr) {
+                        if (generated) presenter->context->GenerateMips(pack_view);
+                        return storeTexture(pack_view);
+                    }
+                    releaseCom(pack_view);
+                }
+            }
+            recomp_texture_pack_reject(pack_key);
+        }
+    }
+
+    if (pack_key != 0u && recomp_texture_pack_dumping())
+        recomp_texture_pack_dump(pack_key, desc.format_byte, desc.width, desc.height, levels,
+            draw.texture_bytes, draw.texture_byte_count, palettized ? draw.palette_bytes : nullptr);
+
     D3D11_TEXTURE2D_DESC texture_desc{};
     texture_desc.Width = desc.width;
     texture_desc.Height = desc.height;
@@ -2817,35 +2923,7 @@ ID3D11ShaderResourceView *lookupTexture(
     }
     if (larger) presenter->context->GenerateMips(view);
 
-    // ponytail: FIFO eviction; track recent use if upload churn is costly.
-    const uint32_t slot = presenter->next_texture_slot;
-    TextureEntry &entry = presenter->textures[slot];
-    if (entry.used) unindexTexture(presenter, slot);
-    releaseCom(entry.view);
-    presenter->next_texture_slot =
-        (presenter->next_texture_slot + 1u) % kTextureSlots;
-    if (presenter->texture_count < kTextureSlots) {
-        ++presenter->texture_count;
-    }
-    entry.used = true;
-    entry.data = desc.data;
-    entry.format_byte = desc.format_byte;
-    entry.width = desc.width;
-    entry.height = desc.height;
-    entry.volume_depth = desc.volume_depth;
-    entry.mip_levels = levels;
-    if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
-    entry.fingerprint = fingerprint;
-    entry.scale = scale;
-    entry.view = view;
-    try {
-        presenter->texture_index.emplace(desc.data, slot);
-    } catch (const std::bad_alloc &) {
-        releaseCom(entry.view);
-        entry.used = false;
-        return nullptr;
-    }
-    return view;
+    return storeTexture(view);
 }
 
 ID3D11BlendState *lookupBlendState(

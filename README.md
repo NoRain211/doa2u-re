@@ -179,6 +179,13 @@ keeps running.
   lists them, and a later mod's file wins; a folder whose name starts with
   `_` is off. The game's log (`private\play-logs`) lists every mod and file
   it serves. Netplay only pairs players whose mods are the same.
+- **Custom textures.** A `textures` folder beside the launcher changes how the
+  game's textures look without rebuilding it: an image in
+  `textures\replacement` named like `256x256_90b9f6d015002a1c_DXT1.png` (or
+  `.dds`) replaces the texture with that key at any resolution, and a pack made
+  for DOA2U-XBERecomp works here too. `RECOMP_TEXTURE_DUMP=png` (or `dds`)
+  writes each texture once to `textures\dumps` to edit. A8 and V8U8 textures
+  are left as the game draws them.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
   shown, so it stays smooth at high resolutions; the Vulkan renderer also

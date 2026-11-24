@@ -33,6 +33,7 @@
 #include "save_transaction.h"
 #include "sha.h"
 #include "synctest.h"
+#include "texture_pack.h"
 #include "d3d_vblank.h"
 #include "xapi_time_adapter.h"
 #include "xbox_memory_layout.h"
@@ -232,6 +233,15 @@ static std::string installMods(const std::string &discRoot)
        it: dropping either half would pair builds or mod sets that differ. */
     const std::string combined = digest + '\n' + hex;
     return doaxbv::sha256Hex(std::vector<std::uint8_t>(combined.begin(), combined.end()));
+}
+
+/* Texture packs (texture_pack.h): RECOMP_TEXTURES, or textures/ beside
+   private/, where installMods reads mods/ from too. */
+static std::string textureFolder()
+{
+    if (const char *textures = std::getenv("RECOMP_TEXTURES"); textures != nullptr && *textures != '\0')
+        return textures;
+    return (std::filesystem::u8path(privateFolder()).parent_path() / "textures").u8string();
 }
 
 static void installPcSettings(bool online)
@@ -723,6 +733,7 @@ int main(int argc, char **argv)
     }
     recomp_disc_root_path = discRoot.c_str();
     static const std::string netplayDigest = installMods(discRoot);
+    recomp_texture_pack_configure(textureFolder());
     recomp_netplay_session_init({discPath, netplayDigest.c_str(), &inputPulses, scriptedInputOnly, guestRam});
     recomp_netplay_session_start_live();
     bootGuest();

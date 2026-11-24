@@ -47,6 +47,9 @@ class ReleaseSelectionTest(unittest.TestCase):
     def test_developer_notes_stay_out(self):
         for path in ("AGENTS.md", "CONTEXT.md", "README.md", "docs/bring-up.md", "tools/test_run_game.py"):
             self.assertFalse(shipped(path, "windows"), path)
+        # Texture dumps are extracted game art and replacement packs are the player's.
+        self.assertFalse(shipped("textures/dumps/title.png", "windows"))
+        self.assertFalse(shipped("textures/replacement/title.png", "linux"))
         self.assertTrue(lifter_shipped("tools/recomp/__main__.py"))
         self.assertTrue(lifter_shipped("LICENSES/LGPL-2.1.txt"))
         self.assertTrue(lifter_shipped("templates/runtime/recomp_types.h"))
