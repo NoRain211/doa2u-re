@@ -7,6 +7,21 @@
 /* Ambient occlusion (d3d_ao.h) matches the D3D11 presenter's three passes. Its
    depth input must be a single-sample texture: the main depth at 1x, and with
    MSAA the resolved depth copy the scene draws wrote (aoDepthCopy). */
+void releaseAo(RecompD3dPresenter *presenter)
+{
+    for (SDL_GPUGraphicsPipeline *pipeline : {presenter->ao_occlusion_pipeline,
+            presenter->ao_blur_pipeline, presenter->ao_apply_pipeline}) {
+        if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
+    }
+    presenter->ao_occlusion_pipeline = presenter->ao_blur_pipeline = presenter->ao_apply_pipeline = nullptr;
+    for (SDL_GPUTexture *texture : presenter->ao_texture) {
+        if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
+    }
+    presenter->ao_texture[0] = presenter->ao_texture[1] = nullptr;
+    presenter->ao_width = presenter->ao_height = 0u;
+    presenter->ao_samples = SDL_GPU_SAMPLECOUNT_1;
+}
+
 void releaseAoCopy(RecompD3dPresenter *presenter)
 {
     for (SDL_GPUTexture *texture : {presenter->ao_copy, presenter->ao_copy_resolved}) {
@@ -47,6 +62,31 @@ SDL_GPUTexture *aoDepthCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color
     const SDL_FColor far = {1.0f, 1.0f, 1.0f, 1.0f};
     clearTexture(presenter, presenter->ao_copy, &far, nullptr, nullptr, nullptr);
     return presenter->ao_copy;
+}
+
+/* A draw whose depth-copy shader failed draws on without the copy, which is
+   freed; occlusion stays off until a quality change. */
+void dropAoCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth)
+{
+    presenter->ao_copy_failed = true;
+    useTarget(presenter, color, depth);  // flushes the draws that wrote the copy
+    releaseAoCopy(presenter);
+    presenter->ao_copy_failed = true;
+}
+
+/* A live change that turns the depth copy on: compile its shaders, and the
+   draw shaders at a new sample count, off the render thread as at creation. */
+void aoPrecompile(RecompD3dPresenter *presenter)
+{
+    presenter->precompile_stop = true;
+    if (presenter->precompile.joinable()) presenter->precompile.join();
+    presenter->precompile_stop = false;
+    try {
+        presenter->precompile = std::thread(precompileDrawShaders, presenter, presenter->scale != 1.0f,
+            presenter->msaa_count, presenter->fg_k != 0u, true);
+    } catch (const std::system_error &) {
+        // They then compile on first use.
+    }
 }
 
 /* The draw shader's color as usual and, in a second target, the depth it writes. */
@@ -112,7 +152,7 @@ bool ensureAo(RecompD3dPresenter *presenter)
     const uint32_t width = (mainWidth(presenter) + 1u) / 2u;
     const uint32_t height = (mainHeight(presenter) + 1u) / 2u;
     if (presenter->ao_occlusion_pipeline != nullptr && presenter->ao_width == width &&
-        presenter->ao_height == height) return true;
+        presenter->ao_height == height && presenter->ao_samples == presenter->msaa) return true;
     releaseAo(presenter);
     const std::string header =
         "[[vk::binding(0, 2)]] Texture2D<float4> ao_depth : register(t0);\n"
@@ -167,6 +207,7 @@ bool ensureAo(RecompD3dPresenter *presenter)
     }
     presenter->ao_width = width;
     presenter->ao_height = height;
+    presenter->ao_samples = presenter->msaa;
     std::fprintf(stderr, "recomp d3d presenter: ambient occlusion %ux%u\n", width, height);
     return true;
 }

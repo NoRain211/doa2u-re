@@ -3613,6 +3613,11 @@ static bool testAmbientOcclusion(bool live)
         bool ok = expect("ao clear", d3d_backend_submit(presenter, &clear));
         ok &= expect("ao floor", d3d_backend_submit(presenter, &triangle(floor, sizeof floor[0], floor_indices)));
         ok &= expect("ao wall", d3d_backend_submit(presenter, &triangle(wall, sizeof wall[0], wall_indices)));
+        // A coverage probe after the scene must not run occlusion inside its query.
+        auto probe = triangle(floor, sizeof floor[0], floor_indices).data.draw;
+        probe.transform[0] = 0.0f;
+        bool covered = true;
+        ok &= expect("ao coverage", d3d_backend_draw_coverage(presenter, &probe, &covered)) && !covered;
         struct ScreenVertex { float x, y, z, rhw; uint32_t color; };
         const ScreenVertex band[] = {{20,30,0.5f,1,~0u}, {300,30,0.5f,1,~0u},
             {20,70,0.5f,1,~0u}, {300,70,0.5f,1,~0u}};

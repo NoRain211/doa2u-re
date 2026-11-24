@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /* Screen-space ambient occlusion, opt-in as RECOMP_D3D_AO. Both presenters
-   run it once per frame after the 3D scene and before the first 2D layer
-   draw, so the HUD, menus, fonts, movies and full-screen effects drawn after
-   it keep the pixels the game wrote. The occlusion pass reconstructs view
+   run it once per frame after the depth-written 3D scene, before the first
+   other draw into the main target (a 2D layer or a blended 3D effect), so
+   what is drawn after it keeps the pixels the game wrote. The occlusion pass reconstructs view
    space from the main depth buffer and the projection the scene drew with,
    sums a normal-oriented hemisphere over a rotated 12-tap disk, and the blur
    pass keeps it to surfaces at the same depth. The result multiplies the main

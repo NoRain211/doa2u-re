@@ -441,6 +441,7 @@ struct RecompD3dPresenter {
     SDL_GPUTexture *ao_copy_resolved = nullptr;  // ao_copy resolved, what occlusion reads
     bool ao_copy_failed = false;
     uint32_t ao_width = 0u, ao_height = 0u;
+    SDL_GPUSampleCount ao_samples = SDL_GPU_SAMPLECOUNT_1;  // the apply pipeline's
     SDL_GPUGraphicsPipeline *smaa_pipelines[3]{};  // edges, weights, blend
     SDL_GPUTexture *smaa_textures[5]{};  // edges, area, search, weights, output
     SDL_GPUGraphicsPipeline *gamma_pipeline = nullptr;
@@ -684,6 +685,8 @@ bool runAo(RecompD3dPresenter *presenter);
 void releaseAoCopy(RecompD3dPresenter *presenter);
 SDL_GPUTexture *aoDepthCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth);
 bool aoDepthCopySource(std::string &hlsl);
+void dropAoCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth);
+void aoPrecompile(RecompD3dPresenter *presenter);
 void clearTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *color, const SDL_FColor *clear_color,
     SDL_GPUTexture *depth, const float *clear_depth, const uint8_t *clear_stencil);
 
@@ -804,20 +807,6 @@ void releaseColorTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *&render, 
     if (resolve != nullptr && resolve != render) SDL_ReleaseGPUTexture(presenter->device, resolve);
     if (render != nullptr) SDL_ReleaseGPUTexture(presenter->device, render);
     render = resolve = nullptr;
-}
-
-void releaseAo(RecompD3dPresenter *presenter)
-{
-    for (SDL_GPUGraphicsPipeline *pipeline : {presenter->ao_occlusion_pipeline,
-            presenter->ao_blur_pipeline, presenter->ao_apply_pipeline}) {
-        if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, pipeline);
-    }
-    presenter->ao_occlusion_pipeline = presenter->ao_blur_pipeline = presenter->ao_apply_pipeline = nullptr;
-    for (SDL_GPUTexture *texture : presenter->ao_texture) {
-        if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
-    }
-    presenter->ao_texture[0] = presenter->ao_texture[1] = nullptr;
-    presenter->ao_width = presenter->ao_height = 0u;
 }
 
 /* A colour target and, when multisampled, the texture it resolves to (the
@@ -2292,9 +2281,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
     if (presenter->segment.depth_copy != nullptr) {
         drawn = lookupShaders(presenter, shader_key, kOutputDepthCopy, presenter->msaa_count);
         if (drawn.vertex == nullptr) {
-            // Draw on without the copy; occlusion stays off.
-            presenter->ao_copy_failed = true;
-            useTarget(presenter, bound.color, bound.depth);
+            dropAoCopy(presenter, bound.color, bound.depth);
             drawn = shaders;
         }
     }
@@ -4197,7 +4184,10 @@ void applyQuality(RecompD3dPresenter *presenter)
         flushSegment(presenter);
         releaseAoCopy(presenter);
     }
-    if (scale == presenter->scale && msaa == presenter->msaa) return;
+    if (scale == presenter->scale && msaa == presenter->msaa) {
+        if (presenter->ao && !old_ao && presenter->msaa_count > 1u) aoPrecompile(presenter);
+        return;
+    }
 
     flushSegment(presenter);
     resolveMain(presenter);
@@ -4237,6 +4227,7 @@ void applyQuality(RecompD3dPresenter *presenter)
     presenter->main_resolve = resolve;
     presenter->main_depth = depth;
     presenter->main_resolved = true;
+    if (presenter->ao && presenter->msaa_count > 1u) aoPrecompile(presenter);
 
     // Main-sized and scaled render targets, as bindTarget sizes them.
     for (RenderTargetEntry &entry : presenter->render_targets) {
@@ -4336,17 +4327,22 @@ unsigned d3d_backend_precompile_boot_shaders(const RecompD3dPresenterConfig *con
             for (const uint32_t samples : {1u, 2u, 4u, 8u}) {
                 recomp_d3d_for_each_boot_shader(config, scaled, samples, framegen,
                     [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
-                        RecompD3dVertexLayout layout;
-                        std::string hlsl, error;
-                        std::vector<std::string> defines;
-                        if (!drawShaderSource(key, output, samples, target, layout, hlsl, defines)) return true;
-                        for (const bool vertex : {true, false}) {
-                            RecompCompiledShader shader;
-                            if (recomp_shader_compile(hlsl, vertex ? "vs_main" : "ps_main", vertex,
-                                    target, defines, shader, error)) ++compiled;
-                            else std::fprintf(stderr, "recomp d3d presenter: boot shader %s failed: %s\n",
-                                vertex ? "vs_main" : "ps_main", error.c_str());
-                        }
+                        const auto build = [&](uint8_t built) {
+                            RecompD3dVertexLayout layout;
+                            std::string hlsl, error;
+                            std::vector<std::string> defines;
+                            if (!drawShaderSource(key, built, samples, target, layout, hlsl, defines)) return;
+                            for (const bool vertex : {true, false}) {
+                                RecompCompiledShader shader;
+                                if (recomp_shader_compile(hlsl, vertex ? "vs_main" : "ps_main", vertex,
+                                        target, defines, shader, error)) ++compiled;
+                                else std::fprintf(stderr, "recomp d3d presenter: boot shader %s failed: %s\n",
+                                    vertex ? "vs_main" : "ps_main", error.c_str());
+                            }
+                        };
+                        build(output);
+                        // Ambient occlusion's MSAA depth copy draws each shaded key again.
+                        if (samples > 1u && output == kOutputShaded) build(kOutputDepthCopy);
                         return true;
                     });
             }

@@ -1848,11 +1848,11 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     /* The projection alone, for ambient occlusion: a composed
        world-view-projection cannot give back near and far. Program draws use
        the same device projection, so it is captured for them too. */
+    uint32_t projection_nonfinite = 0u;
     if (!layout.pretransformed) {
         recomp_guest_load(draw->projection, device + 0xca0u, sizeof draw->projection);
-        uint32_t nonfinite = 0u;
-        for (uint32_t i = 0u; i < 16u; ++i) nonfinite += !isfinite(draw->projection[i]);
-        if (nonfinite != 0u) memset(draw->projection, 0, sizeof draw->projection);
+        for (uint32_t i = 0u; i < 16u; ++i) projection_nonfinite += !isfinite(draw->projection[i]);
+        if (projection_nonfinite != 0u) memset(draw->projection, 0, sizeof draw->projection);
     }
     if (!layout.pretransformed && !program) {
         float view[16], world[16], vp[16], blend[3][16];
@@ -1863,9 +1863,9 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
         /* The game occasionally poses a mesh at a NaN position (seen after fights,
            ret 0x28708b). NV2A vertices then become NaN and are clipped, so the
            draw shows nothing; drop it instead of stopping. */
-        uint32_t nonfinite = 0u;
+        uint32_t nonfinite = projection_nonfinite;  // counted before the projection was zeroed
         for (uint32_t i = 0u; i < 16u; ++i) {
-            nonfinite += !isfinite(view[i]) + !isfinite(draw->projection[i]) + !isfinite(world[i]);
+            nonfinite += !isfinite(view[i]) + !isfinite(world[i]);
             for (uint32_t b = 0u; b < layout.blend_weight_count; ++b) nonfinite += !isfinite(blend[b][i]);
         }
         if (nonfinite != 0u) {

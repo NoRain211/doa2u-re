@@ -1120,7 +1120,10 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
         desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
         desc.SampleDesc.Count = presenter->msaa;
         desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+        // Feature level 10.0 cannot read multisampled depth; ambient occlusion then stays off.
+        const bool readable = presenter->msaa == 1u ||
+            presenter->device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_10_1;
+        desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | (readable ? D3D11_BIND_SHADER_RESOURCE : 0u);
         result = presenter->device->CreateTexture2D(&desc, nullptr, &depth_texture);
         if (SUCCEEDED(result)) {
             // A typeless resource needs explicit views; null would name no format.
@@ -1130,14 +1133,16 @@ HRESULT createMainTargets(RecompD3dPresenter *presenter)
                 ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
             result = presenter->device->CreateDepthStencilView(depth_texture, &view, &depth_view);
         }
-        if (SUCCEEDED(result)) {
+        if (SUCCEEDED(result) && readable) {
             D3D11_SHADER_RESOURCE_VIEW_DESC view{};
             view.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
             view.ViewDimension = presenter->msaa > 1u
                 ? D3D11_SRV_DIMENSION_TEXTURE2DMS : D3D11_SRV_DIMENSION_TEXTURE2D;
             view.Texture2D.MostDetailedMip = 0u;
             view.Texture2D.MipLevels = 0xffffffffu;
-            result = presenter->device->CreateShaderResourceView(depth_texture, &view, &depth_sample);
+            // Without the view the renderer draws on; only ambient occlusion needs it.
+            if (FAILED(presenter->device->CreateShaderResourceView(depth_texture, &view, &depth_sample)))
+                depth_sample = nullptr;
         }
     }
     if (FAILED(result)) {
@@ -2968,7 +2973,8 @@ RecompD3dPresenterError submitDraw(
     }
 
     // Before the layer this draw starts, so ambient occlusion cannot touch it.
-    aoDrawBoundary(presenter, draw, layout);
+    // A coverage probe writes nothing and runs inside an occlusion query.
+    if (!coverage_only) aoDrawBoundary(presenter, draw, layout);
 
     D3D11_PRIMITIVE_TOPOLOGY topology;
     switch (draw.primitive_type) {
@@ -3856,6 +3862,12 @@ bool runAo(RecompD3dPresenter *presenter)
             std::fprintf(stderr, "recomp d3d presenter: ambient occlusion needs the scene's projection;"
                 " this frame's draws carried none\n");
         }
+        return false;
+    }
+    if (presenter->depth_sample == nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: ambient occlusion cannot read this depth buffer;"
+            " it stays off\n");
+        presenter->ao = false;
         return false;
     }
     if (!ensureAo(presenter)) {
