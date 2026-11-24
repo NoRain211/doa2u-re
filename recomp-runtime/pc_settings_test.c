@@ -303,7 +303,7 @@ int main(void)
 {
     recomp_runtime.registers.esp = STACK;
     make_layout();
-    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 0, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1};
+    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 0, 0, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
     const RecompButtonConfigHost rebind = {host_bound, host_listen, host_listening, host_reset, host_rebind_closed};
     recomp_runner_assets_reset();
@@ -321,22 +321,24 @@ int main(void)
         rd32(0x0067afa0u + 4u * 19u) != 0u && rd32(0x0067af00u + 4u * 19u) != 0u &&
         rd32(0x0067b040u + 4u * 19u) != 0u);
     expect("choices kept", recomp_pc_settings_choice(RECOMP_PC_SCREEN) == 4u &&
-        recomp_pc_settings_choice(RECOMP_PC_INTRO) == 1u && recomp_pc_settings_choice(RECOMP_PC_SHARPEN) == 0u);
+        recomp_pc_settings_choice(RECOMP_PC_INTRO) == 1u && recomp_pc_settings_choice(RECOMP_PC_SHARPEN) == 0u &&
+        recomp_pc_settings_choice(RECOMP_PC_AO) == 0u);
     expect("choice counts", recomp_pc_settings_choices(RECOMP_PC_MSAA) == 6u &&
         recomp_pc_settings_choices(RECOMP_PC_FRAME_RATE) == 2u &&
-        recomp_pc_settings_choices(RECOMP_PC_SHARPEN) == 4u &&
+        recomp_pc_settings_choices(RECOMP_PC_SHARPEN) == 4u && recomp_pc_settings_choices(RECOMP_PC_AO) == 2u &&
         recomp_pc_settings_choices(RECOMP_PC_RENDERER) == 3u && recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
         recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
-        !recomp_pc_settings_applies_now(RECOMP_PC_SHARPEN) &&
+        !recomp_pc_settings_applies_now(RECOMP_PC_SHARPEN) && !recomp_pc_settings_applies_now(RECOMP_PC_AO) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
     recomp_pc_settings_set_live(RECOMP_PC_MSAA, true);
     recomp_pc_settings_set_live(RECOMP_PC_SHARPEN, true);
+    recomp_pc_settings_set_live(RECOMP_PC_AO, true);
     recomp_pc_settings_set_live(RECOMP_PC_FREE_CAMERA, false); /* as online */
     expect("renderer rows", recomp_pc_settings_applies_now(RECOMP_PC_MSAA) &&
-        recomp_pc_settings_applies_now(RECOMP_PC_SHARPEN) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_SHARPEN) && recomp_pc_settings_applies_now(RECOMP_PC_AO) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) && recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS));
 
     /* Row counts: the top list has eight rows, page 19 six (Page and five), others the game's. */
@@ -451,40 +453,40 @@ int main(void)
     hook(0x0011cfc0u, none, 2u);
     expect("other pages", original_update == 1u);
 
-    /* Page 19: the Page row turns to the second view, the Frame rate row there
+    /* Page 19: the Page row turns to the second view, the VRR row there
        changes, confirm turns on through the views to the short last one and
        back to the first, then leave. */
     wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     expect("page turns", changed_setting == 99u);
-    wr16(CURSORS + 2u, 3u); nav_delta = 1; /* down to row 4, Frame rate */
+    wr16(CURSORS + 2u, 3u); nav_delta = 1; /* down to row 4, VRR */
     hook(0x0011cfc0u, none, 2u);
-    expect("pc change", changed_setting == RECOMP_PC_FRAME_RATE && changed_choice == 1u &&
-        recomp_pc_settings_choice(RECOMP_PC_FRAME_RATE) == 1u);
+    expect("pc change", changed_setting == RECOMP_PC_VRR && changed_choice == 1u &&
+        recomp_pc_settings_choice(RECOMP_PC_VRR) == 1u);
     const uint32_t frame_help[3] = {19u, 4u, 0u};
     hook(0x00091560u, frame_help, 3u);
     expect("next-start help", ascii(help_text) == 'T' && rd16(help_text + 26u) == 't'); /* "Takes effect the next ..." */
     wr16(CURSORS + 2u, 0u); nav_delta = 0; step_delta = 0; confirm_pressed = 1u;
-    hook(0x0011cfc0u, none, 2u); /* the third view: Audio Output to CPU Costumes */
-    const uint32_t cpu_help[3] = {19u, 4u, 0u}, free_help[3] = {19u, 1u, 0u};
+    hook(0x0011cfc0u, none, 2u); /* the third view: Frame rate to Unlocks */
+    const uint32_t cpu_help[3] = {19u, 4u, 0u}, free_help[3] = {19u, 2u, 0u};
     hook(0x00091560u, cpu_help, 3u);
-    expect("confirm turns on", rd16(help_text + 26u) == 'i'); /* row 4 is CPU Costumes, live */
-    hook(0x0011cfc0u, none, 2u); /* the fourth view: Free Camera to Fight HUD */
+    expect("confirm turns on", rd16(help_text + 26u) == 'i'); /* row 4 is Unlocks, live */
+    hook(0x0011cfc0u, none, 2u); /* the fourth view: CPU Costumes to Life Bar */
     hook(0x00091560u, free_help, 3u);
-    expect("online run next start", rd16(help_text + 26u) == 't'); /* row 1 is Free Camera, off as online */
+    expect("online run next start", rd16(help_text + 26u) == 't'); /* row 2 is Free Camera, off as online */
     recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, true); /* as Live logged on */
     hook(0x00091560u, free_help, 3u);
     expect("leave online help", rd16(help_text + 26u) == 'w'); /* "Takes effect when you leave ..." */
     recomp_pc_settings_set_after_online(RECOMP_PC_FREE_CAMERA, false);
-    const uint32_t row3_help[3] = {19u, 3u, 0u};
-    hook(0x00091560u, row3_help, 3u);
-    expect("life bar live", rd16(help_text + 26u) == 'i'); /* row 3 is Life Bar, live */
-    hook(0x0011cfc0u, none, 2u); /* the fifth view: Hit Voices and KO Replay */
+    const uint32_t row4_help[3] = {19u, 4u, 0u};
+    hook(0x00091560u, row4_help, 3u);
+    expect("life bar live", rd16(help_text + 26u) == 'i'); /* row 4 is Life Bar, live */
+    hook(0x0011cfc0u, none, 2u); /* the fifth view: Fight HUD, Hit Voices and KO Replay */
     const uint32_t short_page = 19u;
-    expect("short view rows", hook(0x0011ac90u, &short_page, 1u) == 3u);
+    expect("short view rows", hook(0x0011ac90u, &short_page, 1u) == 4u);
     const uint32_t short_help[3] = {19u, 1u, 0u};
     hook(0x00091560u, short_help, 3u);
-    expect("short view help", rd16(help_text + 26u) == 'i'); /* row 1 is Hit Voices, live */
+    expect("short view help", rd16(help_text + 26u) == 'i'); /* row 1 is Fight HUD, live */
     hook(0x0011cfc0u, none, 2u); /* wraps to view 1 */
     confirm_pressed = 0u;
     hook(0x00091560u, resolution_help, 3u);
@@ -512,41 +514,43 @@ int main(void)
     language = 3u; /* German */
     hook(draw, &context, 1u);
     expect("german", ascii(labels[0]) == 'S' && ascii(labels[1]) == 'A' && rd16(labels[1] + 8u) == 0xf6u); /* "Aufl\u00f6sung" */
-    /* The second view: Screen to Frame rate. */
+    /* The second view: Ambient Occlusion to VRR. */
     wr16(DEPTH, 1u); wr16(PAGE, 19u); wr16(CURSORS + 2u, 0u); step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("second view", ascii(labels[1]) == 'B' && ascii(labels[3]) == 'V' && ascii(values[0]) == '2' &&
-        ascii(values[1u + RECOMP_PC_SCREEN - 4u]) == '3'); /* Bildschirm, VRR, 32:9 */
-    /* The third view: Audio Output to CPU Costumes. */
+    expect("second view", ascii(labels[1]) == 'U' && ascii(labels[2]) == 'B' && ascii(labels[3]) == 'R' &&
+        ascii(values[0]) == '2' && ascii(values[1u + RECOMP_PC_SCREEN - 4u]) == '3');
+        /* Umgebungsverdeckung, Bildschirm, VRR, 32:9 */
+    /* The third view: Frame rate to Unlocks. */
     step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("third view", ascii(labels[1]) == 'A' && ascii(labels[2]) == 'I' && ascii(values[0]) == '3' &&
-        label_count == 5u); /* Audioausgabe, Intro-Videos */
-    /* The fourth view: Free Camera to Fight HUD. */
+    expect("third view", ascii(labels[1]) == 'B' && ascii(labels[2]) == 'A' && ascii(values[0]) == '3' &&
+        label_count == 5u); /* Bildrate, Audioausgabe */
+    /* The fourth view: CPU Costumes to Life Bar. */
     step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("fourth view", ascii(labels[1]) == 'F' && ascii(labels[2]) == 'W' && ascii(labels[4]) == 'K' &&
-        ascii(values[0]) == '4' && label_count == 5u); /* Freie Kamera, Kampfanzeige */
-    /* The fifth view: Hit Voices and KO Replay. */
+    expect("fourth view", ascii(labels[1]) == 'C' && ascii(labels[2]) == 'F' && ascii(labels[4]) == 'L' &&
+        ascii(values[0]) == '4' && label_count == 5u); /* CPU-Kost\u00fcme, Freie Kamera, Lebensleiste */
+    /* The fifth view: Fight HUD, Hit Voices and KO Replay. */
     step_delta = 1;
     hook(0x0011cfc0u, none, 2u);
     step_delta = 0;
     hook(draw, &context, 1u);
-    expect("fifth view", label_count == 3u && value_count == 3u && ascii(labels[1]) == 'T' &&
-        ascii(values[0]) == '5' && ascii(values[1]) == 'L' && ascii(values[2]) == 'D' &&
-        layout_walked == 6u); /* Treffer-Stimmen, Leise, Dynamisch */
+    expect("fifth view", label_count == 4u && value_count == 4u && ascii(labels[1]) == 'K' &&
+        ascii(labels[2]) == 'T' && ascii(labels[3]) == 'K' && ascii(values[0]) == '5' &&
+        ascii(values[1]) == 'S' && ascii(values[2]) == 'L' && ascii(values[3]) == 'D' &&
+        layout_walked == 8u); /* Kampfanzeige Schaden, Treffer-Stimmen Leise, K.O.-Wiederholung Dynamisch */
     expect("leave draw", rd32(0x0067afa0u + 4u * 19u) != draw);
     const uint32_t key[2] = {19u, 0u};
     expect("labels only while drawing", hook(0x000910a0u, key, 2u) == 0x9900u);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
     expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 3u * 28u + 0xcu) == 0u &&
-        rd32(layout + 6u * 28u) == 0u); /* the short view ends its records at six */
+        rd32(layout + 8u * 28u) == 0u); /* the short view ends its records at eight */
 
     /* The Controller page (4): Rebind is row 3, before Default. */
     language = 1u;
@@ -694,7 +698,7 @@ int main(void)
     expect("no options list while leaving", left_options == leaving);
     hook(0x0011afd0u, none, 0u);
     expect("options init clears jukebox", options_inits == 1u);
-    expect("pc page again", hook(0x0011ac90u, &page19, 1u) == 3u); /* the Page row and the short last view */
+    expect("pc page again", hook(0x0011ac90u, &page19, 1u) == 4u); /* the Page row and the short last view */
     return fails == 0 ? 0 : 1;
 }
 

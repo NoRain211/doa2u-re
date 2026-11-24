@@ -49,7 +49,7 @@ int main()
     // No file: the launchers' defaults (the display's height, 32x, SMAA on, 16:9, Everything).
     expect("missing file", !recomp_pc_settings_read(path, store, c));
     expect("defaults", c[RECOMP_PC_RESOLUTION] == 3u && c[RECOMP_PC_MSAA] == 5u && c[RECOMP_PC_SMAA] == 1u &&
-        c[RECOMP_PC_SHARPEN] == 0u &&
+        c[RECOMP_PC_SHARPEN] == 0u && c[RECOMP_PC_AO] == 0u &&
         c[RECOMP_PC_SCREEN] == 1u && c[RECOMP_PC_RENDERER] == 0u && c[RECOMP_PC_INTRO] == 0u &&
         c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u && c[RECOMP_PC_DEDICATION] == 0u &&
         c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u);
@@ -58,11 +58,11 @@ int main()
     write(path, "{\"height\":2160,\"msaa\":8,\"smaa\":false,\"sharpen\":\"medium\",\"widescreen\":true,\"screen\":\"2560:1080\","
         "\"vulkan\":true,\"vrr\":false,\"frameRate\":\"display\",\"skipIntro\":true,\"surround\":true,\"unlockAll\":false,"
         "\"freeCamera\":true,\"randomCpuCostumes\":true,\"dedicationCard\":false,\"checkUpdates\":true,"
-        "\"comboHud\":false,"
+        "\"ambientOcclusion\":true,\"comboHud\":false,"
         "\"game_source\":\"D:\\\\Games\\\\doa2.iso\",\"window\":{\"x\":1,\"y\":[2,3]}}");
     expect("read", recomp_pc_settings_read(path, store, c));
     expect("values", c[RECOMP_PC_RESOLUTION] == 4u && c[RECOMP_PC_MSAA] == 3u && c[RECOMP_PC_SMAA] == 0u &&
-        c[RECOMP_PC_SHARPEN] == 2u &&
+        c[RECOMP_PC_SHARPEN] == 2u && c[RECOMP_PC_AO] == 1u &&
         c[RECOMP_PC_SCREEN] == 3u && c[RECOMP_PC_RENDERER] == 1u && c[RECOMP_PC_VRR] == 0u &&
         c[RECOMP_PC_FRAME_RATE] == 1u &&
         c[RECOMP_PC_AUDIO] == 1u && c[RECOMP_PC_INTRO] == 1u && c[RECOMP_PC_UNLOCKS] == 1u &&
@@ -80,12 +80,13 @@ int main()
     expect("dedication", saved.find("\"dedicationCard\":false") != std::string::npos);
     expect("fight hud", saved.find("\"fightHud\":\"original\"") != std::string::npos);
     expect("sharpen saved", saved.find("\"sharpen\":\"medium\"") != std::string::npos);
+    expect("occlusion saved", saved.find("\"ambientOcclusion\":true") != std::string::npos);
     expect("msaa off", saved.find("\"msaa\":1") != std::string::npos);
     expect("no temporary file", !std::filesystem::exists(path + ".tmp"));
     expect("frame rate saved", saved.find("\"frameRate\":\"display\"") != std::string::npos);
     std::uint8_t again[RECOMP_PC_SETTING_COUNT];
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
-        again[RECOMP_PC_SHARPEN] == 2u &&
+        again[RECOMP_PC_SHARPEN] == 2u && again[RECOMP_PC_AO] == 1u &&
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u && again[RECOMP_PC_DEDICATION] == 1u &&
         again[RECOMP_PC_FRAME_RATE] == 1u);
 
@@ -117,6 +118,13 @@ int main()
         expect("sharpen name", read(path).find(sharpens[i]) != std::string::npos);
         expect("sharpen read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_SHARPEN] == i);
     }
+
+    // Ambient occlusion is a boolean beside the launchers' other flags.
+    write(path, "{\"ambientOcclusion\":false}");
+    expect("occlusion off", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_AO] == 0u);
+    again[RECOMP_PC_AO] = 1u;
+    recomp_pc_settings_write(path, store, again);
+    expect("occlusion written", read(path).find("\"ambientOcclusion\":true") != std::string::npos);
 
     // 32:9, then 21:9 again: the monitor's own shape.
     c[RECOMP_PC_SCREEN] = 4u;

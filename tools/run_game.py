@@ -98,7 +98,8 @@ def saved_settings():
         options["msaa"] = saved["msaa"]
     if saved.get("sharpen") in ("off", "low", "medium", "high"):
         options["sharpen"] = saved["sharpen"]
-    for key, option in (("smaa", "smaa"), ("widescreen", "widescreen"), ("vrr", "vrr"), ("skipIntro", "skip_intro"),
+    for key, option in (("ambientOcclusion", "ao"), ("smaa", "smaa"), ("widescreen", "widescreen"),
+                        ("vrr", "vrr"), ("skipIntro", "skip_intro"),
                         ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan"),
                         ("d3d12", "d3d12"), ("freeCamera", "free_camera"), ("randomCpuCostumes", "random_cpu_costumes")):
         if isinstance(saved.get(key), bool):
@@ -128,7 +129,7 @@ def open_launcher():
 
 
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
-        widescreen=None, msaa=None, smaa=None, sharpen=None, resolution=None, story_finale=False,
+        widescreen=None, msaa=None, smaa=None, sharpen=None, ao=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, d3d12=False,
         free_camera=None, random_cpu_costumes=None, hide_dedication=False, framegen=None,
         dump_textures=None):
@@ -145,7 +146,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     if d3d12 and sys.platform == "win32":
         env["SDL_GPU_DRIVER"] = "direct3d12"
     for name, value in (("RECOMP_D3D_WIDESCREEN", widescreen),
-                        ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa),
+                        ("RECOMP_D3D_MSAA", msaa), ("RECOMP_D3D_SMAA", smaa), ("RECOMP_D3D_AO", ao),
                         ("RECOMP_AUDIO_SURROUND", surround), ("RECOMP_D3D_VRR", vrr),
                         ("RECOMP_FREE_CAMERA", free_camera), ("RECOMP_RANDOM_CPU_COSTUMES", random_cpu_costumes),
                         ("RECOMP_D3D_FRAMEGEN", framegen)):
@@ -281,6 +282,8 @@ if __name__ == "__main__":
                         help="Apply SMAA Ultra after MSAA resolve")
     parser.add_argument("--sharpen", choices=("off", "low", "medium", "high"),
                         help="Sharpens after anti-aliasing with AMD FidelityFX CAS")
+    parser.add_argument("--ao", action=argparse.BooleanOptionalAction, default=None,
+                        help="Darkens creases and contact areas with screen-space ambient occlusion")
     parser.add_argument("--surround", action=argparse.BooleanOptionalAction, default=None,
                         help="Output 5.1 through the game's own surround mix")
     parser.add_argument("--vrr", action=argparse.BooleanOptionalAction, default=None,
@@ -329,6 +332,7 @@ if __name__ == "__main__":
                              args.input_analog_pulse_at,
                              args.screen if args.screen is not None else pick("widescreen", args.widescreen),
                              pick("msaa", args.msaa), pick("smaa", args.smaa), pick("sharpen", args.sharpen),
+                             pick("ao", args.ao),
                              pick("resolution", args.resolution), args.story_finale,
                              args.skip_intro or saved.get("skip_intro", False),
                              args.unlock_all and saved.get("unlock_all", True),
