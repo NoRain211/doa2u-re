@@ -118,6 +118,9 @@ def bundle(package, prefix, url, digest, top, skip=()):
 
 def shipped(path, platform):
     """Whether a repository file belongs in the platform's release."""
+    # Players' texture packs and dumps sit beside the launcher; a release never carries them.
+    if path.startswith("textures/"):
+        return False
     if path in PLATFORM_FILES[platform]:
         return True
     if any(path in files for files in PLATFORM_FILES.values()):

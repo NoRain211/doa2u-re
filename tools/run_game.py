@@ -130,7 +130,8 @@ def open_launcher():
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, sharpen=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, d3d12=False,
-        free_camera=None, random_cpu_costumes=None, hide_dedication=False, framegen=None):
+        free_camera=None, random_cpu_costumes=None, hide_dedication=False, framegen=None,
+        dump_textures=None):
     if seconds is not None and seconds <= 0:
         raise ValueError("Probe duration must be positive")
     if msaa is not None and msaa not in (1, 2, 4, 8, 16, 32):
@@ -150,6 +151,8 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
                         ("RECOMP_D3D_FRAMEGEN", framegen)):
         if value is not None:
             env[name] = value if isinstance(value, str) else str(int(value))
+    if dump_textures is not None:
+        env["RECOMP_TEXTURE_DUMP"] = dump_textures
     if sharpen is not None:
         env["RECOMP_D3D_SHARPEN"] = {"off": "0", "low": "0.3", "medium": "0.6", "high": "1.0"}[sharpen]
     if resolution is not None:
@@ -308,6 +311,8 @@ if __name__ == "__main__":
                         help="Leave character and costume unlocks to play, for acceptance runs")
     parser.add_argument("--no-dedication-card", action="store_true",
                         help="Hide the staff roll's dedication card for this run")
+    parser.add_argument("--dump-textures", choices=("png", "dds"), metavar="{png,dds}",
+                        help="Write each game texture once to textures/dumps as PNG or DDS")
     parser.add_argument("--saved", action="store_true",
                         help="Use the choices saved by the launcher in private/launcher.json")
     parser.add_argument("--launcher", action="store_true",
@@ -334,7 +339,8 @@ if __name__ == "__main__":
                                   else args.vulkan is None and saved.get("d3d12")),
                              pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
-                             args.no_dedication_card, pick("framegen", args.framegen)))
+                             args.no_dedication_card, pick("framegen", args.framegen),
+                             args.dump_textures))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)

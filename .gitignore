@@ -4,6 +4,7 @@ private/**
 # Players' mods (README: Mods) hold their own and the game's content.
 /mods/
 /jukebox/
+/textures/
 orig/
 dump/
 dumps/
