@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // macOS launcher: pick resolution, anti-aliasing, sharpening, ambient occlusion, widescreen, 5.1 surround, the free camera,
-// the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
+// the intro skip, the staff-roll dedication card and texture dumping, remember them in private/launcher.json, then exit 0 so
 // launcher.sh starts the game. Mirrors tools/launcher.cs, its GAME page's build included,
 // with MSAA up to SDL_GPU's 8x: the backdrop under a top letterbox bar, and a panel
 // at the left with the page tabs, the chosen page's settings and their information.
@@ -16,6 +16,7 @@ let heights = [480, 720, 1080, 1440, 2160]
 let samples = [1, 2, 4, 8]
 let screens = ["4:3", "16:9", "16:10", "21:9", "32:9"]
 let sharpens = ["off", "low", "medium", "high"]
+let dumps = ["off", "png", "dds"]
 
 var settings: [String: Any] = [:]
 if let data = try? Data(contentsOf: settingsURL),
@@ -139,14 +140,16 @@ final class LauncherView: NSView {
                           boolSetting("randomCpuCostumes", false) ? 1 : 0)
     let dedication = Row("Dedication", "Shows a memorial card before the staff roll", ["Show", "Hide"],
                          boolSetting("dedicationCard", true) ? 0 : 1)
+    let textureDump = Row("Texture Dump", "Writes each texture once to textures/dumps for editing; can stutter while it writes",
+                          ["Off", "PNG", "DDS"], dumps.firstIndex(of: stringSetting("textureDump", "off")) ?? 0)
     // No JUKEBOX page: this launcher has no jukebox rows.
     lazy var pages = [
         Page(name: "GAME", info: "Starts the game, or builds it from your own Disc 2 ISO", rows: [playRow, chooseGame, buildRow]),
         Page(name: "VIDEO", info: "Sets resolution, anti-aliasing, sharpening, occlusion, screen shape and the intro movies",
              rows: [resolution, msaa, smaa, sharpen, ao, screen, intro]),
         Page(name: "AUDIO", info: "Chooses stereo or the game's own 5.1 surround mix", rows: [surround]),
-        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera and dedication card",
-             rows: [unlock, cpuCostumes, freeCamera, dedication]),
+        Page(name: "GAMEPLAY", info: "Chooses the unlocks, CPU costumes, free camera, dedication card and texture dumping",
+             rows: [unlock, cpuCostumes, freeCamera, dedication, textureDump]),
         Page(name: "UPDATE", info: "Checks GitHub for a newer release and installs it", rows: [updateRow, checkAtStart]),
     ]
     // Focus is on the page tabs, or (inPage) on the current page's row. It opens on Start Game, or on
@@ -209,6 +212,7 @@ final class LauncherView: NSView {
             "freeCamera": freeCamera.index == 1,
             "randomCpuCostumes": cpuCostumes.index == 1,
             "dedicationCard": dedication.index == 0,
+            "textureDump": dumps[textureDump.index],
         ]
         if !gameSource.isEmpty { chosen["game_source"] = gameSource }
         return chosen

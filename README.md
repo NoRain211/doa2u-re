@@ -183,7 +183,8 @@ keeps running.
   game's textures look without rebuilding it: an image in
   `textures\replacement` named like `256x256_90b9f6d015002a1c_DXT1.png` (or
   `.dds`) replaces the texture with that key at any resolution, and a pack made
-  for DOA2U-XBERecomp works here too. `RECOMP_TEXTURE_DUMP=png` (or `dds`)
+  for DOA2U-XBERecomp works here too. **Texture Dump: PNG** (or **DDS**) on
+  the launcher's **GAMEPLAY** page, or `RECOMP_TEXTURE_DUMP=png` (or `dds`),
   writes each texture once to `textures\dumps` to edit. A8 and V8U8 textures
   are left as the game draws them.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,

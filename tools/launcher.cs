@@ -4,7 +4,7 @@
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
 //     anti-aliasing, SMAA, sharpening, ambient occlusion, widescreen, the
 //     renderer (Direct3D 11, Vulkan or Direct3D 12), VRR, the frame rate, the
-//     intro skip, 5.1 surround and the free camera, remembers them in
+//     intro skip, 5.1 surround, the free camera and texture dumping, remembers them in
 //     private\launcher.json, then plays. An ISO dropped on it, or chosen on
 //     the GAME page, starts the build.
 //   DOA2U.exe (PLAY_ONLY) plays with the saved settings.
@@ -268,6 +268,7 @@ class LauncherForm : Form
     static readonly int[] Samples = { 1, 2, 4, 8, 16, 32 };
     static readonly string[] Screens = { "4:3", "16:9", "16:10", "21:9", "32:9" };
     static readonly string[] Sharpens = { "off", "low", "medium", "high" };
+    static readonly string[] Dumps = { "off", "png", "dds" };
     const int GamePage = 0, AudioPage = 2, JukeboxPage = 4, UpdatePage = 5;
     const string DiscordUrl = "https://discord.gg/56TGGxZnE3";
     // The Discord mark in a 24-unit box: one outline of cubic Bezier segments, the eyes cut out below.
@@ -285,7 +286,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int PanelW = 480, Inset = 20, TabY = TopH + 12, TabH = 26, ListY = TabY + TabH + 18, RowH = 36, InfoY = H - 64;
 
-    readonly Row resolution, msaa, smaa, sharpen, ao, screen, renderer, vrr, frameRate, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, sharpen, ao, screen, renderer, vrr, frameRate, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, textureDump, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page, the row cursor a row on it; focus is on that row, or on the tabs when not inPage.
     int menu, row;
@@ -369,6 +370,9 @@ class LauncherForm : Form
         freeCamera = Choice("Free Camera", "In game, F1 or a right-stick click flies the camera", new[] { "Off", "On" }, Game.Bool(settings, "freeCamera", false), 0);
         cpuCostumes = Choice("CPU Costumes", "Random dresses CPU opponents in any unlocked costume; offline only", new[] { "Default", "Random" }, Game.Bool(settings, "randomCpuCostumes", false), 0);
         dedication = Choice("Dedication", "Shows a memorial card before the staff roll", new[] { "Show", "Hide" }, !Game.Bool(settings, "dedicationCard", true), 0);
+        textureDump = new Row { Label = "Texture Dump", Info = "Writes each texture once to textures/dumps for editing; can stutter while it writes",
+            Names = new[] { "Off", "PNG", "DDS" }, Default = 0,
+            Index = Math.Max(0, Array.IndexOf(Dumps, Game.Str(settings, "textureDump", "off"))) };
         gameSource = Game.Str(settings, "game_source", null);
         lifeBarColour = Game.Str(settings, "lifeBarColour", "default");
         lifeBarCustom = Game.Str(settings, "lifeBarCustom", "FFFFFF");
@@ -391,7 +395,7 @@ class LauncherForm : Form
                 Rows = PageRows(surround, voiceSetting,
                     new Row { Label = "Import DOA4 Voices", Info = "Choose your Dead or Alive 4 ISO; your existing clip selections are kept", Action = "voices" },
                     new Row { Label = "Edit Voices", Info = "Pick each fighter's hit and KO clips and tune how often they play", Action = "voice-editor" }) },
-            new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks, CPU costumes, free camera and dedication card", Rows = PageRows(unlock, cpuCostumes, freeCamera, dedication) },
+            new Page { Name = "GAMEPLAY", Info = "Chooses the unlocks, CPU costumes, free camera, dedication card and texture dumping", Rows = PageRows(unlock, cpuCostumes, freeCamera, dedication, textureDump) },
             new Page { Name = "JUKEBOX", Info = JukeboxStatus(), Rows = new[] { importRow, new Row { Label = "Edit Tracks", Info = "Opens the Jukebox Editor: hear, rename and assign every track", Action = "names" } } },
             new Page { Name = "UPDATE", Info = UpdateStatus(), Rows = PageRows(updateRow, checkAtStart) },
         };
@@ -497,7 +501,7 @@ class LauncherForm : Form
             { "ambientOcclusion", ao.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
             { "vulkan", renderer.Index != 0 }, { "d3d12", renderer.Index == 2 }, { "vrr", vrr.Index == 1 }, { "frameRate", frameRate.Index == 1 ? "display" : "original" }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
-            { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 },
+            { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 }, { "textureDump", Dumps[textureDump.Index] },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
             { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
             { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay }, { "fightHud", fightHud } };

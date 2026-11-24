@@ -260,10 +260,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 settings.write_text(json.dumps({"height": 1080, "msaa": 4, "smaa": False, "sharpen": "medium",
                     "ambientOcclusion": True,
                     "widescreen": True, "vrr": True, "skipIntro": True, "surround": True, "unlockAll": False,
-                    "freeCamera": True, "randomCpuCostumes": True, "frameRate": "display"}),
+                    "freeCamera": True, "randomCpuCostumes": True, "frameRate": "display", "textureDump": "dds"}),
                     encoding="utf-8")
                 self.assertEqual(saved_settings(), {"resolution": 1080, "msaa": 4, "smaa": False,
-                    "sharpen": "medium", "ao": True,
+                    "sharpen": "medium", "ao": True, "dump_textures": "dds",
                     "widescreen": True, "vrr": True, "skip_intro": True, "surround": True, "unlock_all": False,
                     "free_camera": True, "random_cpu_costumes": True, "framegen": True})
                 settings.write_text(json.dumps({"vulkan": True, "d3d12": True}), encoding="utf-8")
@@ -280,7 +280,8 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                                          ("16:9", "16:9"), ("5:1", True), ("wide", True)):
                     settings.write_text(json.dumps({"widescreen": True, "screen": screen}), encoding="utf-8")
                     self.assertEqual(saved_settings(), {"widescreen": expected}, screen)
-                settings.write_text(json.dumps({"frameRate": "bogus", "sharpen": "bogus"}), encoding="utf-8")
+                settings.write_text(json.dumps({"frameRate": "bogus", "sharpen": "bogus", "textureDump": "off"}),
+                    encoding="utf-8")
                 self.assertEqual(saved_settings(), {"framegen": False})
                 settings.write_text("{", encoding="utf-8")
                 self.assertEqual(saved_settings(), {})

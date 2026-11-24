@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Linux launcher: pick resolution, anti-aliasing, widescreen, 5.1 surround, the free camera,
-// the intro skip and the staff-roll dedication card, remember them in private/launcher.json, then exit 0 so
+// the intro skip, the staff-roll dedication card and texture dumping, remember them in private/launcher.json, then exit 0 so
 // run_game.py starts the game. Mirrors tools/launcher.cs, its GAME page's build included,
 // with MSAA up to SDL_GPU's 8x: the backdrop
 // under a top bar, and a panel on the left with the page tabs, the chosen page's
@@ -33,9 +33,11 @@ const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "21:9", "32:9"};
 const char *const kSharpens[] = {"off", "low", "medium", "high"};
+const char *const kDumps[] = {"off", "png", "dds"};
 const char *const kSharpenLabels[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+const char *const kDumpLabels[] = {"OFF", "PNG", "DDS"};
 
-enum Item { RESOLUTION, MSAA, SMAA, SHARPEN, AO, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, UPDATE, CHECK_UPDATES, CHOOSE_ISO, BUILD, PLAY, ITEM_COUNT };
+enum Item { RESOLUTION, MSAA, SMAA, SHARPEN, AO, WIDESCREEN, SURROUND, SKIP_INTRO, UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, TEXTURE_DUMP, UPDATE, CHECK_UPDATES, CHOOSE_ISO, BUILD, PLAY, ITEM_COUNT };
 // One row per Item, in Item order: its label, how many values it steps through and what it does.
 struct Row { const char *label; int count; const char *info; };
 const Row kRows[] = {
@@ -51,6 +53,7 @@ const Row kRows[] = {
     {"CPU COSTUMES", 2, "Random dresses CPU opponents in any unlocked costume; offline only"},
     {"FREE CAMERA", 2, "In game, F1 or a right-stick click flies the camera"},
     {"DEDICATION", 2, "Shows a memorial card before the staff roll"},
+    {"TEXTURE DUMP", static_cast<int>(std::size(kDumps)), "Writes each texture once to textures/dumps for editing"},
     {"UPDATE", 1, "Checks GitHub for a newer release and installs it"},
     {"CHECK AT START", 2, "Looks for a newer release when the launcher opens"},
     {"DISC 2 ISO", 1, ""}, // its information is the build status
@@ -65,7 +68,7 @@ const Page kPages[] = {
     {"GAME", "Starts the game, or builds it from your own Disc 2 ISO", {PLAY, CHOOSE_ISO, BUILD}},
     {"VIDEO", "Sets resolution, anti-aliasing, sharpening, occlusion, screen shape and the intro movies", {RESOLUTION, MSAA, SMAA, SHARPEN, AO, WIDESCREEN, SKIP_INTRO}},
     {"AUDIO", "Chooses stereo or the game's own 5.1 surround mix", {SURROUND}},
-    {"GAMEPLAY", "Chooses the unlocks, CPU costumes, free camera and dedication card", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION}},
+    {"GAMEPLAY", "Chooses unlocks, CPU costumes, free camera, dedication and texture dumps", {UNLOCKS, CPU_COSTUMES, FREE_CAMERA, DEDICATION, TEXTURE_DUMP}},
     {"UPDATE", "Checks GitHub for a newer release and installs it", {UPDATE, CHECK_UPDATES}},
 };
 constexpr int kPageCount = static_cast<int>(std::size(kPages)), kGamePage = 0, kUpdatePage = 4;
@@ -87,6 +90,7 @@ struct Settings {
     bool random_cpu_costumes = false;
     bool free_camera = false;
     bool dedication = true;
+    std::string texture_dump = "off"; // "off", "png" or "dds"
     std::string game_source; // the Disc 2 ISO the GAME page builds from, shared with the Windows launcher's key
 };
 
@@ -151,6 +155,7 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "freeCamera", value)) settings.free_camera = value == "true";
     if (jsonValue(text, "randomCpuCostumes", value)) settings.random_cpu_costumes = value == "true";
     if (jsonValue(text, "dedicationCard", value)) settings.dedication = value == "true";
+    jsonText(text, "textureDump", settings.texture_dump);
     jsonText(text, "game_source", settings.game_source);
     return settings;
 }
@@ -251,6 +256,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
     put("freeCamera", settings.free_camera ? "true" : "false");
     put("randomCpuCostumes", settings.random_cpu_costumes ? "true" : "false");
     put("dedicationCard", settings.dedication ? "true" : "false");
+    put("textureDump", std::string("\"") + settings.texture_dump + "\"");
     if (!settings.game_source.empty()) {
         std::string quoted = "\"";
         for (const char c : settings.game_source) {
@@ -374,6 +380,7 @@ struct Launcher {
         case UNLOCKS: return choice[item] ? "EARN" : "EVERYTHING";
         case CPU_COSTUMES: return choice[item] ? "RANDOM" : "DEFAULT";
         case DEDICATION: return choice[item] ? "HIDE" : "SHOW";
+        case TEXTURE_DUMP: return kDumpLabels[choice[item]];
         default: return choice[item] ? "ON" : "OFF";
         }
     }
@@ -858,6 +865,9 @@ int main(int argc, char **argv)
     launcher.choice[CPU_COSTUMES] = settings.random_cpu_costumes ? 1 : 0;
     launcher.choice[FREE_CAMERA] = settings.free_camera ? 1 : 0;
     launcher.choice[DEDICATION] = settings.dedication ? 0 : 1;
+    for (int i = 0; i < static_cast<int>(std::size(kDumps)); ++i) {
+        if (settings.texture_dump == kDumps[i]) launcher.choice[TEXTURE_DUMP] = i;
+    }
     launcher.row = launcher.built ? kPlayRow : kDiscRow;
     // A plain exit keeps an untouched 16x/32x MSAA or 21:9 shape; play saves what the rows show.
     const Settings loaded = settings;
@@ -995,6 +1005,7 @@ int main(int argc, char **argv)
         settings.random_cpu_costumes = launcher.choice[CPU_COSTUMES] != 0;
         settings.free_camera = launcher.choice[FREE_CAMERA] != 0;
         settings.dedication = launcher.choice[DEDICATION] == 0;
+        settings.texture_dump = kDumps[launcher.choice[TEXTURE_DUMP]];
         settings.game_source = launcher.game_source;
         if (result != 0) {
             if (launcher.choice[MSAA] == shown_msaa) settings.msaa = loaded.msaa;

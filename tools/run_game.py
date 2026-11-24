@@ -98,6 +98,8 @@ def saved_settings():
         options["msaa"] = saved["msaa"]
     if saved.get("sharpen") in ("off", "low", "medium", "high"):
         options["sharpen"] = saved["sharpen"]
+    if saved.get("textureDump") in ("png", "dds"):
+        options["dump_textures"] = saved["textureDump"]
     for key, option in (("ambientOcclusion", "ao"), ("smaa", "smaa"), ("widescreen", "widescreen"),
                         ("vrr", "vrr"), ("skipIntro", "skip_intro"),
                         ("surround", "surround"), ("unlockAll", "unlock_all"), ("vulkan", "vulkan"),
@@ -344,7 +346,7 @@ if __name__ == "__main__":
                              pick("free_camera", args.free_camera),
                              pick("random_cpu_costumes", args.random_cpu_costumes),
                              args.no_dedication_card, pick("framegen", args.framegen),
-                             args.dump_textures))
+                             pick("dump_textures", args.dump_textures)))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"Cannot run game: {error}", file=sys.stderr)
         raise SystemExit(1)
