@@ -552,10 +552,10 @@ final class LauncherView: NSView {
         }
 
         // Logo in the sky at the right, as in launcher.cs.
-        let right = w - 44, two = width("2", bigFont)
-        text("2", bigFont, chrome, NSRect(x: 0, y: 60, width: right, height: 74), .right, shadow: true, oblique: 0.2)
-        text("DEAD OR ALIVE", logoFont, chrome, NSRect(x: 0, y: 78, width: right - two - 8, height: 46), .right, shadow: true, oblique: 0.2)
-        text("ULTIMATE", ultimateFont, chrome, NSRect(x: 0, y: 124, width: right - 4, height: 30), .right, shadow: true)
+        let logoRight = w - 44, two = width("2", bigFont)
+        text("2", bigFont, chrome, NSRect(x: 0, y: 60, width: logoRight, height: 74), .right, shadow: true, oblique: 0.2)
+        text("DEAD OR ALIVE", logoFont, chrome, NSRect(x: 0, y: 78, width: logoRight - two - 8, height: 46), .right, shadow: true, oblique: 0.2)
+        text("ULTIMATE", ultimateFont, chrome, NSRect(x: 0, y: 124, width: logoRight - 4, height: 30), .right, shadow: true)
 
         // The settings panel: the page tabs, the chosen page's rows, then the information.
         rgb(13, 10, 9, 190).setFill()
