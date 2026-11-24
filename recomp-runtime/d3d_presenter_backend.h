@@ -42,7 +42,7 @@ bool d3d_backend_framegen_on(RecompD3dPresenter *presenter);
 /* Sends the frame's recorded GPU work before the presenter holds a PRESENT. */
 void d3d_backend_flush(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */
-void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen);
+void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen, bool ao);
 bool d3d_backend_quality_live();
 void d3d_backend_report_draw_textures();
 

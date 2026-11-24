@@ -51,9 +51,11 @@ keeps running.
   lifted program and HLSL shaders as Windows. A gamepad settings screen works
   in Steam Game Mode. See [building on macOS and Linux](docs/building.md).
 - **Native renderer.** Direct3D 11, Direct3D 12 or Vulkan through SDL_GPU, at 480p to 4K, the game's own 16:9
-  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9, the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12), SMAA Ultra and AMD FidelityFX CAS sharpening. Water
-  reflections render at the output resolution; bloom and lighting follow the
-  game's own passes.
+  widescreen camera and menus (the 3D view also widened to 16:10, 21:9 or 32:9,
+  the HUD and menus kept 16:9), MSAA up to 32x (8x on Vulkan and Direct3D 12),
+  SMAA Ultra, AMD FidelityFX CAS sharpening and an opt-in screen-space ambient
+  occlusion pass. Water reflections render at the output resolution; bloom and
+  lighting follow the game's own passes.
 - **Xbox-like pacing.** Frames flip on the next refresh as on the Xbox, at
   60 fps, including heavy rain-stage fights at 4K. **VRR: On** is for G-SYNC
   or FreeSync displays and tears on fixed-refresh ones; it is not yet verified
@@ -71,9 +73,9 @@ keeps running.
   anywhere, freeze the scene, hide the HUD and save screenshots. Turn it on in
   the launcher; see [free camera](docs/free-camera.md).
 - **Launcher.** `Launcher.exe` picks resolution, anti-aliasing, sharpening,
-  widescreen, the renderer, VRR, an optional intro-movie skip, 5.1 surround,
-  the unlock setting, random CPU costumes, the free camera and the staff-roll
-  dedication card, and remembers them. `DOA2U.exe` plays with the same choices. On release
+  ambient occlusion, widescreen, the renderer, VRR, an optional intro-movie
+  skip, 5.1 surround, the unlock setting, random CPU costumes, the free camera
+  and the staff-roll dedication card, and remembers them. `DOA2U.exe` plays with the same choices. On release
   ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
   for a newer release and install it from its **UPDATE** page; **Check At
   Start** turns the start-up check off.
@@ -84,8 +86,8 @@ keeps running.
   HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
   **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
   **KO Replay** change at once, and so do **Resolution**, **MSAA**,
-  **SMAA** and **Sharpening**, on any renderer; the others say they apply the
-  next time the game starts. Leaving the page saves them for the launcher too.
+  **SMAA**, **Sharpening** and **Ambient Occlusion**, on any renderer; the
+  others say they apply the next time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
   shows under the game's own hit counter, and while a fighter is in a
   critical stun their life bar darkens the damage left before the stun
@@ -220,6 +222,7 @@ keeps running.
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
 | CAS sharpening | New, chosen in the launcher or PC SETTINGS; seen on the title screen on Direct3D 11 and Vulkan, and the presenter tests pass on Direct3D 12 too; not yet played through or tried on Metal |
+| Ambient occlusion | New and off by default, chosen in the launcher or PC SETTINGS; darkens creases and contact areas of the 3D scene only, never the HUD, menus or effects drawn after it. Seen in the attract demo on Direct3D 11, and the presenter tests pass on Vulkan and Direct3D 12 too; not yet played through or tried on Metal |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |
@@ -380,7 +383,7 @@ accepts the registry path as its first argument. Names outside
 `--seconds <n>` runs a bounded probe instead of `--play`:
 
 ```powershell
-python tools/run_game.py --play --resolution 2160 --widescreen --msaa 32 --smaa --sharpen medium
+python tools/run_game.py --play --resolution 2160 --widescreen --msaa 32 --smaa --sharpen medium --ao
 python tools/run_game.py --play --no-widescreen --msaa 1 --no-smaa --sharpen off
 python tools/run_game.py --play --resolution 1440 --screen 3440:1440
 ```
@@ -401,7 +404,9 @@ window is resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; **Sharpening** adds AMD FidelityFX CAS after
 anti-aliasing, from **Off** through **Low**, **Medium** and **High**
 (`--sharpen off|low|medium|high`, or `RECOMP_D3D_SHARPEN=0`, `0.3`, `0.6` or
-`1`). Unsupported MSAA counts fall back to the
+`1`). **Ambient occlusion** (`--ao`, or `RECOMP_D3D_AO=1`) darkens creases and
+contact areas of the 3D scene; it runs before the HUD and screen effects, so
+they stay as the game drew them, and it is off by default. Unsupported MSAA counts fall back to the
 highest count the GPU supports. Options passed to `run_game.py` bypass the settings
 window. The build fetches pinned, hash-verified copies of SDL3,
 [upstream SMAA](https://github.com/iryoku/smaa) and

@@ -2,8 +2,8 @@
 // Windows launcher, built twice by tools/package_test.py with the C# compiler
 // every Windows ships (.NET Framework 4):
 //   Launcher.exe builds the game from your Disc 2 ISO, picks resolution,
-//     anti-aliasing, SMAA, sharpening, widescreen, the renderer (Direct3D 11,
-//     Vulkan or Direct3D 12), VRR, the frame rate, the
+//     anti-aliasing, SMAA, sharpening, ambient occlusion, widescreen, the
+//     renderer (Direct3D 11, Vulkan or Direct3D 12), VRR, the frame rate, the
 //     intro skip, 5.1 surround, the free camera and texture dumping, remembers them in
 //     private\launcher.json, then plays. An ISO dropped on it, or chosen on
 //     the GAME page, starts the build.
@@ -286,7 +286,7 @@ class LauncherForm : Form
     const int W = 960, H = 540, TopH = 44, Side = 30, FadeY = 334;
     const int PanelW = 480, Inset = 20, TabY = TopH + 12, TabH = 26, ListY = TabY + TabH + 18, RowH = 36, InfoY = H - 64;
 
-    readonly Row resolution, msaa, smaa, sharpen, screen, renderer, vrr, frameRate, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, textureDump, chooseGame, updateRow, checkAtStart;
+    readonly Row resolution, msaa, smaa, sharpen, ao, screen, renderer, vrr, frameRate, surround, voiceSetting, intro, unlock, cpuCostumes, freeCamera, dedication, textureDump, chooseGame, updateRow, checkAtStart;
     readonly Page[] pages;
     // The menu cursor picks a page, the row cursor a row on it; focus is on that row, or on the tabs when not inPage.
     int menu, row;
@@ -353,6 +353,7 @@ class LauncherForm : Form
         sharpen = new Row { Label = "Sharpening", Info = "Sharpens the picture with AMD FidelityFX CAS after anti-aliasing",
             Names = new[] { "Off", "Low", "Medium", "High" }, Default = 0,
             Index = Math.Max(0, Array.IndexOf(Sharpens, Game.Str(settings, "sharpen", "off"))) };
+        ao = Choice("Ambient Occlusion", "Darkens creases and contact areas; off leaves the picture as the game drew it", new[] { "Off", "On" }, Game.Bool(settings, "ambientOcclusion", false), 0);
         int savedScreen = Array.IndexOf(Screens, Game.ScreenShape(settings)); // -1: a 21:9 "W:H"
         screen = new Row { Label = "Screen", Info = "Widescreen widens the game's own camera; its 16:9 menus keep their shape",
             Names = Screens, Index = savedScreen >= 0 ? savedScreen : 3, Default = 1 };
@@ -389,7 +390,7 @@ class LauncherForm : Form
         importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3 or 4 ISO to add its music; DOA4 adds the hit voices too", Action = "import" };
         pages = new[] {
             new Page { Name = "GAME", Info = BuildStatus(), Rows = new[] { new Row { Label = "Start Game", Info = "Saves these settings and starts the game", Action = "play" }, chooseGame, buildRow } },
-            new Page { Name = "VIDEO", Info = "Sets resolution, anti-aliasing, sharpening, screen shape, renderer, VRR, frame rate and the intro movies", Rows = PageRows(resolution, msaa, smaa, sharpen, screen, renderer, vrr, frameRate, intro) },
+            new Page { Name = "VIDEO", Info = "Sets resolution, anti-aliasing, sharpening, ambient occlusion, screen shape, renderer, VRR, frame rate and the intro movies", Rows = PageRows(resolution, msaa, smaa, sharpen, ao, screen, renderer, vrr, frameRate, intro) },
             new Page { Name = "AUDIO", Info = "Choose the output, import DOA4 hit voices from your ISO, or edit your clips",
                 Rows = PageRows(surround, voiceSetting,
                     new Row { Label = "Import DOA4 Voices", Info = "Choose your Dead or Alive 4 ISO; your existing clip selections are kept", Action = "voices" },
@@ -497,6 +498,7 @@ class LauncherForm : Form
         return new Dictionary<string, object> {
             { "height", Heights[resolution.Index] }, { "msaa", Samples[msaa.Index] }, { "smaa", smaa.Index == 1 },
             { "sharpen", Sharpens[sharpen.Index] },
+            { "ambientOcclusion", ao.Index == 1 },
             { "widescreen", screen.Index != 0 }, { "screen", screen.Index == 3 ? Game.UltrawideShape() : Screens[screen.Index] },
             { "vulkan", renderer.Index != 0 }, { "d3d12", renderer.Index == 2 }, { "vrr", vrr.Index == 1 }, { "frameRate", frameRate.Index == 1 ? "display" : "original" }, { "skipIntro", intro.Index == 1 }, { "surround", surround.Index == 1 }, { "unlockAll", unlock.Index == 0 },
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 }, { "textureDump", Dumps[textureDump.Index] },
