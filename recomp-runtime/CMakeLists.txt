@@ -599,6 +599,23 @@ set_source_files_properties(texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" PROPERTI
 add_executable(recomp_texture_upscale_test texture_upscale.cpp "${_xbrz_dir}/xbrz.cpp" texture_upscale_test.cpp)
 target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
 add_test(NAME recomp-runtime-texture-upscale COMMAND recomp_texture_upscale_test)
+# Texture packs (texture_pack.cpp): edited images replace a guest texture and
+# RECOMP_TEXTURE_DUMP writes dumps, in the same names DOA2U-XBERecomp uses.
+add_library(recomp_texture_pack STATIC texture_pack.cpp)
+target_include_directories(recomp_texture_pack PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_texture_pack)
+if(WIN32)
+    target_link_libraries(recomp_d3d_presenter PUBLIC recomp_texture_pack)
+    target_link_libraries(recomp_texture_pack PUBLIC SDL3::SDL3)
+else()
+    recomp_use_sdl3(recomp_texture_pack)
+endif()
+if(WIN32 OR SDL3_FOUND)
+    add_executable(recomp_texture_pack_test texture_pack_test.cpp d3d_texture_model.c)
+    target_link_libraries(recomp_texture_pack_test PRIVATE recomp_texture_pack)
+    recomp_use_sdl3(recomp_texture_pack_test)
+    add_test(NAME recomp-runtime-texture-pack COMMAND recomp_texture_pack_test)
+endif()
 if(WIN32)
     # Tests tell the SDL_GPU presenter from the Direct3D 11 one.
     target_compile_definitions(${_sdl_gpu_presenter} PUBLIC RECOMP_PRESENTER_SDL_GPU)

@@ -164,9 +164,10 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_AUDIO_SURROUND"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_FREE_CAMERA"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_RANDOM_CPU_COSTUMES"], "1")
-                self.assertEqual(run(None, vrr=True, framegen=True), 0)
+                self.assertEqual(run(None, vrr=True, framegen=True, dump_textures="png"), 0)
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_VRR"], "1")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_D3D_FRAMEGEN"], "1")
+                self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_TEXTURE_DUMP"], "png")
                 self.assertEqual(execute.call_args.kwargs["env"]["RECOMP_LAUNCHER_SETTINGS"],
                                  str(root / "private/launcher.json"))
                 # The shader cache follows the root like every other private path.

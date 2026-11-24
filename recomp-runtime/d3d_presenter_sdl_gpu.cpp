@@ -22,6 +22,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_sdl_gpu.h"
 #include "screenshot.h"
+#include "texture_pack.h"
 #include "texture_upscale.h"
 #include "widescreen.h"
 #include "xapi_time_adapter.h"
@@ -977,6 +978,31 @@ bool isSwizzledTextureFormat(uint32_t format_byte)
         format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8 || format_byte == 0x28u;
 }
 
+/* The formats a texture pack may replace: those whose host texture keeps the
+   guest's colours. shortcut: A8 and V8U8 stay the game's (their host formats
+   are A8_UNORM and R8G8_SNORM, so a BGRA replacement would sample wrong);
+   include them once a pack can carry those formats. */
+bool texturePackFormat(uint32_t format_byte)
+{
+    return format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ||
+        format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 ||
+        format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5 ||
+        format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8 ||
+        format_byte == RECOMP_D3D_TEXTURE_FORMAT_P8;
+}
+
+/* Level 0 bytes as the guest stores them: the key's input. */
+uint32_t texturePackLevel0Bytes(const RecompD3dTextureDesc &desc)
+{
+    if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1)
+        return (std::max)(1u, (desc.width + 3u) / 4u) * (std::max)(1u, (desc.height + 3u) / 4u) * 8u;
+    if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 ||
+        desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5)
+        return (std::max)(1u, (desc.width + 3u) / 4u) * (std::max)(1u, (desc.height + 3u) / 4u) * 16u;
+    return desc.width * desc.height *
+        (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_P8 ? 1u : 4u);
+}
+
 /* Uploads one region of bytes, rows packed at pixels_per_row texels. They stage
    in one transfer buffer, cycled when it is full: a stage change uploads
    hundreds of mip levels in one frame, and a transfer buffer for each took
@@ -1212,6 +1238,96 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
         return nullptr;
     }
 
+    /* The key is only worth hashing when a pack can change the result. */
+    uint64_t pack_key = 0u;
+    if ((recomp_texture_pack_replacing() || recomp_texture_pack_dumping()) &&
+        texturePackFormat(desc.format_byte) && !volume && !desc.linear && !desc.depth &&
+        !desc.render_target && (!palettized || draw.palette_bytes != nullptr)) {
+        const uint32_t level0 = texturePackLevel0Bytes(desc);
+        if (level0 != 0u && level0 <= draw.texture_byte_count)
+            pack_key = recomp_texture_pack_key(desc.format_byte, desc.width, desc.height,
+                draw.texture_bytes, level0, palettized ? draw.palette_bytes : nullptr);
+    }
+
+    const auto storeTexture = [&](SDL_GPUTexture *created) -> SDL_GPUTexture * {
+        // ponytail: FIFO eviction; track recent use if upload churn is costly.
+        const uint32_t slot = presenter->next_texture_slot;
+        TextureEntry &entry = presenter->textures[slot];
+        if (entry.used) unindexTexture(presenter, slot);
+        retireTexture(presenter, entry.texture);
+        presenter->next_texture_slot = (presenter->next_texture_slot + 1u) % kTextureSlots;
+        if (presenter->texture_count < kTextureSlots) ++presenter->texture_count;
+        entry.used = true;
+        entry.data = desc.data;
+        entry.format_byte = desc.format_byte;
+        entry.width = desc.width;
+        entry.height = desc.height;
+        entry.volume_depth = desc.volume_depth;
+        entry.mip_levels = levels;
+        if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
+        entry.fingerprint = fingerprint;
+        entry.scale = scale;
+        entry.texture = created;
+        presenter->texture_index.emplace(desc.data, slot);
+        return created;
+    };
+
+    /* A replacement image wins over the guest copy and over xBRZ. A PNG gets
+       a generated host mip chain; a DDS keeps the levels it carries. */
+    if (pack_key != 0u) {
+        RecompTexturePackImage replacement;
+        if (recomp_texture_pack_find(pack_key, replacement) && !replacement.levels.empty() &&
+            replacement.width != 0u && replacement.height != 0u) {
+            SDL_GPUTextureFormat replacement_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+            switch (replacement.format) {
+            case RECOMP_TEXTURE_PACK_BGRA8: replacement_format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC1: replacement_format = SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC2: replacement_format = SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM; break;
+            case RECOMP_TEXTURE_PACK_BC3: replacement_format = SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM; break;
+            }
+            if (replacement_format != SDL_GPU_TEXTUREFORMAT_INVALID &&
+                replacement.width <= kMaxTextureSize && replacement.height <= kMaxTextureSize) {
+                uint32_t pack_levels = static_cast<uint32_t>(replacement.levels.size());
+                if (replacement.generate_mips) {
+                    pack_levels = 1u;
+                    while ((std::max(replacement.width, replacement.height) >> pack_levels) != 0u)
+                        ++pack_levels;
+                }
+                SDL_GPUTexture *pack_texture = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+                    replacement_format, replacement.generate_mips
+                        ? SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET
+                        : SDL_GPU_TEXTUREUSAGE_SAMPLER,
+                    replacement.width, replacement.height, 1u, pack_levels);
+                if (pack_texture != nullptr) {
+                    bool uploaded = true;
+                    if (replacement.generate_mips) {
+                        uploaded = uploadTexture(presenter, pack_texture,
+                            replacement.levels[0].bytes.data(),
+                            static_cast<uint32_t>(replacement.levels[0].bytes.size()), 0u,
+                            replacement.width, replacement.height);
+                        if (uploaded && pack_levels > 1u)
+                            SDL_GenerateMipmapsForGPUTexture(commandBuffer(presenter), pack_texture);
+                    } else {
+                        for (uint32_t level = 0u; level < pack_levels && uploaded; ++level) {
+                            const uint32_t width = std::max(replacement.width >> level, 1u);
+                            const uint32_t height = std::max(replacement.height >> level, 1u);
+                            uploaded = uploadTexture(presenter, pack_texture,
+                                replacement.levels[level].bytes.data(),
+                                static_cast<uint32_t>(replacement.levels[level].bytes.size()),
+                                level, width, height);
+                        }
+                    }
+                    if (uploaded) return storeTexture(pack_texture);
+                    SDL_ReleaseGPUTexture(presenter->device, pack_texture);
+                }
+            }
+        }
+    }
+
+    if (pack_key != 0u && recomp_texture_pack_dumping())
+        recomp_texture_pack_dump(pack_key, desc.format_byte, desc.width, desc.height, levels,
+            draw.texture_bytes, draw.texture_byte_count, palettized ? draw.palette_bytes : nullptr);
+
     std::vector<uint8_t> unpacked;
     /* Decodes one guest level into host order: its texels, rows packed. */
     const auto decodeLevel = [&](uint32_t level, std::vector<uint8_t> &texels,
@@ -1314,26 +1430,7 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
         return nullptr;
     }
 
-    // ponytail: FIFO eviction; track recent use if upload churn is costly.
-    const uint32_t slot = presenter->next_texture_slot;
-    TextureEntry &entry = presenter->textures[slot];
-    if (entry.used) unindexTexture(presenter, slot);
-    retireTexture(presenter, entry.texture);
-    presenter->next_texture_slot = (presenter->next_texture_slot + 1u) % kTextureSlots;
-    if (presenter->texture_count < kTextureSlots) ++presenter->texture_count;
-    entry.used = true;
-    entry.data = desc.data;
-    entry.format_byte = desc.format_byte;
-    entry.width = desc.width;
-    entry.height = desc.height;
-    entry.volume_depth = desc.volume_depth;
-    entry.mip_levels = levels;
-    if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
-    entry.fingerprint = fingerprint;
-    entry.scale = scale;
-    entry.texture = texture;
-    presenter->texture_index.emplace(desc.data, slot);
-    return texture;
+    return storeTexture(texture);
 }
 
 /* ---- Shaders and pipelines ------------------------------------------------ */
