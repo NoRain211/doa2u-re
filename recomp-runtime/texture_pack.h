@@ -42,6 +42,11 @@ void recomp_texture_pack_configure(const std::string &textures_folder);
 bool recomp_texture_pack_replacing();
 bool recomp_texture_pack_dumping();
 
+/* The guest's level 0 byte count, the key's input: 0 for a format this pack
+   does not handle or a side over 16384. */
+uint32_t recomp_texture_pack_level0_bytes(uint32_t format_byte, uint32_t width,
+    uint32_t height);
+
 /* The key of a guest texture's level 0 bytes, its size and format, and a P8
    texture's 256-colour palette. 0 for a format this pack does not handle. */
 uint64_t recomp_texture_pack_key(uint32_t format_byte, uint32_t width, uint32_t height,
@@ -50,6 +55,10 @@ uint64_t recomp_texture_pack_key(uint32_t format_byte, uint32_t width, uint32_t 
 /* True and fills out when the key names a replacement image. A file that does
    not load is not tried again this session. */
 bool recomp_texture_pack_find(uint64_t key, RecompTexturePackImage &out);
+
+/* The presenter could not create the replacement found for key: use the guest
+   texture for the rest of the session. */
+void recomp_texture_pack_reject(uint64_t key);
 
 /* Writes the key once this session as PNG or DDS, unless a replacement holds
    it. `guest` is the level 0 bytes then each next level, as the presenter

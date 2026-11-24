@@ -63,7 +63,11 @@ int main()
         0x643b87b7d9d7592eull);
 
     /* Names */
-    expect("name", recomp_texture_pack_file_name(0x0cu, 256u, 256u, 0x90b9f6d015002a1cull, "png") ==
+    expect("DXT1 level 0", recomp_texture_pack_level0_bytes(0x0cu, 8u, 8u) == 32u);
+    expect("P8 level 0", recomp_texture_pack_level0_bytes(0x0bu, 4u, 2u) == 8u);
+    expect("A8 not packed", recomp_texture_pack_level0_bytes(0x19u, 4u, 4u) == 0u);
+    expect("oversized", recomp_texture_pack_level0_bytes(0x06u, 32768u, 32768u) == 0u);
+    expect("name",recomp_texture_pack_file_name(0x0cu, 256u, 256u, 0x90b9f6d015002a1cull, "png") ==
         "256x256_90b9f6d015002a1c_DXT1.png");
     expect("key in name",
         recomp_texture_pack_key_in_name("256x256_90b9f6d015002a1c_DXT1.png") == 0x90b9f6d015002a1cull);
@@ -127,6 +131,8 @@ int main()
     expect("BGRA replacement", recomp_texture_pack_find(bgra_key, image) &&
         image.format == RECOMP_TEXTURE_PACK_BGRA8 && image.levels.size() == 1u &&
         image.levels[0].bytes == bgra);
+    recomp_texture_pack_reject(bgra_key);
+    expect("rejected replacement", !recomp_texture_pack_find(bgra_key, image));
 
     /* The same through PNG, which also gets a generated host mip chain. */
     setDump("png");

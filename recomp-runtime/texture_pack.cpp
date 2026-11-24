@@ -87,6 +87,10 @@ const char *formatName(uint32_t format_byte)
     }
 }
 
+/* The formats a pack may replace: those whose host texture keeps the guest's
+   colours. shortcut: A8 and V8U8 stay the game's (their host formats are
+   A8_UNORM and R8G8_SNORM, so a BGRA replacement would sample wrong);
+   include them once a pack can carry those formats. */
 bool packedFormat(uint32_t format_byte)
 {
     return format_byte == 0x06u || format_byte == 0x0bu || format_byte == 0x0cu ||
@@ -479,7 +483,8 @@ bool decodeGuest(const void *guest, size_t guest_bytes, uint32_t format_byte, ui
     uint32_t height, uint32_t levels, const void *palette, bool all_levels,
     RecompTexturePackImage &image)
 {
-    if (guest == nullptr || width == 0u || height == 0u || levels == 0u) return false;
+    if (guest == nullptr || width == 0u || height == 0u || levels == 0u ||
+        width > kMaxSide || height > kMaxSide) return false;
     const auto *source = static_cast<const uint8_t *>(guest);
     image = {};
     image.width = width;
@@ -545,6 +550,7 @@ struct State {
     bool dds = false;
     std::unordered_map<uint64_t, fs::path> files;
     std::unordered_set<uint64_t> failed;
+    std::unordered_set<uint64_t> logged;
     std::unordered_set<uint64_t> dumped;
     std::mutex lock;  // files is read-only after configure; the rest changes
 };
@@ -566,6 +572,7 @@ void recomp_texture_pack_configure(const std::string &textures_folder)
     s.dumps = root / "dumps";
     s.files.clear();
     s.failed.clear();
+    s.logged.clear();
     s.dumped.clear();
     s.dumping = false;
     s.dds = false;
@@ -608,6 +615,14 @@ bool recomp_texture_pack_dumping()
     return state().dumping;
 }
 
+uint32_t recomp_texture_pack_level0_bytes(uint32_t format_byte, uint32_t width,
+    uint32_t height)
+{
+    if (!packedFormat(format_byte) || width == 0u || height == 0u || width > kMaxSide ||
+        height > kMaxSide) return 0u;
+    return levelBytes(format_byte, width, height);
+}
+
 uint64_t recomp_texture_pack_key(uint32_t format_byte, uint32_t width, uint32_t height,
     const void *level0, size_t level0_bytes, const void *palette)
 {
@@ -630,8 +645,9 @@ bool recomp_texture_pack_find(uint64_t key, RecompTexturePackImage &out)
     }
     RecompTexturePackImage image;
     const std::string extension = lowerAscii(path.extension().u8string());
-    /* shortcut: load on the presenter thread; an async worker like the other
-       port's if a large PNG ever hitches the frame. */
+    /* shortcut: load on the presenter thread, again whenever the presenter
+       evicts and rebuilds the texture; an async worker and a decoded-image
+       cache like the other port's if a large PNG ever hitches the frame. */
     const bool ok = extension == ".dds" ? readDds(path, image) : readPng(path, image);
     if (!ok) {
         std::lock_guard<std::mutex> lock(s.lock);
@@ -641,10 +657,25 @@ bool recomp_texture_pack_find(uint64_t key, RecompTexturePackImage &out)
         }
         return false;
     }
-    std::fprintf(stderr, "recomp texture pack: %s replaces %016llx\n", pathText(path).c_str(),
-        static_cast<unsigned long long>(key));
+    {
+        std::lock_guard<std::mutex> lock(s.lock);
+        if (s.logged.insert(key).second) {
+            std::fprintf(stderr, "recomp texture pack: %s replaces %016llx\n",
+                pathText(path).c_str(), static_cast<unsigned long long>(key));
+        }
+    }
     out = std::move(image);
     return true;
+}
+
+void recomp_texture_pack_reject(uint64_t key)
+{
+    State &s = state();
+    std::lock_guard<std::mutex> lock(s.lock);
+    if (s.failed.insert(key).second) {
+        std::fprintf(stderr, "recomp texture pack: %016llx did not upload; using the guest texture\n",
+            static_cast<unsigned long long>(key));
+    }
 }
 
 void recomp_texture_pack_dump(uint64_t key, uint32_t format_byte, uint32_t width,

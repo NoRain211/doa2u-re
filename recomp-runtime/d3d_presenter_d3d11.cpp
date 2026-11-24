@@ -2282,31 +2282,6 @@ bool isSwizzledTextureFormat(uint32_t format_byte)
         format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8 || format_byte == 0x28u;
 }
 
-/* The formats a texture pack may replace: those whose host texture keeps the
-   guest's colours. shortcut: A8 and V8U8 stay the game's (their host formats
-   are A8_UNORM and R8G8_SNORM, so a BGRA replacement would sample wrong);
-   include them once a pack can carry those formats. */
-bool texturePackFormat(uint32_t format_byte)
-{
-    return format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ||
-        format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 ||
-        format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5 ||
-        format_byte == RECOMP_D3D_TEXTURE_FORMAT_A8R8G8B8 ||
-        format_byte == RECOMP_D3D_TEXTURE_FORMAT_P8;
-}
-
-/* Level 0 bytes as the guest stores them: the key's input. */
-uint32_t texturePackLevel0Bytes(const RecompD3dTextureDesc &desc)
-{
-    if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1)
-        return (std::max)(1u, (desc.width + 3u) / 4u) * (std::max)(1u, (desc.height + 3u) / 4u) * 8u;
-    if (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT3 ||
-        desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT5)
-        return (std::max)(1u, (desc.width + 3u) / 4u) * (std::max)(1u, (desc.height + 3u) / 4u) * 16u;
-    return desc.width * desc.height *
-        (desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_P8 ? 1u : 4u);
-}
-
 /* Draw-time tally of the formats a draw actually sampled, keyed by format
    byte, plus how many draws wanted a texture and got none. */
 struct DrawTextureTally {
@@ -2641,9 +2616,10 @@ ID3D11ShaderResourceView *lookupTexture(
     /* The key is only worth hashing when a pack can change the result. */
     uint64_t pack_key = 0u;
     if ((recomp_texture_pack_replacing() || recomp_texture_pack_dumping()) &&
-        texturePackFormat(desc.format_byte) && !volume && !desc.linear && !desc.depth &&
+        !volume && !desc.linear && !desc.depth &&
         !desc.render_target && (!palettized || draw.palette_bytes != nullptr)) {
-        const uint32_t level0 = texturePackLevel0Bytes(desc);
+        const uint32_t level0 =
+            recomp_texture_pack_level0_bytes(desc.format_byte, desc.width, desc.height);
         if (level0 != 0u && level0 <= draw.texture_byte_count)
             pack_key = recomp_texture_pack_key(desc.format_byte, desc.width, desc.height,
                 draw.texture_bytes, level0, palettized ? draw.palette_bytes : nullptr);
@@ -2734,6 +2710,7 @@ ID3D11ShaderResourceView *lookupTexture(
                     releaseCom(pack_view);
                 }
             }
+            recomp_texture_pack_reject(pack_key);
         }
     }
 
