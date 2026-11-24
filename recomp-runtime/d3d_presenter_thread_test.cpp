@@ -3649,15 +3649,13 @@ static bool testAmbientOcclusion(bool live)
     };
     bool passed = run(off_path, "1", "0", false);
     passed &= run(on_path, live ? "3" : "1", "1", live);
-#ifdef RECOMP_TEST_D3D11
-    /* Direct3D 11 reads sample 0 of its multisampled depth; the crease darkens
-       the same way with MSAA on. SDL_GPU has no MSAA depth to sample. */
+    /* With MSAA on, the crease darkens the same way: Direct3D 11 reads sample 0
+       of its depth, SDL_GPU the resolved copy its draws wrote. */
     if (!live) {
         _putenv_s("RECOMP_D3D_MSAA", "4");
         passed &= run(msaa_path, "1", "1", false);
         _putenv_s("RECOMP_D3D_MSAA", "");
     }
-#endif
     std::vector<unsigned char> off, on;
     passed &= readFrame(off_path, off) && readFrame(on_path, on);
     const auto at = [](const std::vector<unsigned char> &pixels, unsigned x, unsigned y) {
@@ -3667,6 +3665,7 @@ static bool testAmbientOcclusion(bool live)
     const unsigned flat_off = at(off, 160, 120), flat_on = at(on, 160, 120);
     const unsigned floor_off = at(off, 280, 175), floor_on = at(on, 280, 175);
     const unsigned band_off = at(off, 160, 50), band_on = at(on, 160, 50);
+    unsigned crease_msaa = 0u, flat_msaa = 0u, floor_msaa = 0u;
     const auto close = [](unsigned a, unsigned b) { return a + 2u >= b && a <= b + 2u; };
     if (live) {
         // A quality request turns it off by the third frame: back to baseline.
@@ -3676,11 +3675,12 @@ static bool testAmbientOcclusion(bool live)
         passed &= crease_on + 8u < crease_off;  // the crease darkens
         passed &= close(flat_on, flat_off) && close(floor_on, floor_off);  // open surfaces stay
         passed &= band_on == band_off && band_off > 200u;  // the later 2D layer is untouched
-#ifdef RECOMP_TEST_D3D11
-        // The same scene with 4x MSAA reads the scene depth's sample 0.
         std::vector<unsigned char> msaa;
-        passed &= readFrame(msaa_path, msaa) && framePixel(msaa, 160, 157) + 8u < crease_off;
-#endif
+        passed &= readFrame(msaa_path, msaa);
+        // Direct3D 11 reads depth sample 0, off the pixel centre, so the crease may move a pixel.
+        crease_msaa = 255u, flat_msaa = at(msaa, 160, 120), floor_msaa = at(msaa, 280, 175);
+        for (unsigned y = 153u; y <= 161u; ++y) if (at(msaa, 160, y) < crease_msaa) crease_msaa = at(msaa, 160, y);
+        passed &= crease_msaa + 8u < crease_off && close(flat_msaa, flat_off) && close(floor_msaa, floor_off);
     }
     _putenv_s("RECOMP_D3D_AO", "");
     _putenv_s("RECOMP_D3D_FRAME_DUMP", "");
@@ -3689,9 +3689,9 @@ static bool testAmbientOcclusion(bool live)
     DeleteFileA(off_path);
     DeleteFileA(msaa_path);
     std::fprintf(passed ? stdout : stderr,
-        "%s ambient occlusion live=%d crease %u->%u flat %u->%u floor %u->%u band %u->%u\n",
+        "%s ambient occlusion live=%d crease %u->%u flat %u->%u floor %u->%u band %u->%u msaa %u/%u/%u\n",
         passed ? "PASS" : "FAIL", live, crease_off, crease_on, flat_off, flat_on, floor_off, floor_on,
-        band_off, band_on);
+        band_off, band_on, crease_msaa, flat_msaa, floor_msaa);
     return passed;
 }
 

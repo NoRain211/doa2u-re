@@ -245,7 +245,7 @@ struct PipelineKey {
     int32_t depth_bias;
     float slope_bias;
     uint8_t coverage_only;
-    uint8_t count_pass, cover_pass;
+    uint8_t count_pass, cover_pass, depth_copy;
     uint8_t depth_test, depth_write, depth_func;
     uint8_t stencil_enable, stencil_read, stencil_write, stencil_func;
     uint8_t stencil_fail, stencil_zfail, stencil_pass;
@@ -303,6 +303,7 @@ struct QueuedDraw {
 struct Segment {
     SDL_GPUTexture *color = nullptr;
     SDL_GPUTexture *depth = nullptr;
+    SDL_GPUTexture *depth_copy = nullptr;  // a second color target: aoDepthCopy
     std::vector<uint8_t> vertex_data;
     std::vector<uint8_t> index_data;
     std::vector<float> uniform_data;
@@ -425,7 +426,8 @@ struct RecompD3dPresenter {
     bool smaa = false;  // RECOMP_D3D_SMAA: post-process the output
     float sharpen = 0.0f;  // RECOMP_D3D_SHARPEN: CAS sharpness in the gamma pass, 0 for off
     /* RECOMP_D3D_AO: screen-space ambient occlusion (d3d_ao.h). SDL_GPU cannot
-       sample a multisampled depth target, so it runs at 1x. */
+       sample or resolve a multisampled depth target, so with MSAA the main
+       target's draws also write their depth to ao_copy (aoDepthCopy). */
     bool ao = false;
     bool ao_scene = false;   // this frame drew depth-tested geometry into the main target
     bool ao_done = false;    // the frame's occlusion has been baked into the main target
@@ -435,6 +437,9 @@ struct RecompD3dPresenter {
     SDL_GPUGraphicsPipeline *ao_blur_pipeline = nullptr;
     SDL_GPUGraphicsPipeline *ao_apply_pipeline = nullptr;
     SDL_GPUTexture *ao_texture[2]{};  // half size: occlusion, blurred
+    SDL_GPUTexture *ao_copy = nullptr;           // R32_FLOAT at the main samples
+    SDL_GPUTexture *ao_copy_resolved = nullptr;  // ao_copy resolved, what occlusion reads
+    bool ao_copy_failed = false;
     uint32_t ao_width = 0u, ao_height = 0u;
     SDL_GPUGraphicsPipeline *smaa_pipelines[3]{};  // edges, weights, blend
     SDL_GPUTexture *smaa_textures[5]{};  // edges, area, search, weights, output
@@ -675,6 +680,10 @@ void applyQuality(RecompD3dPresenter *presenter);
 void aoDrawBoundary(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
     const RecompD3dVertexLayout &layout);
 bool runAo(RecompD3dPresenter *presenter);
+// d3d_ao_sdl.h: ambient occlusion's depth copy with MSAA.
+void releaseAoCopy(RecompD3dPresenter *presenter);
+SDL_GPUTexture *aoDepthCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth);
+bool aoDepthCopySource(std::string &hlsl);
 void clearTexture(RecompD3dPresenter *presenter, SDL_GPUTexture *color, const SDL_FColor *clear_color,
     SDL_GPUTexture *depth, const float *clear_depth, const uint8_t *clear_stencil);
 
@@ -1404,8 +1413,10 @@ SDL_GPUShader *createShader(RecompD3dPresenter *presenter, const std::string &hl
 
 /* What a draw shader returns: its color, or for occlusion counting one per
    fragment that survives its discards, or for frame generation's HUD mask
-   (queueCover) how much of the scene the fragment hides. */
-enum DrawOutput : uint8_t { kOutputShaded, kOutputOne, kOutputAlpha, kOutputLight, kOutputLightAlpha };
+   (queueCover) how much of the scene the fragment hides, or its color with
+   the depth it writes in a second target (aoDepthCopy). */
+enum DrawOutput : uint8_t { kOutputShaded, kOutputOne, kOutputAlpha, kOutputLight, kOutputLightAlpha,
+    kOutputDepthCopy };
 
 /* The draw shader's HLSL for one key and output, with SDL_GPU's bindings and
    the defines the host compile needs. A GPU device is not needed to build it,
@@ -1424,7 +1435,7 @@ bool drawShaderSource(const RecompD3dDrawShaderKey &draw_key, uint8_t output, ui
     hlsl = recomp_shader_draw_bindings(hlsl);
     if (target == RecompShaderTarget::Msl) hlsl = recomp_shader_emulate_sampler_bias(hlsl);
     if (target == RecompShaderTarget::Dxil) hlsl = recomp_shader_keep_interpolants(hlsl);
-    if (output != kOutputShaded) {
+    if (output != kOutputShaded && output != kOutputDepthCopy) {
         static const std::string result = "    return shaded;\n";
         static const char *const outputs[] = {"", "    return float4(1, 1, 1, 1);\n", "    return shaded.aaaa;\n",
             "    return max(shaded.r, max(shaded.g, shaded.b)).xxxx;\n",
@@ -1433,6 +1444,7 @@ bool drawShaderSource(const RecompD3dDrawShaderKey &draw_key, uint8_t output, ui
         if (at == std::string::npos) return false;
         hlsl.replace(at, result.size(), outputs[output]);
     }
+    if (output == kOutputDepthCopy && !aoDepthCopySource(hlsl)) return false;
     if (draw_key.sample_depth_bias) defines.push_back("RECOMP_SAMPLE_COUNT=" + std::to_string(samples));
     return true;
 }
@@ -1472,7 +1484,8 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
         }
     }
     std::fprintf(stderr, "recomp d3d presenter: draw shader fvf=0x%03X program=%u%s%s in %lld ms\n",
-        draw_key.fvf, draw_key.program_count, output == kOutputOne ? " count" : output ? " cover" : "",
+        draw_key.fvf, draw_key.program_count, output == kOutputOne ? " count"
+            : output == kOutputDepthCopy ? " depth copy" : output ? " cover" : "",
         pair.vertex != nullptr ? "" : " failed",
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count()));
@@ -1488,7 +1501,8 @@ ShaderPair lookupShaders(RecompD3dPresenter *presenter, const RecompD3dDrawShade
 
 /* ponytail: unlisted FVFs still compile on first use.
    The quality arguments are a snapshot from creation: applyQuality changes the live ones. */
-void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples, bool framegen)
+void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t samples, bool framegen,
+    bool depth_copy)
 {
     const auto start = std::chrono::steady_clock::now();
     unsigned compiled = 0u;
@@ -1496,6 +1510,8 @@ void precompileDrawShaders(RecompD3dPresenter *presenter, bool scaled, uint32_t 
         [&](const RecompD3dDrawShaderKey &key, uint8_t output) {
             if (presenter->precompile_stop.load()) return false;
             compiled += lookupShaders(presenter, key, output, samples).vertex != nullptr;
+            if (depth_copy && output == kOutputShaded)
+                compiled += lookupShaders(presenter, key, kOutputDepthCopy, samples).vertex != nullptr;
             return true;
         });
     std::fprintf(stderr, "recomp d3d presenter: precompiled %u draw shaders in %lld ms\n", compiled,
@@ -1545,6 +1561,7 @@ struct PipelineState {
     bool coverage_only;
     bool count_pass;
     bool cover_pass;  // into the HUD mask: no depth or stencil, scene weight times one less the output
+    bool depth_copy;  // a second R32_FLOAT target takes the depth the draw writes (aoDepthCopy)
 };
 
 SDL_GPUGraphicsPipeline *lookupPipeline(RecompD3dPresenter *presenter, const PipelineState &state)
@@ -1566,6 +1583,7 @@ SDL_GPUGraphicsPipeline *lookupPipeline(RecompD3dPresenter *presenter, const Pip
     key.coverage_only = state.coverage_only;
     key.count_pass = state.count_pass;
     key.cover_pass = state.cover_pass;
+    key.depth_copy = state.depth_copy;
     key.depth_test = draw.depth.depth_test_enable && !state.cover_pass;
     key.depth_write = draw.depth.depth_write_enable && !state.count_pass;
     key.depth_func = static_cast<uint8_t>(draw.depth.depth_func);
@@ -1653,8 +1671,15 @@ SDL_GPUGraphicsPipeline *lookupPipeline(RecompD3dPresenter *presenter, const Pip
         color.blend_state.dst_alpha_blendfactor = hostBlendFactor(draw.blend.dst_factor, true);
         color.blend_state.alpha_blend_op = hostBlendOp(draw.blend.op);
     }
-    info.target_info.color_target_descriptions = &color;
-    info.target_info.num_color_targets = 1u;
+    SDL_GPUColorTargetDescription colors[2] = {color, {}};
+    if (state.depth_copy) {
+        // Only a fragment that writes the depth target writes the copy.
+        colors[1].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+        colors[1].blend_state.enable_color_write_mask = true;
+        colors[1].blend_state.color_write_mask = key.depth_test && key.depth_write ? SDL_GPU_COLORCOMPONENT_R : 0u;
+    }
+    info.target_info.color_target_descriptions = colors;
+    info.target_info.num_color_targets = state.depth_copy ? 2u : 1u;
     info.target_info.has_depth_stencil_target = state.depth_format != SDL_GPU_TEXTUREFORMAT_INVALID;
     info.target_info.depth_stencil_format = state.depth_format;
 
@@ -1762,17 +1787,21 @@ void flushSegment(RecompD3dPresenter *presenter, Segment &segment)
     }
     SDL_GPURenderPass *pass = nullptr;
     if (ready && commands != nullptr) {
-        SDL_GPUColorTargetInfo color{};
-        color.texture = segment.color;
-        color.load_op = SDL_GPU_LOADOP_LOAD;
-        color.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPUColorTargetInfo color[2]{};
+        color[0].texture = segment.color;
+        color[1].texture = segment.depth_copy;
+        for (SDL_GPUColorTargetInfo &target : color) {
+            target.load_op = SDL_GPU_LOADOP_LOAD;
+            target.store_op = SDL_GPU_STOREOP_STORE;
+        }
         SDL_GPUDepthStencilTargetInfo depth{};
         depth.texture = segment.depth;
         depth.load_op = SDL_GPU_LOADOP_LOAD;
         depth.store_op = SDL_GPU_STOREOP_STORE;
         depth.stencil_load_op = SDL_GPU_LOADOP_LOAD;
         depth.stencil_store_op = SDL_GPU_STOREOP_STORE;
-        pass = SDL_BeginGPURenderPass(commands, &color, 1, segment.depth != nullptr ? &depth : nullptr);
+        pass = SDL_BeginGPURenderPass(commands, color, segment.depth_copy != nullptr ? 2u : 1u,
+            segment.depth != nullptr ? &depth : nullptr);
     }
     if (pass != nullptr) {
         SDL_GPUGraphicsPipeline *pipeline = nullptr;
@@ -1860,10 +1889,12 @@ void flushSegment(RecompD3dPresenter *presenter)
 void useTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth)
 {
     Segment &segment = presenter->segment;
-    if (segment.color != color || segment.depth != depth) {
+    SDL_GPUTexture *const copy = aoDepthCopy(presenter, color, depth);
+    if (segment.color != color || segment.depth != depth || segment.depth_copy != copy) {
         flushSegment(presenter);
         segment.color = color;
         segment.depth = depth;
+        segment.depth_copy = copy;
     }
 }
 
@@ -1916,6 +1947,11 @@ RecompD3dPresenterError submitClear(RecompD3dPresenter *presenter, const RecompD
     if (clear.clear_color || depth != nullptr) {
         clearTexture(presenter, bound.color, clear.clear_color ? &color : nullptr, depth,
             clear.clear_depth ? &z : nullptr, clear.clear_stencil ? &stencil : nullptr);
+    }
+    // Ambient occlusion's depth copy follows the main depth.
+    if (clear.clear_depth && depth != nullptr && depth == presenter->main_depth && presenter->ao_copy != nullptr) {
+        const SDL_FColor copy = {z, z, z, z};
+        clearTexture(presenter, presenter->ao_copy, &copy, nullptr, nullptr, nullptr);
     }
     if (clear.clear_color) markWritten(presenter, bound);
     presenter->last_bound = bound;
@@ -2154,6 +2190,7 @@ void queueCover(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawComma
     cover.depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     cover.samples = SDL_GPU_SAMPLECOUNT_1;
     cover.cover_pass = true;
+    cover.depth_copy = false;
     SDL_GPUGraphicsPipeline *pipeline = cover.shaders.vertex != nullptr ? lookupPipeline(presenter, cover) : nullptr;
     if (pipeline != nullptr) {
         queueDraw(presenter->hud, pipeline, vertices, vertex_bytes, indices, index_count, constants,
@@ -2251,6 +2288,16 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
         }
     }
     useTarget(presenter, bound.color, bound.depth);
+    ShaderPair drawn = shaders;
+    if (presenter->segment.depth_copy != nullptr) {
+        drawn = lookupShaders(presenter, shader_key, kOutputDepthCopy, presenter->msaa_count);
+        if (drawn.vertex == nullptr) {
+            // Draw on without the copy; occlusion stays off.
+            presenter->ao_copy_failed = true;
+            useTarget(presenter, bound.color, bound.depth);
+            drawn = shaders;
+        }
+    }
 
     SDL_GPUTexture *texture = draw.has_texture ? lookupTexture(presenter, draw, layout.pretransformed) : nullptr;
     SDL_GPUTexture *mask = nullptr, *bump = nullptr;
@@ -2421,7 +2468,8 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
 
     PipelineState state{};
     state.draw = &draw;
-    state.shaders = shaders;
+    state.shaders = drawn;
+    state.depth_copy = presenter->segment.depth_copy != nullptr;
     state.fvf = shader_fvf;
     state.stride = stride;
     state.primitive = primitive;
@@ -2511,6 +2559,7 @@ RecompD3dPresenterError submitDraw(RecompD3dPresenter *presenter, const RecompD3
         count_state.shaders = counting;
         count_state.color_format = kCountFormat;
         count_state.count_pass = true;
+        count_state.depth_copy = false;
         SDL_GPUGraphicsPipeline *count_pipeline =
             counting.vertex != nullptr ? lookupPipeline(presenter, count_state) : nullptr;
         if (count_pipeline != nullptr) {
@@ -3966,6 +4015,7 @@ void releasePresenter(RecompD3dPresenter *presenter)
     }
     if (presenter->gamma_pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->gamma_pipeline);
     releaseAo(presenter);
+    releaseAoCopy(presenter);
     if (presenter->fg_blend != nullptr) SDL_ReleaseGPUGraphicsPipeline(presenter->device, presenter->fg_blend);
     releaseFramegenFlow(presenter);
     if (presenter->fg_capture_index != nullptr) std::fclose(presenter->fg_capture_index);
@@ -4142,6 +4192,11 @@ void applyQuality(RecompD3dPresenter *presenter)
     const float scale = std::isfinite(want.scale) ? std::clamp(want.scale, 1.0f, 8.0f) : 1.0f;
     const SDL_GPUSampleCount msaa = supportedSamples(presenter->device, presenter->depth_format,
         std::clamp(want.msaa, 1u, 32u));
+    // The copy belongs to one main target and is drawn only while AO and MSAA are on.
+    if (!presenter->ao || scale != presenter->scale || msaa != presenter->msaa) {
+        flushSegment(presenter);
+        releaseAoCopy(presenter);
+    }
     if (scale == presenter->scale && msaa == presenter->msaa) return;
 
     flushSegment(presenter);
@@ -4423,7 +4478,7 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
         fit.width, fit.height);
     try {
         created->precompile = std::thread(precompileDrawShaders, created, created->scale != 1.0f, created->msaa_count,
-            created->fg_k != 0u);
+            created->fg_k != 0u, created->ao && created->msaa_count > 1u);
     } catch (const std::system_error &) {
         // Shaders then compile on first use.
     }

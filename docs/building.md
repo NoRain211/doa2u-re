@@ -164,8 +164,9 @@ that shortcut.
 
 - MSAA stops at the 8x SDL_GPU supports (Apple GPUs at 4x); a higher choice
   falls back as on Windows. SMAA runs the same upstream shader, and CAS
-  sharpening follows it. Ambient occlusion needs a single-sample depth to
-  sample, so it stays off while MSAA is above 1x here.
+  sharpening follows it. With MSAA, ambient occlusion reads a copy of the
+  depth that the scene's draws write and resolve, since SDL_GPU cannot sample
+  a multisampled depth.
 - SDL_GPU has no geometry shaders or occlusion queries. Wide and antialiased
   lines are expanded on the CPU, a draw's coverage probe rasterizes on the
   CPU, and the glare fade's visibility tests count passing samples with an

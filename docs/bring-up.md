@@ -206,8 +206,10 @@ menus, fonts, movies and the game's own full-screen effects drawn afterwards
 keep their pixels. It reconstructs view space from the main depth buffer and
 the projection the adapter attached to the scene's draws (`d3d_ao.h`), at half
 resolution with a depth-aware blur. Direct3D 11 reads sample 0 of its
-multisampled depth; SDL_GPU cannot sample a multisampled depth target, so the
-Vulkan, Direct3D 12 and Metal renderers leave AO off while MSAA is above 1x.
+multisampled depth. SDL_GPU can neither sample nor resolve a multisampled
+depth, so with MSAA the main target's draws also write their depth to an
+R32_FLOAT color target, which AO resolves and reads; silhouette edges then
+see the samples' average depth.
 Native GPU tests compare each mode
 against the same AA-disabled image and cover widescreen window/target size,
 scaled shared-depth offscreen rendering, resolve, gamma and resource release;

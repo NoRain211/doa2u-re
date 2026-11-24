@@ -214,7 +214,7 @@ keeps running.
 | Vulkan renderer on Windows | Working, chosen in the launcher; not yet tested on AMD; MSAA stops at 8x |
 | Direct3D 12 renderer on Windows | New, chosen in the launcher; SDL_GPU's presenter tests pass on one NVIDIA GPU; not yet played through; MSAA stops at 8x |
 | CAS sharpening | New, chosen in the launcher or PC SETTINGS; seen on the title screen on Direct3D 11 and Vulkan, and the presenter tests pass on Direct3D 12 too; not yet played through or tried on Metal |
-| Ambient occlusion | New and off by default, chosen in the launcher or PC SETTINGS; darkens creases and contact areas of the 3D scene only, never the HUD, menus or effects drawn after it. Seen in the attract demo on Direct3D 11, and the presenter tests pass on Vulkan and Direct3D 12 too; not yet played through or tried on Metal, and on the SDL_GPU renderers it needs MSAA off |
+| Ambient occlusion | New and off by default, chosen in the launcher or PC SETTINGS; darkens creases and contact areas of the 3D scene only, never the HUD, menus or effects drawn after it. Seen in the attract demo on Direct3D 11, and the presenter tests pass on Vulkan and Direct3D 12 too; not yet played through or tried on Metal |
 | Audio, including 3D voices and reverb | Working |
 | Intro and story movies | Play; the launcher can skip the intro ones |
 | Xbox and other SDL3 controllers, keyboard | Working; keyboard drives player 1 |

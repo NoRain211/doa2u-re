@@ -5,10 +5,78 @@
 #define DOA2U_RECOMP_D3D_AO_SDL_H
 
 /* Ambient occlusion (d3d_ao.h) matches the D3D11 presenter's three passes. Its
-   depth input must be a single-sample texture, which SDL_GPU cannot make from
-   a multisampled depth target, so AO runs only while MSAA is off here. */
+   depth input must be a single-sample texture: the main depth at 1x, and with
+   MSAA the resolved depth copy the scene draws wrote (aoDepthCopy). */
+void releaseAoCopy(RecompD3dPresenter *presenter)
+{
+    for (SDL_GPUTexture *texture : {presenter->ao_copy, presenter->ao_copy_resolved}) {
+        if (texture != nullptr) SDL_ReleaseGPUTexture(presenter->device, texture);
+    }
+    presenter->ao_copy = presenter->ao_copy_resolved = nullptr;
+    presenter->ao_copy_failed = false;
+    presenter->segment.depth_copy = nullptr;
+}
+
+/* Ambient occlusion with MSAA: SDL_GPU can neither sample nor resolve a
+   multisampled depth target, so draws into the main target and its depth
+   write their depth to this second color target too, which runAo resolves.
+   Null when it is not needed or the device cannot make it. */
+SDL_GPUTexture *aoDepthCopy(RecompD3dPresenter *presenter, SDL_GPUTexture *color, SDL_GPUTexture *depth)
+{
+    if (!presenter->ao || presenter->msaa_count <= 1u || presenter->ao_copy_failed ||
+        color != presenter->main_color || depth == nullptr || depth != presenter->main_depth) return nullptr;
+    if (presenter->ao_copy != nullptr) return presenter->ao_copy;
+    constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+    const uint32_t width = mainWidth(presenter), height = mainHeight(presenter);
+    if (SDL_GPUTextureSupportsSampleCount(presenter->device, format, presenter->msaa) &&
+        SDL_GPUTextureSupportsFormat(presenter->device, format, SDL_GPU_TEXTURETYPE_2D,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+        presenter->ao_copy = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, format,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, width, height, 1u, 1u, presenter->msaa);
+        presenter->ao_copy_resolved = createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, format,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, width, height);
+    }
+    if (presenter->ao_copy == nullptr || presenter->ao_copy_resolved == nullptr) {
+        std::fprintf(stderr, "recomp d3d presenter: ambient occlusion has no R32_FLOAT target at MSAA %u;"
+            " it stays off\n", presenter->msaa_count);
+        releaseAoCopy(presenter);
+        presenter->ao_copy_failed = true;
+        return nullptr;
+    }
+    // The far plane until the scene draws, as the frame's depth clear leaves the depth.
+    const SDL_FColor far = {1.0f, 1.0f, 1.0f, 1.0f};
+    clearTexture(presenter, presenter->ao_copy, &far, nullptr, nullptr, nullptr);
+    return presenter->ao_copy;
+}
+
+/* The draw shader's color as usual and, in a second target, the depth it writes. */
+bool aoDepthCopySource(std::string &hlsl)
+{
+    // A scaled depth bias already writes SV_Depth; the copy takes the same value.
+    static const std::string biased = "struct DepthOutput { float4 color : SV_TARGET; float depth : SV_Depth; };";
+    const size_t at = hlsl.find(biased);
+    if (at != std::string::npos) {
+        hlsl.replace(at, biased.size(),
+            "struct DepthOutput { float4 color : SV_TARGET0; float copy : SV_TARGET1; float depth : SV_Depth; };");
+        const size_t result = hlsl.rfind("    output.color = ps_color(input); return output;");
+        if (result == std::string::npos) return false;
+        hlsl.insert(result, "    output.copy = output.depth;\n");
+    } else {
+        const size_t entry = hlsl.find("float4 ps_main(");
+        if (entry == std::string::npos) return false;
+        hlsl.replace(entry, 15u, "float4 ps_color(");
+        hlsl += "\nstruct DepthCopyOutput { float4 color : SV_TARGET0; float copy : SV_TARGET1; };\n"
+            "DepthCopyOutput ps_main(VSOut input) {\n"
+            "    DepthCopyOutput output;\n"
+            "    output.color = ps_color(input);\n"
+            "    output.copy = input.position.z;\n"
+            "    return output;\n}\n";
+    }
+    return true;
+}
+
 SDL_GPUGraphicsPipeline *createAoPipeline(RecompD3dPresenter *presenter, const std::string &source,
-    uint32_t samplers, SDL_GPUTextureFormat format, bool blend)
+    uint32_t samplers, SDL_GPUTextureFormat format, bool blend, SDL_GPUSampleCount samples)
 {
     SDL_GPUShader *vertex = createShader(presenter, source, true, {}, 0u, 0u);
     SDL_GPUShader *fragment = vertex != nullptr ? createShader(presenter, source, false, {}, samplers, 1u) : nullptr;
@@ -29,6 +97,7 @@ SDL_GPUGraphicsPipeline *createAoPipeline(RecompD3dPresenter *presenter, const s
         info.vertex_shader = vertex;
         info.fragment_shader = fragment;
         info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        info.multisample_state.sample_count = samples;  // the apply pass draws into the main target
         info.target_info.color_target_descriptions = &color;
         info.target_info.num_color_targets = 1u;
         pipeline = SDL_CreateGPUGraphicsPipeline(presenter->device, &info);
@@ -76,11 +145,11 @@ bool ensureAo(RecompD3dPresenter *presenter)
         RECOMP_AO_APPLY_HLSL
         "float4 ps_main(float4 p : SV_Position) : SV_Target { return recompAoApply(p.xy / ao_screen.xy); }\n";
     presenter->ao_occlusion_pipeline = createAoPipeline(presenter, occlusion, 1u,
-        SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
+        SDL_GPU_TEXTUREFORMAT_R8_UNORM, false, SDL_GPU_SAMPLECOUNT_1);
     presenter->ao_blur_pipeline = createAoPipeline(presenter, blur, 2u,
-        SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
+        SDL_GPU_TEXTUREFORMAT_R8_UNORM, false, SDL_GPU_SAMPLECOUNT_1);
     presenter->ao_apply_pipeline = createAoPipeline(presenter, apply, 1u,
-        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM, true);
+        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM, true, presenter->msaa);
     if (presenter->ao_occlusion_pipeline != nullptr && presenter->ao_blur_pipeline != nullptr &&
         presenter->ao_apply_pipeline != nullptr) {
         const SDL_GPUTextureUsageFlags usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
@@ -106,14 +175,8 @@ bool ensureAo(RecompD3dPresenter *presenter)
 bool runAo(RecompD3dPresenter *presenter)
 {
     presenter->ao_done = true;
-    if (presenter->msaa_count > 1u) {
-        if (!presenter->ao_reported) {
-            presenter->ao_reported = true;
-            std::fprintf(stderr, "recomp d3d presenter: ambient occlusion needs a single-sample depth;"
-                " MSAA %u leaves it off\n", presenter->msaa_count);
-        }
-        return false;
-    }
+    const bool copy = presenter->msaa_count > 1u;
+    if (copy && (presenter->ao_copy == nullptr || presenter->ao_copy_failed)) return false;
     if (!recomp_ao_projection(presenter->ao_projection)) {
         if (!presenter->ao_reported) {
             presenter->ao_reported = true;
@@ -131,7 +194,9 @@ bool runAo(RecompD3dPresenter *presenter)
     if (commands == nullptr) return false;
     const RecompAoConstants constants = recomp_ao_constants(presenter->ao_projection,
         mainWidth(presenter), mainHeight(presenter), presenter->ao_width, presenter->ao_height);
-    const SDL_GPUTextureSamplerBinding depth = {presenter->main_depth, presenter->point_sampler};
+    if (copy) resolveTarget(presenter, presenter->ao_copy, presenter->ao_copy_resolved);
+    const SDL_GPUTextureSamplerBinding depth = {copy ? presenter->ao_copy_resolved : presenter->main_depth,
+        presenter->point_sampler};
     // Occlusion into ao_texture[0].
     SDL_GPUColorTargetInfo target{};
     target.texture = presenter->ao_texture[0];
