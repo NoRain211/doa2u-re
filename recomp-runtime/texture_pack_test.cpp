@@ -77,14 +77,18 @@ int main()
     expect("short part", recomp_texture_pack_key_in_name("256x256_0123456789abcde_DXT1.png") == 0u);
 
     /* One BC1 block: white with index 0, then transparent black from index 3. */
-    const uint8_t opaque[8] = {0xffu, 0xffu, 0x00u, 0x00u, 0u, 0u, 0u, 0u};
+    /* colour0 = 0xffff > colour1 = 0, every index 0: opaque white. */
+    uint8_t opaque[8] = {};
+    opaque[0] = opaque[1] = 0xffu;
     std::vector<uint8_t> pixels;
     expect("BC1 decodes", recomp_texture_pack_decode_bc(opaque, sizeof opaque, 0x0cu, 4u, 4u, pixels) &&
         pixels.size() == 64u);
     bool white = pixels.size() == 64u;
     for (uint8_t byte : pixels) white = white && byte == 0xffu;
     expect("BC1 white", white);
-    const uint8_t clear[8] = {0u, 0u, 0xffu, 0xffu, 0xffu, 0xffu, 0xffu, 0xffu};
+    /* colour0 = 0 <= colour1 = 0xffff, every index 3: transparent black. */
+    uint8_t clear[8] = {};
+    std::memset(clear + 2, 0xff, 6u);
     expect("BC1 transparent",
         recomp_texture_pack_decode_bc(clear, sizeof clear, 0x0cu, 4u, 4u, pixels) &&
         pixels.size() == 64u);
