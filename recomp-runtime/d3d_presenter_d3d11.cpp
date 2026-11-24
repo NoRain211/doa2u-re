@@ -720,7 +720,6 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     for (auto &entry : presenter->raster_states) releaseCom(entry.state);
     presenter->raster_state_count = presenter->next_raster_state_slot = 0u;
     releaseCom(presenter->draw_constant_buffer);
-    presenter->constant_last_offset = ~0u;
     releaseCom(presenter->constant_ring);
     presenter->constant_last_offset = ~0u;
     releaseCom(presenter->context1);
