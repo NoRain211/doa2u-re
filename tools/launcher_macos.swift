@@ -625,6 +625,10 @@ final class Launcher: NSObject, NSApplicationDelegate, NSWindowDelegate {
         view.onPlay = { [unowned self] in self.play() }
         if view.checkAtStart.index == 1 { view.update(quiet: true) }
         window.title = "Dead or Alive 2 Ultimate"
+        // The Dock icon, when private/launcher-icon.png is present (fan art, so it stays untracked).
+        if let icon = NSImage(contentsOf: root.appendingPathComponent("private/launcher-icon.png")) {
+            NSApp.applicationIconImage = icon
+        }
         window.delegate = self
         window.contentView = view
         window.acceptsMouseMovedEvents = true

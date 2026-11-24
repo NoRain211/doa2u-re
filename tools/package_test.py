@@ -77,6 +77,8 @@ LAUNCHERS = {"Launcher.exe": ("launcher.cs", []), "DOA2U.exe": ("launcher.cs", [
 JUKEBOX_EDITOR = "JukeboxEditor.exe"
 # Optional private icon (fan art from issue #39 holds Tecmo's character and logo art, so it stays untracked).
 ICON = ROOT / "private" / "launcher-icon.ico"
+# The same art for the macOS and Linux launchers, which load it from the package's private/ folder.
+ICON_PNG = ROOT / "private" / "launcher-icon.png"
 
 
 def build_launchers(out_dir):
@@ -172,8 +174,9 @@ def main():
         parser.error("give a version, or --launchers DIR")
     suffix, readme = PLATFORMS[args.platform]
     # v0.2.1 and v0.2.2 shipped icon-less exes from a tree without it, and updating stripped installed icons.
-    if args.platform == "windows" and not ICON.is_file():
-        raise SystemExit(f"Missing {ICON}: the release launchers would ship without their icon")
+    icon = ICON if args.platform == "windows" else ICON_PNG
+    if not icon.is_file():
+        raise SystemExit(f"Missing {icon}: the release launchers would ship without their icon")
     if git("status", "--porcelain", "--untracked-files=no").strip():
         raise SystemExit("Commit first: the package is built from HEAD")
     pinned = git("ls-tree", "HEAD", SUBMODULE).split()[2].decode()
@@ -225,6 +228,8 @@ def main():
         if linux:
             package.writestr(executable(f"{name}/tools/artifacts/{LINUX_LAUNCHER}"), (ARTIFACTS / LINUX_LAUNCHER).read_bytes())
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")
+        if not windows:
+            package.write(ICON_PNG, f"{name}/private/launcher-icon.png")
         package.write(ROOT / readme, f"{name}/README.txt")
         package.writestr(f"{name}/VERSION", args.version)  # tools/update.py compares it with the newest release
     partial.rename(out)

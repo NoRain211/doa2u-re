@@ -15,6 +15,12 @@ class ReleaseSelectionTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "without their icon"):
                 package_test.main()
 
+    def test_macos_and_linux_releases_need_the_launcher_png(self):
+        for platform in ("macos", "linux"):
+            with self.subTest(platform), mock.patch.object(package_test, "ICON_PNG", Path("missing.png")),                     mock.patch("sys.argv", ["package_test.py", "0.0-test", "--platform", platform]):
+                with self.assertRaisesRegex(SystemExit, "missing.png: the release launchers would ship without their icon"):
+                    package_test.main()
+
     def test_platform_lists_name_tracked_files(self):
         # A renamed backend would otherwise ship to every platform.
         tracked = set(git("ls-files").decode().splitlines())

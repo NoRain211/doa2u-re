@@ -830,6 +830,11 @@ int main(int argc, char **argv)
         return 1;
     }
     launcher.window = window;
+    // The window icon, when private/launcher-icon.png is present (fan art, so it stays untracked).
+    if (SDL_Surface *icon = SDL_LoadPNG((root + "/private/launcher-icon.png").c_str())) {
+        SDL_SetWindowIcon(window, icon);
+        SDL_DestroySurface(icon);
+    }
     SDL_SetRenderLogicalPresentation(launcher.renderer, kWidth, kHeight, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
     SDL_SetRenderVSync(launcher.renderer, 1);
     SDL_SetRenderDrawBlendMode(launcher.renderer, SDL_BLENDMODE_BLEND);
