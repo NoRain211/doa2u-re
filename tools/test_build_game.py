@@ -180,10 +180,11 @@ class BuildTests(unittest.TestCase):
                 use_windows_newlines(generated)
             self.assertEqual((generated / "recomp_0000.c").read_bytes(), b"a\r\nb\r\nc\r\n")
             # An unchanged chunk keeps its time: runtime-sources hard-links it.
-            os.utime(generated / "recomp_0000.c", ns=(1, 1))
+            # A whole second, since NTFS stores times in 100 ns steps.
+            os.utime(generated / "recomp_0000.c", ns=(10**9, 10**9))
             with patch("build_game.sys.platform", "darwin"):
                 use_windows_newlines(generated)
-            self.assertEqual((generated / "recomp_0000.c").stat().st_mtime_ns, 1)
+            self.assertEqual((generated / "recomp_0000.c").stat().st_mtime_ns, 10**9)
             (generated / "recomp_0000.c").write_bytes(b"a\n")
             with patch("build_game.sys.platform", "win32"):
                 use_windows_newlines(generated)
