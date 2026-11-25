@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 from build_game import (STEPS, build, build_fraction, drop_owned_extraction, failure_excerpt, import_disc,
                         lifter_revision, main, merge_functions, precompile_shaders, program_manifest,
-                        selected_xbe, use_windows_newlines, write_functions)
+                        reusable_program, selected_xbe, use_windows_newlines, write_functions)
 from extract_iso import sha256
 
 
@@ -89,6 +89,23 @@ class BuildTests(unittest.TestCase):
         # The compiler's up-front file list does not move the bar.
         self.assertEqual(build_fraction(["build"], 0, 109, 0), 0)
         self.assertAlmostEqual(build_fraction(["build"], 0, 0, 10**6), 0.95)
+
+    def test_full_build_reuses_only_an_unchanged_program_from_the_same_recipe(self):
+        with tempfile.TemporaryDirectory() as folder:
+            generated, receipt = Path(folder) / "generated", Path(folder) / "receipt.json"
+            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            generated.mkdir()
+            for name in ("recomp_0000.c", "recomp_dispatch.c", "recomp_funcs.h"):
+                (generated / name).write_text("int x;\n")
+            manifest, ebp = program_manifest(generated)
+            receipt.write_text(json.dumps({"recipe": {"xbe": "a"}, "manifest_sha256": manifest, "ebp_count": ebp}))
+            self.assertTrue(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            self.assertFalse(reusable_program(receipt, generated, {"xbe": "b"}, False))
+            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, True))  # not the pinned program
+            with patch("build_game.PROGRAM_SHA256", manifest):
+                self.assertTrue(reusable_program(receipt, generated, {"xbe": "a"}, True))
+            (generated / "recomp_0000.c").write_text("int y;\n")
+            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, False))
 
     def test_manifest_authenticates_members_and_contents(self):
         with tempfile.TemporaryDirectory() as folder:

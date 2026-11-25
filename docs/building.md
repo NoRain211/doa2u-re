@@ -82,10 +82,11 @@ Then build from your Disc 2 ISO:
 ./build_game.sh /path/to/disc2.iso --extractor extract-xiso/build/extract-xiso
 ```
 
-Lifting takes several minutes. The generated program is checked against the
-same manifest hash as the Windows build, so a different lifter or input stops
-the build before it compiles. The ISO is extracted once into
-`private/imported-disc`, about 4.1 GB, and moved to `private/play-disc`
+Lifting takes several minutes; building again skips it while the generated
+program still matches the executable and the lifter. The generated program is
+checked against the same manifest hash as the Windows build, so a different
+lifter or input stops the build before it compiles. The ISO is extracted once
+into `private/imported-disc`, about 4.1 GB, and moved to `private/play-disc`
 once the build succeeds.
 
 `./launcher.sh` opens the same menu as the Windows launcher: resolution, MSAA,

@@ -182,6 +182,19 @@ def program_manifest(generated):
     return hashlib.sha256(manifest.encode("utf-8")).hexdigest(), ebp
 
 
+def reusable_program(receipt_path, generated, recipe, validated):
+    """True when the receipt's program comes from this exact recipe and is unchanged:
+    lifting again would write the same files and takes minutes."""
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        manifest = program_manifest(generated)
+    except (OSError, ValueError):
+        return False
+    return (receipt.get("recipe") == recipe
+            and manifest == (receipt.get("manifest_sha256"), receipt.get("ebp_count"))
+            and (not validated or manifest == (PROGRAM_SHA256, PROGRAM_EBP)))
+
+
 def lifter_revision():
     if not (LIFTER / ".git").exists():
         # A release ZIP ships the pinned lifter as plain files, without Git.
@@ -368,7 +381,18 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     logs.mkdir(parents=True)
     generated, disasm, functions = work / "generated", work / "disasm", work / "functions.json"
     receipt_path = work / "receipt.json"
-    lift = [] if build_only else ["xbe-parser", "disasm", "lift"] if disassemble else ["lift"]
+
+    def program_recipe():
+        return dict(xbe_sha256=sha256(xbe), lifter_commit=revision, capstone=capstone.__version__,
+                    functions_sha256=sha256(functions))
+
+    reuse = False
+    if not (build_only or lift_only or disassemble):
+        merge_functions(functions)
+        if reusable_program(receipt_path, generated, program_recipe(), iso is not None):
+            print("The generated program already matches this executable and lifter; skipping the lift.", flush=True)
+            reuse = True
+    lift = [] if build_only or reuse else ["xbe-parser", "disasm", "lift"] if disassemble else ["lift"]
     progress = Progress(lift + ([] if lift_only else ["configure", "build"]))
     if disassemble:
         analysis = work / "analysis.json"
@@ -380,9 +404,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                      logs / "disasm.log", LIFTER)
         write_functions(disasm)
     merge_functions(functions)
-    recipe = dict(xbe_sha256=sha256(xbe), lifter_commit=revision, capstone=capstone.__version__,
-                  functions_sha256=sha256(functions))
-    if build_only:
+    recipe = program_recipe()
+    if build_only or reuse:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt["recipe"] != recipe:
             raise ValueError("Generated receipt belongs to a different executable or lifter recipe")
