@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -111,6 +112,11 @@ class BuildTests(unittest.TestCase):
             with patch("build_game.sys.platform", "darwin"):
                 use_windows_newlines(generated)
             self.assertEqual((generated / "recomp_0000.c").read_bytes(), b"a\r\nb\r\nc\r\n")
+            # An unchanged chunk keeps its time: runtime-sources hard-links it.
+            os.utime(generated / "recomp_0000.c", ns=(1, 1))
+            with patch("build_game.sys.platform", "darwin"):
+                use_windows_newlines(generated)
+            self.assertEqual((generated / "recomp_0000.c").stat().st_mtime_ns, 1)
             (generated / "recomp_0000.c").write_bytes(b"a\n")
             with patch("build_game.sys.platform", "win32"):
                 use_windows_newlines(generated)
