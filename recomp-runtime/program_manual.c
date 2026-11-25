@@ -271,11 +271,11 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (function == NULL) function = recomp_ko_replay_lookup_manual(guest_address);
     /* Unlock Everything keeps saves and awards to what was earned. */
     if (function == NULL) function = recomp_unlock_profile_lookup_manual(guest_address);
-    /* PC SETTINGS in the game's Options menu. */
+    /* PC SETTINGS, a page of the game's Options menu. */
     if (function == NULL) function = recomp_pc_settings_lookup_manual(guest_address);
-    /* Quit Game, the main menu's last entry. */
+    /* PC Settings, the Jukebox and Quit Game on the main menu. */
     if (function == NULL) function = recomp_menu_quit_lookup_manual(guest_address);
-    /* The runner's own sprites (PC Settings' label, Quit Game's). */
+    /* The runner's own sprites (the main menu's labels and pictures). */
     if (function == NULL) function = recomp_runner_assets_lookup_manual(guest_address);
     /* Hitomi and Bayman among story mode's random opponents (story_roster.c). */
     if (function == NULL) function = recomp_story_roster_lookup_manual(guest_address);

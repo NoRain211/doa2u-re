@@ -22,7 +22,7 @@ enum { MAX_SHAPES = 16 };
 enum { SHAPE_POLYGON, SHAPE_CIRCLE };
 typedef struct Shape {
     int kind;
-    Point points[8];
+    Point points[32];
     int count;           /* polygon corners; a circle's centre is points[0] */
     float radius;        /* circle */
     float outline;       /* black outline width; 0 for none */
@@ -107,6 +107,26 @@ static const Shape JUKEBOX_SHAPES[] = {
 };
 _Static_assert(sizeof JUKEBOX_SHAPES / sizeof JUKEBOX_SHAPES[0] <= MAX_SHAPES, "the Jukebox's shapes exceed MAX_SHAPES");
 
+/* The PC Settings picture: a monitor on its stand, a gear in front of its
+   screen, in the same greys and outlines. */
+static const Shape PC_SHAPES[] = {
+    /* The stand: neck, then foot. */
+    {SHAPE_POLYGON, {{56, 90}, {72, 90}, {72, 106}, {56, 106}}, 4, 0, 0, 51, 51},
+    {SHAPE_POLYGON, {{36, 104}, {92, 104}, {96, 116}, {32, 116}}, 4, 0, 3.0f, 250, 140},
+    /* The monitor: a plate of the outline grey, as behind the tools of Options, and its dark screen. */
+    {SHAPE_POLYGON, {{12, 14}, {116, 14}, {116, 94}, {12, 94}}, 4, 0, 0, 51, 51},
+    {SHAPE_POLYGON, {{20, 22}, {108, 22}, {108, 86}, {20, 86}}, 4, 0, 0, 22, 14},
+    /* The gear: eight teeth around (64, 54), then its hole. */
+    {SHAPE_POLYGON, {{57.6f, 33}, {58.6f, 23.5f}, {69.4f, 23.5f}, {70.4f, 33}, {74.3f, 34.6f}, {81.8f, 28.6f},
+        {89.4f, 36.2f}, {83.4f, 43.7f}, {85, 47.6f}, {94.5f, 48.6f}, {94.5f, 59.4f}, {85, 60.4f}, {83.4f, 64.3f},
+        {89.4f, 71.8f}, {81.8f, 79.4f}, {74.3f, 73.4f}, {70.4f, 75}, {69.4f, 84.5f}, {58.6f, 84.5f}, {57.6f, 75},
+        {53.7f, 73.4f}, {46.2f, 79.4f}, {38.6f, 71.8f}, {44.6f, 64.3f}, {43, 60.4f}, {33.5f, 59.4f},
+        {33.5f, 48.6f}, {43, 47.6f}, {44.6f, 43.7f}, {38.6f, 36.2f}, {46.2f, 28.6f}, {53.7f, 34.6f}},
+        32, 0, 3.0f, 252, 150},
+    {SHAPE_CIRCLE, {{64, 54}}, 0, 9.0f, 3.0f, 51, 51},
+};
+_Static_assert(sizeof PC_SHAPES / sizeof PC_SHAPES[0] <= MAX_SHAPES, "the PC Settings shapes exceed MAX_SHAPES");
+
 static void draw_shapes(const Shape *list, int shapes, float squeeze,
     uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
 {
@@ -158,4 +178,10 @@ void recomp_jukebox_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_
     uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
 {
     draw_shapes(JUKEBOX_SHAPES, (int)(sizeof JUKEBOX_SHAPES / sizeof JUKEBOX_SHAPES[0]), squeeze, grey, alpha);
+}
+
+void recomp_pc_icon_draw(float squeeze, uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE],
+    uint8_t alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE])
+{
+    draw_shapes(PC_SHAPES, (int)(sizeof PC_SHAPES / sizeof PC_SHAPES[0]), squeeze, grey, alpha);
 }

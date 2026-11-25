@@ -430,6 +430,16 @@ void recomp_d3d_presenter_set_quality(float scale, uint32_t msaa, bool smaa, flo
 /* Whether this renderer applies recomp_d3d_presenter_set_quality live. */
 bool recomp_d3d_presenter_quality_live(void);
 
+/* PC Settings: asks for the display mode (as RECOMP_PC_DISPLAY_MODE): 0 is a
+   window, 1 borderless over the window's monitor, 2 exclusive fullscreen at
+   that monitor's mode; any other value is borderless. Callable from the game
+   thread at any time. A request made before the window exists is kept and
+   applied when it is made; one made while the game runs is applied after the
+   next presented frame. Until it is first called, the window keeps its own
+   startup rule. F11 and Alt+Enter toggle a window with the chosen fullscreen
+   kind, which changes nothing here: only the player's saved choice does. */
+void recomp_d3d_presenter_set_display_mode(unsigned mode);
+
 /* Observation only: reports which guest texture formats draws actually
    sampled, and which ones a draw asked for but the presenter could not
    upload. Bind counts alone cannot answer that. */

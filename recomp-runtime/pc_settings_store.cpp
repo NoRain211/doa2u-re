@@ -90,6 +90,9 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     // fightHud replaced comboHud, whose Off is Original and On is Both.
     const std::string hud = text(entries, "fightHud", boolean(entries, "comboHud", true) ? "both" : "original");
     choices[RECOMP_PC_FIGHT_HUD] = hud == "original" ? 0u : hud == "damage" ? 1u : hud == "stun" ? 2u : 3u;
+    // A missing or unknown mode is borderless, as the launchers default.
+    const std::string display = text(entries, "displayMode", "borderless");
+    choices[RECOMP_PC_DISPLAY_MODE] = display == "windowed" ? 0u : display == "fullscreen" ? 2u : 1u;
 }
 
 void put(Entries *entries, const char *key, std::string value)
@@ -174,6 +177,9 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     put(&entries, "koReplay", choices[RECOMP_PC_KO_REPLAY] == 0u ? "\"original\"" : "\"dynamic\"");
     static const char *const HUDS[4] = {"original", "damage", "stun", "both"};
     put(&entries, "fightHud", std::string("\"") + HUDS[choices[RECOMP_PC_FIGHT_HUD] & 3u] + "\"");
+    static const char *const DISPLAY_MODES[3] = {"windowed", "borderless", "fullscreen"};
+    put(&entries, "displayMode", std::string("\"") +
+        DISPLAY_MODES[choices[RECOMP_PC_DISPLAY_MODE] % 3u] + "\"");
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;

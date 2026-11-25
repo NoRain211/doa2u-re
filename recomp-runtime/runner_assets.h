@@ -25,10 +25,10 @@ uint32_t recomp_runner_alloc(uint32_t size, uint32_t alignment);
    12-byte rectangle {left, top, right, bottom, u16 index, u16 group} and
    0xaa9b0 its texture entry {texture, palette}. The game has 0x1a5 groups,
    which it loads and unloads by number, so the runner's are a group past them. */
-enum { RECOMP_RUNNER_SPRITE_GROUP = 0x1f0, RECOMP_RUNNER_SPRITE_SLOTS = 9 };
+enum { RECOMP_RUNNER_SPRITE_GROUP = 0x1f0, RECOMP_RUNNER_SPRITE_SLOTS = 10 };
 enum {
-    RECOMP_RUNNER_SPRITE_PC_WHITE = 0,  /* PC Settings' label and its glow */
-    RECOMP_RUNNER_SPRITE_PC_GLOW = 1,
+    RECOMP_RUNNER_SPRITE_PC_LABEL = 0,  /* the main menu's PC Settings label and pictures, with PC_WIDE */
+    RECOMP_RUNNER_SPRITE_PC_PICTURE = 1,
     RECOMP_RUNNER_SPRITE_QUIT_LABEL = 2, /* the main menu's Quit Game label and pictures */
     RECOMP_RUNNER_SPRITE_QUIT_PICTURE = 3,
     RECOMP_RUNNER_SPRITE_QUIT_WIDE = 4,
@@ -36,6 +36,7 @@ enum {
     RECOMP_RUNNER_SPRITE_JUKEBOX_PICTURE = 6,
     RECOMP_RUNNER_SPRITE_JUKEBOX_WIDE = 7,
     RECOMP_RUNNER_SPRITE_DAMAGE_LABEL = 8, /* DAMAGE under the fight's combo counter */
+    RECOMP_RUNNER_SPRITE_PC_WIDE = 9,
 };
 static inline uint32_t recomp_runner_sprite_id(unsigned slot)
 {
@@ -74,7 +75,8 @@ typedef uint_least16_t recomp_utf16;
 
 /* Message numbers for 0x6a3e0, past every number the game uses. */
 enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_BUTTON_CONFIG = 0x7180, RECOMP_RUNNER_TEXT_QUIT = 0x7200,
-    RECOMP_RUNNER_TEXT_JUKEBOX = 0x7201, RECOMP_RUNNER_TEXT_JUKEBOX_HELP = 0x7202 };
+    RECOMP_RUNNER_TEXT_JUKEBOX = 0x7201, RECOMP_RUNNER_TEXT_JUKEBOX_HELP = 0x7202,
+    RECOMP_RUNNER_TEXT_PC_MENU = 0x7203 };
 /* A message's text per game language (Japanese, English, French, German,
    Italian, Spanish), copied into guest memory. */
 void recomp_runner_text_set(uint32_t number, const recomp_utf16 *const text[6]);

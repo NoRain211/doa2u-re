@@ -606,6 +606,11 @@ bool recomp_d3d_presenter_quality_live()
     return d3d_backend_quality_live();
 }
 
+void recomp_d3d_presenter_set_display_mode(unsigned mode)
+{
+    d3d_backend_set_display_mode(mode);
+}
+
 void recomp_d3d_presenter_report_draw_textures()
 {
     if (active_thread == nullptr || GetCurrentThreadId() != active_thread->owner_thread) return;

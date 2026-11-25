@@ -22,6 +22,9 @@ extern "C" {
    logoff changes it mid-run: the entry follows at the next menu build, and
    until then a NULL request leaves its confirm entering plain Options. */
 void recomp_menu_quit_set_jukebox(void (*request)(void));
+/* Before install: PC Settings' entry, before the Jukebox's, enters Options
+   after calling request. NULL (the default) leaves it out. */
+void recomp_menu_quit_set_pc_settings(void (*request)(void));
 void recomp_menu_quit_install(void);
 RecompFunction recomp_menu_quit_lookup_manual(uint32_t guest_address);
 

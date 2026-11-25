@@ -44,6 +44,8 @@ void d3d_backend_flush(RecompD3dPresenter *presenter);
 /* recomp_d3d_presenter_set_quality, from any thread. */
 void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpen, bool ao);
 bool d3d_backend_quality_live();
+/* recomp_d3d_presenter_set_display_mode, from any thread. */
+void d3d_backend_set_display_mode(unsigned mode);
 void d3d_backend_report_draw_textures();
 
 enum D3dBackendVisibilityPoll {

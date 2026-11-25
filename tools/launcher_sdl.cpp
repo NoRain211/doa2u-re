@@ -91,6 +91,7 @@ struct Settings {
     bool free_camera = false;
     bool dedication = true;
     std::string texture_dump = "off"; // "off", "png" or "dds"
+    std::string display_mode = "borderless"; // "windowed", "borderless" or "fullscreen", the game's PC SETTINGS row
     std::string game_source; // the Disc 2 ISO the GAME page builds from, shared with the Windows launcher's key
 };
 
@@ -156,6 +157,9 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "randomCpuCostumes", value)) settings.random_cpu_costumes = value == "true";
     if (jsonValue(text, "dedicationCard", value)) settings.dedication = value == "true";
     jsonText(text, "textureDump", settings.texture_dump);
+    jsonText(text, "displayMode", settings.display_mode); // the game's PC SETTINGS row, kept as saved
+    // Only its three values are saved back; anything else is borderless, as the game reads it.
+    if (settings.display_mode != "windowed" && settings.display_mode != "fullscreen") settings.display_mode = "borderless";
     jsonText(text, "game_source", settings.game_source);
     return settings;
 }
@@ -257,6 +261,7 @@ bool saveSettings(const std::string &path, const Settings &settings)
     put("randomCpuCostumes", settings.random_cpu_costumes ? "true" : "false");
     put("dedicationCard", settings.dedication ? "true" : "false");
     put("textureDump", std::string("\"") + settings.texture_dump + "\"");
+    put("displayMode", std::string("\"") + settings.display_mode + "\"");
     if (!settings.game_source.empty()) {
         std::string quoted = "\"";
         for (const char c : settings.game_source) {

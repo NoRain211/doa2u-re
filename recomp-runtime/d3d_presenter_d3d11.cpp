@@ -296,6 +296,13 @@ struct RecompD3dPresenter {
     bool close_requested = false;
     bool fullscreen = false;           // borderless over the monitor; F11 and Alt+Enter toggle it
     WINDOWPLACEMENT windowed_placement{}; // where leaving fullscreen returns; length 0 = unset
+    /* PC Settings' display mode: what the window shows (0 windowed, 1 borderless,
+       2 exclusive), the kind F11 returns to, and the request generation it reflects. */
+    unsigned display_mode = 0u;
+    unsigned preferred_fullscreen = 1u;
+    bool exclusive = false;            // the swap chain is in DXGI exclusive fullscreen
+    bool toggle_requested = false;     // F11 or Alt+Enter, applied after the next present
+    unsigned display_mode_applied = 0u;
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
     float scale = 1.0f;         // RECOMP_D3D_SCALE: main target height multiplier
@@ -514,6 +521,21 @@ struct QualityRequest {
 static std::mutex quality_lock;
 static QualityRequest quality_request;
 
+/* PC Settings' display mode, set from the game thread before the window exists
+   or while the game runs, and applied by the presenter (applyDisplayMode). */
+constexpr unsigned kDisplayModeUnset = ~0u;
+static std::mutex display_mode_lock;
+static unsigned display_mode_request = kDisplayModeUnset; // 0 windowed, 1 borderless, 2 exclusive
+static unsigned display_mode_generation = 0u;
+
+/* The requested mode, or kDisplayModeUnset; generation gets the request's. */
+unsigned requestedDisplayMode(unsigned *generation)
+{
+    std::lock_guard<std::mutex> lock(display_mode_lock);
+    if (generation != nullptr) *generation = display_mode_generation;
+    return display_mode_request;
+}
+
 /* The display aspect: RECOMP_D3D_WIDESCREEN's shape (16:9 for 1), else 4:3.
    The game renders 4:3 or that shape anamorphic into its backbuffer; a
    netplay session takes the host's 4:3 or 16:9, and submitPresent fits it in. */
@@ -546,19 +568,34 @@ uint32_t scaledSize(const RecompD3dPresenter *presenter, uint32_t guest)
         static_cast<uint32_t>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION));
 }
 
-/* A scaled window covers the primary screen, whatever its shape; scale 1
-   keeps a 480-line window. (DOA3 port, issue #45 there.) */
+/* A fullscreen window covers its monitor; a windowed one is its picture's size,
+   at most the work area's, so a scaled picture still fits. (DOA3 port, issue
+   #45 there.) */
+RECT windowedWorkArea()
+{
+    RECT area{};
+    if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &area, 0))
+        area = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    return area;
+}
+
 uint32_t windowWidth(const RecompD3dPresenter *presenter)
 {
-    return presenter->scale == 1.0f
-        ? presentClientWidth(presenter, presenter->config.height)
-        : static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
+    if (presenter->fullscreen) return static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
+    const uint32_t picture = presenter->scale == 1.0f
+        ? presentClientWidth(presenter, presenter->config.height) : mainWidth(presenter);
+    const RECT area = windowedWorkArea();
+    const uint32_t work = static_cast<uint32_t>(area.right - area.left);
+    return (std::min)(picture, work > 80u ? work - 80u : work); // 80 pixels stay for the decorations
 }
 
 uint32_t windowHeight(const RecompD3dPresenter *presenter)
 {
-    return presenter->scale == 1.0f
-        ? presenter->config.height : static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
+    if (presenter->fullscreen) return static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
+    const uint32_t picture = presenter->scale == 1.0f ? presenter->config.height : mainHeight(presenter);
+    const RECT area = windowedWorkArea();
+    const uint32_t work = static_cast<uint32_t>(area.bottom - area.top);
+    return (std::min)(picture, work > 80u ? work - 80u : work);
 }
 
 /* VRR needs direct flip. */
@@ -577,21 +614,31 @@ D3D11_VIEWPORT fitViewport(float aspect, UINT width, UINT height)
     return {std::floor((width - w) / 2.0f), std::floor((height - h) / 2.0f), w, h, 0.0f, 1.0f};
 }
 
-/* Borderless fullscreen on the window's monitor. The swap chain follows the
-   client size on the next present. A window that started fullscreen (scale > 1)
-   leaves it for a centered 480-line window. */
-void toggleFullscreen(RecompD3dPresenter *presenter)
+/* Borderless fullscreen over the window's monitor. The swap chain follows the
+   client size on the next present. */
+void fillMonitor(RecompD3dPresenter *presenter)
 {
+    MONITORINFO monitor{sizeof monitor};
+    GetMonitorInfoW(MonitorFromWindow(presenter->window, MONITOR_DEFAULTTONEAREST), &monitor);
+    SetWindowLongPtrW(presenter->window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowPos(presenter->window, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+        monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+        SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+}
+
+/* Borderless true fills the window's monitor, false restores the placement it
+   had. A window that started fullscreen leaves it for a centered window of its
+   picture. */
+void setBorderless(RecompD3dPresenter *presenter, bool on)
+{
+    if (presenter->fullscreen == on) return;
     HWND window = presenter->window;
-    if (!presenter->fullscreen) {
-        MONITORINFO monitor{sizeof monitor};
+    if (on) {
         GetWindowPlacement(window, &presenter->windowed_placement);
-        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
-        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-        SetWindowPos(window, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
-            monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-            SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+        fillMonitor(presenter);
     } else {
+        // Not fullscreen any more, so windowWidth and windowHeight are the picture's.
+        presenter->fullscreen = false;
         WINDOWPLACEMENT &placement = presenter->windowed_placement;
         if (placement.length == 0u) {
             MONITORINFO monitor{sizeof monitor};
@@ -602,8 +649,8 @@ void toggleFullscreen(RecompD3dPresenter *presenter)
                 monitor.rcWork = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
                 origin = {};
             }
-            RECT rect = {0, 0, static_cast<LONG>(presentClientWidth(presenter, presenter->config.height)),
-                static_cast<LONG>(presenter->config.height)};
+            RECT rect = {0, 0, static_cast<LONG>(windowWidth(presenter)),
+                static_cast<LONG>(windowHeight(presenter))};
             AdjustWindowRectEx(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0u);
             const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
             const LONG left = (monitor.rcWork.left + monitor.rcWork.right - width) / 2 - origin.left;
@@ -617,7 +664,138 @@ void toggleFullscreen(RecompD3dPresenter *presenter)
         SetWindowPos(window, nullptr, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     }
-    presenter->fullscreen = !presenter->fullscreen;
+    presenter->fullscreen = on;
+}
+
+/* Resizes the back buffers to width x height and remakes the view PRESENT draws
+   into. The swap chain follows the window at each present; a mode change and a
+   resized window both come through here. */
+bool resizeSwapChain(RecompD3dPresenter *presenter, UINT width, UINT height)
+{
+    DXGI_SWAP_CHAIN_DESC chain{};
+    if (FAILED(presenter->swap_chain->GetDesc(&chain))) return false;
+    presenter->context->ClearState();
+    releaseCom(presenter->present_target_view);
+    presenter->context->Flush();
+    ID3D11Texture2D *back_buffer = nullptr;
+    const bool resized = SUCCEEDED(presenter->swap_chain->ResizeBuffers(0u, width, height,
+            DXGI_FORMAT_UNKNOWN, chain.Flags)) &&
+        SUCCEEDED(presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer))) &&
+        SUCCEEDED(presenter->device->CreateRenderTargetView(
+            back_buffer, nullptr, &presenter->present_target_view));
+    releaseCom(back_buffer);
+    if (!resized) std::fprintf(stderr, "recomp d3d presenter: swap chain %ux%u failed\n", width, height);
+    return resized;
+}
+
+/* The DXGI output on the window's monitor, for exclusive fullscreen. */
+IDXGIOutput *outputForWindow(RecompD3dPresenter *presenter)
+{
+    IDXGIDevice *device = nullptr;
+    IDXGIAdapter *adapter = nullptr;
+    IDXGIOutput *found = nullptr;
+    if (FAILED(presenter->device->QueryInterface(IID_PPV_ARGS(&device)))) return nullptr;
+    if (FAILED(device->GetAdapter(&adapter))) {
+        releaseCom(device);
+        return nullptr;
+    }
+    const HMONITOR monitor = MonitorFromWindow(presenter->window, MONITOR_DEFAULTTONEAREST);
+    for (UINT index = 0u; found == nullptr; ++index) {
+        IDXGIOutput *output = nullptr;
+        if (adapter->EnumOutputs(index, &output) == DXGI_ERROR_NOT_FOUND || output == nullptr) break;
+        DXGI_OUTPUT_DESC desc{};
+        if (SUCCEEDED(output->GetDesc(&desc)) && desc.AttachedToDesktop && desc.Monitor == monitor)
+            found = output;
+        else
+            releaseCom(output);
+    }
+    releaseCom(adapter);
+    releaseCom(device);
+    return found;
+}
+
+/* Exclusive fullscreen at the output's mode, over the borderless window that
+   setBorderless left covering the monitor, so leaving it has a placement to
+   return to. False when DXGI refuses it (a tearing swap chain or another
+   display owner), leaving the window as it was. */
+bool enterExclusive(RecompD3dPresenter *presenter)
+{
+    IDXGIOutput *output = outputForWindow(presenter);
+    if (output == nullptr) return false;
+    HRESULT result = presenter->swap_chain->SetFullscreenState(TRUE, output);
+    /* The chain is now the output's own mode and the window covers exactly its
+       pixels, so the buffers are resized here rather than at the next present's
+       window check. */
+    RECT client{};
+    if (SUCCEEDED(result) && GetClientRect(presenter->window, &client) &&
+        client.right > 0 && client.bottom > 0 &&
+        !resizeSwapChain(presenter, static_cast<UINT>(client.right), static_cast<UINT>(client.bottom)))
+        result = E_FAIL;
+    releaseCom(output);
+    if (FAILED(result)) {
+        presenter->swap_chain->SetFullscreenState(FALSE, nullptr);
+        return false;
+    }
+    presenter->exclusive = true;
+    return true;
+}
+
+/* Leaves exclusive fullscreen before anything that cannot run inside it: a
+   mode change, a released swap chain, or a lost focus. */
+void leaveExclusive(RecompD3dPresenter *presenter)
+{
+    if (!presenter->exclusive) return;
+    presenter->exclusive = false;
+    if (presenter->swap_chain != nullptr) presenter->swap_chain->SetFullscreenState(FALSE, nullptr);
+}
+
+/* Puts the window in mode: 0 a window, 1 borderless over its monitor, 2
+   exclusive. Exclusive is entered last, over the borderless window, so leaving
+   it has a placement to return to. */
+void enterDisplayMode(RecompD3dPresenter *presenter, unsigned mode)
+{
+    leaveExclusive(presenter);
+    if (mode == 2u) {
+        setBorderless(presenter, true);
+        if (!enterExclusive(presenter)) {
+            std::fprintf(stderr, "recomp d3d presenter: exclusive fullscreen unavailable; borderless\n");
+            mode = 1u;
+        }
+    } else {
+        setBorderless(presenter, mode != 0u);
+    }
+    presenter->display_mode = mode;
+    if (mode != 0u) presenter->preferred_fullscreen = mode;
+}
+
+/* F11 and Alt+Enter: a window, or the kind of fullscreen the player chose. A
+   toggle is not saved: the setting keeps its kind for the next launch. */
+void toggleDisplayMode(RecompD3dPresenter *presenter)
+{
+    enterDisplayMode(presenter, presenter->display_mode != 0u ? 0u : presenter->preferred_fullscreen);
+}
+
+/* Applies PC Settings' display mode between frames, as applyQuality does. A
+   window that started exclusive enters it at its first present, when it is
+   visible: DXGI refuses a fullscreen transition on a hidden window. */
+void applyDisplayMode(RecompD3dPresenter *presenter)
+{
+    if (presenter->toggle_requested) {
+        presenter->toggle_requested = false;
+        toggleDisplayMode(presenter);
+    }
+    unsigned generation = 0u;
+    const unsigned requested = requestedDisplayMode(&generation);
+    unsigned mode;
+    if (generation != presenter->display_mode_applied) {
+        presenter->display_mode_applied = generation;
+        mode = requested > 2u ? 1u : requested;
+    } else if (presenter->display_mode == 2u && !presenter->exclusive) {
+        mode = 2u;
+    } else {
+        return;
+    }
+    enterDisplayMode(presenter, mode);
 }
 
 LRESULT CALLBACK presenterWindowProc(
@@ -630,8 +808,9 @@ LRESULT CALLBACK presenterWindowProc(
     const bool toggle = (message == WM_KEYDOWN && wparam == VK_F11) ||
         (message == WM_SYSKEYDOWN && wparam == VK_RETURN);
     if (toggle || (message == WM_KEYUP && wparam == VK_F11) || (message == WM_SYSCHAR && wparam == VK_RETURN)) {
-        if (toggle && (lparam & (1 << 30)) == 0) // not a key repeat
-            toggleFullscreen(reinterpret_cast<RecompD3dPresenter *>(GetWindowLongPtrW(window, GWLP_USERDATA)));
+        auto *presenter = reinterpret_cast<RecompD3dPresenter *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+        // Not a key repeat. Messages arrive between packets, inside a frame: applyDisplayMode toggles after the present.
+        if (toggle && (lparam & (1 << 30)) == 0 && presenter != nullptr) presenter->toggle_requested = true;
         return 0;
     }
     if (message == WM_KEYDOWN || message == WM_KEYUP)
@@ -639,6 +818,17 @@ LRESULT CALLBACK presenterWindowProc(
     if (message == WM_CHAR) recomp_input_keyboard_char(static_cast<uint32_t>(wparam));
     if (message == WM_KILLFOCUS || message == WM_DESTROY)
         recomp_input_keyboard_reset();
+    /* A lost focus leaves exclusive fullscreen for the borderless window it was
+       over: DXGI minimizes a fullscreen chain's window when it loses focus, and
+       the display would stay in the game's mode behind an icon. */
+    if (message == WM_KILLFOCUS) {
+        auto *presenter = reinterpret_cast<RecompD3dPresenter *>(
+            GetWindowLongPtrW(window, GWLP_USERDATA));
+        if (presenter != nullptr && presenter->exclusive) {
+            leaveExclusive(presenter);
+            presenter->display_mode = 1u;
+        }
+    }
     if (message == WM_NCCREATE) {
         const auto *creation = reinterpret_cast<const CREATESTRUCTW *>(lparam);
         SetWindowLongPtrW(window, GWLP_USERDATA,
@@ -791,6 +981,9 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     releaseCom(presenter->back_buffer_copy);
     releaseCom(presenter->previous_frame_sample);
     releaseCom(presenter->previous_frame);
+    /* Exclusive fullscreen left with the chain would leave the display in the
+       game's mode with the desktop unpainted. */
+    leaveExclusive(presenter);
     releaseCom(presenter->swap_chain);
     if (presenter->frame_latency != nullptr) CloseHandle(presenter->frame_latency);
     presenter->frame_latency = nullptr;
@@ -892,6 +1085,15 @@ bool bindDrawConstants(RecompD3dPresenter *presenter, const float *constants)
 bool createWindow(RecompD3dPresenter *presenter)
 {
     WNDCLASSEXW window_class{};
+    unsigned generation = 0u;
+    const unsigned requested = requestedDisplayMode(&generation);
+    presenter->display_mode_applied = generation;
+    /* A requested fullscreen mode fills the monitor from the first frame; until
+       one is asked for, a scaled window does, as it did before the setting. */
+    presenter->display_mode = requested == kDisplayModeUnset
+        ? (presenter->scale > 1.0f ? 1u : 0u) : (requested > 2u ? 1u : requested);
+    presenter->fullscreen = presenter->display_mode != 0u;
+    if (presenter->fullscreen) presenter->preferred_fullscreen = presenter->display_mode;
     const uint32_t client_width = windowWidth(presenter);
     RECT window_rect = {
         0,
@@ -899,9 +1101,8 @@ bool createWindow(RecompD3dPresenter *presenter)
         static_cast<LONG>(client_width),
         static_cast<LONG>(windowHeight(presenter)),
     };
-    /* A scaled window fills the screen; decorations would not fit. */
-    const DWORD style = presenter->scale > 1.0f ? WS_POPUP : WS_OVERLAPPEDWINDOW;
-    presenter->fullscreen = style == WS_POPUP;
+    /* Decorations would not fit a window that fills the screen. */
+    const DWORD style = presenter->fullscreen ? WS_POPUP : WS_OVERLAPPEDWINDOW;
 
     presenter->instance = GetModuleHandleW(nullptr);
     window_class.cbSize = sizeof window_class;
@@ -945,11 +1146,16 @@ bool createWindow(RecompD3dPresenter *presenter)
     }
 
     RECT client_rect{};
-    return GetClientRect(presenter->window, &client_rect) &&
-        client_rect.right - client_rect.left ==
-            static_cast<LONG>(client_width) &&
-        client_rect.bottom - client_rect.top ==
-            static_cast<LONG>(windowHeight(presenter));
+    if (!GetClientRect(presenter->window, &client_rect) ||
+        client_rect.right - client_rect.left != static_cast<LONG>(client_width) ||
+        client_rect.bottom - client_rect.top != static_cast<LONG>(windowHeight(presenter))) {
+        return false;
+    }
+    /* Fullscreen from the first frame, without keeping this default placement as
+       where leaving it returns: a window that starts fullscreen leaves it for a
+       centered window of its picture. */
+    if (presenter->fullscreen) fillMonitor(presenter);
+    return true;
 }
 
 HRESULT createDeviceWithDriver(
@@ -966,8 +1172,14 @@ HRESULT createDeviceWithDriver(
     };
     D3D_FEATURE_LEVEL selected_feature_level{};
 
-    swap_chain_desc.BufferDesc.Width = windowWidth(presenter);
-    swap_chain_desc.BufferDesc.Height = windowHeight(presenter);
+    /* The window's own client area: a fullscreen one is the monitor's. */
+    RECT client{};
+    if (!GetClientRect(presenter->window, &client) || client.right <= 0 || client.bottom <= 0) {
+        client.right = static_cast<LONG>(windowWidth(presenter));
+        client.bottom = static_cast<LONG>(windowHeight(presenter));
+    }
+    swap_chain_desc.BufferDesc.Width = static_cast<UINT>(client.right);
+    swap_chain_desc.BufferDesc.Height = static_cast<UINT>(client.bottom);
     swap_chain_desc.BufferDesc.RefreshRate.Numerator = 0u;
     swap_chain_desc.BufferDesc.RefreshRate.Denominator = 1u;
     swap_chain_desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -4423,9 +4635,6 @@ void applyQuality(RecompD3dPresenter *presenter)
         framegenRelease(presenter);
         releaseSmaa(presenter);
         releaseAo(presenter);  // it pairs with the rebuilt depth
-        // A 480-line picture is windowed and a scaled one fills the screen, as at start.
-        if ((old_scale > 1.0f) != (scale > 1.0f) && presenter->fullscreen != (scale > 1.0f))
-            toggleFullscreen(presenter);
         presenter->quality_applied = want.generation;
     }
     releaseCom(picture);
@@ -4561,22 +4770,14 @@ RecompD3dPresenterError submitPresent(
     DXGI_SWAP_CHAIN_DESC chain{};
     RECT client{};
     presenter->swap_chain->GetDesc(&chain);
+    // A failed resize (enterExclusive's) leaves no view to draw into: remake it here.
     if (GetClientRect(presenter->window, &client) && client.right > 0 && client.bottom > 0 &&
         (static_cast<UINT>(client.right) != chain.BufferDesc.Width ||
-            static_cast<UINT>(client.bottom) != chain.BufferDesc.Height)) {
-        presenter->context->ClearState();
-        releaseCom(presenter->present_target_view);
-        presenter->context->Flush();
+            static_cast<UINT>(client.bottom) != chain.BufferDesc.Height || presenter->present_target_view == nullptr)) {
         chain.BufferDesc.Width = static_cast<UINT>(client.right);
         chain.BufferDesc.Height = static_cast<UINT>(client.bottom);
-        ID3D11Texture2D *back_buffer = nullptr;
-        const bool resized = SUCCEEDED(presenter->swap_chain->ResizeBuffers(0u,
-                chain.BufferDesc.Width, chain.BufferDesc.Height, DXGI_FORMAT_UNKNOWN, chain.Flags)) &&
-            SUCCEEDED(presenter->swap_chain->GetBuffer(0u, IID_PPV_ARGS(&back_buffer))) &&
-            SUCCEEDED(presenter->device->CreateRenderTargetView(
-                back_buffer, nullptr, &presenter->present_target_view));
-        releaseCom(back_buffer);
-        if (!resized) return RECOMP_D3D_PRESENTER_HOST_FAILURE;
+        if (!resizeSwapChain(presenter, chain.BufferDesc.Width, chain.BufferDesc.Height))
+            return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
     // A picture of another size or aspect than the window is drawn into it, with black bars.
     const float window_aspect = presenter->widescreen
@@ -4614,6 +4815,7 @@ RecompD3dPresenterError submitPresent(
         const RecompD3dPresenterError first = reportFirstPresent(presenter, S_OK);
         if (first != RECOMP_D3D_PRESENTER_OK) return first;
         applyQuality(presenter);
+        applyDisplayMode(presenter);
         return RECOMP_D3D_PRESENTER_OK;
     }
     framegenDiscardCover(presenter);
@@ -4764,6 +4966,7 @@ RecompD3dPresenterError submitPresent(
     const RecompD3dPresenterError first = reportFirstPresent(presenter, present_result);
     if (first != RECOMP_D3D_PRESENTER_OK) return first;
     applyQuality(presenter);
+    applyDisplayMode(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
 
@@ -5319,6 +5522,15 @@ void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpe
 bool d3d_backend_quality_live()
 {
     return true;
+}
+
+void d3d_backend_set_display_mode(unsigned mode)
+{
+    if (mode > 2u) mode = 1u; // out of range: borderless
+    std::lock_guard<std::mutex> lock(display_mode_lock);
+    display_mode_request = mode;
+    ++display_mode_generation;
+    std::fprintf(stderr, "recomp d3d presenter: display mode %u requested\n", mode);
 }
 
 D3dBackendVisibilityPoll d3d_backend_poll_visibility(

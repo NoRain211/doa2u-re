@@ -79,11 +79,12 @@ keeps running.
   ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
   for a newer release and install it from its **UPDATE** page; **Check At
   Start** turns the start-up check off.
-- **PC Settings in the game.** The game's own **Options** menu has a
-  **PC SETTINGS** row after **Video**, drawn and translated like the game's
-  rows, with the launcher's settings over four pages: the top **Page** row
-  (left, right or confirm) turns between the display, audio, gameplay and
-  HUD settings. **Unlocks**, **CPU Costumes**, **Free Camera**,
+- **PC Settings in the game.** The main menu has a **PC SETTINGS** entry
+  beside **JUKEBOX** and **QUIT GAME**. It opens a page drawn and translated
+  like the game's option pages: **Display**, **Graphics**, **Audio**,
+  **Gameplay** and **HUD** are listed on the left, and the selected
+  category's settings are on the right (A or right goes into them, B comes
+  back). **Display Mode**, **Unlocks**, **CPU Costumes**, **Free Camera**,
   **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
   **KO Replay** change at once, and so do **Resolution**, **MSAA**,
   **SMAA**, **Sharpening** and **Ambient Occlusion**, on any renderer; the
@@ -277,7 +278,8 @@ arrows are the D-pad, Enter is Start, Backspace is Back, Z/X are A/B, A/S are
 X/Y, Q/W are White/Black and E/R are the triggers. F3 turns on, or off again,
 a readout of the frame rate, the average frame time and the slowest frame of
 the last second; it starts off. F11 or Alt+Enter switches between a window and
-borderless fullscreen.
+fullscreen, borderless or exclusive as **Display Mode** in the game's **PC
+SETTINGS** page chooses.
 
 To rebind, open **Options**, **Controller**, **Rebind**. This opens the game's
 Button Config screen with **Keyboard** and **Controller** in its left list.
@@ -398,7 +400,7 @@ launcher's **16:10**, **21:9** (the primary monitor's own shape on a 21:9
 display, else 64:27) and
 **32:9** choices set it. A Live fight hashes only the fight, so each player
 keeps their own shape there; the presenter fits the game's 4:3 or 16:9
-picture into the window. Above 480p the Direct3D 11 window fills the screen borderless in
+picture into the window. A fullscreen window fills the screen in
 any shape, with black bars around a picture of another shape; the SDL_GPU
 window is resizable and fits the picture the same way. MSAA resolves before
 SMAA, and gamma applies last; **Sharpening** adds AMD FidelityFX CAS after
@@ -407,8 +409,10 @@ anti-aliasing, from **Off** through **Low**, **Medium** and **High**
 `1`). **Ambient occlusion** (`--ao`, or `RECOMP_D3D_AO=1`) darkens creases and
 contact areas of the 3D scene; it runs before the HUD and screen effects, so
 they stay as the game drew them, and it is off by default. Unsupported MSAA counts fall back to the
-highest count the GPU supports. Options passed to `run_game.py` bypass the settings
-window. The build fetches pinned, hash-verified copies of SDL3,
+highest count the GPU supports. **Display Mode** in the game's **PC SETTINGS**
+page chooses a window, borderless fullscreen over its monitor, or exclusive
+fullscreen at the monitor's mode, and applies at once. Options passed to
+`run_game.py` bypass the settings window. The build fetches pinned, hash-verified copies of SDL3,
 [upstream SMAA](https://github.com/iryoku/smaa) and
 [Dear ImGui](https://github.com/ocornut/imgui), which draws the free camera's panel.
 

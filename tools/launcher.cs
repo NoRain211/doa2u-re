@@ -294,7 +294,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
-    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay, fightHud; bool hitVoices; // chosen in the game's PC Settings; kept as saved
+    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay, fightHud, displayMode; bool hitVoices; // chosen in the game's PC Settings; kept as saved
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
@@ -406,6 +406,7 @@ class LauncherForm : Form
             Index = !hitVoices ? 0 : hitVoiceVolume == "quiet" ? 1 : hitVoiceVolume == "loud" ? 3 : 2 };
         koReplay = Game.Str(settings, "koReplay", "dynamic");
         fightHud = Game.Str(settings, "fightHud", Game.Bool(settings, "comboHud", true) ? "both" : "original"); // comboHud came first
+        displayMode = Game.Str(settings, "displayMode", "borderless"); // the game's PC SETTINGS row
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
@@ -530,7 +531,8 @@ class LauncherForm : Form
             { "freeCamera", freeCamera.Index == 1 }, { "randomCpuCostumes", cpuCostumes.Index == 1 }, { "dedicationCard", dedication.Index == 0 }, { "textureDump", Dumps[textureDump.Index] },
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
             { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
-            { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay }, { "fightHud", fightHud } };
+            { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay }, { "fightHud", fightHud },
+            { "displayMode", displayMode } };
     }
 
     static Color Rgb(int r, int g, int b, int a = 255) { return Color.FromArgb(a, r, g, b); }

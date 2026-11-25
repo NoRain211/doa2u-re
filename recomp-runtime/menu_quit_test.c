@@ -62,7 +62,7 @@ static void ret(uint32_t eax) { recomp_runtime.registers.eax = eax; recomp_runti
 /* The game, faked. */
 static unsigned language = 1u, unlocked = 16u, invalidated;
 static uint32_t sounds[16], sound_count;
-static bool confirm_this_frame;
+static bool confirm_this_frame, dialog_confirm_this_frame;
 void recomp_d3d8_invalidate_textures(uint32_t base, uint32_t size) { (void)base; (void)size; ++invalidated; }
 void recomp_stop(int code, const char *format, ...) { fprintf(stderr, "stop %d: %s\n", code, format); abort(); }
 void sub_000212E0(void) { ret(language); }
@@ -81,15 +81,23 @@ void sub_001345C0(void) { ret(0x95u); }
 static unsigned cancels;
 void sub_00135AE0(void) { ++cancels; ret(1u); }
 void sub_000FED70(void) { if (sound_count < 16u) sounds[sound_count++] = arg(1u); ret(0u); }
-/* The menu's update: the confirm plays sound 0x24 through the hooked call. */
+void sub_00127840(void) { ret(0u); }
+/* The menu's update: the carousel's confirm starts its leave (0x127840 with 2,
+   on the carousel) and plays sound 0x24; a dialog in the same update (the
+   first boot's profile screen) plays 0x24 alone. */
 void sub_0013B850(void)
 {
+    const uint32_t saved = recomp_runtime.registers.esp;
     if (confirm_this_frame) {
-        const uint32_t id = 0x24u;
-        const uint32_t saved = recomp_runtime.registers.esp;
+        const uint32_t leave[3] = {2u, 20u, 0u}, id = 0x24u;
+        recomp_runtime.registers.ecx = 0x00df5d28u;
+        hook(0x00127840u, leave, 3u);
         hook(0x000fed70u, &id, 1u);
-        recomp_runtime.registers.esp = saved;
+    } else if (dialog_confirm_this_frame) {
+        const uint32_t id = 0x24u;
+        hook(0x000fed70u, &id, 1u);
     }
+    recomp_runtime.registers.esp = saved;
     ret(1u);
 }
 
@@ -148,8 +156,9 @@ static RecompInputGamepad pad_with(uint16_t buttons, uint8_t a, uint8_t b)
     return pad;
 }
 
-static unsigned jukebox_opens;
+static unsigned jukebox_opens, pc_opens;
 static void fake_jukebox_request(void) { ++jukebox_opens; }
+static void fake_pc_request(void) { ++pc_opens; }
 
 static bool idle(RecompInputGamepad pad) { return pad.buttons == 0u && pad.analog_buttons[0] == 0u && pad.analog_buttons[1] == 0u; }
 
@@ -249,6 +258,14 @@ int main(void)
     frame();
     expect("other confirm", !recomp_quit_prompt_open() && sound_count == 1u && sounds[0] == 0x24u);
     wr32(SELECTED, QUIT_MODE);
+    /* A dialog's confirm in the menu's update (the first boot's region or
+       profile screen) is not the carousel's, whatever the carousel shows. */
+    confirm_this_frame = false;
+    dialog_confirm_this_frame = true;
+    frame();
+    dialog_confirm_this_frame = false;
+    expect("dialog confirm does not quit", !recomp_quit_prompt_open());
+    confirm_this_frame = true;
     frame();
     confirm_this_frame = false;
     expect("asks", recomp_quit_prompt_open());
@@ -322,6 +339,53 @@ int main(void)
     frame();
     confirm_this_frame = false;
     expect("logged-on jukebox entry asks for nothing", jukebox_opens == 1u);
+
+    /* PC Settings: one more entry before the Jukebox, with its own pictures and
+       label; its confirm asks for its page. */
+    static uint8_t pc_grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], pc_alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE];
+    recomp_pc_icon_draw(1.0f, pc_grey, pc_alpha);
+    expect("pc picture gear", pc_alpha[54 * 128 + 64] == 255u && pc_alpha[30 * 128 + 66] == 255u && pc_alpha[0] == 0u);
+    recomp_runner_assets_reset();
+    recomp_menu_quit_set_jukebox(fake_jukebox_request);
+    recomp_menu_quit_set_pc_settings(fake_pc_request);
+    const unsigned before_pc = invalidated;
+    recomp_menu_quit_install();
+    expect("pc pictures drawn", invalidated == before_pc + 6u);
+    hook(0x00134330u, &none, 1u);
+    expect("count with pc settings", *recomp_memory(COUNT, 1u) == 19u);
+    position = 16u;
+    const uint32_t pc_entry = hook(0x001343a0u, &position, 1u);
+    expect("pc entry", rd32(pc_entry) == 0x0au && rd32(pc_entry + 4u) == (0x1f0u << 16) &&
+        rd32(pc_entry + 8u) == (0x1f0u << 16 | 1u) && rd32(pc_entry + 12u) == (0x1f0u << 16 | 9u));
+    const uint32_t pc_label = 0x1f0u << 16;
+    const uint32_t pc_rect = hook(0x000aa970u, &pc_label, 1u);
+    /* 6 lean + P 10, C 12.5, space 9, SETTINGS 83: 120.5, and the shadow's 8 capped at the sprite's 128. */
+    expect("pc label", rd16(pc_rect + 4u) == 128u && rd16(pc_rect + 6u) == 24u);
+    position = 17u;
+    expect("jukebox after pc settings", rd32(hook(0x001343a0u, &position, 1u) + 4u) == jukebox_label);
+    position = 18u;
+    expect("quit last", rd32(hook(0x001343a0u, &position, 1u)) == QUIT_MODE);
+    *recomp_memory(MENU + 0x120u, 1u) = 16u;
+    expect("pc mode is Options'", hook(0x001343d0u, &ctx, 1u) == 0x0au);
+    uint32_t pc_help_text = 0u;
+    const uint32_t pc_help = hook(0x001345c0u, &options_mode, 1u);
+    expect("pc help", pc_help == RECOMP_RUNNER_TEXT_PC_MENU && recomp_runner_text_lookup(pc_help, 1u, &pc_help_text) &&
+        rd16(pc_help_text) == 'G');
+    /* A dialog's confirm in the menu's update (the profile screen) is not the carousel's. */
+    dialog_confirm_this_frame = true;
+    frame();
+    dialog_confirm_this_frame = false;
+    expect("dialog confirm asks for nothing", pc_opens == 0u && jukebox_opens == 1u);
+    wr32(SELECTED, 0x0au);
+    confirm_this_frame = true;
+    frame();
+    confirm_this_frame = false;
+    expect("pc asked for", pc_opens == 1u && jukebox_opens == 1u);
+    *recomp_memory(MENU + 0x120u, 1u) = 17u;
+    confirm_this_frame = true;
+    frame();
+    confirm_this_frame = false;
+    expect("jukebox still its own", pc_opens == 1u && jukebox_opens == 2u);
 
     if (failures == 0) printf("menu quit: all tests passed\n");
     return failures == 0 ? 0 : 1;

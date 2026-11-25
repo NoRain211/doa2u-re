@@ -52,7 +52,7 @@ int main()
         c[RECOMP_PC_SHARPEN] == 0u && c[RECOMP_PC_AO] == 0u &&
         c[RECOMP_PC_SCREEN] == 1u && c[RECOMP_PC_RENDERER] == 0u && c[RECOMP_PC_INTRO] == 0u &&
         c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u && c[RECOMP_PC_DEDICATION] == 0u &&
-        c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u);
+        c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u && c[RECOMP_PC_DISPLAY_MODE] == 1u);
 
     // A launcher's file, with keys the page does not own.
     write(path, "{\"height\":2160,\"msaa\":8,\"smaa\":false,\"sharpen\":\"medium\",\"widescreen\":true,\"screen\":\"2560:1080\","
@@ -107,6 +107,21 @@ int main()
     expect("frame rate display read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_FRAME_RATE] == 1u);
     write(path, "{\"frameRate\":\"bogus\"}");
     expect("unknown frame rate", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_FRAME_RATE] == 0u);
+    // Display mode names a window, borderless or exclusive fullscreen; anything else is borderless.
+    write(path, "{\"displayMode\":\"windowed\"}");
+    expect("windowed read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_DISPLAY_MODE] == 0u);
+    write(path, "{\"displayMode\":\"fullscreen\"}");
+    expect("fullscreen read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_DISPLAY_MODE] == 2u);
+    write(path, "{\"displayMode\":\"bogus\"}");
+    expect("unknown display mode", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_DISPLAY_MODE] == 1u);
+    for (std::uint8_t i = 0u; i < 3u; ++i) {
+        again[RECOMP_PC_DISPLAY_MODE] = i;
+        recomp_pc_settings_write(path, store, again);
+        const std::string names[3] = {"\"displayMode\":\"windowed\"", "\"displayMode\":\"borderless\"",
+            "\"displayMode\":\"fullscreen\""};
+        expect("display mode name", read(path).find(names[i]) != std::string::npos);
+        expect("display mode read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_DISPLAY_MODE] == i);
+    }
     // Sharpening saves by name; a missing or unknown one is off.
     write(path, "{\"sharpen\":\"bogus\"}");
     expect("unknown sharpen", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_SHARPEN] == 0u);
