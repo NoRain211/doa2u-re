@@ -405,8 +405,8 @@ an address, and an address may open 16 pairs. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
 672-byte attributes, 512-byte filters, 25 search results, 100 friends and
 pending requests, 250 mutes (147 fit one MUTELIST packet, so it is cut
-there), 32 boards per account, 256 board rankings cached (the oldest makes
-room), 16 feedback types per target, 64 stats per write and 64 per account
+there), 48 boards per account (the game's whole 0..47 board range), 256 board
+rankings cached (the oldest makes room), 16 feedback types per target, 64 stats per write and 64 per account
 and board (a full group-7 write is 61; the game reads back its
 62 entries, the last a rank the client makes from the row), 100 XUIDs per
 read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
