@@ -388,7 +388,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
         return dict(xbe_sha256=sha256(xbe), lifter_commit=revision, capstone=capstone.__version__,
                     functions_sha256=sha256(functions))
 
-    reuse = None
+    reuse = recipe = None
     if not (build_only or lift_only or disassemble):
         merge_functions(functions)
         recipe = program_recipe()
@@ -406,7 +406,7 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                       "--seed-functions", ROOT / "tools/doa2u/seed_functions.json"],
                      logs / "disasm.log", LIFTER)
         write_functions(disasm)
-    if not reuse:
+    if recipe is None:  # build-only, lift-only, or shards rewritten by the disassembly
         merge_functions(functions)
         recipe = program_recipe()
     if reuse:
