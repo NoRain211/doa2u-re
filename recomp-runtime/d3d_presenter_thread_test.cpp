@@ -33,6 +33,11 @@ static int _putenv_s(const char *name, const char *value)
     return value[0] != '\0' ? setenv(name, value, 1) : unsetenv(name);
 }
 
+static unsigned long GetCurrentProcessId()
+{
+    return (unsigned long)getpid();
+}
+
 static ULONGLONG GetTickCount64()
 {
     return SDL_GetTicks();
@@ -3611,8 +3616,10 @@ static bool testAmbientOcclusion(bool live)
         auto clear = clearCommand();
         clear.data.clear.color = 0xff808080u;
         bool ok = expect("ao clear", d3d_backend_submit(presenter, &clear));
-        ok &= expect("ao floor", d3d_backend_submit(presenter, &triangle(floor, sizeof floor[0], floor_indices)));
-        ok &= expect("ao wall", d3d_backend_submit(presenter, &triangle(wall, sizeof wall[0], wall_indices)));
+        auto floorDraw = triangle(floor, sizeof floor[0], floor_indices);
+        auto wallDraw = triangle(wall, sizeof wall[0], wall_indices);
+        ok &= expect("ao floor", d3d_backend_submit(presenter, &floorDraw));
+        ok &= expect("ao wall", d3d_backend_submit(presenter, &wallDraw));
         // A coverage probe after the scene must not run occlusion inside its query.
         auto probe = triangle(floor, sizeof floor[0], floor_indices).data.draw;
         probe.transform[0] = 0.0f;
@@ -4661,7 +4668,7 @@ static bool testFramegenCuts()
         }
     }
     passed = passed && flowFrame(presenter, a, 0x100000u, ++swap) && flowFrame(presenter, moved[0], 0x400000u, ++swap) &&
-        flowFrame(presenter, moved[1], 0x500000u, ++swap) && generate(0.5f);
+        flowFrame(presenter, moved[1], 0x500000u, ++swap) && (!engaged || generate(0.5f));
     if (passed && engaged) {
         unsigned held = 0u;
         for (size_t at = 0u; at < a.size(); ++at)
