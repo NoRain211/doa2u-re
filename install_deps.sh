@@ -9,19 +9,19 @@ if [[ -r /etc/os-release ]] && grep -qx 'ID=steamos' /etc/os-release; then
     exit 1
 fi
 if command -v apt-get >/dev/null; then
-    cmd=(apt-get install -y build-essential cmake ninja-build git python3-venv
+    cmd=(apt-get install -y build-essential clang cmake ninja-build git python3-venv
          libshaderc1 libvulkan1 mesa-vulkan-drivers
          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev
          libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev libpulse-dev
          libpipewire-0.3-dev libudev-dev libdbus-1-dev libxtst-dev)
 elif command -v dnf >/dev/null; then
-    cmd=(dnf install -y gcc-c++ cmake ninja-build git python3
+    cmd=(dnf install -y gcc-c++ clang cmake ninja-build git python3
          libshaderc vulkan-loader mesa-vulkan-drivers
          libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXi-devel libXScrnSaver-devel
          libxkbcommon-devel wayland-devel wayland-protocols-devel mesa-libEGL-devel alsa-lib-devel
          pulseaudio-libs-devel pipewire-devel systemd-devel dbus-devel libXtst-devel)
 elif command -v pacman >/dev/null; then
-    cmd=(pacman -S --needed --noconfirm base-devel cmake ninja git python
+    cmd=(pacman -S --needed --noconfirm base-devel clang cmake ninja git python
          shaderc vulkan-icd-loader mesa
          libx11 libxext libxrandr libxcursor libxi libxss libxkbcommon wayland wayland-protocols
          alsa-lib libpulse pipewire dbus libxtst)

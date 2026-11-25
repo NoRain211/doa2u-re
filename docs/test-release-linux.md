@@ -13,8 +13,11 @@ Vulkan driver for an NVIDIA GPU:
   with its venv module, the shaderc library and a Vulkan driver. On
   Ubuntu 24.04 or Debian 13:
 
-      sudo apt install build-essential cmake ninja-build git python3-venv \
+      sudo apt install build-essential clang cmake ninja-build git python3-venv \
           libshaderc1 libvulkan1 mesa-vulkan-drivers
+
+  Clang is optional; it compiles the game in half the memory GCC takes,
+  so more compile jobs fit.
 
   The build compiles SDL3 when your distribution has none, which also
   needs its development packages:

@@ -111,7 +111,7 @@ apt, dnf or pacman (`--print` only shows the command). On Ubuntu 24.04 or
 Debian 13 the same packages are:
 
 ```bash
-sudo apt install build-essential cmake ninja-build git python3-venv \
+sudo apt install build-essential clang cmake ninja-build git python3-venv \
     libshaderc1 libvulkan1 mesa-vulkan-drivers \
     libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
     libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev libpulse-dev \
@@ -136,6 +136,14 @@ cd doa2u-re
 
 `build_game.sh` creates `private/venv` and installs Capstone there itself, and
 stops at once if CMake, Ninja, Git or a C++ compiler is missing.
+
+The build compiles with Clang when `clang` and `clang++` are on `PATH`, as
+the Windows and macOS builds do, and with the system compiler otherwise; set
+`CC` and `CXX` to choose another. It runs as many compile jobs as the CPU has
+threads while every generated chunk still fits in the free memory: each takes
+up to about 0.8 GB with Clang and 1.6 GB with GCC. On a 16-thread PC with
+24 GB free, Clang 18 compiles the game in about 3 minutes, against 8 with
+GCC 13 and the former four jobs.
 
 SteamOS has a read-only system and no compiler. On a Steam Deck, keep the
 checkout under your home folder, open Konsole in Desktop Mode and run:

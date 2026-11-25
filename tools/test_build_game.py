@@ -11,7 +11,8 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from build_game import (STEPS, build, build_fraction, drop_owned_extraction, failure_excerpt, import_disc,
+from build_game import (STEPS, build, build_fraction, build_jobs, drop_owned_extraction, failure_excerpt,
+                        import_disc, linux_compilers,
                         lifter_revision, main, merge_functions, precompile_shaders, program_manifest,
                         selected_xbe, use_windows_newlines, write_functions)
 from extract_iso import sha256
@@ -46,6 +47,25 @@ class BuildTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "build_steamdeck.sh"):
             build(iso=Path("disc.iso"))
         imported.assert_not_called()
+
+    def test_jobs_fit_every_chunk_in_free_memory(self):
+        gib = 1 << 30
+        self.assertEqual(build_jobs(True, cpus=16, memory=24 * gib), 16)
+        self.assertEqual(build_jobs(False, cpus=16, memory=24 * gib), 12)
+        self.assertEqual(build_jobs(True, cpus=8, memory=6 * gib + gib // 2), 6)
+        self.assertEqual(build_jobs(False, cpus=8, memory=gib), 1)
+        self.assertEqual(build_jobs(True, cpus=16, memory=None), 4)
+
+    def test_linux_prefers_clang_unless_the_environment_names_a_compiler(self):
+        tools = {"clang": "/usr/bin/clang", "clang++": "/usr/bin/clang++"}
+        with patch.dict("build_game.os.environ", {}, clear=True):
+            with patch("build_game.shutil.which", side_effect=tools.get):
+                self.assertEqual(linux_compilers(), ("/usr/bin/clang", "/usr/bin/clang++"))
+            with patch("build_game.shutil.which", side_effect={"clang": "/usr/bin/clang"}.get):
+                self.assertIsNone(linux_compilers())
+        with patch.dict("build_game.os.environ", {"CC": "gcc"}, clear=True), \
+                patch("build_game.shutil.which", side_effect=tools.get):
+            self.assertIsNone(linux_compilers())
 
     def test_failure_excerpt_keeps_an_early_cause_ahead_of_a_long_tail(self):
         # CMake prints "Could not create named generator" first, then its whole help.

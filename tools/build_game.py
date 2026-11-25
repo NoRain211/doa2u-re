@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -128,6 +129,40 @@ def use_windows_newlines(generated):
         if path.is_file():
             data = path.read_bytes()
             path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+
+
+def linux_compilers():
+    """Clang for the generated program, as on Windows and macOS: on the largest chunk
+    it took half GCC 13's memory (0.8 GB, not 1.6 GB) and a sixth less time.
+    CC or CXX in the environment, or no clang on PATH, keeps CMake's own choice."""
+    if os.environ.get("CC") or os.environ.get("CXX"):
+        return None
+    c, cxx = shutil.which("clang"), shutil.which("clang++")
+    return (c, cxx) if c and cxx else None
+
+
+def available_memory():
+    """Bytes the build can take: MemAvailable on Linux, half the RAM elsewhere."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def build_jobs(clang, cpus=None, memory=None):
+    """Compile jobs outside Windows: as many as the CPUs, while every generated chunk
+    compiling at once (1 GiB each with clang, 2 GiB with GCC) still fits in memory."""
+    cpus = cpus or os.cpu_count() or 1
+    if memory is None:
+        return min(4, cpus)
+    return max(1, min(cpus, memory // ((1 if clang else 2) << 30)))
 
 
 def runner_path(root=ROOT, vulkan=False):
@@ -410,8 +445,18 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                      f"-DCMAKE_CXX_COMPILER={compiler.with_name('clang++.exe').as_posix()}"]
     else:
         generator = ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
+    clang = sys.platform == "darwin"  # Apple's cc is clang
     if sys.platform.startswith("linux"):
         generator.append("-DRECOMP_FETCH_SDL3=ON")  # used only when the system has no SDL3
+        compilers = linux_compilers()
+        if compilers:
+            clang = True
+            generator += [f"-DCMAKE_C_COMPILER={compilers[0]}", f"-DCMAKE_CXX_COMPILER={compilers[1]}"]
+            # CMake keeps a cache's first compiler; drop a cache that names another.
+            cache = build_dir / "CMakeCache.txt"
+            if cache.is_file() and not re.search(rf"^CMAKE_C_COMPILER:\w+={re.escape(compilers[0])}$",
+                                                 cache.read_text(encoding="utf-8", errors="replace"), re.M):
+                cache.unlink()
     progress.run(["cmake", "-S", ROOT / "recomp-runtime", "-B", build_dir, *generator,
                 f"-DRECOMP_PROGRAM_DIR={generated.as_posix()}",
                 f"-DRECOMP_XBE_SHA256={recipe['xbe_sha256']}",
@@ -422,8 +467,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     targets = ["recomp_program_runner", "recomp_adx_encode"] + (["recomp_launcher"] if sys.platform.startswith("linux") else [])
     if windows:
         targets.append("recomp_program_runner_vulkan")
-    # Generated chunks are large; outside Windows more jobs than this can exhaust memory.
-    jobs = str(os.cpu_count() or 4) if windows else str(min(4, os.cpu_count() or 1))
+    # Generated chunks are large; outside Windows, size the jobs to the free memory.
+    jobs = str(os.cpu_count() or 4) if windows else str(build_jobs(clang, memory=available_memory()))
     progress.run(["cmake", "--build", build_dir, "--parallel", jobs,
                 "--target", *targets], logs / "build.log")
     receipt["runner_sha256"] = sha256(runner_path())
