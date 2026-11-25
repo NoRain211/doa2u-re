@@ -301,6 +301,7 @@ struct RecompD3dPresenter {
     unsigned display_mode = 0u;
     unsigned preferred_fullscreen = 1u;
     bool exclusive = false;            // the swap chain is in DXGI exclusive fullscreen
+    bool toggle_requested = false;     // F11 or Alt+Enter, applied after the next present
     unsigned display_mode_applied = 0u;
     bool widescreen = false;
     uint32_t aspect_w = 16u, aspect_h = 9u; // widescreen shape, from RECOMP_D3D_WIDESCREEN
@@ -779,6 +780,10 @@ void toggleDisplayMode(RecompD3dPresenter *presenter)
    visible: DXGI refuses a fullscreen transition on a hidden window. */
 void applyDisplayMode(RecompD3dPresenter *presenter)
 {
+    if (presenter->toggle_requested) {
+        presenter->toggle_requested = false;
+        toggleDisplayMode(presenter);
+    }
     unsigned generation = 0u;
     const unsigned requested = requestedDisplayMode(&generation);
     unsigned mode;
@@ -803,8 +808,9 @@ LRESULT CALLBACK presenterWindowProc(
     const bool toggle = (message == WM_KEYDOWN && wparam == VK_F11) ||
         (message == WM_SYSKEYDOWN && wparam == VK_RETURN);
     if (toggle || (message == WM_KEYUP && wparam == VK_F11) || (message == WM_SYSCHAR && wparam == VK_RETURN)) {
-        if (toggle && (lparam & (1 << 30)) == 0) // not a key repeat
-            toggleDisplayMode(reinterpret_cast<RecompD3dPresenter *>(GetWindowLongPtrW(window, GWLP_USERDATA)));
+        auto *presenter = reinterpret_cast<RecompD3dPresenter *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+        // Not a key repeat. Messages arrive between packets, inside a frame: applyDisplayMode toggles after the present.
+        if (toggle && (lparam & (1 << 30)) == 0 && presenter != nullptr) presenter->toggle_requested = true;
         return 0;
     }
     if (message == WM_KEYDOWN || message == WM_KEYUP)
@@ -4764,9 +4770,10 @@ RecompD3dPresenterError submitPresent(
     DXGI_SWAP_CHAIN_DESC chain{};
     RECT client{};
     presenter->swap_chain->GetDesc(&chain);
+    // A failed resize (enterExclusive's) leaves no view to draw into: remake it here.
     if (GetClientRect(presenter->window, &client) && client.right > 0 && client.bottom > 0 &&
         (static_cast<UINT>(client.right) != chain.BufferDesc.Width ||
-            static_cast<UINT>(client.bottom) != chain.BufferDesc.Height)) {
+            static_cast<UINT>(client.bottom) != chain.BufferDesc.Height || presenter->present_target_view == nullptr)) {
         chain.BufferDesc.Width = static_cast<UINT>(client.right);
         chain.BufferDesc.Height = static_cast<UINT>(client.bottom);
         if (!resizeSwapChain(presenter, chain.BufferDesc.Width, chain.BufferDesc.Height))

@@ -158,6 +158,8 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "dedicationCard", value)) settings.dedication = value == "true";
     jsonText(text, "textureDump", settings.texture_dump);
     jsonText(text, "displayMode", settings.display_mode); // the game's PC SETTINGS row, kept as saved
+    // Only its three values are saved back; anything else is borderless, as the game reads it.
+    if (settings.display_mode != "windowed" && settings.display_mode != "fullscreen") settings.display_mode = "borderless";
     jsonText(text, "game_source", settings.game_source);
     return settings;
 }
