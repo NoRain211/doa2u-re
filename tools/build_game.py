@@ -155,15 +155,23 @@ def available_memory():
             return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2
         except (AttributeError, OSError, ValueError):
             return None
-    # cgroup v2, then v1; "max" or a missing file means no limit.
-    for limit, usage in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
-                         ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
-                          "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+    # cgroup v2, then v1; "max" or a missing file means no limit. Usage counts the
+    # page cache, so take out the inactive part, as Docker does.
+    for folder, limit, usage, cache in (("/sys/fs/cgroup", "memory.max", "memory.current", "inactive_file"),
+                                        ("/sys/fs/cgroup/memory", "memory.limit_in_bytes",
+                                         "memory.usage_in_bytes", "total_inactive_file")):
         try:
-            with open(limit, encoding="ascii") as cap, open(usage, encoding="ascii") as used:
-                memory = min(memory, max(0, int(cap.read()) - int(used.read())))
+            with open(f"{folder}/{limit}", encoding="ascii") as limit_file, \
+                    open(f"{folder}/{usage}", encoding="ascii") as usage_file:
+                cap, used = int(limit_file.read()), int(usage_file.read())
         except (OSError, ValueError):
+            continue
+        try:
+            with open(f"{folder}/memory.stat", encoding="ascii") as stat:
+                used -= next(int(line.split()[1]) for line in stat if line.split()[0] == cache)
+        except (OSError, ValueError, IndexError, StopIteration):
             pass
+        memory = min(memory, max(0, cap - used))
     return memory
 
 
@@ -474,7 +482,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
             generator += [f"-DCMAKE_C_COMPILER={compilers[0]}", f"-DCMAKE_CXX_COMPILER={compilers[1]}"]
         # The compiler CMake will use: clang, else CC, else cc.
         compiler = compilers[0] if compilers else shutil.which(os.environ.get("CC") or "cc")
-        clang = compiler is not None and "clang" in Path(compiler).resolve().name
+        # Clang passed by name may be a ccache link; only CC or cc needs its real name read.
+        clang = bool(compilers) or (compiler is not None and "clang" in Path(compiler).resolve().name)
         drop_stale_cache(build_dir, compiler)
     progress.run(["cmake", "-S", ROOT / "recomp-runtime", "-B", build_dir, *generator,
                 f"-DRECOMP_PROGRAM_DIR={generated.as_posix()}",

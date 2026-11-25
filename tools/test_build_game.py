@@ -77,6 +77,8 @@ class BuildTests(unittest.TestCase):
             return io.StringIO(files[path])
         with patch("builtins.open", fake_open):
             self.assertEqual(available_memory(), 6000000000)
+            files["/sys/fs/cgroup/memory.stat"] = "anon 1000000000\ninactive_file 1500000000\n"
+            self.assertEqual(available_memory(), 7500000000)  # page cache the kernel can drop
             files["/sys/fs/cgroup/memory.max"] = "max\n"
             self.assertEqual(available_memory(), 24000000 * 1024)
 
