@@ -810,7 +810,12 @@ class LiveTest(unittest.TestCase):
 
     def test_an_account_keeps_only_so_many_stat_boards(self):
         self.online()
-        for board in range(mm.MAX_BOARDS):
+        # The game can address every board in 0..47 (its tables use 1 and 4..47).
+        for board in range(48):
+            self.assertEqual(self.done(self.one(live(mm.STAT_WRITE, write_body(self.next_request(), board, A,
+                                                                               ((1, 1, board),))), A_AT, 0.0,
+                                                mm.DONE))[1], 0)
+        for board in range(48, mm.MAX_BOARDS):
             self.assertEqual(self.done(self.one(live(mm.STAT_WRITE, write_body(self.next_request(), board, A,
                                                                                ((1, 1, board),))), A_AT, 0.0,
                                                 mm.DONE))[1], 0)
