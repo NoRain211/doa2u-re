@@ -1,5 +1,5 @@
-Dead or Alive 2 Ultimate native macOS port - 0.4.0 Alpha
-========================================================
+Dead or Alive 2 Ultimate native macOS port - 0.5.0
+==================================================
 
 This is an early build. It contains no game files. You
 build the game yourself from your own copy of Dead or Alive Ultimate
