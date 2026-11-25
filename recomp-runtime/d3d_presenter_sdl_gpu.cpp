@@ -351,6 +351,7 @@ struct RecompD3dPresenter {
     SDL_GPUShaderFormat shader_format = SDL_GPU_SHADERFORMAT_SPIRV;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
     bool close_requested = false;
+    unsigned display_mode = 0u, preferred_fullscreen = 1u, display_mode_applied = 0u; // setWindowMode
     // The last two presents' GPU work, oldest first. Swap waits for the newer one, so one frame is in flight.
     SDL_GPUFence *present_fences[2] = {};
     bool vrr = false;           // RECOMP_D3D_VRR=1: the game's 60 Hz timer paces a VRR display
@@ -505,6 +506,9 @@ std::mutex quality_lock;
 QualityRequest quality_request;
 unsigned quality_applied = 0u;
 std::atomic<int64_t> framegen_late_ns{25000000};
+
+// Display mode: requests << 2 | mode.
+std::atomic<unsigned> mode_request{0u};
 
 uint32_t presentClientWidth(const RecompD3dPresenter *presenter, uint64_t height)
 {
@@ -678,6 +682,8 @@ void resolveTarget(RecompD3dPresenter *presenter, SDL_GPUTexture *source, SDL_GP
 
 void flushSegment(RecompD3dPresenter *presenter);
 void applyQuality(RecompD3dPresenter *presenter);
+void applyDisplayMode(RecompD3dPresenter *presenter);
+void setWindowMode(RecompD3dPresenter *presenter, unsigned mode);
 /* d3d_ao.h: runs before the frame's 2D layers and at PRESENT. */
 void aoDrawBoundary(RecompD3dPresenter *presenter, const RecompD3dPresenterDrawCommand &draw,
     const RecompD3dVertexLayout &layout);
@@ -2860,8 +2866,8 @@ void pumpEvents(RecompD3dPresenter *presenter)
         // F11 and Alt+Enter switch fullscreen and never reach the game.
         if (event.type == SDL_EVENT_KEY_DOWN && (event.key.key == SDLK_F11 ||
                 ((event.key.mod & SDL_KMOD_ALT) != 0 && (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER)))) {
-            if (!event.key.repeat)
-                SDL_SetWindowFullscreen(presenter->window, (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_FULLSCREEN) == 0);
+            // Not saved.
+            if (!event.key.repeat) setWindowMode(presenter, presenter->display_mode != 0u ? 0u : presenter->preferred_fullscreen);
             continue;
         }
         // The menus read typed text as Windows' WM_CHAR gives it, control keys included.
@@ -3885,6 +3891,7 @@ RecompD3dPresenterError submitPresent(RecompD3dPresenter *presenter, const Recom
     if (presenter->performance_counter) reportPerformance(presenter);
     if (generated) (void)framegenIdle(presenter);  // slot 0 is due now
     applyQuality(presenter);
+    applyDisplayMode(presenter);
     return RECOMP_D3D_PRESENTER_OK;
 }
 
@@ -4108,6 +4115,31 @@ void fitWindow(RecompD3dPresenter *presenter)
     const WindowFit fit = windowFit(presenter);
     SDL_SetWindowSize(presenter->window, static_cast<int>(fit.width), static_cast<int>(fit.height));
     SDL_SetWindowPosition(presenter->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+}
+
+/* 0 window, 1 borderless, 2 exclusive at the display's mode (else borderless). */
+void setWindowMode(RecompD3dPresenter *presenter, unsigned mode)
+{
+    SDL_Window *window = presenter->window;
+    if (window == nullptr) return;
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+    const SDL_DisplayMode *desktop = SDL_GetDesktopDisplayMode(display);
+    SDL_DisplayMode own{};
+    if (mode == 2u && (desktop == nullptr || !SDL_GetClosestFullscreenDisplayMode(display, desktop->w, desktop->h,
+            desktop->refresh_rate, true, &own))) mode = 1u;
+    SDL_SetWindowFullscreenMode(window, mode == 2u ? &own : nullptr);
+    SDL_SetWindowFullscreen(window, mode != 0u);
+    presenter->display_mode = mode;
+    if (mode != 0u) presenter->preferred_fullscreen = mode;
+    else fitWindow(presenter);
+}
+
+void applyDisplayMode(RecompD3dPresenter *presenter)
+{
+    const unsigned request = mode_request;
+    if (request == presenter->display_mode_applied) return;
+    presenter->display_mode_applied = request;
+    setWindowMode(presenter, request & 3u);
 }
 
 /* Applies PC Settings' quality between frames. SMAA only switches its pass.
@@ -4398,12 +4430,18 @@ RecompD3dPresenterError d3d_backend_create(const RecompD3dPresenterConfig *confi
 
     const uint32_t main_width = mainWidth(created), main_height = mainHeight(created);
     const WindowFit fit = windowFit(created);
+    // Unasked, Steam or a scaled picture is borderless.
+    const unsigned request = mode_request, display_mode = request != 0u ? request & 3u : fit.fullscreen ? 1u : 0u;
+    created->display_mode = display_mode;
+    created->display_mode_applied = request;
+    if (display_mode != 0u) created->preferred_fullscreen = display_mode;
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (std::getenv("RECOMP_HEADLESS") != nullptr) flags |= SDL_WINDOW_HIDDEN;
-    else if (fit.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+    else if (display_mode != 0u) flags |= SDL_WINDOW_FULLSCREEN;
     created->window = SDL_CreateWindow(unpacedRun() ? "DOA2U Recomp (unpaced)" : "DOA2U Recomp",
         static_cast<int>(fit.width), static_cast<int>(fit.height), flags);
     if (created->window == nullptr) return fail("window");
+    if (display_mode == 2u) setWindowMode(created, 2u);
     // Take the focus from the launcher: an unfocused window gets no pad input.
     if ((flags & SDL_WINDOW_HIDDEN) == 0) SDL_RaiseWindow(created->window);
     // Swap's guest wait already holds one frame in flight; this holds it under the frame clock too.
@@ -4716,6 +4754,12 @@ void d3d_backend_set_quality(float scale, uint32_t msaa, bool smaa, float sharpe
 bool d3d_backend_quality_live()
 {
     return true;
+}
+
+// Game thread only.
+void d3d_backend_set_display_mode(unsigned mode)
+{
+    mode_request = ((mode_request & ~3u) + 4u) | (mode > 2u ? 1u : mode);
 }
 
 void d3d_backend_set_immediate_present(bool enabled)

@@ -28,7 +28,9 @@
    The Jukebox (jukebox.c), when the runner turns it on, is one more position
    before Quit Game with Options' mode (0xa): its confirm enters Options as
    that entry's does, having asked for the Jukebox's page, which Options
-   (pc_settings.c) then opens alone; leaving it returns to this menu. */
+   (pc_settings.c) then opens alone; leaving it returns to this menu.
+   PC Settings, when the runner turns it on, is one more such position before
+   the Jukebox, and asks for the PC Settings page the same way. */
 
 extern void sub_00134330(void);
 extern void sub_001343A0(void);
@@ -37,6 +39,7 @@ extern void sub_001345C0(void);
 extern void sub_0013B850(void);
 extern void sub_000FED70(void);
 extern void sub_00135AE0(void);
+extern void sub_00127840(void);
 
 enum {
     MENU_BUILD = 0x00134330u,
@@ -45,6 +48,8 @@ enum {
     MENU_HELP = 0x001345c0u,
     MENU_UPDATE = 0x0013b850u,
     PLAY_SOUND = 0x000fed70u,
+    CAROUSEL_LEAVE = 0x00127840u,   /* thiscall (state, frames, 0) on the carousel */
+    CAROUSEL = 0x00df5d28u,
     MENU_COUNT = 0x006e2260u,       /* u8 */
     SELECTED_MODE = 0x00df57b4u,    /* the mode 0x1343d0 gave this frame */
 
@@ -93,6 +98,13 @@ static const Piece JUKEBOX_PIECES[] = {
     {u'X', 0x70008, 545, 665, 0, 9, 0, 0, 0}, {0, 0x70008, 545, 665, 0, 9, 1, 0, 17},
 };
 
+/* PC SETTINGS: P of SPARRING, C of CG GALLERY, then the whole of SETTINGS,
+   the game's own label for Options. */
+static const Piece PC_PIECES[] = {
+    {u'P', 0x70015, 185, 285, 0, 0, 0, 0, 0}, {u'C', 0x7000e, 85, 210, 0, 0, 0, 0, 0},
+    {u' ', 0, 0, 90, 0, 0, 0, 0, 0}, {u'S', 0x70009, 85, 915, 0, 0, 0, 0, 0},
+};
+
 /* The help line per game language (Japanese reads English). */
 static const recomp_utf16 *const HELP[6] = {
     u"Quit the game and return to the desktop.", u"Quit the game and return to the desktop.",
@@ -109,17 +121,32 @@ static const recomp_utf16 *const JUKEBOX_HELP[6] = {
     u"Escucha la m\u00fasica de DOA2U, y la de DOA3 y DOA4 de tus discos.",
 };
 
+static const recomp_utf16 *const PC_HELP[6] = {
+    u"Graphics, audio and gameplay settings for this PC.",
+    u"Graphics, audio and gameplay settings for this PC.",
+    u"Voici les param\u00e8tres graphiques, audio et de jeu de ce PC.",
+    u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
+    u"Impostazioni grafiche, audio e di gioco di questo PC.",
+    u"Opciones de gr\u00e1ficos, audio y juego de este PC.",
+};
+
 /* ---- State -------------------------------------------------------- */
 
 static uint32_t entry;           /* the 28-byte menu entry, in the runner's asset area */
 static int quit_position = -1;   /* the carousel position, once listed */
 static bool in_update, label_made;
+static bool confirming;          /* the carousel's own confirm is under way */
 static bool asking;              /* the quit prompt is open for Quit Game */
 
 static void (*jukebox_request)(void); /* NULL: no Jukebox entry */
 static uint32_t jukebox_entry;
 static int jukebox_position = -1;
 static bool jukebox_label_made;
+
+static void (*pc_request)(void); /* NULL: no PC Settings entry */
+static uint32_t pc_entry;
+static int pc_position = -1;
+static bool pc_label_made;
 
 /* ---- Guest helpers -------------------------------------------------- */
 
@@ -137,12 +164,13 @@ static uint8_t picture_index(uint8_t grey, uint8_t alpha)
     return a == 0u ? 0u : (uint8_t)(a * 8u + (grey * 7u + 127u) / 255u);
 }
 
-static void write_picture(unsigned slot, float squeeze, bool jukebox)
+typedef void (*IconDraw)(float, uint8_t *, uint8_t *);
+
+static void write_picture(unsigned slot, float squeeze, IconDraw draw)
 {
     static uint8_t grey[QUIT_ICON_SIZE * QUIT_ICON_SIZE], alpha[QUIT_ICON_SIZE * QUIT_ICON_SIZE];
     static uint8_t pixels[QUIT_ICON_SIZE * QUIT_ICON_SIZE];
-    if (jukebox) recomp_jukebox_icon_draw(squeeze, grey, alpha);
-    else recomp_quit_icon_draw(squeeze, grey, alpha);
+    draw(squeeze, grey, alpha);
     for (uint32_t i = 0u; i < QUIT_ICON_SIZE * QUIT_ICON_SIZE; ++i) pixels[i] = picture_index(grey[i], alpha[i]);
     recomp_runner_sprite_pixels(slot, pixels);
 }
@@ -308,6 +336,11 @@ static bool make_jukebox_label(void)
                            RECOMP_RUNNER_SPRITE_JUKEBOX_LABEL, "jukebox");
 }
 
+static bool make_pc_label(void)
+{
+    return make_label_from(PC_PIECES, sizeof PC_PIECES / sizeof PC_PIECES[0], RECOMP_RUNNER_SPRITE_PC_LABEL, "pc settings");
+}
+
 /* ---- Install -------------------------------------------------------- */
 
 void recomp_menu_quit_install(void)
@@ -336,9 +369,29 @@ void recomp_menu_quit_install(void)
     for (unsigned i = 0u; i < 2u; ++i) {
         recomp_runner_sprite(pictures[i], PICTURE_LOG, PICTURE_LOG, palette);
         recomp_runner_sprite_size(pictures[i], QUIT_ICON_SIZE, QUIT_ICON_SIZE);
-        write_picture(pictures[i], i == 0u ? 1.0f : 0.75f, false);
+        write_picture(pictures[i], i == 0u ? 1.0f : 0.75f, recomp_quit_icon_draw);
     }
     recomp_runner_text_set(RECOMP_RUNNER_TEXT_QUIT, HELP);
+
+    pc_entry = 0u;
+    pc_position = -1;
+    pc_label_made = false;
+    if (pc_request != NULL) {
+        pc_entry = recomp_runner_alloc(28u, 4u);
+        const uint32_t pc_ids[4] = {OPTIONS_MODE, recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_PC_LABEL),
+            recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_PC_PICTURE), recomp_runner_sprite_id(RECOMP_RUNNER_SPRITE_PC_WIDE)};
+        for (unsigned i = 0u; i < 4u; ++i) set_u32(pc_entry + 4u * i, pc_ids[i]);
+        /* As the Jukebox's: Quit Game's palette for the pictures, the menu's for the label. */
+        recomp_runner_sprite(RECOMP_RUNNER_SPRITE_PC_LABEL, LABEL_LOG_W, LABEL_LOG_H, palette);
+        recomp_runner_sprite_size(RECOMP_RUNNER_SPRITE_PC_LABEL, 1, WORD_H);
+        const unsigned pc_pictures[2] = {RECOMP_RUNNER_SPRITE_PC_PICTURE, RECOMP_RUNNER_SPRITE_PC_WIDE};
+        for (unsigned i = 0u; i < 2u; ++i) {
+            recomp_runner_sprite(pc_pictures[i], PICTURE_LOG, PICTURE_LOG, palette);
+            recomp_runner_sprite_size(pc_pictures[i], QUIT_ICON_SIZE, QUIT_ICON_SIZE);
+            write_picture(pc_pictures[i], i == 0u ? 1.0f : 0.75f, recomp_pc_icon_draw);
+        }
+        recomp_runner_text_set(RECOMP_RUNNER_TEXT_PC_MENU, PC_HELP);
+    }
 
     jukebox_entry = 0u;
     jukebox_position = -1;
@@ -356,7 +409,7 @@ void recomp_menu_quit_install(void)
     for (unsigned i = 0u; i < 2u; ++i) {
         recomp_runner_sprite(jukebox_pictures[i], PICTURE_LOG, PICTURE_LOG, palette);
         recomp_runner_sprite_size(jukebox_pictures[i], QUIT_ICON_SIZE, QUIT_ICON_SIZE);
-        write_picture(jukebox_pictures[i], i == 0u ? 1.0f : 0.75f, true);
+        write_picture(jukebox_pictures[i], i == 0u ? 1.0f : 0.75f, recomp_jukebox_icon_draw);
     }
     recomp_runner_text_set(RECOMP_RUNNER_TEXT_JUKEBOX, JUKEBOX_HELP);
 }
@@ -366,13 +419,19 @@ void recomp_menu_quit_set_jukebox(void (*request)(void))
     jukebox_request = request;
 }
 
+void recomp_menu_quit_set_pc_settings(void (*request)(void))
+{
+    pc_request = request;
+}
+
 /* ---- The carousel --------------------------------------------------- */
 
 static void menu_build(void)
 {
     sub_00134330();
-    quit_position = jukebox_position = -1;
+    quit_position = jukebox_position = pc_position = -1;
     uint8_t count = *recomp_memory(MENU_COUNT, 1u);
+    if (pc_entry != 0u && count < 0xfeu) pc_position = count++;
     if (jukebox_request != NULL && count < 0xfeu) jukebox_position = count++;
     if (count >= 0xffu) return;
     quit_position = count;
@@ -388,6 +447,14 @@ static int clamped(uint32_t position)
 
 static void menu_entry(void)
 {
+    if (pc_position >= 0 && clamped(kernel_arg(1u)) == pc_position) {
+        RecompGameSprite word;
+        if (!pc_label_made) pc_label_made = make_pc_label();
+        else if (recomp_game_sprite(PC_PIECES[0].sprite, WORD_H, &word)) /* reloaded art */
+            recomp_runner_sprite_palette(RECOMP_RUNNER_SPRITE_PC_LABEL, word.palette);
+        kernel_return_caller_cleanup(pc_entry);
+        return;
+    }
     if (jukebox_position >= 0 && clamped(kernel_arg(1u)) == jukebox_position) {
         RecompGameSprite word;
         if (!jukebox_label_made) jukebox_label_made = make_jukebox_label();
@@ -410,11 +477,16 @@ static void menu_entry(void)
 
 static void menu_mode(void)
 {
-    if (jukebox_position >= 0 && clamped(*recomp_memory(kernel_arg(1u) + 0x120u, 1u)) == jukebox_position) {
+    const int position = clamped(*recomp_memory(kernel_arg(1u) + 0x120u, 1u));
+    if (pc_position >= 0 && position == pc_position) {
         kernel_return_caller_cleanup(OPTIONS_MODE);
         return;
     }
-    if (quit_position >= 0 && clamped(*recomp_memory(kernel_arg(1u) + 0x120u, 1u)) == quit_position) {
+    if (jukebox_position >= 0 && position == jukebox_position) {
+        kernel_return_caller_cleanup(OPTIONS_MODE);
+        return;
+    }
+    if (quit_position >= 0 && position == quit_position) {
         kernel_return_caller_cleanup(QUIT_MODE);
         return;
     }
@@ -423,25 +495,43 @@ static void menu_mode(void)
 
 static void menu_help(void)
 {
+    const int position = clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u));
     if (kernel_arg(1u) == QUIT_MODE) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_QUIT);
-    else if (jukebox_position >= 0 && clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == jukebox_position)
+    else if (pc_position >= 0 && position == pc_position) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_PC_MENU);
+    else if (jukebox_position >= 0 && position == jukebox_position)
         kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_JUKEBOX);
     else sub_001345C0();
+}
+
+/* The carousel's confirm starts its leave (0x127840 with 2) just before
+   its confirm sound. Other confirms in the menu's update, such as the first
+   boot's region and profile screens', play the same sound, so only one
+   after this leave counts as choosing an entry. */
+static void carousel_leave(void)
+{
+    if (in_update && kernel_arg(1u) == 2u && recomp_runtime.registers.ecx == CAROUSEL) confirming = true;
+    sub_00127840();
 }
 
 /* The confirm on Quit Game asks through the runner's quit prompt. */
 static void play_sound(void)
 {
-    if (in_update && kernel_arg(1u) == SOUND_CONFIRM && !asking && quit_position >= 0 &&
-        u32(SELECTED_MODE) == QUIT_MODE) {
+    const bool chosen = confirming && kernel_arg(1u) == SOUND_CONFIRM;
+    if (chosen) confirming = false;
+    if (chosen && !asking && quit_position >= 0 && u32(SELECTED_MODE) == QUIT_MODE) {
         asking = true;
         recomp_quit_prompt_request();
         fprintf(stderr, "recomp menu quit: asking\n");
     }
-    if (in_update && kernel_arg(1u) == SOUND_CONFIRM && jukebox_request != NULL && jukebox_position >= 0 &&
+    if (chosen && jukebox_request != NULL && jukebox_position >= 0 &&
         clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == jukebox_position) {
         jukebox_request();
         fprintf(stderr, "recomp menu jukebox: entering Options for the Jukebox\n");
+    }
+    if (chosen && pc_request != NULL && pc_position >= 0 &&
+        clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u)) == pc_position) {
+        pc_request();
+        fprintf(stderr, "recomp menu pc settings: entering Options for PC Settings\n");
     }
     sub_000FED70();
 }
@@ -452,8 +542,9 @@ static void play_sound(void)
 static void menu_update(void)
 {
     in_update = true;
+    confirming = false;
     sub_0013B850();
-    in_update = false;
+    in_update = confirming = false;
     if (!asking || recomp_quit_prompt_open()) return;
     const uint32_t eax = recomp_runtime.registers.eax, sound = SOUND_CANCEL;
     asking = false;
@@ -471,6 +562,7 @@ RecompFunction recomp_menu_quit_lookup_manual(uint32_t guest_address)
     case MENU_HELP: return menu_help;
     case MENU_UPDATE: return menu_update;
     case PLAY_SOUND: return play_sound;
+    case CAROUSEL_LEAVE: return carousel_leave;
     default: return NULL;
     }
 }

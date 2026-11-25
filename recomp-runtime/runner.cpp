@@ -142,8 +142,9 @@ static bool unlockAll = true; // --no-unlock-all leaves unlocks to play
 
 /* PC SETTINGS in the game's Options menu (pc_settings.c) edits the launchers'
    private/launcher.json, which run_game.py names in RECOMP_LAUNCHER_SETTINGS.
-   Unlocks, the HUD rows and the KO replay change at once, as do CPU costumes
-   and the free camera offline; the other rows apply at the next launch. */
+   Unlocks, the HUD rows, the KO replay and the display mode change at once, as
+   do CPU costumes and the free camera offline; the other rows apply at the next
+   launch. */
 static std::string launcherSettings;
 static RecompPcSettingsStore pcStore;
 /* Loopback, synctest and rollback runs: the HUD rows wait for the next start. */
@@ -162,6 +163,7 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_HIT_VOICES: if (!pcHudLocked) recomp_hit_voice_set_choice(choice); break;
     case RECOMP_PC_KO_REPLAY: recomp_ko_replay_set_enabled(choice == 1u); break;
     case RECOMP_PC_FIGHT_HUD: if (!pcHudLocked) recomp_combo_hud_set_choice(choice); break;
+    case RECOMP_PC_DISPLAY_MODE: recomp_d3d_presenter_set_display_mode(choice); break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
     case RECOMP_PC_SMAA:
@@ -272,6 +274,9 @@ static void installPcSettings(bool online)
     recomp_combo_hud_set_choice(choices[RECOMP_PC_FIGHT_HUD]);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
+    // The renderer may not have a window yet; it keeps the mode until it has one.
+    recomp_d3d_presenter_set_display_mode(choices[RECOMP_PC_DISPLAY_MODE]);
+    recomp_pc_settings_set_live(RECOMP_PC_DISPLAY_MODE, true);
     const RecompButtonConfigHost rebind{recomp_rebind_name, recomp_rebind_listen, recomp_rebind_listening,
         recomp_rebind_reset, recomp_rebind_save};
     recomp_button_config_install(&rebind);
@@ -798,6 +803,7 @@ static void bootGuest()
     setOnlineMode(online); /* before the Jukebox install, which applies the saved assignments */
     recomp_jukebox_install(online);
     staffrollOffsets.clear();
+    recomp_menu_quit_set_pc_settings(recomp_pc_settings_request_page);
     recomp_menu_quit_install();
     if (const char *card = std::getenv("RECOMP_DEDICATION_CARD"); card != nullptr && *card != '\0') {
         if (loadCard(card)) recomp_kernel_read_hook = noteRead;

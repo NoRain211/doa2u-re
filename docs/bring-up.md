@@ -926,49 +926,53 @@ a logon to DOA ONLINE until the player leaves.
 The hook is routed whenever it may be wanted and checks the setting itself,
 so PC Settings can switch it while the game runs.
 
-PC SETTINGS (`pc_settings.c`) is a row of the game's Options menu. The menu
+PC SETTINGS (`pc_settings.c`) is a page of the game's Options menu that the
+main menu's PC SETTINGS entry opens alone. The menu
 (`frontend_options_menu_update`, `0x11cfc0`) keeps a cursor per depth at
 `0xdf4ac8`, the depth at `0xdf4ad4` and the page at `0xdf4ad8`; page 0 is the
 top list, whose rows `0x11ac90` counts (7) and whose choices open pages 1 to 4
-or the Video and Warning scenes (`0x18`, `0x17`). The top list's labels are
-sprites of group 3 (`spOption`): `0x95a70` draws each through `0x97830` at x
-`0xf0`, y `0x5d` + 26 per row, the selected one also as a glow at x `0xf6`,
-y `0x56` + 26 per row, with ids per language (`0x3000d`, `0x3001b`, `0x30029`,
-`0x30045`, `0x30037`; glows 7 below), over seven bars (`0x976f0`, from y
-`0x5c`). The runner replaces page 0's input with the same calls for eight
-rows, PC SETTINGS at row 5; while `0x95a70` runs it moves Warning and Exit,
-their glows and colours down a row, adds an eighth bar and draws PC SETTINGS
-after Video. The help line (`0x91560`, messages `0xc4`-`0xca`) and the
-selected row's page preview (`0x95a10`) see the game's row for the rows
-after it.
+or the Video and Warning scenes (`0x18`, `0x17`). Its labels are sprites of
+group 3 (`spOption`) that `0x95a70` draws through `0x97830` at x `0xf0`, the
+selected one also as a glow at x `0xf6`. The entry asks for the page and
+enters Options with Options' mode (`0xa`); the first update opens page 19 at
+depth 1, `0x97830` drops the top list's sprites while it shows, and leaving
+it leaves Options for the main menu as the top list's back does
+(`0x134950`, `0x20a70`).
 
-PC SETTINGS opens page 19, which no table uses. The page tables at
+Page 19 is used by no table. The page tables at
 `0x67af50` (reset), `0x67aff0` (draw) and `0x67afa0` (draw while leaving) get
 lookup keys for page 19's three functions, which do what page 8's do: rows
 through `0x91440`, values through `0x93270`, the cursor through `0x90f00`,
 reading the page's layout (`0x90ad0`, page 8's records 26 apart), labels and
 values (`0x910a0`, `0x91370`) and row count, all answered for page 19 by the
 runner. Its input moves through the rows (`0x11b8d0`), steps the selected
-value as the game's pages do (`0x11b9f0`) and goes back to the top list
-(`0x11bca0`). Text is UTF-16 in five languages (Japanese shows English), in
-message numbers from `0x7000`.
+value as the game's pages do (`0x11b9f0`) and goes back (`0x11bca0`). The
+settings are grouped in five categories. Their list is drawn first, through
+the same three calls with its own layout at x `0x24` and no values;
+`0x91440` right-aligns every label at x `0x1d4`, so while it draws the list
+`0x978e0` moves each label to the list's bar (`0x1d4 - 0x10a + 0x24`). The
+renderers only compare their cursor with each row, so the list without the
+focus gets one no row matches. Text is UTF-16 in five languages (Japanese
+shows English), in message numbers from `0x7000`.
 
-The PC SETTINGS label is cut letter by letter from the other top-list labels
-(group 3), and its glow is that label padded 6 and 7, blurred (sigma 3.5),
-brightened 2.52 times and tinted `0x3990fa`; both were fitted to the game's
-own art. They are made in the game's language once its label art is loaded.
 The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
 `RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
-Dedication, the life bar, the fight HUD, hit voices and the KO replay apply at
-once, as do CPU Costumes and the Free Camera offline (both are off while
-logged on to DOA ONLINE), and the others at the next launch.
+Dedication, the life bar, the fight HUD, hit voices, the KO replay and the
+display mode apply at once, as do CPU Costumes and the Free Camera offline
+(both are off while logged on to DOA ONLINE), and the others at the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and
 `0x1343d0` read it), with mode `0x13`, which no entry uses and the mode
 switch ignores. Its confirm opens the runner's quit prompt; keeping on plays
 the cancel sound and runs the menu's own transition cancel (`0x135ae0`).
+PC SETTINGS and the JUKEBOX are positions before it with Options' mode. A
+confirm counts only after the carousel's own leave (`0x127840` with state 2
+on the carousel at `0xdf5d28`): the first boot's region and profile screens
+play the same confirm sound inside the menu's update. PC SETTINGS' label is
+the P of SPARRING (`0x70015`), the C of CG GALLERY (`0x7000e`) and the whole
+of SETTINGS (`0x70009`, the Options entry's own label).
 
 Both features' guest data lives in the runner's asset area (256 KiB at
 `0x03f00000`, below the startup stack), which `runner_assets.c` hands out at

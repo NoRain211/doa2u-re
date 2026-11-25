@@ -11,9 +11,10 @@
 extern "C" {
 #endif
 
-/* PC SETTINGS: a row the runner adds to the game's Options list, after Video,
-   and the page it opens, drawn by the game's own option pages. The rows are
-   the launcher's settings; their choices are indexes into these lists. */
+/* PC SETTINGS: a page of the game's Options menu, drawn by the game's own
+   option pages, that the main menu's PC SETTINGS entry (menu_quit.c) opens
+   alone. The rows are the launcher's settings; their choices are indexes
+   into these lists. */
 enum RecompPcSetting {
     RECOMP_PC_RESOLUTION,    /* 480p, 720p, 1080p, 1440p, 4K */
     RECOMP_PC_MSAA,          /* Off, 2x, 4x, 8x, 16x, 32x */
@@ -34,6 +35,7 @@ enum RecompPcSetting {
     RECOMP_PC_FIGHT_HUD,     /* Original, Damage, Stun Meter, Both (combo_hud.h) */
     RECOMP_PC_HIT_VOICES,    /* Off, Quiet, Normal, Loud (hit_voice.h) */
     RECOMP_PC_KO_REPLAY,     /* Original, Dynamic (ko_replay.h) */
+    RECOMP_PC_DISPLAY_MODE,  /* Windowed, Borderless, Fullscreen (exclusive) */
     RECOMP_PC_SETTING_COUNT
 };
 
@@ -70,6 +72,8 @@ typedef struct RecompPcSettingsHost {
 void recomp_pc_settings_install(const RecompPcSettingsHost *host,
     const uint8_t choices[RECOMP_PC_SETTING_COUNT]);
 uint8_t recomp_pc_settings_choice(unsigned setting);
+/* The main menu's PC SETTINGS entry: Options, entered next, opens the page alone. */
+void recomp_pc_settings_request_page(void);
 RecompFunction recomp_pc_settings_lookup_manual(uint32_t guest_address);
 
 #ifdef __cplusplus
