@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUBMODULE = "tools/xboxrecomp"
 # A release holds what building and playing need; developer and agent material stays in the repository.
 DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitignore", ".gitmodules",
-             "private/README.md", "tools/package_test.py", "tools/public_export.py", "tools/xbe_info.py",
+             "private/README.md", "tools/package_test.py", "tools/public_export.py",
              "tools/doa2u/function_status.json", "tools/build_linux_launcher.sh", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
 # Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
