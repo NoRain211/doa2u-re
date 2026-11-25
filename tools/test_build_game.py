@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from build_game import (STEPS, build, build_fraction, build_jobs, drop_owned_extraction, failure_excerpt,
-                        import_disc, linux_compilers,
+                        available_memory, drop_stale_cache, import_disc, linux_compilers,
                         lifter_revision, main, merge_functions, precompile_shaders, program_manifest,
                         selected_xbe, use_windows_newlines, write_functions)
 from extract_iso import sha256
@@ -55,6 +55,30 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(build_jobs(True, cpus=8, memory=6 * gib + gib // 2), 6)
         self.assertEqual(build_jobs(False, cpus=8, memory=gib), 1)
         self.assertEqual(build_jobs(True, cpus=16, memory=None), 4)
+
+    def test_cache_naming_another_compiler_is_dropped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder) / "CMakeCache.txt"
+            for cached, compiler, kept in (("STRING=/usr/bin/clang", "/usr/bin/clang", True),
+                                           ("STRING=/usr/bin/clang", "/usr/bin/gcc", False),
+                                           ("FILEPATH=/usr/bin/cc", "/usr/bin/clang", False),
+                                           ("FILEPATH=/usr/bin/cc", None, True)):
+                cache.write_text(f"CMAKE_C_COMPILER:{cached}\nCMAKE_C_COMPILER_AR:FILEPATH=/usr/bin/ar\n")
+                drop_stale_cache(Path(folder), compiler)
+                self.assertEqual(cache.is_file(), kept, (cached, compiler))
+
+    def test_free_memory_stays_within_a_container_limit(self):
+        files = {"/proc/meminfo": "MemTotal: 32000000 kB\nMemAvailable: 24000000 kB\n",
+                 "/sys/fs/cgroup/memory.max": "8000000000\n", "/sys/fs/cgroup/memory.current": "2000000000\n"}
+
+        def fake_open(path, *args, **kwargs):
+            if path not in files:
+                raise FileNotFoundError(path)
+            return io.StringIO(files[path])
+        with patch("builtins.open", fake_open):
+            self.assertEqual(available_memory(), 6000000000)
+            files["/sys/fs/cgroup/memory.max"] = "max\n"
+            self.assertEqual(available_memory(), 24000000 * 1024)
 
     def test_linux_prefers_clang_unless_the_environment_names_a_compiler(self):
         tools = {"clang": "/usr/bin/clang", "clang++": "/usr/bin/clang++"}

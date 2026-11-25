@@ -142,18 +142,39 @@ def linux_compilers():
 
 
 def available_memory():
-    """Bytes the build can take: MemAvailable on Linux, half the RAM elsewhere."""
+    """Bytes the build can take: MemAvailable on Linux, within a container's cgroup
+    limit, and half the RAM elsewhere."""
+    memory = None
     try:
         with open("/proc/meminfo", encoding="ascii") as meminfo:
-            for line in meminfo:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
+            memory = next(int(line.split()[1]) * 1024 for line in meminfo if line.startswith("MemAvailable:"))
+    except (OSError, ValueError, IndexError, StopIteration):
         pass
-    try:
-        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2
-    except (AttributeError, OSError, ValueError):
-        return None
+    if memory is None:
+        try:
+            return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2
+        except (AttributeError, OSError, ValueError):
+            return None
+    # cgroup v2, then v1; "max" or a missing file means no limit.
+    for limit, usage in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                         ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                          "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+        try:
+            with open(limit, encoding="ascii") as cap, open(usage, encoding="ascii") as used:
+                memory = min(memory, max(0, int(cap.read()) - int(used.read())))
+        except (OSError, ValueError):
+            pass
+    return memory
+
+
+def drop_stale_cache(build_dir, compiler):
+    """CMake keeps a cache's first compiler and ignores CC afterwards, so drop a
+    cache that names another one."""
+    cache = build_dir / "CMakeCache.txt"
+    if compiler and cache.is_file() and not re.search(
+            rf"^CMAKE_C_COMPILER:\w+={re.escape(compiler)}$",
+            cache.read_text(encoding="utf-8", errors="replace"), re.M):
+        cache.unlink()
 
 
 def build_jobs(clang, cpus=None, memory=None):
@@ -450,13 +471,11 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
         generator.append("-DRECOMP_FETCH_SDL3=ON")  # used only when the system has no SDL3
         compilers = linux_compilers()
         if compilers:
-            clang = True
             generator += [f"-DCMAKE_C_COMPILER={compilers[0]}", f"-DCMAKE_CXX_COMPILER={compilers[1]}"]
-            # CMake keeps a cache's first compiler; drop a cache that names another.
-            cache = build_dir / "CMakeCache.txt"
-            if cache.is_file() and not re.search(rf"^CMAKE_C_COMPILER:\w+={re.escape(compilers[0])}$",
-                                                 cache.read_text(encoding="utf-8", errors="replace"), re.M):
-                cache.unlink()
+        # The compiler CMake will use: clang, else CC, else cc.
+        compiler = compilers[0] if compilers else shutil.which(os.environ.get("CC") or "cc")
+        clang = compiler is not None and "clang" in Path(compiler).resolve().name
+        drop_stale_cache(build_dir, compiler)
     progress.run(["cmake", "-S", ROOT / "recomp-runtime", "-B", build_dir, *generator,
                 f"-DRECOMP_PROGRAM_DIR={generated.as_posix()}",
                 f"-DRECOMP_XBE_SHA256={recipe['xbe_sha256']}",
