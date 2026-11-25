@@ -482,8 +482,9 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
             generator += [f"-DCMAKE_C_COMPILER={compilers[0]}", f"-DCMAKE_CXX_COMPILER={compilers[1]}"]
         # The compiler CMake will use: clang, else CC, else cc.
         compiler = compilers[0] if compilers else shutil.which(os.environ.get("CC") or "cc")
-        # Clang passed by name may be a ccache link; only CC or cc needs its real name read.
-        clang = bool(compilers) or (compiler is not None and "clang" in Path(compiler).resolve().name)
+        # Clang passed by name may be a ccache link; CC or cc is clang if its name or target says so.
+        clang = bool(compilers) or (compiler is not None and any(
+            "clang" in name for name in (Path(compiler).name, Path(compiler).resolve().name)))
         drop_stale_cache(build_dir, compiler)
     progress.run(["cmake", "-S", ROOT / "recomp-runtime", "-B", build_dir, *generator,
                 f"-DRECOMP_PROGRAM_DIR={generated.as_posix()}",

@@ -10,6 +10,7 @@ if [[ -r /etc/os-release ]] && grep -qx 'ID=steamos' /etc/os-release; then
 fi
 if command -v apt-get >/dev/null; then
     cmd=(apt-get install -y --no-install-recommends build-essential clang cmake ninja-build git python3-venv
+         ca-certificates
          libshaderc1 libvulkan1 mesa-vulkan-drivers
          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev
          libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev libpulse-dev
