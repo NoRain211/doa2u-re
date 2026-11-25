@@ -8,6 +8,21 @@
 #include <math.h>
 #include <string.h>
 
+/* The guest stores its floats as little-endian x86 bytes; copy a cell in and
+   out of the block instead of aliasing it through a float pointer. */
+static float guest_float_load(const uint8_t *block, unsigned index)
+{
+    float value;
+
+    memcpy(&value, block + index * sizeof value, sizeof value);
+    return value;
+}
+
+static void guest_float_store(uint8_t *block, unsigned index, float value)
+{
+    memcpy(block + index * sizeof value, &value, sizeof value);
+}
+
 /* ── guest float arithmetic ──────────────────────────────────────────────
    The lifted runtime keeps the guest x87 registers as doubles and rounds every
    arithmetic result under the control word's precision bits. The game runs the
@@ -133,7 +148,7 @@ typedef struct PoseCircleConstraint {
 
 static uint32_t pose_circle_constraint_body(void)
 {
-    float *const position = (float *)recomp_memory(kernel_arg(1u), 3u * sizeof(float));
+    uint8_t *const position = recomp_memory(kernel_arg(1u), 3u * sizeof(float));
     PoseCircleConstraint *const circle =
         (PoseCircleConstraint *)recomp_memory(kernel_arg(2u), sizeof *circle);
     const int axis = truncate_to_int(circle->axis);
@@ -141,17 +156,17 @@ static uint32_t pose_circle_constraint_body(void)
     const unsigned normal = axis == 0 ? 0u : axis == 1 ? 1u : 2u;
     const unsigned across1 = axis == 0 ? 2u : 0u;
     const unsigned across2 = axis == 0 ? 1u : axis == 1 ? 2u : 1u;
-    const float offset1 = position[across1] - circle->centre1;
-    const float offset2 = position[across2] - circle->centre2;
+    const float offset1 = guest_float_load(position, across1) - circle->centre1;
+    const float offset2 = guest_float_load(position, across2) - circle->centre2;
     float offset_normal = 0.0f;
     float length2;
     float distance;
     float scale;
 
-    if (position[normal] > circle->high) {
-        offset_normal = position[normal] - circle->high;
-    } else if (circle->low > position[normal]) {
-        offset_normal = position[normal] - circle->low;
+    if (guest_float_load(position, normal) > circle->high) {
+        offset_normal = guest_float_load(position, normal) - circle->high;
+    } else if (circle->low > guest_float_load(position, normal)) {
+        offset_normal = guest_float_load(position, normal) - circle->low;
     }
 
     /* 0x4c4d0: SUB ESP,0xc then PUSH EBX, EBP, ESI, EDI; the plane offsets
@@ -180,9 +195,12 @@ static uint32_t pose_circle_constraint_body(void)
     scale = 1.0f;
     if (distance != 0.0f) scale = (circle->radius - distance) / distance;
 
-    position[across1] = scale * offset1 + position[across1];
-    position[normal] = scale * offset_normal + position[normal];
-    position[across2] = scale * offset2 + position[across2];
+    guest_float_store(position, across1,
+        scale * offset1 + guest_float_load(position, across1));
+    guest_float_store(position, normal,
+        scale * offset_normal + guest_float_load(position, normal));
+    guest_float_store(position, across2,
+        scale * offset2 + guest_float_load(position, across2));
     return 1u;
 }
 
@@ -213,17 +231,17 @@ static void pose_matrix_select(uint8_t bone, int inverse)
    current matrix. Each lane is ((m0*x + m1*y) + (m2*z + m3)). */
 static void pose_transform_point(const float *point, float *out)
 {
-    const float *const matrix =
-        (const float *)recomp_memory(POSE_MATRIX_CURRENT, 16u * sizeof(float));
+    const uint8_t *const matrix =
+        recomp_memory(POSE_MATRIX_CURRENT, 16u * sizeof(float));
     const float x = point[0];
     const float y = point[1];
     const float z = point[2];
 
     for (unsigned lane = 0u; lane < 4u; ++lane) {
-        const float along_x = matrix[lane] * x;
-        const float along_y = matrix[4u + lane] * y;
-        const float along_z = matrix[8u + lane] * z;
-        const float offset = matrix[12u + lane];
+        const float along_x = guest_float_load(matrix, lane) * x;
+        const float along_y = guest_float_load(matrix, 4u + lane) * y;
+        const float along_z = guest_float_load(matrix, 8u + lane) * z;
+        const float offset = guest_float_load(matrix, 12u + lane);
 
         out[lane] = (along_x + along_y) + (along_z + offset);
     }
@@ -243,23 +261,24 @@ static uint32_t fighter_pose_constraints_apply_body(void)
     const uint32_t list = kernel_arg(1u);
     const uint32_t position_address = kernel_arg(3u);
     const uint32_t delta_address = kernel_arg(4u);
-    const float *const position =
-        (const float *)recomp_memory(position_address, 3u * sizeof(float));
-    float *const delta = (float *)recomp_memory(delta_address, 3u * sizeof(float));
+    const uint8_t *const position =
+        recomp_memory(position_address, 3u * sizeof(float));
+    uint8_t *const delta = recomp_memory(delta_address, 3u * sizeof(float));
     /* The handlers edit the bone-local point through guest memory, so it lives
        in a scratch block below our frame, where the original kept its own. */
     const uint32_t local_address = esp_in - 0x30u;
-    float *const local =
-        (float *)recomp_memory(local_address, 4u * sizeof(float));
+    uint8_t *const local =
+        recomp_memory(local_address, 4u * sizeof(float));
+    float local_point[4];
     float world[4]; /* x, y, z and the transform's unused fourth lane */
     uint32_t command;
     uint8_t matrix_id = 0xffu;
     uint32_t changed = 0u;
 
     if (list == 0u) return 0u;
-    world[0] = position[0] + delta[0];
-    world[1] = position[1] + delta[1];
-    world[2] = position[2] + delta[2];
+    world[0] = guest_float_load(position, 0u) + guest_float_load(delta, 0u);
+    world[1] = guest_float_load(position, 1u) + guest_float_load(delta, 1u);
+    world[2] = guest_float_load(position, 2u) + guest_float_load(delta, 2u);
     if (*(const uint8_t *)recomp_memory(list + 1u, 1u) == 0xffu) return 0u;
 
     command = list;
@@ -274,7 +293,8 @@ static uint32_t fighter_pose_constraints_apply_body(void)
         if (entry[0] != matrix_id) {
             matrix_id = entry[0];
             pose_matrix_select(matrix_id, 0);
-            pose_transform_point(world, local);
+            pose_transform_point(world, local_point);
+            memcpy(local, local_point, sizeof local_point);
             changed = 0u;
         }
         kernel_call_guest_at(0x0004c094u, handler, handler_args, 2u);
@@ -286,15 +306,16 @@ static uint32_t fighter_pose_constraints_apply_body(void)
                      *(const uint8_t *)recomp_memory(command, 1u) != matrix_id)) {
             /* Leave this bone's space with its inverse matrix. */
             pose_matrix_select(matrix_id, 1);
-            pose_transform_point(local, world);
+            memcpy(local_point, local, sizeof local_point);
+            pose_transform_point(local_point, world);
         }
         if (last) break;
     }
     recomp_runtime.registers.esp = esp_in;
 
-    delta[0] = world[0] - position[0];
-    delta[1] = world[1] - position[1];
-    delta[2] = world[2] - position[2];
+    guest_float_store(delta, 0u, world[0] - guest_float_load(position, 0u));
+    guest_float_store(delta, 1u, world[1] - guest_float_load(position, 1u));
+    guest_float_store(delta, 2u, world[2] - guest_float_load(position, 2u));
     return 0u;
 }
 
@@ -308,36 +329,36 @@ static uint32_t fighter_pose_constraints_apply_body(void)
 static uint32_t fighter_segment_triangle_score_body(void)
 {
     const uint32_t esp_in = recomp_runtime.registers.esp;
-    float *const score = (float *)recomp_memory(kernel_arg(1u), sizeof(float));
+    uint8_t *const score = recomp_memory(kernel_arg(1u), sizeof(float));
     const uint32_t p2_address = kernel_arg(2u);
     const uint32_t p3_address = kernel_arg(3u);
     const uint32_t v4_address = kernel_arg(4u);
     const uint32_t v5_address = kernel_arg(5u);
     const uint32_t v6_address = kernel_arg(6u);
-    const float *const p2 = (const float *)recomp_memory(p2_address, 3u * sizeof(float));
-    const float *const p3 = (const float *)recomp_memory(p3_address, 3u * sizeof(float));
-    const float *const v4 = (const float *)recomp_memory(v4_address, 3u * sizeof(float));
-    const float *const v5 = (const float *)recomp_memory(v5_address, 3u * sizeof(float));
-    const float *const v6 = (const float *)recomp_memory(v6_address, 3u * sizeof(float));
-    const float zero = *(const float *)recomp_memory(0x003c2a10u, sizeof(float));
-    const float one = *(const float *)recomp_memory(0x003c1a44u, sizeof(float));
+    const uint8_t *const p2 = recomp_memory(p2_address, 3u * sizeof(float));
+    const uint8_t *const p3 = recomp_memory(p3_address, 3u * sizeof(float));
+    const uint8_t *const v4 = recomp_memory(v4_address, 3u * sizeof(float));
+    const uint8_t *const v5 = recomp_memory(v5_address, 3u * sizeof(float));
+    const uint8_t *const v6 = recomp_memory(v6_address, 3u * sizeof(float));
+    const float zero = guest_float_load(recomp_memory(0x003c2a10u, sizeof(float)), 0u);
+    const float one = guest_float_load(recomp_memory(0x003c1a44u, sizeof(float)), 0u);
     float edge45[3]; /* v5 - v4 */
     float edge46[3]; /* v6 - v4 */
     float normal[3];
     float to_p2[3];
     float to_p3[3];
     uint32_t scratch;
-    float *work;
+    uint8_t *work;
     uint32_t crossing_args[6];
     uint32_t saved_esp;
     uint32_t crossings;
     unsigned inside = 0u;
 
     for (unsigned i = 0u; i < 3u; ++i) {
-        edge45[i] = v5[i] - v4[i];
-        edge46[i] = v6[i] - v4[i];
-        to_p2[i] = p2[i] - v4[i];
-        to_p3[i] = p3[i] - v4[i];
+        edge45[i] = guest_float_load(v5, i) - guest_float_load(v4, i);
+        edge46[i] = guest_float_load(v6, i) - guest_float_load(v4, i);
+        to_p2[i] = guest_float_load(p2, i) - guest_float_load(v4, i);
+        to_p3[i] = guest_float_load(p3, i) - guest_float_load(v4, i);
     }
     vec3_cross(edge46, edge45, normal);
 
@@ -358,12 +379,13 @@ static uint32_t fighter_segment_triangle_score_body(void)
        0x2e040 from entry-0xc0, so the callee's spills land elsewhere here;
        reproduce that frame if a mixed-build check ever diverges below it. */
     scratch = esp_in - 0x50u;
-    work = (float *)recomp_memory(scratch, 16u * sizeof(float));
+    work = recomp_memory(scratch, 16u * sizeof(float));
     for (unsigned i = 0u; i < 3u; ++i) {
-        work[4u + i] = p3[i] - p2[i];
-        work[7u + i] = p2[i];
-        work[10u + i] = edge46[i];
-        work[13u + i] = edge45[i];
+        guest_float_store(work, 4u + i,
+            guest_float_load(p3, i) - guest_float_load(p2, i));
+        guest_float_store(work, 7u + i, guest_float_load(p2, i));
+        guest_float_store(work, 10u + i, edge46[i]);
+        guest_float_store(work, 13u + i, edge45[i]);
     }
     crossing_args[0] = scratch;
     crossing_args[1] = scratch + 4u * 4u;
@@ -382,8 +404,8 @@ static uint32_t fighter_segment_triangle_score_body(void)
        v6->v4 against v5. Project the crossing point onto the edge line and ask
        whether it stops short of the opposite vertex. */
     for (unsigned i = 0u; i < 3u; ++i) {
-        const float *base;
-        const float *opposite;
+        const uint8_t *base;
+        const uint8_t *opposite;
         float edge[3];
         float length2;
         float along;
@@ -395,32 +417,41 @@ static uint32_t fighter_segment_triangle_score_body(void)
         if (i == 0u) {
             base = v4;
             opposite = v6;
-            for (unsigned k = 0u; k < 3u; ++k) edge[k] = v5[k] - v4[k];
+            for (unsigned k = 0u; k < 3u; ++k) {
+                edge[k] = guest_float_load(v5, k) - guest_float_load(v4, k);
+            }
         } else if (i == 1u) {
             base = v5;
             opposite = v4;
-            for (unsigned k = 0u; k < 3u; ++k) edge[k] = v6[k] - v5[k];
+            for (unsigned k = 0u; k < 3u; ++k) {
+                edge[k] = guest_float_load(v6, k) - guest_float_load(v5, k);
+            }
         } else {
             base = v6;
             opposite = v5;
-            for (unsigned k = 0u; k < 3u; ++k) edge[k] = v4[k] - v6[k];
+            for (unsigned k = 0u; k < 3u; ++k) {
+                edge[k] = guest_float_load(v4, k) - guest_float_load(v6, k);
+            }
         }
         length2 = edge[2] * edge[2] + edge[1] * edge[1] + edge[0] * edge[0];
         if (length2 == 0.0f) return 0u;
 
-        along = (((work[2] - base[2]) * edge[2]) + ((work[1] - base[1]) * edge[1])) +
-                ((work[0] - base[0]) * edge[0]);
+        along = (((guest_float_load(work, 2u) - guest_float_load(base, 2u)) * edge[2]) +
+                 ((guest_float_load(work, 1u) - guest_float_load(base, 1u)) * edge[1])) +
+                ((guest_float_load(work, 0u) - guest_float_load(base, 0u)) * edge[0]);
         step = along * (one / length2);
-        for (unsigned k = 0u; k < 3u; ++k) projected[k] = edge[k] * step + base[k];
         for (unsigned k = 0u; k < 3u; ++k) {
-            to_opposite[k] = opposite[k] - projected[k];
-            to_crossing[k] = work[k] - projected[k];
+            projected[k] = edge[k] * step + guest_float_load(base, k);
+        }
+        for (unsigned k = 0u; k < 3u; ++k) {
+            to_opposite[k] = guest_float_load(opposite, k) - projected[k];
+            to_crossing[k] = guest_float_load(work, k) - projected[k];
         }
         /* Unordered (NaN) counts as outside, as the guest's fcomip does. */
         if (dot3(to_opposite, to_crossing) >= (double)zero) ++inside;
     }
 
-    *score = inside == 3u ? 0.0f : one;
+    guest_float_store(score, 0u, inside == 3u ? 0.0f : one);
     return crossings;
 }
 

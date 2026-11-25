@@ -521,7 +521,7 @@ static void output_span(Buffer *buffer, uint32_t offset, uint32_t bytes, bool ba
         uint32_t piece = frames - done < limit ? frames - done : limit;
         uint32_t rendered = recomp_hrtf_render(voice, samples + done, piece,
             buffer->model.sample_rate, ears, 20000u);
-        if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)ears, rendered * 12u,
+        if (rendered && !output_suppressed) recomp_audio_output_submit(slot, (const uint8_t *)(const void *)ears, rendered * 12u,
             RECOMP_HRTF_RATE, 3u, 32u, output_muted ? -10000 : buffer->volume);
         done += piece;
     }

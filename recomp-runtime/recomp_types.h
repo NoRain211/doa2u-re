@@ -1022,7 +1022,7 @@ static inline RecompMmx MMX_PSRAW(RecompMmx a, uint64_t count)
     RecompMmx r;
     unsigned shift = count > 15u ? 15u : (unsigned)count;
 
-    for (int i = 0; i < 4; ++i) r.w[i] = (int16_t)(a.w[i] >> shift);
+    for (int i = 0; i < 4; ++i) r.w[i] = (int16_t)(a.w[i] < 0 ? ~(~a.w[i] >> shift) : a.w[i] >> shift);
     return r;
 }
 
@@ -1031,7 +1031,7 @@ static inline RecompMmx MMX_PSRAD(RecompMmx a, uint64_t count)
     RecompMmx r;
     unsigned shift = count > 31u ? 31u : (unsigned)count;
 
-    for (int i = 0; i < 2; ++i) r.d[i] = a.d[i] >> shift;
+    for (int i = 0; i < 2; ++i) r.d[i] = a.d[i] < 0 ? ~(~a.d[i] >> shift) : a.d[i] >> shift;
     return r;
 }
 

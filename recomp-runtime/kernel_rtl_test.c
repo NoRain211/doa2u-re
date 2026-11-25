@@ -309,7 +309,7 @@ int recomp_kernel_rtl_test(void)
 
     /* Both imports are stdcall with two arguments, so each must pop twelve
        bytes. Getting that wrong corrupts ESP and fails somewhere unrelated. */
-    stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
     stack[0] = 0x0010abcdu;
     stack[1] = TEST_TIME;
     stack[2] = TEST_FIELDS;

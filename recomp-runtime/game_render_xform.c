@@ -14,6 +14,21 @@
 
 #include <string.h>
 
+/* The guest stores its floats as little-endian x86 bytes; copy a cell in and
+   out of the block instead of aliasing it through a float pointer. */
+static float guest_float_load(const uint8_t *block, int index)
+{
+    float value;
+
+    memcpy(&value, block + index * sizeof value, sizeof value);
+    return value;
+}
+
+static void guest_float_store(uint8_t *block, int index, float value)
+{
+    memcpy(block + index * sizeof value, &value, sizeof value);
+}
+
 /* Guest 0x00ea6080: the current 4x4 transform. */
 #define MATRIX_CURRENT 0x00ea6080u
 /* Guest 0x00ea5f70: the working copy matrix_stack_invert permutes in place. */
@@ -79,11 +94,13 @@ static void matrix_stack_translate_local(void)
     {
         const uint32_t frame =
             ((stack_pointer - 4u) & 0xfffffff0u) - 0x20u;
-        float *slots = (float *)recomp_memory(frame, 0x20u);
+        uint8_t *const slots = recomp_memory(frame, 0x20u);
 
         *recomp_memory_u32(stack_pointer - 4u) = recomp_runtime.registers.ebp;
-        slots[3] = offset[2];
-        for (int lane = 0; lane < 4; ++lane) slots[4 + lane] = moved[lane];
+        guest_float_store(slots, 3, offset[2]);
+        for (int lane = 0; lane < 4; ++lane) {
+            guest_float_store(slots, 4 + lane, moved[lane]);
+        }
     }
     kernel_return_caller_cleanup(MATRIX_TRANSLATION_ROW);
 }
@@ -153,20 +170,19 @@ static void matrix_transform_point(void)
 static void matrix_transform_direction(void)
 {
     const uint32_t direction_in = recomp_runtime.registers.edx;
-    const float *matrix;
+    const uint8_t *matrix;
     float direction[3];
     float result[4];
     uint32_t direction_out;
 
-    matrix = (const float *)recomp_memory(
-        recomp_runtime.registers.ecx, 12u * sizeof(float));
+    matrix = recomp_memory(recomp_runtime.registers.ecx, 12u * sizeof(float));
     memcpy(direction, recomp_memory(direction_in, sizeof direction),
         sizeof direction);
     for (int lane = 0; lane < 4; ++lane) {
-        float value = matrix[lane] * direction[0];
+        float value = guest_float_load(matrix, lane) * direction[0];
 
-        value = value + matrix[4 + lane] * direction[1];
-        result[lane] = value + matrix[8 + lane] * direction[2];
+        value = value + guest_float_load(matrix, 4 + lane) * direction[1];
+        result[lane] = value + guest_float_load(matrix, 8 + lane) * direction[2];
     }
     memcpy(&direction_out,
         recomp_memory(recomp_runtime.registers.esp + 4u, sizeof direction_out),
@@ -222,8 +238,8 @@ static void write_invert_frame(
 {
     const uint32_t base = ((stack_pointer - 4u) & 0xfffffff0u) -
         kInvertFrameWords * 4u;
-    uint32_t *words = (uint32_t *)recomp_memory(base, kInvertFrameWords * 4u);
-    float *reals = (float *)words;
+    uint8_t *const block = recomp_memory(base, kInvertFrameWords * 4u);
+    uint32_t *const words = (uint32_t *)block;
 
     words[kInvertFrameEdi] = recomp_runtime.registers.edi;
     words[kInvertFrameEsi] = recomp_runtime.registers.esi;
@@ -235,7 +251,7 @@ static void write_invert_frame(
 
     for (int column = 0; column < columns; ++column) {
         words[kInvertFramePermutation + column] = (uint32_t)perm[column];
-        reals[kInvertFrameScale + column] = scale[column];
+        guest_float_store(block, kInvertFrameScale + column, scale[column]);
     }
     if (path == INVERT_PATH_COLUMNS) return;
 
@@ -281,7 +297,7 @@ static void matrix_stack_invert(void)
     float work[16];
     int perm[4];
     float scale[4];
-    float *current;
+    uint8_t *current;
     int columns = 0;
     int step = 0;
     uint32_t pivot_column = 0;
@@ -311,14 +327,14 @@ static void matrix_stack_invert(void)
 
     /* The cells of the output's identity the inverse pass never revisits: the
        original stores exactly these before it starts eliminating. */
-    current = (float *)recomp_memory(MATRIX_CURRENT, 16u * sizeof(float));
-    current[3] = 0.0f;
-    current[7] = 0.0f;
-    current[11] = 0.0f;
-    current[12] = 0.0f;
-    current[13] = 0.0f;
-    current[14] = 0.0f;
-    current[15] = 1.0f;
+    current = recomp_memory(MATRIX_CURRENT, 16u * sizeof(float));
+    guest_float_store(current, 3, 0.0f);
+    guest_float_store(current, 7, 0.0f);
+    guest_float_store(current, 11, 0.0f);
+    guest_float_store(current, 12, 0.0f);
+    guest_float_store(current, 13, 0.0f);
+    guest_float_store(current, 14, 0.0f);
+    guest_float_store(current, 15, 1.0f);
 
     for (step = 0; step < 4; ++step) {
         float best_value = -1.0f;
@@ -371,23 +387,26 @@ static void matrix_stack_invert(void)
                 float value = source == row ? 1.0f : 0.0f;
 
                 for (int i = 0; i < column; ++i) {
-                    const float product = current[row * 4 + i] * work[i * 4 + source];
+                    const float product =
+                        guest_float_load(current, row * 4 + i) * work[i * 4 + source];
 
                     value = value - product;
                 }
-                current[row * 4 + column] = value;
+                guest_float_store(current, row * 4 + column, value);
             }
             /* Back substitution for the columns the elimination transformed. */
             for (int column = 3; column >= 0; --column) {
                 const int source = perm[column];
-                float value = current[row * 4 + column];
+                float value = guest_float_load(current, row * 4 + column);
 
                 for (int i = column + 1; i < 4; ++i) {
-                    const float product = current[row * 4 + i] * work[i * 4 + source];
+                    const float product =
+                        guest_float_load(current, row * 4 + i) * work[i * 4 + source];
 
                     value = value - product;
                 }
-                current[row * 4 + column] = value / work[column * 4 + source];
+                guest_float_store(current, row * 4 + column,
+                    value / work[column * 4 + source]);
             }
         }
     }

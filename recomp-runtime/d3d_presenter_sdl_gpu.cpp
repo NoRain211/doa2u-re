@@ -1636,7 +1636,7 @@ SDL_GPUGraphicsPipeline *lookupPipeline(RecompD3dPresenter *presenter, const Pip
 {
     const RecompD3dPresenterDrawCommand &draw = *state.draw;
     PipelineKey key;
-    std::memset(&key, 0, sizeof key);
+    std::memset(static_cast<void *>(&key), 0, sizeof key);
     key.vertex = state.shaders.vertex;
     key.fragment = state.shaders.fragment;
     key.fvf = state.fvf;

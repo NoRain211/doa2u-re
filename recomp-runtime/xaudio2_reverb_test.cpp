@@ -47,8 +47,8 @@ int main()
         for (BOOL seven_dot_one : {FALSE, TRUE}) {
             XAUDIO2FX_REVERB_PARAMETERS expected;
             recomp::ReverbParameters actual;
-            std::memset(&expected, 0xcd, sizeof expected);
-            std::memset(&actual, 0xcd, sizeof actual);
+            std::memset(static_cast<void *>(&expected), 0xcd, sizeof expected);
+            std::memset(static_cast<void *>(&actual), 0xcd, sizeof actual);
             recomp::ReverbI3dl2Parameters copy;
             std::memcpy(&copy, &input, sizeof copy);
             ReverbConvertI3DL2ToNative(&input, &expected, seven_dot_one);

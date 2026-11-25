@@ -114,7 +114,9 @@ static int mmx_native_lanes(void)
         for (unsigned i = 0; i < 8; ++i)
             expected[4].ub[i] = (uint8_t)(((unsigned)a.ub[i] + b.ub[i] + 1) / 2);
         for (unsigned i = 0; i < 2; ++i) {
-            expected[7].d[i] = a.d[i] >> (count >= 32 ? 31 : count);
+            /* Floor division by 2^count: arithmetic shift without signed >>. */
+            const int64_t unit = (int64_t)1 << (count >= 32 ? 31 : count);
+            expected[7].d[i] = (int32_t)((a.d[i] - (a.d[i] < 0 ? unit - 1 : 0)) / unit);
             expected[8].uw[2*i] = a.uw[i];
             expected[8].uw[2*i+1] = b.uw[i];
             expected[9].uw[2*i] = a.uw[i+2];

@@ -36,6 +36,11 @@ void recomp_stop_at_boundary(const char *stop_id);
 
 /* Records the stop, appends a milestone line when configured, then exits.
    fallback_code applies only when no expectation was set. Does not return. */
+#if defined(_MSC_VER) && !defined(__clang__)
+__declspec(noreturn)
+#else
+__attribute__((noreturn))
+#endif
 void recomp_stop(int fallback_code, const char *stop_id_format, ...);
 
 /* Coarse forward-progress measure carried in the milestone line. */

@@ -38,7 +38,7 @@ static bool checkReverbCapture(Capture *recording, uint32_t channels, bool wet)
     float pcm[960]{};
     pcm[0] = 0.75f;
     if (channels == 2) pcm[1] = -0.5f;
-    recomp_audio_output_submit(1, reinterpret_cast<const uint8_t *>(pcm),
+    recomp_audio_output_submit(1, static_cast<const uint8_t *>(static_cast<const void *>(pcm)),
         480 * channels * sizeof(float), 48000, channels, 32, 0);
     if (!check("capture submission", recomp_audio_output_enabled() != 0)) return false;
     const ULONGLONG deadline = GetTickCount64() + 500;

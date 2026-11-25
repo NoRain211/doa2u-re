@@ -238,7 +238,7 @@ int recomp_kernel_crypto_test(void)
         *recomp_memory_i8(TEST_INPUT + i) = (int8_t)"abc"[i];
     }
 
-    stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
     stack[0] = 0x0010abcdu;
     stack[1] = TEST_CONTEXT;
     recomp_runtime.registers.esp = TEST_ENTRY_ESP;
