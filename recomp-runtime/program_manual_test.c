@@ -38,8 +38,8 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= 0x3000u && address + width <= 0x3000u + sizeof guest_path)
         return (uint8_t *)&guest_path[address - 0x3000u];
     if (address >= 0x4000u && address + width <= 0x4000u + sizeof aix) return &aix[address - 0x4000u];
-    if (address == 0x003c2cecu && width == sizeof nine_sixteenths) return (uint8_t *)&nine_sixteenths;
-    if (address == 0x00877ea0u && width == sizeof back_buffer_shape) return (uint8_t *)&back_buffer_shape;
+    if (address == 0x003c2cecu && width == sizeof nine_sixteenths) return (uint8_t *)(void *)&nine_sixteenths;
+    if (address == 0x00877ea0u && width == sizeof back_buffer_shape) return (uint8_t *)(void *)&back_buffer_shape;
     if (address < 0x2000u || address + width > 0x2000u + sizeof scene) abort();
     return &scene[address - 0x2000u];
 }

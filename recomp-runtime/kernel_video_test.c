@@ -37,7 +37,7 @@ static int expect_u32(const char *field, uint32_t actual, uint32_t expected)
 
 static void prepare_stack(uint8_t *memory, uint32_t result)
 {
-    uint32_t *stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    uint32_t *stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
 
     stack[0] = 0x0010abcdu;
     stack[1] = 0xfd000000u;
@@ -49,7 +49,7 @@ static void prepare_stack(uint8_t *memory, uint32_t result)
 
 static void prepare_getter_stack(uint8_t *memory)
 {
-    uint32_t *stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    uint32_t *stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
 
     stack[0] = 0x0010abcdu;
     recomp_runtime.registers.esp = TEST_ENTRY_ESP;
@@ -57,7 +57,7 @@ static void prepare_getter_stack(uint8_t *memory)
 
 static void prepare_setter_stack(uint8_t *memory, uint32_t address)
 {
-    uint32_t *stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    uint32_t *stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
 
     stack[0] = 0x0010abcdu;
     stack[1] = address;
@@ -171,7 +171,7 @@ int recomp_kernel_video_test(void)
         "stored getter value", recomp_runtime.registers.eax, 0x00a23ac8u);
 
     prepare_stack(memory, TEST_RESULT);
-    memcpy(stack_before, memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, 20u);
+    memcpy(stack_before, memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), 20u);
     *recomp_memory_u32(TEST_RESULT) = 0xa5a5a5a5u;
     send_option();
     passed &= expect_u32("status", recomp_runtime.registers.eax, 0u);
@@ -180,7 +180,7 @@ int recomp_kernel_video_test(void)
     passed &= expect_u32("result", *recomp_memory_u32(TEST_RESULT), 0u);
     passed &= expect_u32(
         "preserves stack",
-        memcmp(stack_before, memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, 20u),
+        memcmp(stack_before, memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), 20u),
         0u);
 
     prepare_stack(memory, 0u);
@@ -191,13 +191,13 @@ int recomp_kernel_video_test(void)
 
     const uint32_t mode_stack[] = {0x12345678u, 0xfd000000u, 0u, 1u,
         0x12u, 2880u, 0x02000000u};
-    memcpy(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, mode_stack, sizeof mode_stack);
+    memcpy(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), mode_stack, sizeof mode_stack);
     recomp_runtime.registers.esp = TEST_ENTRY_ESP;
     set_mode();
     passed &= expect_u32("display mode complete", recomp_runtime.registers.eax, 0u);
     passed &= expect_u32("display mode ESP", recomp_runtime.registers.esp,
         TEST_ENTRY_ESP + sizeof mode_stack);
     passed &= expect_u32("display mode preserves arguments",
-        memcmp(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, mode_stack, sizeof mode_stack), 0u);
+        memcmp(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), mode_stack, sizeof mode_stack), 0u);
     return passed;
 }

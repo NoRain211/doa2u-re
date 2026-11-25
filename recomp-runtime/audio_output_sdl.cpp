@@ -361,7 +361,7 @@ extern "C" void recomp_audio_output_shutdown(void)
     std::lock_guard<std::mutex> lock(audio_mutex);
     if (summary_printed) return;
     for (auto &voice : voices) destroyVoice(voice);
-    std::memset(routing, 0, sizeof routing);
+    std::memset(static_cast<void *>(routing), 0, sizeof routing);
     if (reverb_device != 0) {
         SDL_CloseAudioDevice(reverb_device);
         reverb_device = 0;

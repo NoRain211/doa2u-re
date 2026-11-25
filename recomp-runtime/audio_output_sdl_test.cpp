@@ -62,7 +62,7 @@ int main()
     // Submit stereo 48000 Hz 32-bit float, as the HRTF mixer does
     std::vector<float> pcm_float(480 * 2, 0.25f);
     recomp_audio_output_submit(
-        2, reinterpret_cast<const uint8_t *>(pcm_float.data()),
+        2, static_cast<const uint8_t *>(static_cast<const void *>(pcm_float.data())),
         static_cast<uint32_t>(pcm_float.size() * sizeof(float)),
         48000, 2, 32, 0);
 
@@ -127,12 +127,12 @@ int main()
         if (slot == 4u) CHECK(recomp_audio_output_set_voice_routing(slot, 2, front_dry, no_wet));
         std::vector<float> level(4800 * 2, 0.5f);  // 100 ms of DC
         const uint32_t level_bytes = static_cast<uint32_t>(level.size() * sizeof(float));
-        recomp_audio_output_submit(slot, reinterpret_cast<const uint8_t *>(level.data()), level_bytes, 48000, 2, 32, 0);
+        recomp_audio_output_submit(slot, static_cast<const uint8_t *>(static_cast<const void *>(level.data())), level_bytes, 48000, 2, 32, 0);
         // Change the volume while the first chunk plays, as the game does, in
         // 2 ms chunks like game-thread pumps: each must continue the ramp.
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
         for (uint32_t done = 0; done < level_bytes; done += 96u * 2u * sizeof(float)) {
-            recomp_audio_output_submit(slot, reinterpret_cast<const uint8_t *>(level.data()) + done,
+            recomp_audio_output_submit(slot, static_cast<const uint8_t *>(static_cast<const void *>(level.data())) + done,
                 96u * 2u * sizeof(float), 48000, 2, 32, -600);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -168,7 +168,7 @@ int main()
     recomp_audio_output_initialize();
     CHECK(recomp_audio_output_enabled() != 0);
     std::vector<float> mono(4800, 0.5f);  // 100 ms of DC
-    recomp_audio_output_submit(257, reinterpret_cast<const uint8_t *>(mono.data()),
+    recomp_audio_output_submit(257, static_cast<const uint8_t *>(static_cast<const void *>(mono.data())),
         static_cast<uint32_t>(mono.size() * sizeof(float)), 48000, 1, 32, 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     recomp_audio_output_shutdown();

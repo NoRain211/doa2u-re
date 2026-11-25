@@ -27,7 +27,7 @@ static int expect_u32(const char *field, uint32_t actual, uint32_t expected)
 
 static void prepare_stack(uint8_t *memory, uint32_t priority, int has_priority)
 {
-    uint32_t *stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    uint32_t *stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
 
     stack[0] = 0x0010abcdu;
     stack[1] = TEST_THREAD;
@@ -58,7 +58,7 @@ static RecompFunction apc_lookup(uint32_t address)
 /* An I/O APC queued by NtReadFile runs at the next alertable wait, once. */
 static int test_user_apc(uint8_t *memory)
 {
-    uint32_t *stack = (uint32_t *)(memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE);
+    uint32_t *stack = (uint32_t *)(memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE));
     RecompFunction delay = recomp_kernel_thread(99u);
     int passed = 1;
 
@@ -111,14 +111,14 @@ int recomp_kernel_thread_test(void)
     }
 
     prepare_stack(memory, 0u, 0);
-    memcpy(stack_before, memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, 8u);
+    memcpy(stack_before, memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), 8u);
     query();
     passed &= expect_u32("initial priority", recomp_runtime.registers.eax, 0u);
     passed &= expect_u32(
         "query ESP", recomp_runtime.registers.esp, TEST_ENTRY_ESP + 8u);
     passed &= expect_u32(
         "query preserves stack",
-        memcmp(stack_before, memory + TEST_ENTRY_ESP - TEST_MEMORY_BASE, 8u),
+        memcmp(stack_before, memory + (TEST_ENTRY_ESP - TEST_MEMORY_BASE), 8u),
         0u);
 
     prepare_stack(memory, 5u, 1);

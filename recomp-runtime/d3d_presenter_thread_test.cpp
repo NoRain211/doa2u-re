@@ -285,7 +285,7 @@ static bool testCapturedDraw()
     draw.blend.color_write_mask = 15;
     passed &= expect("capture draw", recomp_d3d_presenter_submit(presenter, &command));
     // No PRESENT has published this packet, so these writes precede execution.
-    std::memset(vertices, 0xff, sizeof vertices);
+    std::memset(static_cast<void *>(vertices), 0xff, sizeof vertices);
     std::memset(indices, 0xff, sizeof indices);
     command = {};
     command.type = RECOMP_D3D_PRESENTER_COMMAND_PRESENT;
@@ -3300,7 +3300,7 @@ static bool testDrawCoverage(bool scaled_msaa = false)
     uint32_t query_index = 0u, pixels = ~0u;
     const auto poll = d3d_backend_poll_visibility(presenter, &query_index, &pixels);
     if (poll != D3D_BACKEND_VISIBILITY_READY || query_index != 17u || pixels != 0u) {
-        std::fprintf(stderr, "FAIL coverage changed guest visibility poll=%u pixels=%u\n", poll, pixels);
+        std::fprintf(stderr, "FAIL coverage changed guest visibility poll=%d pixels=%u\n", poll, pixels);
         passed = false;
     }
     // Paint only the right half, conditioned on the original depth AND stencil.

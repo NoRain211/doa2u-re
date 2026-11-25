@@ -465,7 +465,7 @@ int main()
 
     /* Float keeps headroom, signed-zero silence, and byte/frame accounting. */
     float float_pcm[] = {0.0f, -0.0f, 1.5f, -1.5f};
-    const uint8_t *float_bytes = reinterpret_cast<const uint8_t *>(float_pcm);
+    const uint8_t *float_bytes = static_cast<const uint8_t *>(static_cast<const void *>(float_pcm));
     const auto nonzero_before = nonzero_buffers;
     const auto bytes_before = submitted_bytes;
     source = voices[1].source;

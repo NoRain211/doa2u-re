@@ -95,7 +95,7 @@ void releaseOutput()
     for (auto &voice : voices) destroyVoice(voice);
     if (reverb_voice) reverb_voice->DestroyVoice();
     reverb_voice = nullptr;
-    std::memset(routing, 0, sizeof routing);
+    std::memset(static_cast<void *>(routing), 0, sizeof routing);
     std::memset(routing_reported, 0, sizeof routing_reported);
     if (master) master->DestroyVoice();
     recomp_audio_capture_save();

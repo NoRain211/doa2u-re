@@ -238,7 +238,7 @@ bool recomp_screenshot_path(char *path, size_t size)
     if (make_folder(folder) != 0 && errno != EEXIST) return false;
 
     time_t now = time(NULL);
-    struct tm local;
+    struct tm local = {0};
 #ifdef _WIN32
     localtime_s(&local, &now);
 #else
