@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import ast
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -26,6 +27,19 @@ class ReleaseSelectionTest(unittest.TestCase):
         tracked = set(git("ls-files").decode().splitlines())
         for platform, files in PLATFORM_FILES.items():
             self.assertEqual(files - tracked, set(), platform)
+
+    def test_shipped_tools_ship_the_tools_they_import(self):
+        # import_soundtrack.py needs xbe_info.py; a dropped module fails only on a player's build.
+        tools = {path for path in git("ls-files", "tools").decode().splitlines()
+                 if path.endswith(".py") and path.count("/") == 1}
+        for platform in PLATFORM_FILES:
+            for path in sorted(p for p in tools if shipped(p, platform)):
+                for node in ast.walk(ast.parse((package_test.ROOT / path).read_text(encoding="utf-8"))):
+                    names = [a.name for a in node.names] if isinstance(node, ast.Import) else                         [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else []
+                    for name in names:
+                        module = f"tools/{name.split('.')[0]}.py"
+                        if module in tools:
+                            self.assertTrue(shipped(module, platform), f"{platform}: {path} imports {module}")
 
     def test_each_platform_ships_its_own_backends(self):
         self.assertTrue(shipped("recomp-runtime/d3d_presenter_d3d11.cpp", "windows"))
