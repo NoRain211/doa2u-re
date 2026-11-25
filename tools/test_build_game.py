@@ -93,19 +93,23 @@ class BuildTests(unittest.TestCase):
     def test_full_build_reuses_only_an_unchanged_program_from_the_same_recipe(self):
         with tempfile.TemporaryDirectory() as folder:
             generated, receipt = Path(folder) / "generated", Path(folder) / "receipt.json"
-            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            self.assertIsNone(reusable_program(receipt, generated, {"xbe": "a"}, False))
             generated.mkdir()
             for name in ("recomp_0000.c", "recomp_dispatch.c", "recomp_funcs.h"):
                 (generated / name).write_text("int x;\n")
             manifest, ebp = program_manifest(generated)
             receipt.write_text(json.dumps({"recipe": {"xbe": "a"}, "manifest_sha256": manifest, "ebp_count": ebp}))
-            self.assertTrue(reusable_program(receipt, generated, {"xbe": "a"}, False))
-            self.assertFalse(reusable_program(receipt, generated, {"xbe": "b"}, False))
-            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, True))  # not the pinned program
+            self.assertIsNotNone(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            self.assertIsNone(reusable_program(receipt, generated, {"xbe": "b"}, False))
+            self.assertIsNone(reusable_program(receipt, generated, {"xbe": "a"}, True))  # not the pinned program
             with patch("build_game.PROGRAM_SHA256", manifest):
-                self.assertTrue(reusable_program(receipt, generated, {"xbe": "a"}, True))
+                self.assertIsNotNone(reusable_program(receipt, generated, {"xbe": "a"}, True))
+            valid = receipt.read_text()
+            receipt.write_text("[]")  # parses, but is no receipt
+            self.assertIsNone(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            receipt.write_text(valid)
             (generated / "recomp_0000.c").write_text("int y;\n")
-            self.assertFalse(reusable_program(receipt, generated, {"xbe": "a"}, False))
+            self.assertIsNone(reusable_program(receipt, generated, {"xbe": "a"}, False))
 
     def test_manifest_authenticates_members_and_contents(self):
         with tempfile.TemporaryDirectory() as folder:

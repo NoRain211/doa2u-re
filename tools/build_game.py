@@ -183,16 +183,18 @@ def program_manifest(generated):
 
 
 def reusable_program(receipt_path, generated, recipe, validated):
-    """True when the receipt's program comes from this exact recipe and is unchanged:
-    lifting again would write the same files and takes minutes."""
+    """The receipt, when its program comes from this exact recipe and is unchanged:
+    lifting again would write the same files and takes minutes. Otherwise None."""
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         manifest = program_manifest(generated)
     except (OSError, ValueError):
-        return False
-    return (receipt.get("recipe") == recipe
+        return None
+    if (isinstance(receipt, dict) and receipt.get("recipe") == recipe
             and manifest == (receipt.get("manifest_sha256"), receipt.get("ebp_count"))
-            and (not validated or manifest == (PROGRAM_SHA256, PROGRAM_EBP)))
+            and (not validated or manifest == (PROGRAM_SHA256, PROGRAM_EBP))):
+        return receipt
+    return None
 
 
 def lifter_revision():
@@ -386,12 +388,13 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
         return dict(xbe_sha256=sha256(xbe), lifter_commit=revision, capstone=capstone.__version__,
                     functions_sha256=sha256(functions))
 
-    reuse = False
+    reuse = None
     if not (build_only or lift_only or disassemble):
         merge_functions(functions)
-        if reusable_program(receipt_path, generated, program_recipe(), iso is not None):
+        recipe = program_recipe()
+        reuse = reusable_program(receipt_path, generated, recipe, iso is not None)
+        if reuse:
             print("The generated program already matches this executable and lifter; skipping the lift.", flush=True)
-            reuse = True
     lift = [] if build_only or reuse else ["xbe-parser", "disasm", "lift"] if disassemble else ["lift"]
     progress = Progress(lift + ([] if lift_only else ["configure", "build"]))
     if disassemble:
@@ -403,9 +406,12 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
                       "--seed-functions", ROOT / "tools/doa2u/seed_functions.json"],
                      logs / "disasm.log", LIFTER)
         write_functions(disasm)
-    merge_functions(functions)
-    recipe = program_recipe()
-    if build_only or reuse:
+    if not reuse:
+        merge_functions(functions)
+        recipe = program_recipe()
+    if reuse:
+        receipt = reuse
+    elif build_only:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt["recipe"] != recipe:
             raise ValueError("Generated receipt belongs to a different executable or lifter recipe")
