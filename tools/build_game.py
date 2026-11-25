@@ -128,7 +128,10 @@ def use_windows_newlines(generated):
     for path in generated.iterdir():
         if path.is_file():
             data = path.read_bytes()
-            path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+            converted = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+            # runtime-sources hard-links these files, so a rewrite would recompile them.
+            if converted != data:
+                path.write_bytes(converted)
 
 
 def linux_compilers():
