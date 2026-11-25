@@ -54,7 +54,10 @@ Game handlers reached only through data tables (the game-mode table at
 way when the lifter misses them; an unresolved indirect call names the next one.
 Tail-jump switch cases past a null table slot (0x2a82bc, cases 0x2a8247 and
 0x2a8286) are seeded too. A lone in-function arm ended by a null slot
-(0x2929f4) resolves in the lifter as a local switch.
+(0x2929f4) resolves in the lifter as a local switch. A switch table's null
+slots are holes, not its end: the online lobby's life and timer settings
+dispatch (0x2b3233) shares its arms with the following table, and the two
+arms after its holes (0x2b3260 and 0x2b3253) are local gotos.
 
 `tools/build_game.py` authenticates the selected XBE, lifter revision,
 generated source manifest and final runner. CMake rejects partial or wrong
