@@ -484,39 +484,6 @@ def swap_levelled(folder, scratch, track):
               "and every import tries the swap again until it works.")
 
 
-def track_loop(parts):
-    """A row's loop fields as (start, end) samples, or None when they are not sample numbers."""
-    if len(parts) < 4 or not re.fullmatch(r"-?\d+", parts[1]) or not re.fullmatch(r"-?\d+", parts[2]):
-        return None
-    return int(parts[1]), int(parts[2])
-
-
-def has_explicit_loop(line):
-    """Whether a tracks.txt row names the loop itself rather than the file's header."""
-    loop = track_loop(line.split("\t"))
-    return loop is not None and loop[0] >= 0
-
-
-def album_track(folder, name):
-    """The track a tracks.txt row names, or None when its name is not one (left alone, said once)."""
-    try:
-        return os.path.join(folder, track_name(name))
-    except ValueError:
-        print(f"warning: {os.path.basename(folder)}: {name!r} is not a track file name; "
-            "its row is left as it is.")
-        return None
-
-
-def finish_swaps(folder, lines):
-    """Finishes a swap a failed replace cut short: a levelled copy left beside its track."""
-    for line in lines:
-        parts = line.split("\t")
-        if not line.startswith("#") and len(parts) >= 4:
-            track = album_track(folder, parts[0])
-            if track is not None and os.path.exists(track + ".level"):
-                swap_levelled(folder, track + ".level", track)
-
-
 def level_album(folder, encoder):
     """Brings each track of an album to LEVEL_DB with recomp_adx_encode --level, once: tracks.txt
     then says #level. Without the encoder (build the game first) it leaves them as they are.
@@ -525,67 +492,45 @@ def level_album(folder, encoder):
     the same input rather than levelling the tracks that worked a second time. Once they all
     succeeded, the #level mark is written first and the scratch files then replace the tracks: if
     a replace fails (a track open elsewhere), that track keeps its scratch file and a rerun
-    swaps it in rather than levelling again. Returns how many tracks it levelled successfully.
-
-    A row's own loop points go to the encoder too, and the row then reads -1 -1: the header holds
-    that loop, frame-aligned. The game loops an assigned track from its ADX header, and a DOA4
-    album ffmpeg encoded before the game was built has its loop only in tracks.txt, so levelling
-    with that row is what puts the loop in the header and keeps long matches playing. The mark
-    says loop for the same reason; an album the earlier mark levelled without one is levelled
-    again only when a row still holds a loop to restore."""
+    swaps it in rather than levelling again. Returns how many tracks it levelled successfully."""
     path = os.path.join(folder, "tracks.txt")
     try:
         with open(path, encoding="utf-8") as file:
             lines = file.read().splitlines()
     except OSError:
         return 0
-    mark = f"#level\t{LEVEL_DB}\tloop"
-    legacy = f"#level\t{LEVEL_DB}"
+    mark = f"#level\t{LEVEL_DB}"
     if mark in lines:
-        finish_swaps(folder, lines)
-        return 0
-    if legacy in lines and not any(has_explicit_loop(line) for line in lines if not line.startswith("#")):
-        # Levelled before loops were kept, and no row holds a loop its file could have lost:
-        # the new mark alone says so, without another lossy pass over every track.
-        finish_swaps(folder, lines)
-        lines[lines.index(legacy)] = mark
-        atomic_text(path, "\n".join(lines) + "\n")
+        for line in lines:  # finish a swap that a failed replace cut short
+            parts = line.split("\t")
+            if not line.startswith("#") and len(parts) >= 4:
+                track = os.path.join(folder, track_name(parts[0]))
+                if os.path.exists(track + ".level"):
+                    swap_levelled(folder, track + ".level", track)
         return 0
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
         return 0
     levelled, failed, committed = [], False, False
     try:
-        for index, line in enumerate(lines):
+        for line in lines:
             parts = line.split("\t")
             if line.startswith("#") or len(parts) < 4:
                 continue
-            track = album_track(folder, parts[0])
-            if track is None:
-                continue
+            track = os.path.join(folder, track_name(parts[0]))
             scratch = track + ".level"
-            loop = track_loop(parts)
-            if loop is None:
-                print(f"  {parts[0]}: its loop points are not samples ({parts[1]!r} {parts[2]!r}); "
-                    "levelling with the loop in the file's header instead.")
-            # -1 says the header has the loop, -2 no loop, and samples given win.
-            args = [] if loop in (None, (-1, -1)) else [parts[1], parts[2]]
-            result = run_tool([encoder, "--level", str(LEVEL_DB), *args, track, scratch],
-                capture_output=True, text=True)
+            result = run_tool([encoder, "--level", str(LEVEL_DB), track, scratch], capture_output=True, text=True)
             if result.returncode != 0:
                 failed = True
                 print(f"  {parts[0]}: not levelled ({result.stderr.strip()})")
                 if os.path.exists(scratch):
                     os.remove(scratch)
                 continue
-            if loop is not None and loop[0] >= 0 and loop[1] > loop[0]:
-                lines[index] = "\t".join([parts[0], "-1", "-1", *parts[3:]])
             levelled.append((scratch, track))
             print(f"  {parts[0]}: {result.stdout.strip()}", flush=True)
         if failed:
             print(f"{os.path.basename(folder)}: not every track was levelled; the album is as it was.")
             return len(levelled)
-        lines = [line for line in lines if line != legacy]
         at = 1 if lines and lines[0].startswith("#title") else 0
         lines.insert(at, mark)
         atomic_text(path, "\n".join(lines) + "\n")
