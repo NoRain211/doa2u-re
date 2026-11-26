@@ -474,8 +474,13 @@ static void resetNetplayCounters()
    last pad before the session (the A that picked the rematch) and its edges,
    and frame 0 would turn them into a press on one side only. Clear the ports'
    and the session slots' records in g_pad_state (0xa94a70, 0x30 each: buttons,
-   held, pressed, released, analog and sticks below +0x24) and the four
-   players' copies in g_player_pads (0x87d260). FUN_000e9c90 fills each
+   held, pressed, released, repeated presses, analog buttons and sticks, at
+   +0x24 the D-pad as two axes, then at +0x28 the key-repeat latch, the last
+   new press, and at +0x2c its hold count; input_update_pad_state writes them
+   all) and the four
+   players' copies in g_player_pads (0x87d260). Left set, the latch keeps each
+   side's last frontend press, such as the stage chooser's last direction
+   against the other side's A. FUN_000e9c90 fills each
    fighter's 16 move slots as moves start, by the slot's type at 0x87d4a0:
    type 1 a vector (0x87a948, 0x10 each) and a float (0x878310), type 3 two
    vectors (0x877f00, 0x20 each) and a float (0x87ad80). The slots the last
@@ -484,9 +489,9 @@ static void resetNetplayCounters()
 static void clearSessionPads()
 {
     for (const std::uint32_t slot : {0u, 1u, 5u, 6u})
-        std::memset(recomp_memory(0x00a94a70u + slot * 0x30u, 0x24u), 0, 0x24u);
+        std::memset(recomp_memory(0x00a94a70u + slot * 0x30u, 0x30u), 0, 0x30u);
     for (std::uint32_t player = 0u; player < 4u; ++player)
-        std::memset(recomp_memory(0x0087d260u + player * 0x30u, 0x24u), 0, 0x24u);
+        std::memset(recomp_memory(0x0087d260u + player * 0x30u, 0x30u), 0, 0x30u);
     std::memset(recomp_memory(0x0087a948u, 0x200u), 0, 0x200u);
     std::memset(recomp_memory(0x00878310u, 0x80u), 0, 0x80u);
     std::memset(recomp_memory(0x00877f00u, 0x400u), 0, 0x400u);
