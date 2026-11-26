@@ -862,15 +862,36 @@ black void in game, so it is left out of the cycle and X on the row does
 nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
 changes. The entry's id bytes hold the pick, and it stays across visits to
 the screen. Random's `row_stage(row, 0)` and the confirm take the current
-variant; find-stage (`0x135580`), which only the online match scene uses,
-writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
-so any variant replays without a row. Played in game: the Up cycle, a fight
-on each variant, the X, Y and Left trigger picks, the kept variant and
-Random; 27 was the black void. Online play and the online match scene's
-restore were not tested. The variant is a stage id the game already syncs, the entry
-sits in the kernel page that rollback restores, and Up is read from the
-lockstepped per-player pad block, so both sides need this build, which
-netplay's build check already requires.
+variant. In a Live match both fighters run Stage Select in lockstep
+(`frontend_online_match_update` steps `online_lockstep_frame` each frame), and
+each runs the same handler (`0x1393b0`, then `0x1357f0`) on the same pad edges,
+which is how the game's own cursor and X picks agree, so Up and Down step the
+entry on both fighters alike, whoever presses them. The row's id goes only to
+spectators: `0x293f00` sends it to session players 2 and up, a spectator
+(local slot -1) keeps player 1's at `0xf0a564`, and its scene
+(`frontend_offline_match_update`, find-stage's only caller) writes it back
+into the entry through find-stage (`0x135580`). Replays restore the stage id
+itself (`0x136bb0`), so any variant replays without a row. Played in game:
+the Up cycle, a fight on each variant, the X, Y and Left trigger picks, the
+kept variant and Random; 27 was the black void. Online play and the
+spectator scene's restore were not tested. The entry sits in the kernel page
+that rollback restores, and Up is read from the lockstepped per-player pad
+block, so both sides need this build, which netplay's build check already
+requires.
+
+The same Up/Down pair on The Aerial Gardens row steps its id between 15
+(day) and 1 (night), and on The Great Opera row between 10 (on fire) and 11
+(calm). Those rows keep their ids in kernel-page copies at `0x03ff0c50` and
+`0x03ff0c68`, so the game's stage table is not written and rollback restores
+the pick; in a Live match they step on both fighters from the same pad edges
+as Miyama's row. The White Storm row toggles the storm flag at `0x6fe9d0`, the same
+u32 its own confirm sets from X; the choice lives at `0x03ff0c40`, and the
+game's A/Start confirm is re-applied afterward so it keeps the Up/Down choice
+instead of clearing it (X stays the game's storm pick). The Koku An snowman
+that sometimes appears on The White Storm is a random stage object, not a
+game variant the row can select, so it stays random. The alt ids and the
+White Storm flag were exercised by the stage-select unit test; they were not
+played through in game.
 
 Modes that pick stages without Stage Select read fixed lists, so Miyama is
 added to those too. Time Attack (game mode 4) fills one stage per opponent
