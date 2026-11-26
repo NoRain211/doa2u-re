@@ -70,11 +70,13 @@ static int level(double target, int64_t loop_start, int64_t loop_end, bool loop_
     RecompAdxDecoder decoder;
     uint32_t at = recomp_adx_open(&decoder, data, (uint32_t)length);
     if (at == 0u) { fprintf(stderr, "%s: not an ADX file the game plays\n", from); free(data); return 1; }
+    bool from_header = false;
     if (loop_start == -1) {
         const uint32_t loop = data[0x12] == 3u ? 0x18u : data[0x12] == 4u ? 0x24u : 0u;
         if (loop != 0u && loop + 0x14u <= at && be32(data + loop) != 0u) {
             loop_start = be32(data + loop + 4u);
             loop_end = be32(data + loop + 12u);
+            from_header = true;
         }
     } else if (loop_start < 0) {
         loop_start = loop_end = -1; /* -2: no loop */
@@ -104,17 +106,16 @@ static int level(double target, int64_t loop_start, int64_t loop_end, bool loop_
         pcm[i] = (int16_t)lrint(v > 32767.0 ? 32767.0 : v < -32768.0 ? -32768.0 : v);
     }
     const int64_t wanted_start = loop_start, wanted_end = loop_end;
-    if (loop_given) {
-        if (loop_start >= 0 && (loop_start >= (int64_t)frames || loop_end > (int64_t)frames ||
-                loop_end <= loop_start)) {
+    if (loop_start >= 0) {
+        if (loop_given && !from_header &&
+                (loop_start >= (int64_t)frames || loop_end > (int64_t)frames || loop_end <= loop_start)) {
             fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples\n",
                 from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
             free(pcm);
             return 1;
         }
-    } else {
         if (loop_end > (int64_t)frames) loop_end = frames;
-        if (loop_start >= 0 && loop_end <= loop_start) {
+        if (loop_end <= loop_start) {
             fprintf(stderr, "%s: its own loop %lld..%lld does not fit its %u samples; levelled without one\n",
                 from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
             loop_start = loop_end = -1;
