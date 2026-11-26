@@ -43,6 +43,9 @@ enum {
        62 requested ids of its leaderboard. */
     GROUP7_STATS = 0x4800,
     GROUP7_STAT_IDS = 0x4c00,
+    /* The logon profile read: six records of 0x18 bytes, two stat entries each. */
+    MULTI_RECORDS = 0x5a00,
+    MULTI_ENTRIES = 0x5b00,
     LEADER_ROWS = 0x6a00,
     LEADER_STATS = 0x6b00,
     DEST = 0x6c00,
@@ -790,6 +793,47 @@ int main(void)
         peek32(STAT_ENTRIES2 + 0x18u) == TAG_OUT + 32u &&
         memcmp(&guest[TAG_OUT + 32u], "A\0n\0n\0", 6u) == 0);
     close_task(pair_task);
+
+    /* The logon profile read names the local player on six boards in one
+       XOnlineStatRead (online_start_stat_read_alt 0x2a36d0 with the pairs at
+       0xf19240: groups 43, 9, 12, 13, 14 and 11). The shim sends one request
+       per board, so a call that names six boards needs six, and each reply
+       must fill only the records that named its board; before this, every
+       record got the last board's row and grade points read back as 0. */
+    {
+        const uint32_t profile_boards[6] = {43u, 9u, 12u, 13u, 14u, 11u};
+        for (unsigned i = 0u; i < 6u; ++i) {
+            set_stat_record(REQUEST, local_xuid, profile_boards[i], 2u, STAT_ENTRIES);
+            set_stat_entry(STAT_ENTRIES, 1u, 1u, (int64_t)(100u + i));
+            set_stat_entry(STAT_ENTRIES + 0x10u, 0xfffeu, 2u, (int64_t)(1000u + i));
+            check("profile stat write starts", call(thunk_stat_write,
+                (const uint32_t[]){1u, REQUEST, 0u, TASK_OUT}, 4u) == 0u);
+            const uint32_t profile_write = peek32(TASK_OUT);
+            check("profile stat write completes", wait_task(profile_write) == TASK_SUCCESS);
+            close_task(profile_write);
+        }
+        for (unsigned i = 0u; i < 6u; ++i) {
+            set_stat_record(MULTI_RECORDS + i * 0x18u, local_xuid, profile_boards[i], 2u,
+                MULTI_ENTRIES + i * 0x20u);
+            set_stat_entry(MULTI_ENTRIES + i * 0x20u, 1u, 0u, 0);
+            set_stat_entry(MULTI_ENTRIES + i * 0x20u + 0x10u, 0xfffeu, 2u, 0);
+        }
+        check("profile read starts", call(thunk_stat_read,
+            (const uint32_t[]){6u, MULTI_RECORDS, 0u, TASK_OUT}, 4u) == 0u);
+        const uint32_t profile_read = peek32(TASK_OUT);
+        check("profile read completes", wait_task(profile_read) == TASK_SUCCESS);
+        check("profile read result", call(thunk_stat_read_result,
+            (const uint32_t[]){profile_read, 6u, MULTI_RECORDS, 128u, TAG_OUT}, 5u) == 0u);
+        bool boards_ok = true;
+        for (unsigned i = 0u; i < 6u; ++i) {
+            const uint32_t entry = MULTI_ENTRIES + i * 0x20u;
+            boards_ok = boards_ok && peek16(entry) == 1u && peek32(entry + 4u) == 1u &&
+                peek32(entry + 8u) == 100u + i && peek16(entry + 0x10u) == 0xfffeu &&
+                peek32(entry + 0x14u) == 2u && peek64(entry + 0x18u) == 1000u + i;
+        }
+        check("each board keeps its own row", boards_ok);
+        close_task(profile_read);
+    }
 
     /* Board 1's RANKINGS group: ids 0..1, gamertag, score, rank. The shim must
        fill the requested ids (not the backend row's own order), leave the
