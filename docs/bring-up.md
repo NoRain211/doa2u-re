@@ -875,10 +875,14 @@ find-stage. Stepping a variant changes the id without moving the row, so before
 the countdown runs the peer kept the season the cursor landed on and fought a
 different one; issue #337 reported that desync. The step now broadcasts the new
 id itself, under the row-change path's guard (an online select and a local
-side). Two runners have not yet repeated the variant pick after the change. The variant is still a stage id the game already carries, the entry
-sits in the kernel page that rollback restores, and Up is read from the
-lockstepped per-player pad block, so both sides need this build, which
-netplay's build check already requires.
+side). Two runners in a Live single battle repeated the test: both showed the
+same Miyama preview before the Up, and the joining side's screen, which took
+no input, changed to the same stepped variant and then fought on it. Its
+rollback check had already failed at frame 30 with other stages, so that
+separate failure is not the stage pick. The variant is still a stage id the
+game already carries, the entry sits in the kernel page that rollback
+restores, and Up is read from the lockstepped per-player pad block, so both
+sides need this build, which netplay's build check already requires.
 
 Modes that pick stages without Stage Select read fixed lists, so Miyama is
 added to those too. Time Attack (game mode 4) fills one stage per opponent
