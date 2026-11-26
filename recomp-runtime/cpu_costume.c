@@ -12,7 +12,9 @@
    random pick is keyed by the run's opponent lists and stays the same. Only
    the game's plain picks change: costume 1, or costume 2 when the player
    wears costume 1. Story's own picks (a costume about to unlock, Kasumi's
-   clone) stay. */
+   clone) stay. Story also reads its per-opponent costume array (0x8a393c)
+   directly for the pre-fight scene, so a random pick is written back there
+   and the scene shows the costume the fight uses. */
 enum {
     FIGHTER_COSTUME = 0x000c6b00u,
     COSTUME_ID = 0x0011e570u,        /* cdecl (character, group, column, side) */
@@ -25,6 +27,7 @@ enum {
     TAG_COSTUMES = 0x0087d24cu,
     OPPONENT_LIST = 0x008a3a08u,     /* seven opponents */
     TEAM_LIST = 0x008a3a24u,         /* opponent pairs */
+    STORY_COSTUMES = 0x008a393cu,    /* seven opponent costumes, by story bout */
 };
 
 extern void sub_000C6B00(void);
@@ -119,6 +122,10 @@ static void fighter_costume(void)
         const uint8_t costume = call_byte(COSTUME_ID, character, (uint8_t)((first + step) % groups), 0u, 0u, 4u);
         if (!wears_player_costume(character, costume)) {
             recomp_runtime.registers.eax = (result & ~0xffu) | costume;
+            /* The pre-fight scene reads this array instead of asking again. */
+            if (mode == 3u && index < 7u &&
+                *recomp_memory(OPPONENT_LIST + index, 1u) == character)
+                *recomp_memory(STORY_COSTUMES + index, 1u) = costume;
             return;
         }
     }

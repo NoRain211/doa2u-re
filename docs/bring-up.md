@@ -921,8 +921,10 @@ the second when the player wears the first, becomes a random unlocked group
 (`0x11e410`), skipping one that matches the player's costume (`0xc5490`).
 Other callers ask again during a run, so the pick hashes a per-boot seed with
 the run's opponent lists (`0x8a3a08`, `0x8a3a24`), the character and the
-index. Story's own picks stay. Netplay and SyncTest boots leave it off, and so does
-a logon to DOA ONLINE until the player leaves.
+index. A Story pick is written back to the per-opponent array (`0x8a393c`),
+which the pre-fight scene reads through `0xc3ee0`, so the scene and the fight
+show the same costume. Story's own picks stay. Netplay and SyncTest boots
+leave it off, and so does a logon to DOA ONLINE until the player leaves.
 The hook is routed whenever it may be wanted and checks the setting itself,
 so PC Settings can switch it while the game runs.
 
