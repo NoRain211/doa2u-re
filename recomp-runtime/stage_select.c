@@ -20,8 +20,19 @@
    Up and Down on that row step its id through the ids that share the boss stage's
    data, because retail offers only 18 of them and its own hidden X, Y and Left
    trigger picks reach the others only from 64. 27 is left out (and X with it):
-   it showed a black void in game. */
+   it showed a black void in game. The same pair of presses steps The Aerial
+   Gardens (15, day, and 1, night) and The Great Opera (10, on fire, and 11,
+   calm) through their alternate stage ids, and toggles The White Storm's storm
+   flag (0x6fe9d0, the value its own X confirm sets). The Koku An snowman that
+   sometimes appears on The White Storm is a random stage object, not a game
+   variant, so it stays random. */
 enum {
+    STAGE_AERIAL_DAY = 15u,
+    STAGE_AERIAL_NIGHT = 1u,
+    STAGE_OPERA_FIRE = 10u,
+    STAGE_OPERA_CALM = 11u,
+    STAGE_WHITE_STORM = 0u,
+    WHITE_STORM_STORM = 0x006fe9d0u, /* u32: 0 clear, 1 snowing */
     STAGE_ENTRIES = 0x006e22b0u,
     STAGE_ENTRY_SIZE = 0x18u,
     STAGE_MODES = 0x006e22a4u, /* per list: first entry, entry count */
@@ -48,8 +59,13 @@ enum {
     STAGE_RANDOM_ENTRY = 0x15u,
     MIYAMA_ENTRY = 0x16u,
     MIYAMA_STAGE = 18u,
+    AERIAL_ENTRY = 4u,
+    OPERA_ENTRY = 10u,
 };
 #define MIYAMA_ENTRY_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc00u)
+#define WHITE_STORM_VARIANT_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc40u)
+#define AERIAL_ENTRY_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc50u)
+#define OPERA_ENTRY_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc68u)
 
 /* Confirming on a row, committing a side's stage and playing a sound. */
 extern void sub_000FED70(void);
@@ -58,6 +74,9 @@ extern void sub_001357F0(void);
 
 /* One stage group (0x693370) holds these and 27 with identical descriptors. */
 static const uint8_t MIYAMA_STAGES[4] = {MIYAMA_STAGE, 64u, 63u, 65u};
+/* The two ids of each retail stage with a selectable alternate. */
+static const uint8_t AERIAL_STAGES[2] = {STAGE_AERIAL_DAY, STAGE_AERIAL_NIGHT};
+static const uint8_t OPERA_STAGES[2] = {STAGE_OPERA_FIRE, STAGE_OPERA_CALM};
 
 static bool miyama_stage(uint8_t id)
 {
@@ -65,19 +84,70 @@ static bool miyama_stage(uint8_t id)
     return false;
 }
 
-/* steps is 1 forward or 3 (one back) */
+/* steps is 1 forward or the group size minus one (one back) */
+static uint8_t stage_group_step(const uint8_t *ids, unsigned count, uint8_t id, unsigned steps)
+{
+    for (unsigned i = 0u; i < count; ++i)
+        if (id == ids[i]) return ids[(i + steps) % count];
+    return ids[0];
+}
+
 static uint8_t miyama_step_stage(uint8_t id, unsigned steps)
 {
-    for (unsigned i = 0u; i < 4u; ++i)
-        if (id == MIYAMA_STAGES[i]) return MIYAMA_STAGES[(i + steps) % 4u];
-    return MIYAMA_STAGE;
+    return stage_group_step(MIYAMA_STAGES, 4u, id, steps);
+}
+
+/* The ids of this retail row's alt group, or NULL for a row with no alt. */
+static const uint8_t *stage_alt_ids(uint8_t id, unsigned *count)
+{
+    if (id == STAGE_AERIAL_DAY || id == STAGE_AERIAL_NIGHT) {
+        *count = 2u;
+        return AERIAL_STAGES;
+    }
+    if (id == STAGE_OPERA_FIRE || id == STAGE_OPERA_CALM) {
+        *count = 2u;
+        return OPERA_STAGES;
+    }
+    return NULL;
 }
 
 static uint8_t guest_byte(uint32_t address) { return *recomp_memory(address, 1u); }
 
+/* The storm choice is a flag, not a stage id, so it persists in the kernel page
+   like Miyama's entry. */
+static void white_storm_apply(void)
+{
+    uint8_t *variant = recomp_memory(WHITE_STORM_VARIANT_ADDRESS, 1u);
+    if (*variant > 1u) *variant = 0u;
+    *recomp_memory_u32(WHITE_STORM_STORM) = *variant != 0u;
+}
+
+static void white_storm_step(void)
+{
+    uint8_t *variant = recomp_memory(WHITE_STORM_VARIANT_ADDRESS, 1u);
+    *variant = *variant == 0u ? 1u : 0u;
+    white_storm_apply();
+}
+
 static uint32_t stage_entry(uint8_t entry)
 {
-    return entry == MIYAMA_ENTRY ? MIYAMA_ENTRY_ADDRESS : STAGE_ENTRIES + entry * STAGE_ENTRY_SIZE;
+    if (entry == MIYAMA_ENTRY) return MIYAMA_ENTRY_ADDRESS;
+    if (entry == AERIAL_ENTRY) return AERIAL_ENTRY_ADDRESS;
+    if (entry == OPERA_ENTRY) return OPERA_ENTRY_ADDRESS;
+    return STAGE_ENTRIES + entry * STAGE_ENTRY_SIZE;
+}
+
+/* Keep the alt rows' ids in the kernel page, which rollback restores, instead
+   of writing the game's stage table. */
+static void stage_alt_entry_init(uint8_t entry, uint32_t address)
+{
+    uint8_t *dst = recomp_memory(address, STAGE_ENTRY_SIZE);
+    const uint8_t saved = dst[1];
+    memcpy(dst, recomp_memory(STAGE_ENTRIES + entry * STAGE_ENTRY_SIZE, STAGE_ENTRY_SIZE), STAGE_ENTRY_SIZE);
+    unsigned count = 0u;
+    const uint8_t *ids = stage_alt_ids(dst[1], &count);
+    for (unsigned i = 0u; ids != NULL && i < count; ++i)
+        if (saved == ids[i]) dst[1] = dst[2] = dst[3] = saved;
 }
 
 static uint8_t stage_row_entry(uint32_t row)
@@ -92,6 +162,8 @@ static void stage_select_build_rows(void)
     if (guest_byte(STAGE_TAG_MATCH) != 0u) list = STAGE_TAG_LIST;
     const uint8_t first = guest_byte(STAGE_MODES + list * 2u);
     const uint8_t count = guest_byte(STAGE_MODES + list * 2u + 1u);
+    stage_alt_entry_init(AERIAL_ENTRY, AERIAL_ENTRY_ADDRESS);
+    stage_alt_entry_init(OPERA_ENTRY, OPERA_ENTRY_ADDRESS);
     uint8_t *rows = recomp_memory(STAGE_ROWS, count + 2u);
     uint8_t row = 0u;
     for (; row < count; ++row) rows[row] = (uint8_t)(first + row);
@@ -140,6 +212,16 @@ static void stage_select_find_stage(void)
             kernel_return(0u, row);
             return;
         }
+        unsigned alt_count = 0u;
+        const uint8_t *alt_ids = stage_alt_ids(guest_byte(entry + 1u), &alt_count);
+        for (unsigned i = 0u; alt_ids != NULL && i < alt_count; ++i) {
+            if (alt_ids[i] != stage) continue;
+            uint8_t *alt = recomp_memory(entry, STAGE_ENTRY_SIZE);
+            alt[1] = alt[2] = alt[3] = stage;
+            *recomp_memory(variant_out, 1u) = 1u;
+            kernel_return(0u, row);
+            return;
+        }
         for (uint32_t step = 1u; step <= 3u; ++step) {
             const uint8_t variant = (uint8_t)(step % 3u); /* the game tries 1, 2, then 0 */
             const uint8_t id = guest_byte(entry + 1u + variant);
@@ -156,34 +238,60 @@ static void stage_select_find_stage(void)
 
 /* 0x1357f0 (pad slot): on the Miyama row, Up steps the entry to its next
    variant and Down to its previous one, reloading the preview; that is the
-   only way to reach the other three, and X does nothing. Every other row, press and frame is the game's
-   own handler, whose hidden Y and Left trigger picks below 64 stay. */
+   only way to reach the other three, and X does nothing. The Aerial Gardens and
+   Great Opera rows step their stage id the same way, and The White Storm row
+   toggles the storm flag its own X confirm uses (the Koku An snowman is a
+   random object, not a game variant, so it is not a step). Every other row,
+   press and frame is the game's own handler, whose hidden Y and Left trigger
+   picks below 64 stay. */
 static void stage_select_confirm_input(void)
 {
     const uint32_t pad_slot = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
     const uint32_t entry = stage_entry(stage_row_entry(guest_byte(STAGE_CURSOR)));
+    const uint8_t shown = guest_byte(entry + 1u);
+    const bool white_storm = shown == STAGE_WHITE_STORM;
     const uint8_t pad = guest_byte(STAGE_PAD_SLOTS + pad_slot * 8u);
     const uint32_t pressed = *recomp_memory_u32(STAGE_PAD_PRESSED + pad * STAGE_PAD_STRIDE);
+    /* X stays the game's own storm pick; A and Start keep the Up/Down choice. */
+    const bool white_storm_x = white_storm && (pressed & STAGE_PAD_X) != 0u;
     /* A second player's grid still runs after the first confirms; keep the chosen id. */
     const bool confirming = (guest_byte(STAGE_CONFIRMING) | guest_byte(STAGE_CONFIRMING + 1u)) != 0u;
     const bool up = (pressed & (STAGE_PAD_UP | STAGE_PAD_STICK_UP)) != 0u;
     const bool down = (pressed & (STAGE_PAD_DOWN | STAGE_PAD_STICK_DOWN)) != 0u;
-    if (entry == MIYAMA_ENTRY_ADDRESS && !confirming && (up || down)) {
-        uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
-        const uint8_t id = miyama_step_stage(miyama[1], up ? 1u : 3u);
-        miyama[1] = miyama[2] = miyama[3] = id;
-        const uint32_t sfx = STAGE_CURSOR_SFX;
-        const uint32_t commit[4] = {1u, id, STAGE_LOAD_SLOT_DATA, 0xffffffffu};
-        kernel_call_lifted(sub_000FED70, &sfx, 1u);
-        kernel_call_lifted(sub_0012F360, commit, 4u);
-        kernel_return(0u, 0u);
-        return;
+    if (!confirming && (up || down)) {
+        unsigned count = 0u;
+        const uint8_t *ids = stage_alt_ids(shown, &count);
+        uint8_t id = shown;
+        bool handled = true;
+        if (entry == MIYAMA_ENTRY_ADDRESS) id = miyama_step_stage(shown, up ? 1u : 3u);
+        else if (ids != NULL) id = stage_group_step(ids, count, shown, up ? 1u : count - 1u);
+        else if (white_storm) white_storm_step();
+        else handled = false;
+        if (handled) {
+            if (ids != NULL) {
+                uint8_t *alt = recomp_memory(entry, STAGE_ENTRY_SIZE);
+                alt[1] = alt[2] = alt[3] = id;
+            } else if (entry == MIYAMA_ENTRY_ADDRESS) {
+                uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
+                miyama[1] = miyama[2] = miyama[3] = id;
+            }
+            const uint32_t sfx = STAGE_CURSOR_SFX;
+            const uint32_t commit[4] = {1u, id, STAGE_LOAD_SLOT_DATA, 0xffffffffu};
+            kernel_call_lifted(sub_000FED70, &sfx, 1u);
+            kernel_call_lifted(sub_0012F360, commit, 4u);
+            if (white_storm) white_storm_apply(); /* the preview commit leaves the flag alone */
+            kernel_return(0u, 0u);
+            return;
+        }
     }
     if (entry == MIYAMA_ENTRY_ADDRESS && (pressed & STAGE_PAD_X) != 0u) {
         kernel_return(0u, 0u);
         return;
     }
     const uint32_t confirmed = kernel_call_lifted(sub_001357F0, &pad_slot, 1u);
+    /* The game's White Storm confirm sets the flag from A/Start or X; keep the
+       row's Up/Down choice for A/Start, while X remains its storm shortcut. */
+    if (white_storm && !white_storm_x) white_storm_apply();
     kernel_return(0u, confirmed);
 }
 

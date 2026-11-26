@@ -16,7 +16,9 @@ static uint8_t stage_tag_match;                    /* at 0x87d49d */
 static uint8_t stage_cursor;                       /* at 0xdf57c4 */
 static uint8_t stage_confirming[2];               /* at 0xdf57ce */
 static uint8_t stage_rows[32];                     /* at 0xdf5f10 */
-static uint8_t kernel_page[0x40];                  /* reserved page +0xc00 */
+static uint8_t kernel_page[0x80];                  /* reserved page +0xc00 */
+static uint32_t white_storm_storm;                 /* at 0x6fe9d0 */
+static uint8_t stage_state[0x40];                  /* at 0x87cfa4, per stage id */
 static uint8_t stage_groups[8];                    /* at 0x693370 */
 static uint8_t time_attack_pool[0x16];             /* at 0x692ba4 */
 static uint8_t rotation_index;                     /* at 0x8783b5 */
@@ -45,6 +47,9 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= 0x692ba4u && address + width <= 0x692ba4u + sizeof time_attack_pool)
         return &time_attack_pool[address - 0x692ba4u];
     if (address == 0x8783b5u && width == 1u) return &rotation_index;
+    if (address == 0x6fe9d0u && width == 4u) return (uint8_t *)&white_storm_storm;
+    if (address >= 0x87cfa4u && address + width <= 0x87cfa4u + sizeof stage_state)
+        return &stage_state[address - 0x87cfa4u];
     if (address == 0xdf57b4u && width == 4u) return (uint8_t *)&selected_mode;
     if (address == 0xf252a4u && width == 1u) return &online_select_flag;
     abort();
@@ -92,6 +97,12 @@ void sub_001357F0(void)
 {
     ++original_calls;
     original_slot = arg(1u);
+    if (stage_cursor == 8u) { /* The White Storm row: A/Start clears, X storms. */
+        const uint32_t pressed = *recomp_memory_u32(0x87d298u);
+        *recomp_memory_u32(0x6fe9d0u) = (pressed & 0x400u) != 0u ? 1u : 0u;
+        ret(1u);
+        return;
+    }
     ret(0x77u);
 }
 
@@ -104,6 +115,10 @@ static int test_stage_select(void)
     uint8_t *modes = &stage_table[4], *entries = &stage_table[0x10];
     modes[2] = 0x10u; modes[3] = 5u; modes[4] = 0u; modes[5] = 0x15u; /* tag: 16-20, regular: 0-20 */
     for (unsigned i = 0u; i < 0x15u; ++i) memset(entries + i * 0x18u + 1u, (int)(i + 30u), 3u);
+    /* The retail ids of the three rows with selectable alternates. */
+    memset(entries + 4u * 0x18u + 1u, 15, 3u); /* The Aerial Gardens, day */
+    memset(entries + 8u * 0x18u + 1u, 0, 3u);  /* The White Storm */
+    memset(entries + 10u * 0x18u + 1u, 10, 3u); /* The Great Opera, on fire */
     entries[0x15u * 0x18u] = 1u;
     memset(entries + 0x15u * 0x18u + 1u, 0xff, 3u);
     if (call_cdecl(0x001354a0u, 2u, 0u) != 23u || stage_table[0xa] != 23u ||
@@ -209,6 +224,76 @@ static int test_miyama_variants(void)
     return failed == NULL;
 }
 
+/* Up/Down on The Aerial Gardens and The Great Opera rows steps their stage id
+   to the alternate and back. The White Storm row toggles the storm flag its own
+   confirm uses, and the confirm keeps the chosen flag instead of the button's.
+   Find-stage, which the online match scene uses, restores the peer's alt id. */
+static int test_stage_alts(void)
+{
+    const char *failed = NULL;
+    uint8_t *entries = &stage_table[0x10];
+    uint8_t *aerial = recomp_memory(XBOX_KERNEL_DATA_BASE + 0xc50u, 0x18u);
+    uint8_t *opera = recomp_memory(XBOX_KERNEL_DATA_BASE + 0xc68u, 0x18u);
+    memset(entries + 4u * 0x18u + 1u, 15, 3u);
+    memset(entries + 8u * 0x18u + 1u, 0, 3u);
+    memset(entries + 10u * 0x18u + 1u, 10, 3u);
+    memset(aerial + 1u, 15, 3u);
+    memset(opera + 1u, 10, 3u);
+    kernel_page[0x40] = 0u; /* White Storm variant: clear */
+    white_storm_storm = 9u;
+    call_cdecl(0x001354a0u, 2u, 0u);
+    pad_slots[3u * 8u] = 1u;
+    *recomp_memory_u32(0x87d268u) = 0x400u;
+    *recomp_memory_u32(0x87d298u) = 0x1u; /* D-pad Up */
+    stage_cursor = 4u; /* The Aerial Gardens */
+    if (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u || aerial[1] != 1u ||
+        aerial[2] != 1u || aerial[3] != 1u ||
+        commit_id != 1u || sfx_played != 0x23u) failed = "Aerial up";
+    call_cdecl(0x001354a0u, 2u, 0u); /* a rebuilt list keeps the alt */
+    if (failed == NULL && aerial[1] != 1u) failed = "kept Aerial alt";
+    *recomp_memory_u32(0x87d298u) = 0x2u; /* D-pad Down */
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        aerial[1] != 15u || commit_id != 15u)) failed = "Aerial down";
+    stage_cursor = 10u; /* The Great Opera */
+    *recomp_memory_u32(0x87d298u) = 0x1u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        opera[1] != 11u || opera[2] != 11u ||
+        opera[3] != 11u || commit_id != 11u)) failed = "Opera up";
+    call_cdecl(0x001354a0u, 2u, 0u); /* a rebuilt list keeps the alt */
+    if (failed == NULL && opera[1] != 11u) failed = "kept Opera alt";
+    *recomp_memory_u32(0x87d298u) = 0x2u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        opera[1] != 10u || commit_id != 10u)) failed = "Opera down";
+    stage_cursor = 8u; /* The White Storm */
+    *recomp_memory_u32(0x87d298u) = 0x1u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        entries[8u * 0x18u + 1u] != 0u || kernel_page[0x40] != 1u ||
+        white_storm_storm != 1u || commit_id != 0u)) failed = "Storm flag up";
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        kernel_page[0x40] != 0u || white_storm_storm != 0u)) failed = "Storm flag down";
+    *recomp_memory_u32(0x87d298u) = 0x2u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        kernel_page[0x40] != 1u || white_storm_storm != 1u)) failed = "Storm flag toggle";
+    *recomp_memory_u32(0x87d298u) = 0x100u; /* A: the game's confirm would clear the flag */
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 1u ||
+        kernel_page[0x40] != 1u || white_storm_storm != 1u)) failed = "Storm confirm";
+    *recomp_memory_u32(0x87d298u) = 0x2u; /* back to clear */
+    call_cdecl(0x001357f0u, 3u, 0xdeadu);
+    *recomp_memory_u32(0x87d298u) = 0x400u; /* X remains the game's storm pick */
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 1u ||
+        kernel_page[0x40] != 0u || white_storm_storm != 1u)) failed = "Storm X";
+    memset(aerial + 1u, 15, 3u);
+    memset(opera + 1u, 10, 3u);
+    variant_out = 9u;
+    if (failed == NULL && (call_cdecl(0x00135580u, 1u, 0x3000u) != 4u || variant_out != 1u ||
+        aerial[1] != 1u || aerial[2] != 1u || aerial[3] != 1u)) failed = "find Aerial night";
+    variant_out = 9u;
+    if (failed == NULL && (call_cdecl(0x00135580u, 11u, 0x3000u) != 10u || variant_out != 1u ||
+        opera[1] != 11u || opera[2] != 11u || opera[3] != 11u)) failed = "find Opera calm";
+    if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
+    return failed == NULL;
+}
+
 /* The lifted stage pickers, as the game runs them: the fill copies the pool
    and the group it sees, the draw returns a set value, and the next-stage
    pick either steps the 21-stage rotation or draws from it through 0xc4410. */
@@ -296,5 +381,5 @@ static int test_mode_rotations(void)
 int main(void)
 {
     if (recomp_stage_select_lookup_manual(0x00135400u) != NULL) return 1;
-    return test_stage_select() && test_miyama_variants() && test_mode_rotations() ? 0 : 1;
+    return test_stage_select() && test_miyama_variants() && test_stage_alts() && test_mode_rotations() ? 0 : 1;
 }

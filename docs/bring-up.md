@@ -872,6 +872,19 @@ sits in the kernel page that rollback restores, and Up is read from the
 lockstepped per-player pad block, so both sides need this build, which
 netplay's build check already requires.
 
+The same Up/Down pair on The Aerial Gardens row steps its id between 15
+(day) and 1 (night), and on The Great Opera row between 10 (on fire) and 11
+(calm). Those rows keep their ids in kernel-page copies at `0x03ff0c50` and
+`0x03ff0c68`, so the game's stage table is not written and rollback restores
+the pick. The White Storm row toggles the storm flag at `0x6fe9d0`, the same
+u32 its own confirm sets from X; the choice lives at `0x03ff0c40`, and the
+game's A/Start confirm is re-applied afterward so it keeps the Up/Down choice
+instead of clearing it (X stays the game's storm pick). The Koku An snowman
+that sometimes appears on The White Storm is a random stage object, not a
+game variant the row can select, so it stays random. The alt ids and the
+White Storm flag were exercised by the stage-select unit test; they were not
+played through in game.
+
 Modes that pick stages without Stage Select read fixed lists, so Miyama is
 added to those too. Time Attack (game mode 4) fills one stage per opponent
 from the 20 stages at `0x692ba4` (`battle_fill_random_stages`, `0xc7fd0`,
