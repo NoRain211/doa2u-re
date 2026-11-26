@@ -531,6 +531,12 @@ class DiscTests(unittest.TestCase):
                 self.assertEqual(soundtrack.detect(image), "doaxbv")
             finally:
                 image.close()
+            # datahdd.afs alone is not DOAXBV's: a DOA3 disc with one stays DOA3.
+            other = Path(folder, "other")
+            other.mkdir()
+            for name in ("bgm.afs", "voice.afs", "datahdd.afs"):
+                (other / name).write_bytes(b"AFS\0")
+            self.assertEqual(soundtrack.detect(soundtrack.Folder(str(other))), "doa3")
             disc = Path(folder, "disc")
             disc.mkdir()
             (disc / "bgm.afs").write_bytes(afs([adx, adx + b"x", b"\x77" * 16]))

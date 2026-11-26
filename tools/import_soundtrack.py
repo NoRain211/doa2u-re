@@ -205,7 +205,8 @@ def detect(source):
         return "doa4"
     if source.find("DOA2/bgm.afs"):
         return "doa2u"
-    if source.find("bgm.afs") and (source.find("xtalkamp.bin") or source.find("datahdd.afs")):
+    # DOAXBV ships voice.afs too, so it goes first, on the one file DOA3 lacks.
+    if source.find("bgm.afs") and source.find("xtalkamp.bin"):
         return "doaxbv"
     if source.find("bgm.afs") and source.find("voice.afs"):
         return "doa3"
