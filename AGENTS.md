@@ -65,7 +65,7 @@ ask the user to save the program (Ctrl+S) after naming.
 
 ## Lifter and shared source
 
-`tools/xboxrecomp` is pinned to `6d3b8ec99f5d411dc972f5d11de060a8d9085182`
+`tools/xboxrecomp` is pinned to `64d7ab516972fdb7ba5aa890afc7f6895145a2f3`
 on `NoRain211/xboxrecomp`'s `codex/doa2u-recipe` branch. This is an initial
 tooling baseline, not a validated DOA2U recipe. Use its upstream interfaces
 (`--manual-functions`, `--coalesce-functions`). Update its gitlink and the
