@@ -554,15 +554,17 @@ def level_album(folder, encoder):
     if not encoder:
         print(f"{os.path.basename(folder)}: build the game first to level its loudness with DOA2U's music.")
         return 0
-    levelled, failed, skipped, committed = [], False, False, False
+    levelled, failed, committed, rows = [], False, False, 0
     try:
         for index, line in enumerate(lines):
+            if line.startswith("#") or not line.strip():
+                continue
+            rows += 1
             parts = line.split("\t")
-            if line.startswith("#") or len(parts) < 4:
+            if len(parts) < 4:
                 continue
             track = album_track(folder, parts[0])
             if track is None:
-                skipped = True
                 continue
             scratch = track + ".level"
             loop = track_loop(parts)
@@ -586,9 +588,9 @@ def level_album(folder, encoder):
         if failed:
             print(f"{os.path.basename(folder)}: not every track was levelled; the album is as it was.")
             return len(levelled)
-        if skipped and not levelled:
-            # Nothing was levelled, so no mark: fix the names and the next import tries again.
-            print(f"{os.path.basename(folder)}: no track was levelled; the album is as it was.")
+        if not levelled and rows:
+            # Nothing could be levelled, so no mark: fix the rows and the next import tries again.
+            print(f"{os.path.basename(folder)}: no track could be levelled; the album is as it was.")
             return 0
         lines = [line for line in lines if line != legacy]
         at = 1 if lines and lines[0].startswith("#title") else 0

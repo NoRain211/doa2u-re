@@ -353,6 +353,15 @@ class ImportFailureTests(unittest.TestCase):
             self.assertIn("bad name.adx\t-1\t-1\tBad", text)
             self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
 
+    def test_an_album_with_only_malformed_rows_is_not_marked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "tracks.txt")
+            path.write_text("#title\tAlbum\none.adx\t-1\tOne\n", encoding="utf-8")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            self.assertNotIn("#level", path.read_text())
+
     def test_a_legacy_album_with_a_bad_row_name_only_takes_the_new_mark(self):
         with tempfile.TemporaryDirectory() as folder:
             soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One")])
