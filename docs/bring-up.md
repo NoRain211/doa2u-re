@@ -862,12 +862,20 @@ black void in game, so it is left out of the cycle and X on the row does
 nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
 changes. The entry's id bytes hold the pick, and it stays across visits to
 the screen. Random's `row_stage(row, 0)` and the confirm take the current
-variant; find-stage (`0x135580`), which only the online match scene uses,
-writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
-so any variant replays without a row. Played in game: the Up cycle, a fight
-on each variant, the X, Y and Left trigger picks, the kept variant and
-Random; 27 was the black void. Online play and the online match scene's
-restore were not tested. The variant is a stage id the game already syncs, the entry
+variant; find-stage (`0x135580`), which the fallback match scene the joining
+side runs (`0x132520`) uses, writes the peer's id back. Replays restore the
+stage id itself (`0x136bb0`), so any variant replays without a row. Played in
+game: the Up cycle, a fight on each variant, the X, Y and Left trigger picks,
+the kept variant and Random; 27 was the black void.
+
+A stage's id reaches the session's other players on a row change (`0x1393b0`
+calls the broadcast, `0x293f00`) and on the online scene's post-confirm
+countdown (`0x1318e0`); the joining side applies it in `0x132520` through
+find-stage. Stepping a variant changes the id without moving the row, so before
+the countdown runs the peer kept the season the cursor landed on and fought a
+different one; issue #337 reported that desync. The step now broadcasts the new
+id itself, under the row-change path's guard (an online select and a local
+side). Two runners have not yet repeated the variant pick after the change. The variant is still a stage id the game already carries, the entry
 sits in the kernel page that rollback restores, and Up is read from the
 lockstepped per-player pad block, so both sides need this build, which
 netplay's build check already requires.

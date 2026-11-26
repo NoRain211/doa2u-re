@@ -51,10 +51,13 @@ enum {
 };
 #define MIYAMA_ENTRY_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc00u)
 
-/* Confirming on a row, committing a side's stage and playing a sound. */
+/* Confirming on a row, committing a side's stage, playing a sound, and the
+   0x1354a0 grid's stage broadcast to the session's other players. */
 extern void sub_000FED70(void);
 extern void sub_0012F360(void);
 extern void sub_001357F0(void);
+extern void sub_00293F00(void);
+extern void sub_00298F70(void);
 
 /* One stage group (0x693370) holds these and 27 with identical descriptors. */
 static const uint8_t MIYAMA_STAGES[4] = {MIYAMA_STAGE, 64u, 63u, 65u};
@@ -157,7 +160,14 @@ static void stage_select_find_stage(void)
 /* 0x1357f0 (pad slot): on the Miyama row, Up steps the entry to its next
    variant and Down to its previous one, reloading the preview; that is the
    only way to reach the other three, and X does nothing. Every other row, press and frame is the game's
-   own handler, whose hidden Y and Left trigger picks below 64 stay. */
+   own handler, whose hidden Y and Left trigger picks below 64 stay.
+
+   A stage's id reaches the session's other players on a row change (0x1393b0
+   calls 0x293f00) and on the online scene's post-confirm countdown; the
+   fallback match scene the joining side runs (0x132520) applies it through
+   find-stage. Up and Down change the id without moving the row, so before
+   that countdown a peer keeps the variant the cursor landed on and fights a
+   different season; the step broadcasts the new id here. */
 static void stage_select_confirm_input(void)
 {
     const uint32_t pad_slot = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
@@ -176,6 +186,13 @@ static void stage_select_confirm_input(void)
         const uint32_t commit[4] = {1u, id, STAGE_LOAD_SLOT_DATA, 0xffffffffu};
         kernel_call_lifted(sub_000FED70, &sfx, 1u);
         kernel_call_lifted(sub_0012F360, commit, 4u);
+        /* The row change path's own guard: an online select with a local side. */
+        const bool online = *recomp_memory_u32(FRONTEND_SELECTED_MODE) == FRONTEND_ONLINE_MODE &&
+            guest_byte(ONLINE_SELECT_FLAG) != 0u;
+        if (online && kernel_call_lifted(sub_00298F70, NULL, 0u) != 0xffffffffu) {
+            const uint32_t stage = id;
+            kernel_call_lifted(sub_00293F00, &stage, 1u);
+        }
         kernel_return(0u, 0u);
         return;
     }
