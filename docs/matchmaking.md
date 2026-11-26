@@ -323,23 +323,36 @@ any session still there, so an invite still works when the session has
 filled.
 
 CONNECT picks the other player's account by virtual address, and only when
-that player hosts a Live session from SESSION_PUT that is still alive, or
-when the two already have a pair from an earlier CONNECT, so a host can
-connect back to the joiner who came to it. Otherwise it is dropped: virtual
-addresses are sequential, so without this any account could make any online
-player reveal their public endpoint. Joining a friend means CONNECTing to the
-host of the friend's session, which hosts one. Both get an LPEER with the
-other's endpoint and the pair's token, whichever side asks first, and then
-punch or relay; a punch carries that token instead of the socket's nonce,
-which stays with the server. The side that receives an LPEER it did not ask
-for CONNECTs back, so both sides have asked. The pairing is by the two XUIDs,
-lasts 10 minutes past its last relayed packet or CONNECT to a player who
-still hosts, and an address may open at most 16 (pairs others opened with its
-players do not count); `--relay-only` zeroes both endpoints and sets the
-relay flag. The LAN endpoint stays zero: LOGON carries none, so Live players
-behind one router punch through their public addresses. A token belongs to
-one pairing: once it expires, another CONNECT makes a new pair and a new
-token.
+that player hosts a Live session from SESSION_PUT that is still alive, when
+the two already have a pair from an earlier CONNECT, or when both are in the
+same live session. The last case is a lobby's members reaching each other:
+the game has the two fighters exchange lockstep and a spectator subscribe to
+a fighter's state stream, and the host may not be fighting. Membership is
+the session the game names in its presence (the in-session bit and XNKID
+that `XOnlineNotificationSetState` gets from `0x2a1340`, set by
+`online_session_join` on every join, which LOGON's heartbeat carries): both
+must name the same session that SESSION_PUT still holds, and both must have a
+live pair with its host. Having CONNECTed the host is not membership, so a
+stranger who only did that, or a member of the host's other session, cannot
+reach the lobby's members. The presence is the client's word, so whoever
+knows a session's XNKID (SEARCH lists it while a slot is open) can claim it,
+as it could join it. Otherwise CONNECT is dropped: virtual addresses are
+sequential, so without this any account could make any online player reveal
+their public endpoint. Joining a friend means CONNECTing to the host of the
+friend's session, which hosts one. Both get an LPEER with the other's
+endpoint and the pair's token, whichever side asks first, and then punch or
+relay; a punch carries that token instead of the socket's nonce, which stays
+with the server. The side that receives an LPEER it did not ask for CONNECTs
+back, so both sides have asked. The pairing is by the two XUIDs, lasts 10
+minutes past its last relayed packet or CONNECT to a player who still hosts,
+and an address may open at most 16 (pairs others opened with its players do
+not count, nor do pairs between members of one session, so a lobby behind one
+router does not fill it); `--relay-only` zeroes both endpoints and sets the
+relay flag. Two lobby members who answer each other are a full pair, so a
+match between them can write its results. The LAN endpoint stays zero: LOGON
+carries none, so Live players behind one router punch through their public
+addresses. A token belongs to one pairing: once it expires, another
+CONNECT makes a new pair and a new token.
 
 ### Friends, invites, mutes and rankings
 

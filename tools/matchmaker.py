@@ -812,6 +812,29 @@ class Matchmaker:
         """The Live pairs address opened; pairs others opened with its players do not count."""
         return sum(1 for pair in self.live_pairs.values() if pair.opener == address)
 
+    def session_siblings(self, first, second, now):
+        """True when both accounts are in one live session and each has a live pair with its host.
+
+        The game's presence names the session it is in: XOnlineNotificationSetState's
+        in-session bit and XNKID (0x2a1340, from online_update each frame), the key
+        online_session_join sets on every join, which the client's heartbeat carries.
+        A lobby's members then send to each other directly: the two fighters exchange
+        lockstep and input, and a spectator subscribes to a fighter's state stream,
+        and the host may not be fighting. Pairing with a host is not membership, so
+        a stranger who only CONNECTed the host, or a member of the host's other
+        session, does not qualify.
+        """
+        if not first.state & second.state & PRESENCE_SESSION or first.kid != second.kid:
+            return False
+        session = self.sessions.get(first.kid)
+        if session is None:
+            return False
+        for member in (first, second):
+            pair = self.live_pairs.get(frozenset((member.xuid, session.host.xuid)))
+            if pair is None or now - pair.used > PAIR_SECONDS:
+                return False
+        return True
+
     def live_connect(self, body, nonce, sender, now):
         req, ina = CONNECT_BODY.unpack(body)
         me = self.online_at(sender, now)
@@ -823,19 +846,25 @@ class Matchmaker:
         key = frozenset((me.xuid, other.xuid))
         pair = self.live_pairs.get(key)
         hosting = self.hosts_session(other)
+        fresh = pair is None or now - pair.used > PAIR_SECONDS
         # An address is the other player's to learn only when they host a Live
-        # session, or when they connected here first: a joiner may connect back.
-        if (pair is None or now - pair.used > PAIR_SECONDS) and not hosting:
+        # session, when they connected here first (a joiner may connect back),
+        # or when both are in the same live session.
+        sibling = fresh and not hosting and self.session_siblings(me, other, now)
+        if fresh and not hosting and not sibling:
             return []
-        if key not in self.live_pairs and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
+        # The session bounds its members' pairs, so players behind one router
+        # in one lobby do not use up the address's cap on each other.
+        if key not in self.live_pairs and not sibling and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
             return []
-        if pair is None or now - pair.used > PAIR_SECONDS:
+        if fresh:
             pair = self.live_pairs[key] = LivePair(now, self.random_bytes(8), sender[0])
         if hosting:
             pair.used = now  # a CONNECT to a player who still hosts keeps the pair; one-sided repeats do not
-        pair.connected.add(me.xuid)
-        if len(pair.connected) == 2 and pair.met is None:
-            pair.met = now  # the first time both connected, which a repeat must not push later
+        if pair.met is None:
+            pair.connected.add(me.xuid)
+            if len(pair.connected) == 2:
+                pair.met = now  # the first time both connected, which a repeat must not push later
         if pair.met is not None:
             self.met[key] = pair.met  # fixed per pair, so a repeat cannot push it later, but a rematch can
         self.connects += 1
