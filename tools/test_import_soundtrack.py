@@ -217,7 +217,7 @@ class ImportFailureTests(unittest.TestCase):
             self.assertTrue(lines[2].startswith("01_bgm_x____evil_.adx\t"))
             self.assertEqual(run.call_count, 1)
 
-    def test_level_album_rejects_track_names_outside_the_album(self):
+    def test_level_album_leaves_track_names_outside_the_album_alone(self):
         with tempfile.TemporaryDirectory() as base:
             folder = os.path.join(base, "album")
             os.makedirs(folder)
@@ -227,10 +227,124 @@ class ImportFailureTests(unittest.TestCase):
                 for name in ("../outside.adx", str(outside.resolve()), "sub/outside.adx", ".", ".."):
                     Path(folder, "tracks.txt").write_text(
                         f"#title\tAlbum\n{name}\t-1\t-1\tEscape\n", encoding="utf-8")
-                    with self.assertRaises(ValueError):
-                        soundtrack.level_album(folder, "encoder")
+                    self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
             run.assert_not_called()
             self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_level_album_hands_tracks_txt_loops_to_the_encoder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [
+                ("one.adx", 1000, 5000, "One"), ("two.adx", -2, -2, "Two"), ("three.adx", -1, -1, "Three")])
+            for name in ("one.adx", "two.adx", "three.adx"):
+                Path(folder, name).write_bytes(b"old")
+            calls = []
+
+            def encode(args, **kwargs):
+                calls.append(args)
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 3)
+            by_track = {os.path.basename(args[-2]): args[:-2] for args in calls}
+            # A loop only tracks.txt knows reaches the header; -2 keeps it absent; -1 leaves it to the file.
+            self.assertEqual(by_track["one.adx"][3:5], ["1000", "5000"])
+            self.assertEqual(by_track["two.adx"][3:5], ["-2", "-2"])
+            self.assertEqual(by_track["three.adx"][3:5], [])
+            text = Path(folder, "tracks.txt").read_text()
+            # The levelled file's header now holds the loop, so the row stops naming it.
+            self.assertIn("one.adx\t-1\t-1\tOne", text)
+            self.assertIn("two.adx\t-2\t-2\tTwo", text)
+            self.assertIn("three.adx\t-1\t-1\tThree", text)
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
+
+    def test_an_album_levelled_before_loops_were_kept_only_takes_the_new_mark(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One"), ("two.adx", -2, -2, "Two")])
+            for name in ("one.adx", "two.adx"):
+                Path(folder, name).write_bytes(b"old")
+            mark = Path(folder, "tracks.txt").read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}")
+            Path(folder, "tracks.txt").write_text(mark, encoding="utf-8")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            text = Path(folder, "tracks.txt").read_text()
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
+            self.assertEqual(text.count("#level"), 1)
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"old")
+
+    def test_an_album_levelled_before_loops_were_kept_is_relevelled_for_a_row_that_holds_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", 1000, 5000, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            mark = Path(folder, "tracks.txt").read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}")
+            Path(folder, "tracks.txt").write_text(mark, encoding="utf-8")
+
+            def encode(args, **kwargs):
+                self.assertEqual(args[3:5], ["1000", "5000"])
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode) as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+            self.assertEqual(run.call_count, 1)
+            text = Path(folder, "tracks.txt").read_text()
+            self.assertIn("one.adx\t-1\t-1\tOne", text)
+            self.assertEqual(text.count("#level"), 1)
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
+
+    def test_a_failed_encoder_keeps_the_rows_loop_points(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", 1000, 5000, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            failed = SimpleNamespace(returncode=1,
+                stderr="its loop 1000..5000 does not fit its 900 samples", stdout="")
+            with mock.patch.object(soundtrack.subprocess, "run", return_value=failed):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            text = Path(folder, "tracks.txt").read_text()
+            # The header does not hold it, so the row keeps naming the loop a rerun can retry.
+            self.assertIn("one.adx\t1000\t5000\tOne", text)
+            self.assertNotIn("#level", text)
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"old")
+
+    def test_a_legacy_album_relevels_around_a_bad_row_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", 1000, 5000, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            path = Path(folder, "tracks.txt")
+            path.write_text(path.read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}") +
+                "bad name.adx\t-1\t-1\tBad\n", encoding="utf-8")
+
+            def encode(args, **kwargs):
+                self.assertEqual(args[3:5], ["1000", "5000"])
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode) as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+            self.assertEqual(run.call_count, 1)
+            text = path.read_text()
+            self.assertIn("one.adx\t-1\t-1\tOne", text)
+            self.assertIn("bad name.adx\t-1\t-1\tBad", text)
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
+
+    def test_a_legacy_album_with_a_bad_row_name_only_takes_the_new_mark(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            path = Path(folder, "tracks.txt")
+            path.write_text(path.read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}") +
+                "bad name.adx\t-1\t-1\tBad\n", encoding="utf-8")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            text = path.read_text()
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
+            self.assertIn("bad name.adx\t-1\t-1\tBad", text)
 
     def test_only_a_missing_ffmpeg_is_reported_as_ffmpeg(self):
         source = mock.Mock()
