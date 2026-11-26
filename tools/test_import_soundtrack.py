@@ -228,8 +228,30 @@ class ImportFailureTests(unittest.TestCase):
                     Path(folder, "tracks.txt").write_text(
                         f"#title\tAlbum\n{name}\t-1\t-1\tEscape\n", encoding="utf-8")
                     self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+                    # Nothing was levelled, so the album is not marked done for good.
+                    self.assertNotIn("#level", Path(folder, "tracks.txt").read_text())
             run.assert_not_called()
             self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_an_album_of_no_usable_rows_is_levelled_once_the_names_are_fixed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "one.adx").write_bytes(b"old")
+            path = Path(folder, "tracks.txt")
+            path.write_text("#title\tAlbum\nbad name.adx\t-1\t-1\tOne\n", encoding="utf-8")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            self.assertNotIn("#level", path.read_text())
+            path.write_text("#title\tAlbum\none.adx\t-1\t-1\tOne\n", encoding="utf-8")
+
+            def encode(args, **kwargs):
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode) as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+            self.assertIn("#level", path.read_text())
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
 
     def test_level_album_hands_tracks_txt_loops_to_the_encoder(self):
         with tempfile.TemporaryDirectory() as folder:
