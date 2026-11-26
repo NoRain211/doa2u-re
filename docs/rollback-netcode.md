@@ -36,10 +36,11 @@ Received input reaches the fight through two virtual pads.
 fight and the frontend read. The frontend's online match scene
 (`frontend_online_match_update`, `0x1318e0`) calls the lockstep once per
 frame, so character select also runs in lockstep. The match RNG is
-MT19937, seeded from the session key and two session counters
-(`online_seed_random_from_session`, `0x127a00`). One of those counters is
-`g_lockstep_batch`, the number of batches this side had exchanged when the
-scene reached the seeding call; it matches on one machine but not across two
+MT19937, seeded from three shared key dwords (`0xf09b88`, `0xf21cdc`,
+`0xf21ce0`) and `g_lockstep_batch` at `0xf0a560`
+(`online_seed_random_from_session`, `0x127a00`). The batch counter is the
+number of batches this side had exchanged when the scene reached the seeding
+call, the only per-side term; it matches on one machine but not across two
 peers, so `live_fight.c` zeroes it for that call. The seed is then the host's
 session key, which the joiner adopts, and both sides start the fight from the
 same RNG state. Without that, every cross-machine fight desynced at its first
