@@ -131,7 +131,7 @@ enum {
 
     LIVE_TASK_SLOTS = 16,
     /* One request per distinct board: the logon profile read asks for six
-       boards in one XOnlineStatRead (online_start_stat_read_alt 0x2a36d0 with
+       boards in one XOnlineStatRead (online_start_stat_read_alt 0x2a3740 with
        the six pairs at 0xf19240), and a stat write sends one record per stat
        block the player slot holds (0x2ee8 bytes, 0x3e8 per block: twelve). */
     LIVE_TASK_REQUESTS = 12,
