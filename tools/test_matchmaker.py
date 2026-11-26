@@ -503,6 +503,35 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(self.send(live(mm.CONNECT, connect_body(self.next_request(), ina[A])), B_AT, later)), 2)
         self.assertNotEqual(self.server.live_pairs[frozenset((A, B))].token, old)
 
+    def test_members_of_one_lobby_reach_each_other_without_hosting(self):
+        self.online()
+        kid = self.put(now=0.0)[2]  # A hosts the lobby
+        ina = {xuid: struct.unpack(">I", self.server.accounts[xuid].ina)[0] for xuid in (A, B, C)}
+        add = lambda sender, target, now: self.send(
+            live(mm.CONNECT, connect_body(self.next_request(), ina[target])), sender, now)
+
+        # B joins: B asks the host and A answers.
+        self.assertEqual(len(add(B_AT, A, 0.0)), 2)
+        self.assertEqual(len(add(A_AT, B, 0.1)), 2)
+        # C is online but not in the lobby, so B may not learn its address yet.
+        self.assertEqual(add(B_AT, C, 0.2), [])
+        # C joins too.
+        self.assertEqual(len(add(C_AT, A, 0.3)), 2)
+        self.assertEqual(len(add(A_AT, C, 0.4)), 2)
+
+        # B and C are now both members: they may pair, though neither hosts, and
+        # the pair becomes a full one when C answers.
+        answers = add(B_AT, C, 0.5)
+        self.assertEqual(sorted(to for _, to in answers), sorted([B_AT, C_AT]))
+        self.assertEqual(len(add(C_AT, B, 0.6)), 2)
+        self.assertIn(frozenset((B, C)), self.server.met)
+
+        # The host leaving the service ends the lobby: a fresh pair needs a host again.
+        self.server.drop_pair(frozenset((B, C)))
+        self.done(self.one(live(mm.SESSION_DEL, mm.SESSION_DEL_BODY.pack(self.next_request(), kid)), A_AT, 1.0,
+                           mm.DONE))
+        self.assertEqual(add(B_AT, C, 1.1), [])
+
     def test_a_repeated_connect_does_not_extend_a_meeting(self):
         self.online()
         self.put(now=0.0)  # A hosts

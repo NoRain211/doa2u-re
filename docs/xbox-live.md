@@ -4,8 +4,12 @@ Status: the game's own Xbox Live pages run on the PC port against the
 project's matchmaker, and Live fights run on the rollback netcode. Two
 scripted runners on one machine have logged on, found each other with Quick
 Match, met in the game's lobby and played three Team Battle matches without
-a desync. Friends, invites, rankings and two machines across the internet
-have only run in unit tests. Voice chat is not supported.
+a desync. The matchmaker pairs lobby members with each other, which the
+game's own spectating needs: a spectator subscribes to one fighter's state
+stream, and a match whose two fighters both joined a host who is not
+fighting needs the same path. Friends, invites, rankings and two machines
+across the internet have only run in unit tests. Voice chat is not
+supported.
 
 ## Turning it on
 
@@ -132,6 +136,9 @@ game's own lockstep works.
 ## Limits
 
 - No voice: the voice engine's stream creation fails and the game carries on.
+- Lobby spectating is unverified in the game: the matchmaker's member pairing
+  has unit tests, but no run has watched a match from a third instance. The
+  built-in matchmaker must be redeployed for the pairing rule to apply.
 - QoS reports a fixed 50 ms round trip, which gives the game's shipped
   lockstep delay; a measured one needs a backend call.
 - Stat writes for an opponent are not tied to a played match: the client
