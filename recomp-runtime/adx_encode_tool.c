@@ -19,6 +19,7 @@
 #include "adx_encoder.h"
 #include "atomic_file.h"
 
+#include <errno.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -98,7 +99,13 @@ static int level(double target, int64_t loop_start, int64_t loop_end, const char
         if (size > knee) v = (v < 0 ? -1.0 : 1.0) * (knee + (32767.0 - knee) * tanh((size - knee) / (32767.0 - knee)));
         pcm[i] = (int16_t)lrint(v > 32767.0 ? 32767.0 : v < -32768.0 ? -32768.0 : v);
     }
+    const int64_t wanted_start = loop_start, wanted_end = loop_end;
     if (loop_end > (int64_t)frames) loop_end = frames;
+    if (loop_start >= 0 && loop_end <= loop_start) {
+        fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples; levelled without a loop\n",
+            from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
+        loop_start = loop_end = -1;
+    }
     size_t size = 0u;
     unsigned char *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &size);
     free(pcm);
@@ -109,17 +116,46 @@ static int level(double target, int64_t loop_start, int64_t loop_end, const char
     return 0;
 }
 
+static int usage(const char *program)
+{
+    fprintf(stderr, "usage: %s in.wav out.adx [loop_start loop_end]\n"
+        "       %s --level dB [loop_start loop_end] in.adx out.adx\n", program, program);
+    return 2;
+}
+
+/* Whether the arguments at [at] and [at + 1] are whole sample numbers. */
+static bool loop_arguments(char **argv, int at, int64_t *start, int64_t *end)
+{
+    char *start_end = NULL, *end_end = NULL;
+    errno = 0;
+    *start = strtoll(argv[at], &start_end, 10);
+    *end = strtoll(argv[at + 1], &end_end, 10);
+    return *start_end == '\0' && *end_end == '\0' && errno != ERANGE;
+}
+
 int main(int argc, char **argv)
 {
     if (argc >= 2 && strcmp(argv[1], "--level") == 0) {
-        if (argc == 5) return level(strtod(argv[2], NULL), -1, -1, argv[3], argv[4]);
-        if (argc == 7)
-            return level(strtod(argv[2], NULL), strtoll(argv[3], NULL, 10), strtoll(argv[4], NULL, 10),
-                argv[5], argv[6]);
+        if (argc != 5 && argc != 7) return usage(argv[0]);
+        char *given = NULL;
+        const double target = strtod(argv[2], &given);
+        if (given == argv[2] || *given != '\0' || !isfinite(target)) {
+            fprintf(stderr, "%s: --level wants a number of dB\n", argv[0]);
+            return 2;
+        }
+        if (argc == 5) return level(target, -1, -1, argv[3], argv[4]);
+        int64_t loop_start, loop_end;
+        if (!loop_arguments(argv, 3, &loop_start, &loop_end)) {
+            fprintf(stderr, "%s: loop points are whole samples, not %s and %s\n",
+                argv[0], argv[3], argv[4]);
+            return 2;
+        }
+        return level(target, loop_start, loop_end, argv[5], argv[6]);
     }
-    if (argc != 3 && argc != 5) {
-        fprintf(stderr, "usage: %s in.wav out.adx [loop_start loop_end]\n"
-            "       %s --level dB [loop_start loop_end] in.adx out.adx\n", argv[0], argv[0]);
+    if (argc != 3 && argc != 5) return usage(argv[0]);
+    int64_t given_start = -1, given_end = -1;
+    if (argc == 5 && !loop_arguments(argv, 3, &given_start, &given_end)) {
+        fprintf(stderr, "%s: loop points are whole samples, not %s and %s\n", argv[0], argv[3], argv[4]);
         return 2;
     }
     long length = 0;
@@ -131,8 +167,8 @@ int main(int argc, char **argv)
     free(data);
     if (pcm == NULL) { fprintf(stderr, "%s: not a mono or stereo PCM WAV\n", argv[1]); return 1; }
     if (argc == 5) {
-        loop_start = strtoll(argv[3], NULL, 10);
-        loop_end = strtoll(argv[4], NULL, 10);
+        loop_start = given_start;
+        loop_end = given_end;
     }
     size_t size = 0u;
     unsigned char *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &size);
