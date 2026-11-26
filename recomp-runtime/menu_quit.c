@@ -113,12 +113,12 @@ static const recomp_utf16 *const HELP[6] = {
 };
 
 static const recomp_utf16 *const JUKEBOX_HELP[6] = {
-    u"Listen to the music of DOA2U, and of DOA3 and DOA4 from your own discs.",
-    u"Listen to the music of DOA2U, and of DOA3 and DOA4 from your own discs.",
-    u"\u00c9couter la musique de DOA2U, et de DOA3 et DOA4 depuis vos disques.",
-    u"Die Musik von DOA2U h\u00f6ren, und die von DOA3 und DOA4 von deinen Discs.",
-    u"Ascolta la musica di DOA2U, e di DOA3 e DOA4 dai tuoi dischi.",
-    u"Escucha la m\u00fasica de DOA2U, y la de DOA3 y DOA4 de tus discos.",
+    u"Listen to the music of DOA2U, and of DOA3, DOA4 and DOAXBV from your own discs.",
+    u"Listen to the music of DOA2U, and of DOA3, DOA4 and DOAXBV from your own discs.",
+    u"\u00c9couter la musique de DOA2U, et de DOA3, DOA4 et DOAXBV depuis vos disques.",
+    u"Die Musik von DOA2U h\u00f6ren, und die von DOA3, DOA4 und DOAXBV von deinen Discs.",
+    u"Ascolta la musica di DOA2U, e di DOA3, DOA4 e DOAXBV dai tuoi dischi.",
+    u"Escucha la m\u00fasica de DOA2U, y la de DOA3, DOA4 y DOAXBV de tus discos.",
 };
 
 static const recomp_utf16 *const PC_HELP[6] = {

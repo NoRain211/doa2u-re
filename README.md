@@ -138,9 +138,10 @@ keeps running.
   drawn like the game's own, that asks before it closes the game.
 - **Jukebox.** A **JUKEBOX** entry before Quit Game, with its own picture,
   opens a page of the game's own Options menu with the game's music:
-  DOA2U's own 50 tracks from the disc, and the soundtracks of Dead or Alive 3
-  and Dead or Alive 4 from your own discs. **Album** and **Track** choose a
-  track (left and right) and A plays or stops it; **Play Mode** is Repeat
+  DOA2U's own 50 tracks from the disc, and the soundtracks of Dead or Alive 3,
+  Dead or Alive 4 and Dead or Alive Xtreme Beach Volleyball from your own
+  discs. **Album** and **Track** choose a track (left and right) and A plays
+  or stops it; **Play Mode** is Repeat
   One, Play All or Shuffle (which move on after two loops, fading out).
   **Assign To** chooses any of the game's music (a fighter's theme, its
   remix, Character Select, the endings and so on) and A gives it the chosen
@@ -149,17 +150,18 @@ keeps running.
   `jukebox\assignments.txt`. The game's own sound is muted while a
   track plays; leaving the page returns to the main menu. Online the game
   plays its own music. To add an album, choose **Import Disc** on the
-  launcher's **JUKEBOX** page, or drop the ISO on the launcher (a DOA3 or DOA4
-  disc is imported; any other disc is used as the game's disc and built), or
-  run `python tools/import_soundtrack.py <ISO or extracted folder>`. DOA3's
-  tracks are copied as they are; DOA4's are decoded with ffmpeg (on Windows the
-  import fetches one into `tools\ffmpeg`) and encoded as ADX with their loops by
-  `recomp_adx_encode` from the game's build, so build the game first. Albums
-  go to a `jukebox` folder beside the launcher (`jukebox\<album>`), with the
-  music of each disc's movies (opening, endings, logos) taken out of the SFD
-  files in its movie folders as well; the build adds DOA2U's own movies' music
-  as **DOA2U-MOVIES**, and the **DOA1U** album is the Dead or Alive Ultimate
-  music on DOA2U's disc (`DOA1\Sound`, from the music list in `Doa1.xbe`).
+  launcher's **JUKEBOX** page, or drop the ISO on the launcher (a DOA3, DOA4 or
+  DOAXBV disc is imported; any other disc is used as the game's disc and
+  built), or run `python tools/import_soundtrack.py <ISO or extracted folder>`.
+  DOA3's and DOAXBV's tracks are copied as they are; DOA4's are decoded with
+  ffmpeg (on Windows the import fetches one into `tools\ffmpeg`) and encoded
+  as ADX with their loops by `recomp_adx_encode` from the game's build, so
+  build the game first. Albums go to a `jukebox` folder beside the launcher
+  (`jukebox\<album>`), with the music of each disc's movies (opening, endings,
+  logos) taken out of the SFD files in its movie folders as well; the build
+  adds DOA2U's own movies' music as **DOA2U-MOVIES**, and the **DOA1U** album
+  is the Dead or Alive Ultimate music on DOA2U's disc (`DOA1\Sound`, from the
+  music list in `Doa1.xbe`).
   **JukeboxEditor.exe** (**Edit Tracks** on the launcher's **JUKEBOX** page;
   built from `tools\jukebox_editor.cs`) lists every album, plays a preview of
   any track, renames tracks and albums and picks what each of the game's music

@@ -88,6 +88,12 @@ class NameTests(unittest.TestCase):
         self.assertEqual(soundtrack.group_name(["bgm_bas", "bgm_bas_doa2", "bgm_bas_doa3"]), "Bass")
         self.assertEqual(soundtrack.group_name(["bgm_select", "bgm_ups"]), "Character Select")
 
+    def test_doax_names_follow_the_sound_test_order(self):
+        self.assertEqual(len(soundtrack.DOAX_TRACKS), 23)
+        self.assertEqual(soundtrack.DOAX_TRACKS[0], "Give me a reason - Aswad")
+        self.assertEqual(soundtrack.DOAX_TRACKS[10], "How crazy are you? - Meja")
+        self.assertEqual(soundtrack.DOAX_TRACKS[-1], "Bgm Shop0")
+
     def test_doa1u_and_movie_names_come_from_their_codes(self):
         code, name = next(iter(soundtrack.DOA1_CODES.items()))
         self.assertEqual(soundtrack.doa1u_name(f"{code}_sng.adx"), name)
@@ -514,6 +520,40 @@ class DiscTests(unittest.TestCase):
             self.assertEqual(soundtrack.detect(soundtrack.Folder(os.path.join(folder, "x"))), "doa2u")
             with self.assertRaises(ValueError):
                 soundtrack.Xdvdfs(os.path.join(folder, "x", "DOA2", "bgm.afs"))
+
+    def test_doax_has_its_own_album_and_is_not_doa3(self):
+        adx = b"\x80\x00\x00\x20" + bytes(100)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "doax.iso")
+            xdvdfs_image(path, {"bgm.afs": b"AFS\0", "voice.afs": b"AFS\0", "xtalkamp.bin": b"x"})
+            image = soundtrack.Xdvdfs(path)
+            try:
+                self.assertEqual(soundtrack.detect(image), "doaxbv")
+            finally:
+                image.close()
+            # Without xtalkamp.bin, datahdd.afs could be either game's: refused, not
+            # filed as DOA3 or DOAXBV.
+            other = Path(folder, "other")
+            other.mkdir()
+            for name in ("bgm.afs", "voice.afs", "datahdd.afs"):
+                (other / name).write_bytes(b"AFS\0")
+            self.assertIsNone(soundtrack.detect(soundtrack.Folder(str(other))))
+            disc = Path(folder, "disc")
+            disc.mkdir()
+            (disc / "bgm.afs").write_bytes(afs([adx, adx + b"x", b"\x77" * 16]))
+            (disc / "voice.afs").write_bytes(b"AFS\0")
+            (disc / "xtalkamp.bin").write_bytes(b"x")
+            (disc / "5_DOAX_OP1.sfd").write_bytes(movie_image(adx + b"z"))
+            source = soundtrack.Folder(str(disc))
+            self.assertEqual(soundtrack.detect(source), "doaxbv")
+            out = os.path.join(folder, "out")
+            self.assertEqual(soundtrack.import_doax(source, out), 3)  # two songs and a movie
+            lines = Path(out, "doaxbv", "tracks.txt").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0], "#title\tDead or Alive Xtreme Beach Volleyball")
+            self.assertEqual(lines[2], "01.adx\t-1\t-1\tGive me a reason - Aswad")
+            self.assertEqual(lines[3], "02.adx\t-1\t-1\tIf it don't fit - B*Witched")
+            self.assertEqual(lines[4], "m_5_doax_op1.adx\t-2\t-2\t5 Doax Op1")
+            self.assertEqual(Path(out, "doaxbv", "01.adx").read_bytes(), adx)
 
     def test_doa2u_bgm_afs_is_not_imported_as_doa3(self):
         with tempfile.TemporaryDirectory() as folder:

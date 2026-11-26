@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 /* The Jukebox plays DOA2U's music from its disc and the albums
-   tools/import_soundtrack.py imports from the player's own DOA3 and DOA4
+   tools/import_soundtrack.py imports from the player's own DOA3, DOA4 and DOAXBV
    (<private>/jukebox/<album>/tracks.txt), and assigns any of them to the
    game's own music: each entry of the music table DOA2.xbe holds, which the
    game plays by file name from DOA2/bgm.afs. The mod loader serves bgm.afs

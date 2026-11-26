@@ -347,6 +347,38 @@ static void test_doa1u_table(const char *base)
     free(empty.tracks);
 }
 
+/* The folders the Launcher imports keep their tabs; doaxbv is the DOAXBV album.
+   The build's doa2u-movies and three of the player's own still fit beside them. */
+static void test_known_albums(const char *base)
+{
+    static const char *const FOLDERS[] = {"doa3", "doa4", "doaxbv", "doa2u-movies", "mine1", "mine2", "mine3"};
+    static const char *const TABS[] = {"DOA3", "DOA4", "DOAXBV", "DOA2U-MOVIES", "MINE1", "MINE2", "MINE3"};
+    static const char tracks[] = "a.adx\t-2\t-2\tA\n";
+    enum { FOLDER_COUNT = sizeof FOLDERS / sizeof FOLDERS[0] };
+    char path[512];
+    make_folder(base);
+    snprintf(jukebox_root, sizeof jukebox_root, "%s/known", base);
+    make_folder(jukebox_root);
+    for (unsigned i = 0u; i < FOLDER_COUNT; ++i) {
+        snprintf(path, sizeof path, "%s/%s", jukebox_root, FOLDERS[i]);
+        make_folder(path);
+        snprintf(path, sizeof path, "%s/%s/tracks.txt", jukebox_root, FOLDERS[i]);
+        write_file(path, tracks, sizeof tracks - 1u);
+    }
+    snprintf(disc_root, sizeof disc_root, "%s", base); /* no disc: DOA2U and DOA1U are empty */
+    load_library();
+    for (unsigned i = 0u; i < FOLDER_COUNT; ++i) {
+        const int album = find_album(TABS[i]);
+        CHECK(album >= 0);
+        if (album >= 0) {
+            CHECK(strcmp(albums[album].tab, TABS[i]) == 0);
+            CHECK(albums[album].count == 1u);
+        }
+    }
+    for (unsigned a = 0u; a < album_count; ++a) free(albums[a].tracks);
+    album_count = 0u;
+}
+
 static FILE *base_file;
 static bool base_read(void *context, uint64_t offset, void *buffer, uint32_t length, uint32_t *read)
 {
@@ -594,6 +626,7 @@ int main(void)
     test_target_names();
     test_music_table("jukebox-test-table");
     test_doa1u_table("jukebox-test-doa1");
+    test_known_albums("jukebox-test-known");
     test_assignments(root);
     return failures != 0u;
 }
