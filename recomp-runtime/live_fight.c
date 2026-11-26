@@ -26,6 +26,12 @@
      stop at the match end. In a session the request rides this side's next
      session pad and both sides reset the lockstep on that frame, so the stop
      lands on the same frame on both sides.
+   - online_seed_random_from_session 0x127a00 seeds the fight RNG, which the
+     rollback snapshots carry. The game's seed adds g_lockstep_batch, the
+     number of lockstep batches this side happened to have exchanged when the
+     scene reached the call. That matched on one machine, but across two peers
+     the batches differ, the seeds differ, and every fight desynced at its
+     first check. The hook seeds with the shared session key only.
 
    The pads' guest state: g_pad_state 0xa94a70 holds
    0x30-byte pads, slot 5 the local and slot 6 the remote fighter. */
@@ -44,6 +50,7 @@ enum {
 extern void sub_00298930(void); /* online_lockstep_frame */
 extern void sub_000D1000(void); /* battle_online_round_start */
 extern void sub_00293980(void); /* online_lockstep_request_stop */
+extern void sub_00127A00(void); /* online_seed_random_from_session */
 
 /* Both sides, at the start of the session frame whose pads carry the stop. */
 void recomp_live_stop_lockstep(void)
@@ -90,6 +97,20 @@ static void live_request_stop(void)
     kernel_return_caller_cleanup(0u);
 }
 
+/* The game's seed is the session key plus g_lockstep_batch. The key is the
+   host's and both peers share it, but the batch is how many exchanges this
+   side had run when the scene reached the call; it need not match the other
+   peer's. Zero it for the call so the seed is a function of the shared key
+   only, then put the exchange's count back. */
+static void live_seed_random(void)
+{
+    uint32_t *batch = recomp_memory_u32(LOCKSTEP_BATCH);
+    const uint32_t saved = *batch;
+    *batch = 0u;
+    sub_00127A00();
+    *batch = saved;
+}
+
 RecompFunction recomp_live_fight_lookup(uint32_t guest_address)
 {
     if (!recomp_netplay_session_live()) return NULL;
@@ -97,6 +118,7 @@ RecompFunction recomp_live_fight_lookup(uint32_t guest_address)
     case 0x00298930u: return live_lockstep_frame;
     case 0x000d1000u: return live_round_start;
     case 0x00293980u: return live_request_stop;
+    case 0x00127a00u: return live_seed_random;
     default: return NULL;
     }
 }

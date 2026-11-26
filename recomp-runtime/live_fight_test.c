@@ -63,6 +63,8 @@ static uint32_t started_opponent;
 static unsigned original_lockstep_frames, original_round_starts, original_stop_calls;
 static uint32_t round_start_eax;
 static unsigned lockstep_resets;
+static unsigned original_seed_calls;
+static uint32_t seed_batch_seen;
 
 bool recomp_netplay_session_live(void) { return live_on; }
 bool recomp_live_rollback_active(void) { return session_active; }
@@ -83,6 +85,11 @@ void sub_000D1000(void)
     recomp_runtime.registers.eax = round_start_eax;
 }
 void sub_00293980(void) { ++original_stop_calls; }
+void sub_00127A00(void)
+{
+    ++original_seed_calls;
+    seed_batch_seen = *recomp_memory_u32(0x00f0a560u);
+}
 
 void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const char *member, int line)
 {
@@ -296,11 +303,31 @@ static void test_lookup(void)
     CHECK(recomp_live_fight_lookup(0x00298930u) == NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) == NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) == NULL);
+    CHECK(recomp_live_fight_lookup(0x00127a00u) == NULL);
     live_on = true;
     CHECK(recomp_live_fight_lookup(0x00298930u) != NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) != NULL);
+    CHECK(recomp_live_fight_lookup(0x00127a00u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00298931u) == NULL);
+}
+
+/* The fight seed must not depend on how many lockstep batches this side had
+   exchanged when the scene reached the seeding call: across two peers that
+   count differs and every fight desyncs at its first check. */
+static void test_seed_random(void)
+{
+    reset_guest();
+    live_on = true;
+    const RecompFunction seed = recomp_live_fight_lookup(0x00127a00u);
+    CHECK(seed != NULL);
+    if (seed == NULL) return;
+    *recomp_memory_u32(0x00f0a560u) = 7u; /* g_lockstep_batch */
+    seed_batch_seen = 0xffffffffu;
+    seed();
+    CHECK(original_seed_calls == 1u);
+    CHECK(seed_batch_seen == 0u);
+    CHECK(*recomp_memory_u32(0x00f0a560u) == 7u);
 }
 
 static void test_lockstep_frame(void)
@@ -484,6 +511,7 @@ int main(void)
     test_window();
     test_session_ends();
     test_lookup();
+    test_seed_random();
     test_lockstep_frame();
     test_request_stop();
     test_stop_lockstep();
