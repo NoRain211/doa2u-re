@@ -303,6 +303,8 @@ add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runne
 add_test(NAME recomp-runtime-menu-quit COMMAND recomp_menu_quit_test)
 add_executable(recomp_hit_voice_test hit_voice.c hit_voice_test.c)
 add_test(NAME recomp-runtime-hit-voice COMMAND recomp_hit_voice_test)
+add_executable(recomp_cpu_costume_test cpu_costume.c cpu_costume_test.c)
+add_test(NAME recomp-runtime-cpu-costume COMMAND recomp_cpu_costume_test)
 add_executable(recomp_combo_hud_test combo_hud.c combo_hud_test.c)
 add_test(NAME recomp-runtime-combo-hud COMMAND recomp_combo_hud_test)
 if(NOT MSVC)
