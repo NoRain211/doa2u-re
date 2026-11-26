@@ -503,21 +503,32 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(self.send(live(mm.CONNECT, connect_body(self.next_request(), ina[A])), B_AT, later)), 2)
         self.assertNotEqual(self.server.live_pairs[frozenset((A, B))].token, old)
 
-    def test_members_of_one_lobby_reach_each_other_without_hosting(self):
-        self.online()
-        kid = self.put(now=0.0)[2]  # A hosts the lobby
-        ina = {xuid: struct.unpack(">I", self.server.accounts[xuid].ina)[0] for xuid in (A, B, C)}
-        add = lambda sender, target, now: self.send(
+    def join(self, sender, xuid, kid, now, proof=None):
+        """A member's heartbeat after joining: the game's presence names the session (0x2a1340)."""
+        self.logon(sender, xuid, proof=proof, now=now, state=mm.PRESENCE_SESSION | 3, kid=kid)
+
+    def connector(self, xuids):
+        """CONNECT from a sender to a player by XUID."""
+        ina = {xuid: struct.unpack(">I", self.server.accounts[xuid].ina)[0] for xuid in xuids}
+        return lambda sender, target, now: self.send(
             live(mm.CONNECT, connect_body(self.next_request(), ina[target])), sender, now)
 
-        # B joins: B asks the host and A answers.
+    def test_members_of_one_session_reach_each_other_without_hosting(self):
+        self.online()
+        kid = self.put(now=0.0)[2]  # A hosts the lobby
+        add = self.connector((A, B, C))
+
+        # B joins: its presence names the session, it asks the host and A answers.
+        self.join(B_AT, B, kid, 0.0)
         self.assertEqual(len(add(B_AT, A, 0.0)), 2)
         self.assertEqual(len(add(A_AT, B, 0.1)), 2)
-        # C is online but not in the lobby, so B may not learn its address yet.
-        self.assertEqual(add(B_AT, C, 0.2), [])
+        # C CONNECTs the host but is not in the session: pairing with a host is
+        # not membership, so neither may learn the other's address.
+        self.assertEqual(len(add(C_AT, A, 0.2)), 2)
+        self.assertEqual(add(C_AT, B, 0.25), [])
+        self.assertEqual(add(B_AT, C, 0.25), [])
         # C joins too.
-        self.assertEqual(len(add(C_AT, A, 0.3)), 2)
-        self.assertEqual(len(add(A_AT, C, 0.4)), 2)
+        self.join(C_AT, C, kid, 0.3)
 
         # B and C are now both members: they may pair, though neither hosts, and
         # the pair becomes a full one when C answers.
@@ -526,11 +537,52 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(add(C_AT, B, 0.6)), 2)
         self.assertIn(frozenset((B, C)), self.server.met)
 
-        # The host leaving the service ends the lobby: a fresh pair needs a host again.
-        self.server.drop_pair(frozenset((B, C)))
+        # The host ending the session ends the membership: a fresh pair needs it again.
+        del self.server.live_pairs[frozenset((B, C))]
         self.done(self.one(live(mm.SESSION_DEL, mm.SESSION_DEL_BODY.pack(self.next_request(), kid)), A_AT, 1.0,
                            mm.DONE))
         self.assertEqual(add(B_AT, C, 1.1), [])
+
+    def test_a_session_member_needs_a_pair_with_its_host(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        add = self.connector((A, B, C))
+        self.join(B_AT, B, kid, 0.0)
+        self.assertEqual(len(add(B_AT, A, 0.0)), 2)
+        # C names the session in its presence but never CONNECTed its host.
+        self.join(C_AT, C, kid, 0.1)
+        self.assertEqual(add(C_AT, B, 0.2), [])
+
+    def test_members_of_a_hosts_two_sessions_are_not_siblings(self):
+        self.online()
+        first = self.put(now=0.0)[2]
+        second = self.put(now=0.0)[2]
+        self.assertNotEqual(first, second)
+        add = self.connector((A, B, C))
+        self.join(B_AT, B, first, 0.0)
+        self.join(C_AT, C, second, 0.0)
+        self.assertEqual(len(add(B_AT, A, 0.1)), 2)
+        self.assertEqual(len(add(C_AT, A, 0.1)), 2)
+        self.assertEqual(add(B_AT, C, 0.2), [])
+
+    def test_members_behind_one_router_pair_past_the_address_cap(self):
+        router = "198.51.100.20"
+        fourth = proof_for(bytes((3,)) * 32)
+        d = xuid_for(fourth)
+        members = {B: ((router, 1001), None), C: ((router, 1002), None), d: ((router, 1003), fourth)}
+        self.logon(A_AT, A, now=0.0)
+        for xuid, (sender, proof) in members.items():
+            self.logon(sender, xuid, proof=proof, now=0.0)
+        kid = self.put(now=0.0)[2]
+        add = self.connector((A, B, C, d))
+        with mock.patch.object(mm, "PAIRS_PER_ADDRESS", 3):
+            for xuid, (sender, proof) in members.items():
+                self.join(sender, xuid, kid, 0.1, proof)
+                self.assertEqual(len(add(sender, A, 0.2)), 2)
+            self.assertEqual(self.server.live_pairs_at(router), 3)  # the cap: the host pairs fill it
+            for first, second in ((B, C), (B, d), (C, d)):
+                self.assertEqual(len(add(members[first][0], second, 0.3)), 2)
+            self.assertEqual(self.server.live_pairs_at(router), 6)
 
     def test_a_repeated_connect_does_not_extend_a_meeting(self):
         self.online()

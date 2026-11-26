@@ -136,9 +136,13 @@ game's own lockstep works.
 ## Limits
 
 - No voice: the voice engine's stream creation fails and the game carries on.
-- Lobby spectating is unverified in the game: the matchmaker's member pairing
-  has unit tests, but no run has watched a match from a third instance. The
-  built-in matchmaker must be redeployed for the pairing rule to apply.
+- Lobby spectating ran once on one machine: three runners against a local
+  matchmaker, where the third watched the other two's match with the live
+  stage, both fighters and the round timer. That run used the earlier rule
+  (a pair with the same host); the session-membership rule now in place has
+  unit tests only. A second spectator, which needs four instances, and two
+  machines have not run. The built-in matchmaker must be redeployed for the
+  rule to apply.
 - QoS reports a fixed 50 ms round trip, which gives the game's shipped
   lockstep delay; a measured one needs a backend call.
 - Stat writes for an opponent are not tied to a played match: the client

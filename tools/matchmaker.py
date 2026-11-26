@@ -365,7 +365,6 @@ class Matchmaker:
         self.boards_of = {}  # XUID -> the boards it has a row on, for MAX_BOARDS without a scan
         self.feedback_kinds = {}  # target XUID -> its feedback types, for MAX_FEEDBACK_KINDS
         self.live_pairs = {}  # CONNECT pairs, by frozenset of two XUIDs, and when last used
-        self.pairs_by_xuid = {}  # XUID -> the XUIDs it has a live pair with, for CONNECT
         self.met = {}  # CONNECT pairs and when both first connected, which allows writing each other's stats
         self.rankings = {}  # each board's sorted ranking and XUID -> rank, until the board is written
         self.live_counts = {}  # Live packets per address since the last sweep
@@ -429,7 +428,7 @@ class Matchmaker:
                 self.account_days.clear()
             self.day = int(now // 86400)
         for key in [key for key, pair in self.live_pairs.items() if now - pair.used > PAIR_SECONDS]:
-            self.drop_pair(key)
+            del self.live_pairs[key]
         for key in [key for key, when in self.met.items() if now - when > MET_SECONDS]:
             del self.met[key]
         # A session is only joinable while its host is online.
@@ -620,7 +619,7 @@ class Matchmaker:
                     del self.stats_by_board[board]
             self.rankings.pop(board, None)
         for key in [key for key in self.live_pairs if xuid in key]:
-            self.drop_pair(key)
+            del self.live_pairs[key]
         self.met = {key: when for key, when in self.met.items() if xuid not in key}
         self.dirty = True
         return True
@@ -809,52 +808,32 @@ class Matchmaker:
         """True when the account hosts a Live session from SESSION_PUT that is still alive."""
         return any(session.host is account for session in self.sessions.values())
 
-    def add_pair(self, key, pair):
-        """Stores one pair and indexes it by both XUIDs."""
-        self.live_pairs[key] = pair
-        first, second = tuple(key)
-        self.pairs_by_xuid.setdefault(first, set()).add(second)
-        self.pairs_by_xuid.setdefault(second, set()).add(first)
-
-    def drop_pair(self, key):
-        """Removes one pair and its two index entries."""
-        self.live_pairs.pop(key, None)
-        first, second = tuple(key)
-        for xuid, peer in ((first, second), (second, first)):
-            peers = self.pairs_by_xuid.get(xuid)
-            if peers is None:
-                continue
-            peers.discard(peer)
-            if not peers:
-                del self.pairs_by_xuid[xuid]
-
     def live_pairs_at(self, address):
         """The Live pairs address opened; pairs others opened with its players do not count."""
         return sum(1 for pair in self.live_pairs.values() if pair.opener == address)
 
     def session_siblings(self, first, second, now):
-        """True when both XUIDs have a live pair with one player who hosts a Live session.
+        """True when both accounts are in one live session and each has a live pair with its host.
 
-        A lobby's host pairs with each member as it joins, and the game then has the
-        members send to each other directly: the two fighters exchange lockstep and
-        input, and a spectator subscribes to a fighter's state stream. The host
-        already knows both members, so this reveals no address the host could not
-        pass on itself. It also covers a match whose fighters both joined a host
-        who is not fighting.
+        The game's presence names the session it is in: XOnlineNotificationSetState's
+        in-session bit and XNKID (0x2a1340, from online_update each frame), the key
+        online_session_join sets on every join, which the client's heartbeat carries.
+        A lobby's members then send to each other directly: the two fighters exchange
+        lockstep and input, and a spectator subscribes to a fighter's state stream,
+        and the host may not be fighting. Pairing with a host is not membership, so
+        a stranger who only CONNECTed the host, or a member of the host's other
+        session, does not qualify.
         """
-        for host in self.pairs_by_xuid.get(first, ()):
-            if host == second:
-                continue
-            pair = self.live_pairs.get(frozenset((first, host)))
+        if not first.state & second.state & PRESENCE_SESSION or first.kid != second.kid:
+            return False
+        session = self.sessions.get(first.kid)
+        if session is None:
+            return False
+        for member in (first, second):
+            pair = self.live_pairs.get(frozenset((member.xuid, session.host.xuid)))
             if pair is None or now - pair.used > PAIR_SECONDS:
-                continue
-            host_account = self.accounts.get(host)
-            if host_account is None or not self.hosts_session(host_account):
-                continue
-            sibling = self.live_pairs.get(frozenset((second, host)))
-            if sibling is not None and now - sibling.used <= PAIR_SECONDS:
-                return True
-        return False
+                return False
+        return True
 
     def live_connect(self, body, nonce, sender, now):
         req, ina = CONNECT_BODY.unpack(body)
@@ -870,14 +849,16 @@ class Matchmaker:
         fresh = pair is None or now - pair.used > PAIR_SECONDS
         # An address is the other player's to learn only when they host a Live
         # session, when they connected here first (a joiner may connect back),
-        # or when both joined the same host's session.
-        if fresh and not hosting and not self.session_siblings(me.xuid, other.xuid, now):
+        # or when both are in the same live session.
+        sibling = fresh and not hosting and self.session_siblings(me, other, now)
+        if fresh and not hosting and not sibling:
             return []
-        if key not in self.live_pairs and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
+        # The session bounds its members' pairs, so players behind one router
+        # in one lobby do not use up the address's cap on each other.
+        if key not in self.live_pairs and not sibling and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
             return []
         if fresh:
-            pair = LivePair(now, self.random_bytes(8), sender[0])
-            self.add_pair(key, pair)
+            pair = self.live_pairs[key] = LivePair(now, self.random_bytes(8), sender[0])
         if hosting:
             pair.used = now  # a CONNECT to a player who still hosts keeps the pair; one-sided repeats do not
         if pair.met is None:
