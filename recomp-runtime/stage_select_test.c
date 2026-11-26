@@ -67,6 +67,7 @@ static uint32_t call_cdecl(uint32_t address, uint32_t a, uint32_t b)
 
 /* The lifted functions the confirm hook calls, as the game would run them. */
 static uint32_t sfx_played, commit_side, commit_id, commit_loader, commit_slot, original_calls, original_slot;
+static uint32_t online_slot, sent_stage, sent_count; /* 0x298f70 and 0x293f00 */
 
 static uint32_t arg(unsigned i) { return *recomp_memory_u32(recomp_runtime.registers.esp + 4u * i); }
 static void ret(uint32_t eax)
@@ -93,6 +94,14 @@ void sub_001357F0(void)
     ++original_calls;
     original_slot = arg(1u);
     ret(0x77u);
+}
+/* online_get_local_player_slot and the grid's stage broadcast. */
+void sub_00298F70(void) { ret(online_slot); }
+void sub_00293F00(void)
+{
+    sent_stage = arg(1u) & 0xffu;
+    ++sent_count;
+    ret(0u);
 }
 
 /* Stage select lists the regular stages, then Tengu's boss stage, then Random;
@@ -144,9 +153,9 @@ static int test_stage_select(void)
 
 /* Up on the Miyama row is the only way to reach the other three variants: it
    steps 18 to 64, 63 and 65, then back to 18, sounds the row and commits the
-   preview each time; Down steps back the same way. X (27, a black void) does
-   nothing there. Other rows and
-   other presses stay the game's. */
+   preview each time, and in an online select with a local side broadcasts the
+   new id as a row change does; Down steps back the same way. X (27, a black
+   void) does nothing there. Other rows and other presses stay the game's. */
 static int test_miyama_variants(void)
 {
     const char *failed = NULL;
@@ -205,6 +214,28 @@ static int test_miyama_variants(void)
         kernel_page[1] != 18u || kernel_page[2] != 18u || kernel_page[3] != 18u)) failed = "reset variant";
     kernel_page[1] = kernel_page[2] = kernel_page[3] = 65u; /* Random reads the current variant */
     if (failed == NULL && call_cdecl(0x00135510u, 21u, 0u) != 65u) failed = "Random variant";
+    /* Up and Down broadcast the new id like a row change does, so a peer's
+       fallback match scene follows; offline, or with no local side, they send
+       nothing. */
+    kernel_page[1] = kernel_page[2] = kernel_page[3] = 18u;
+    stage_cursor = 21u;
+    *recomp_memory_u32(0x87d298u) = 0x1u;
+    selected_mode = 0x12u;
+    online_select_flag = 1u;
+    online_slot = 1u;
+    sent_count = 0u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        kernel_page[1] != 64u || sent_count != 1u || sent_stage != 64u)) failed = "online send";
+    online_slot = 0xffffffffu;
+    sent_count = 0u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        kernel_page[1] != 63u || sent_count != 0u)) failed = "online no side";
+    online_slot = 1u;
+    selected_mode = 0u;
+    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
+        kernel_page[1] != 65u || sent_count != 0u)) failed = "offline no send";
+    online_select_flag = 0u;
+    online_slot = 0u;
     if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
     return failed == NULL;
 }
