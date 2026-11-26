@@ -878,11 +878,11 @@ id itself, under the row-change path's guard (an online select and a local
 side). Two runners in a Live single battle repeated the test: the joining side
 moved to The Miyama, pressed Up and confirmed with A, and the other side, which
 took no input, showed the same stepped variant; both fought on autumn Miyama
-and their guest RAM matched through frame 600. A pick left to the timer after
-a cursor move fails the frame-30 check instead, with or without this change:
-each pad's key-repeat latch (`+0x28` of its `g_pad_state` record, copied to
-`g_player_pads` at `0x87d288`) keeps that side's last frontend press, a
-direction on the chooser and A on the other side. The variant is still a stage id the
+and their guest RAM matched through frame 600. In the same runs, a pick left
+to the timer after a cursor move failed the frame-30 check for a separate
+reason, with or without this change: each pad's key-repeat latch (`+0x28` of
+its `g_pad_state` record) kept that side's last frontend press, which the
+session start now clears (see [rollback netcode](rollback-netcode.md)). The variant is still a stage id the
 game already carries, the entry sits in the kernel page that rollback
 restores, and Up is read from the lockstepped per-player pad block, so both
 sides need this build, which netplay's build check already requires.
