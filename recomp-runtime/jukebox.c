@@ -34,7 +34,7 @@ enum {
     CHUNK_MS = 20,         /* at least this much a submission */
     FADE_MS = 4000,        /* Play All and Shuffle fade a looping track out */
     PASSES = 2,            /* ... after it has looped this many times */
-    MAX_ALBUMS = 8,
+    MAX_ALBUMS = 16,
     ROW_ALBUM = 0, ROW_TRACK, ROW_MODE, ROW_TARGET, ROW_ASSIGNED,
 };
 
@@ -610,6 +610,7 @@ static void load_library(void)
         load_folder(album, KNOWN[k].folder, KNOWN[k].tab);
     }
     /* Any other album a player puts beside them, by folder name. */
+    bool warned = false;
 #ifdef _WIN32
     char pattern[PATH_SIZE];
     struct _finddata_t data;
@@ -625,13 +626,20 @@ static void load_library(void)
         for (struct dirent *entry; (entry = readdir(dir)) != NULL;) {
             const char *name = entry->d_name;
 #endif
-            if (name[0] == '.' || album_count == MAX_ALBUMS) continue;
+            if (name[0] == '.') continue;
             char lower_name[64];
             snprintf(lower_name, sizeof lower_name, "%s", name);
             for (char *c = lower_name; *c != '\0'; ++c) *c = (char)tolower((unsigned char)*c);
             if (strcmp(lower_name, "doa3") == 0 || strcmp(lower_name, "doa4") == 0 ||
                 strcmp(lower_name, "doaxbv") == 0 || strcmp(lower_name, "doa1u") == 0 || !folder_exists(name))
                 continue;
+            if (album_count == MAX_ALBUMS) {
+                if (!warned) {
+                    fprintf(stderr, "recomp jukebox: only %d albums fit; %s is not listed\n", MAX_ALBUMS, name);
+                    warned = true;
+                }
+                continue;
+            }
             char tab[16];
             snprintf(tab, sizeof tab, "%s", name);
             for (char *c = tab; *c != '\0'; ++c) *c = (char)toupper((unsigned char)*c);

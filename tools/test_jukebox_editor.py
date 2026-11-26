@@ -171,6 +171,15 @@ static class EditorChecks
         Check(loaded.Tracks[1].File == "first.adx" && loaded.Tracks[1].Name == "First");
         Check(((List<Track>)Get(editor, "music")).Count == 2);
 
+        // The known folders keep their tabs, as jukebox.c's KNOWN entries do; doaxbv is DOAXBV.
+        foreach (var pair in new[] { new[] {"doa3", "DOA3"}, new[] {"doa4", "DOA4"}, new[] {"doaxbv", "DOAXBV"} })
+        {
+            Directory.CreateDirectory("jukebox/" + pair[0]);
+            File.WriteAllText("jukebox/" + pair[0] + "/tracks.txt", "#title\tT\na.adx\t-2\t-2\tA\n", new UTF8Encoding(false));
+            var known = (Album)Run(editor, "LoadFolder", pair[0]);
+            Check(known != null && known.Tab == pair[1] && known.Title == "T" && known.Tracks.Count == 1);
+        }
+
         // tracks.txt names files beside itself only, as the game's own reader holds.
         Directory.CreateDirectory("jukebox/bad");
         File.WriteAllText("jukebox/bad/tracks.txt",

@@ -623,9 +623,10 @@ DOA3_NAMES = [
 ]
 
 
-def import_doa3(source, out, encoder=None):
+def import_afs_album(source, out, folder, names, title, encoder=None):
+    """A disc's bgm.afs as the album in folder: its songs, then root's SFD movies' music."""
     data = source.read("bgm.afs")
-    folder = os.path.join(out, "doa3")
+    folder = os.path.join(out, folder)
     os.makedirs(folder, exist_ok=True)
     kept = read_names(folder)
     tracks = []
@@ -636,16 +637,20 @@ def import_doa3(source, out, encoder=None):
         name = f"{i + 1:02d}.adx"
         with open(os.path.join(folder, name), "wb") as file:
             file.write(track)
-        default = DOA3_NAMES[i] if i < len(DOA3_NAMES) else f"Track {i + 1:02d}"
+        default = names[i] if i < len(names) else f"Track {i + 1:02d}"
         label = kept.get(name, default)
         if label == f"Track {i + 1:02d}":  # an earlier import's placeholder
             label = default
         tracks.append((name, -1, -1, label))
     import_movies(source, folder, "", kept, tracks)
-    write_tracks(folder, "Dead or Alive 3", tracks)
+    write_tracks(folder, title, tracks)
     level_album(folder, encoder)
-    print(f"Dead or Alive 3: {len(tracks)} tracks in {folder}")
+    print(f"{title}: {len(tracks)} tracks in {folder}")
     return len(tracks)
+
+
+def import_doa3(source, out, encoder=None):
+    return import_afs_album(source, out, "doa3", DOA3_NAMES, "Dead or Alive 3", encoder)
 
 
 # bgm.afs's entries in its own order: the USA default.xbe's Sound Test table (0x2c5ee8)
@@ -682,28 +687,8 @@ DOAX_TRACKS = [
 def import_doax(source, out, encoder=None):
     """Dead or Alive Xtreme Beach Volleyball's bgm.afs as the DOAXBV album, and root's SFD
     movies' music beside it."""
-    data = source.read("bgm.afs")
-    folder = os.path.join(out, "doaxbv")
-    os.makedirs(folder, exist_ok=True)
-    kept = read_names(folder)
-    tracks = []
-    for i, (offset, length) in enumerate(afs_table(data)):
-        track = data[offset:offset + length]
-        if length < 64 or track[:2] != b"\x80\x00":
-            continue  # padding entries
-        name = f"{i + 1:02d}.adx"
-        with open(os.path.join(folder, name), "wb") as file:
-            file.write(track)
-        default = DOAX_TRACKS[i] if i < len(DOAX_TRACKS) else f"Track {i + 1:02d}"
-        label = kept.get(name, default)
-        if label == f"Track {i + 1:02d}":  # an earlier import's placeholder
-            label = default
-        tracks.append((name, -1, -1, label))
-    import_movies(source, folder, "", kept, tracks)
-    write_tracks(folder, "Dead or Alive Xtreme Beach Volleyball", tracks)
-    level_album(folder, encoder)
-    print(f"Dead or Alive Xtreme Beach Volleyball: {len(tracks)} tracks in {folder}")
-    return len(tracks)
+    return import_afs_album(source, out, "doaxbv", DOAX_TRACKS, "Dead or Alive Xtreme Beach Volleyball",
+        encoder)
 
 
 # ffmpeg's XMA decoder starts every wave 448 samples late and pads its end to
