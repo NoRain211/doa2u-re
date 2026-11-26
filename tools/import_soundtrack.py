@@ -208,7 +208,9 @@ def detect(source):
     # DOAXBV ships voice.afs too, so it goes first, on the one file DOA3 lacks.
     if source.find("bgm.afs") and source.find("xtalkamp.bin"):
         return "doaxbv"
-    if source.find("bgm.afs") and source.find("voice.afs"):
+    # Neither DOA3 disc has DOAXBV's datahdd.afs: with it and no xtalkamp.bin the
+    # disc could be either, so it is refused rather than filed under the wrong album.
+    if source.find("bgm.afs") and source.find("voice.afs") and not source.find("datahdd.afs"):
         return "doa3"
     return None
 
