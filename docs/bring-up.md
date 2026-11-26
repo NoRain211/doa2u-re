@@ -1044,11 +1044,13 @@ clock, which falls behind real time when frames run slow and jumps when the
 game waits. Host output there keeps its own place per buffer on the real
 clock, outside the rollback state: a one-shot plays on to its end, also
 after the guest's cursor has reached it, a ring
-runs up to 50 ms ahead into its last Lock, and output falls up to 100 ms
+plays on into its last Lock, and output falls up to 100 ms
 behind the guest's cursor before it skips to it. Re-simulated frames neither
 play nor move that place, and the pump thread feeds only it. A timed ring that
 was muted or frozen for more than 100 ms starts again at the guest's cursor.
-Rings still gap when slow frames outrun the game's refills.
+Rings still gap when slow frames outrun the game's refills; a stall within
+that fill no longer leaves the host with nothing to play, which cut the
+announcer and music at round boundaries online.
 Native endpoint consumption has an opt-in host test;
 synthetic API and backend tests remain suitable for public CI.
 

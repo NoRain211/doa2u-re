@@ -353,8 +353,8 @@ static uint64_t bytes_for_ms(const RecompDsoundBufferModel *model, uint64_t ms)
     return ms * model->sample_rate / 1000u * model->block_align;
 }
 
-/* How far host output may run ahead of the guest's play cursor, and fall behind it. */
-enum { HEARD_AHEAD_MS = 50u, HEARD_BEHIND_MS = 100u };
+/* How far host output may fall behind the guest's play cursor. */
+enum { HEARD_BEHIND_MS = 100u };
 
 /* The span host output plays next on the frame-locked clock. The guest's
    cursor follows guest time, which falls behind when frames run slow and
@@ -402,12 +402,16 @@ static uint32_t heard_span(Buffer *buffer, uint64_t now, bool background, uint32
     int64_t place = (int64_t)start - guest->cursor_bytes;
     if (looping) {
         /* A ring holds its last Lock ahead of the cursor; the next one reuses
-           the oldest data behind it, assumed at most a quarter of the ring. */
+           the oldest data behind it, assumed at most a quarter of the ring.
+           Output may run all the way into that last Lock: a guest stall (a
+           slow frame, a load, or a wait for the other player) freezes guest
+           time, and a shorter bound would stop feeding the device while the
+           ring still holds hundreds of milliseconds, draining the queue and
+           cutting the voices it carries. */
         span = guest->loop_end_bytes - guest->loop_start_bytes;
         const uint64_t lead = bytes_for_ms(guest, buffer->filled_until_ms > now ? buffer->filled_until_ms - now : 0u);
         const uint64_t kept = span - span / 4u > lead ? span - span / 4u - lead : 0u;
-        ahead = bytes_for_ms(guest, HEARD_AHEAD_MS);
-        if (ahead > lead) ahead = lead;
+        ahead = lead;
         if (ahead > span) ahead = span;
         if (behind > kept) behind = kept;
         if (start >= guest->loop_start_bytes && guest->cursor_bytes >= guest->loop_start_bytes) {

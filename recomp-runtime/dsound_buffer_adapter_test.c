@@ -490,7 +490,7 @@ static void test_real_clock_output(void)
     CHECK(output.bytes == 40 && first_sample() == 260);
     CHECK(CALL(0x363641, handle) == 0);
 
-    /* A ring plays ahead only into its last Lock, and 50 ms at most. */
+    /* A ring plays ahead only into its last Lock. */
     fixture(1, 1, 0);
     handle = create();
     for (uint16_t i = 0; i < 500; ++i) write16(DATA + i * 2u, i);
@@ -516,6 +516,30 @@ static void test_real_clock_output(void)
     recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
     now = 140; wall = 400; recomp_dsound_buffers_pump();
     CHECK(output.bytes == 40 && first_sample() == 130);
+    CHECK(CALL(0x363641, handle) == 0);
+
+    /* A guest stall (a load or a wait for the other player) freezes guest time
+       while output keeps real time. The ring must feed up to its last Lock
+       instead of stopping 50 ms past the frozen cursor: otherwise the device
+       queue drains and every voice it carries is cut, which is what the
+       announcer did online at the start and end of a round. */
+    fixture(1, 1, 0);
+    handle = create();
+    for (uint16_t i = 0; i < 1000; ++i) write16(DATA + i * 2u, i);
+    CHECK(CALL(0x365793, handle, DATA, 2000) == 0 && CALL(0x364802, handle, 0, 0, 1) == 0);
+    recomp_dsound_buffers_pump();
+    /* The game fills 300 ms ahead of the cursor. */
+    CHECK(CALL(0x3648da, handle, 0, 600, OUTPUT, OUTPUT + 4, OUTPUT + 8, OUTPUT + 12, 1) == 0);
+    CHECK(CALL(0x36363c, handle, DATA, 600, 0, 0) == 0);
+    /* 300 ms of real time pass while guest time stays put: every 10 ms keeps
+       playing, up to the fill, instead of stopping after the first 50 ms. */
+    for (uint32_t i = 0; i < 30; ++i) {
+        wall += 10; recomp_dsound_buffers_pump();
+        CHECK(output_calls == i + 1u && output.bytes == 20);
+    }
+    /* Past the last Lock there is nothing left to play until the game fills again. */
+    calls = output_calls;
+    wall += 10; recomp_dsound_buffers_pump(); CHECK(output_calls == calls);
     CHECK(CALL(0x363641, handle) == 0);
 
     /* A one-shot whose guest cursor reaches the end first still plays its tail. */
