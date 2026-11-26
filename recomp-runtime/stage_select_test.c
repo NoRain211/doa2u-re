@@ -281,7 +281,11 @@ static int test_stage_alts(void)
     call_cdecl(0x001357f0u, 3u, 0xdeadu);
     *recomp_memory_u32(0x87d298u) = 0x400u; /* X remains the game's storm pick */
     if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 1u ||
-        kernel_page[0x40] != 0u || white_storm_storm != 1u)) failed = "Storm X";
+        kernel_page[0x40] != 1u || white_storm_storm != 1u)) failed = "Storm X";
+    *recomp_memory_u32(0x87d298u) = 0u; /* the next frame must keep X's pick */
+    call_cdecl(0x001357f0u, 3u, 0xdeadu);
+    if (failed == NULL && (kernel_page[0x40] != 1u || white_storm_storm != 1u))
+        failed = "Storm X next frame";
     memset(aerial + 1u, 15, 3u);
     memset(opera + 1u, 10, 3u);
     variant_out = 9u;

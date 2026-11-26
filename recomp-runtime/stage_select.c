@@ -290,8 +290,10 @@ static void stage_select_confirm_input(void)
     }
     const uint32_t confirmed = kernel_call_lifted(sub_001357F0, &pad_slot, 1u);
     /* The game's White Storm confirm sets the flag from A/Start or X; keep the
-       row's Up/Down choice for A/Start, while X remains its storm shortcut. */
-    if (white_storm && !white_storm_x) white_storm_apply();
+       row's Up/Down choice for A/Start, and make X's storm pick the choice. */
+    if (white_storm && white_storm_x && confirmed != 0u)
+        *recomp_memory(WHITE_STORM_VARIANT_ADDRESS, 1u) = 1u;
+    if (white_storm) white_storm_apply();
     kernel_return(0u, confirmed);
 }
 
