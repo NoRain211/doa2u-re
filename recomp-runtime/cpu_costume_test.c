@@ -176,6 +176,13 @@ int main(void)
     expect("a repeat keeps the stored pick",
         call_costume(character, index) == plain_pick && story[index] == plain_pick);
 
+    /* Costume 2 is the other plain pick, and is replaced the same way. */
+    begin();
+    base_result = (uint32_t)plain(character) + 1u;
+    opponents[index] = character;
+    expect("the second plain pick is replaced",
+        call_costume(character, index) == plain_pick && story[index] == plain_pick);
+
     /* A group beyond the first two stays: Story's own pick, or a random pick
        an earlier call wrote back. The hook leaves it and a repeat matches. */
     begin();
