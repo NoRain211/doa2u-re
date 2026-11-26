@@ -881,8 +881,8 @@ took no input, showed the same stepped variant; both fought on autumn Miyama
 and their guest RAM matched through frame 600. In the same runs, a pick left
 to the timer after a cursor move failed the frame-30 check for a separate
 reason, with or without this change: each pad's key-repeat latch (`+0x28` of
-its `g_pad_state` record) kept that side's last frontend press, which the
-session start now clears (see [rollback netcode](rollback-netcode.md)). The variant is still a stage id the
+its `g_pad_state` record) kept that side's last frontend press. Clearing it at
+session start is a separate change. The variant is still a stage id the
 game already carries, the entry sits in the kernel page that rollback
 restores, and Up is read from the lockstepped per-player pad block, so both
 sides need this build, which netplay's build check already requires.
