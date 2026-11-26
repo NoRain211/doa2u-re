@@ -411,7 +411,7 @@ class LauncherForm : Form
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
         checkAtStart = Choice("Check At Start", "Looks for a newer release when the launcher opens", new[] { "Off", "On" }, Game.Bool(settings, "checkUpdates", true), 1);
         var buildRow = new Row { Label = "Build", Info = "Lifts and compiles the game from your ISO; takes about 10 minutes", Action = "build" };
-        importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3 or 4 ISO to add its music; DOA4 adds the hit voices too", Action = "import" };
+        importRow = new Row { Label = "Import Disc", Info = "Choose or drop your Dead or Alive 3, 4 or Xtreme Beach Volleyball ISO to add its music; DOA4 adds the hit voices too", Action = "import" };
         pages = new[] {
             new Page { Name = "GAME", Info = BuildStatus(), Rows = new[] { new Row { Label = "Start Game", Info = "Saves these settings and starts the game", Action = "play" }, chooseGame, buildRow } },
             new Page { Name = "VIDEO", Info = "Sets resolution, anti-aliasing, sharpening, ambient occlusion, screen shape, renderer, VRR, frame rate and the intro movies", Rows = PageRows(resolution, msaa, smaa, sharpen, ao, screen, renderer, vrr, frameRate, intro) },
@@ -463,10 +463,10 @@ class LauncherForm : Form
     // The albums tools\import_soundtrack.py has put in jukebox\ for the game's Jukebox.
     static string JukeboxStatus()
     {
-        var albums = new[] { "doa3", "doa4" }.Where(a => File.Exists(Path.Combine(Game.Jukebox(), a, "tracks.txt")))
+        var albums = new[] { "doa3", "doa4", "doaxbv" }.Where(a => File.Exists(Path.Combine(Game.Jukebox(), a, "tracks.txt")))
             .Select(a => a.ToUpperInvariant()).ToArray();
         return albums.Length > 0 ? "In the Jukebox: DOA2U, " + string.Join(", ", albums) + ". Import another disc to add it"
-            : "The Jukebox plays DOA2U's music; import your own DOA3 or DOA4 disc to add its soundtrack";
+            : "The Jukebox plays DOA2U's music; import your own DOA3, DOA4 or DOAXBV disc to add its soundtrack";
     }
 
     string UpdateStatus()
@@ -771,15 +771,15 @@ class LauncherForm : Form
         timer.Start();
     }
 
-    // A DOA3 disc gives the Jukebox its music; a DOA4 disc its music, then the fighters' hit voices.
+    // A DOA3, DOAXBV or DOA4 disc gives the Jukebox its music; DOA4 then the fighters' hit voices.
     void ImportDisc(string iso, string game = null)
     {
         if (game == null) { DetectDiscAsync(iso, result => ImportDisc(iso, result)); return; }
-        if (game != "doa3" && game != "doa4") { notice = "Choose a Dead or Alive 3 or 4 disc to import."; return; }
+        if (game != "doa3" && game != "doa4" && game != "doaxbv") { notice = "Choose a Dead or Alive 3, 4 or Xtreme Beach Volleyball disc to import."; return; }
         StartImport(iso, false, game == "doa4");
     }
 
-    // Imports a DOA3 or DOA4 disc's music into jukebox\, as a build runs.
+    // Imports a DOA3, DOAXBV or DOA4 disc's music into jukebox\, as a build runs.
     void StartImport(string iso, bool voices = false, bool thenVoices = false)
     {
         if (build != null) { notice = "Wait for the " + (task != "build" ? "import" : "build") + " to finish"; return; }
@@ -797,7 +797,7 @@ class LauncherForm : Form
         timer.Start();
     }
 
-    // doa2u, doa3, doa4 or unknown, from the disc's files.
+    // doa2u, doa3, doa4, doaxbv or unknown, from the disc's files.
     static string DetectDisc(string iso)
     {
         if (Game.Python == null) return "unknown";
@@ -1028,7 +1028,7 @@ class LauncherForm : Form
         if (path == null) return;
         DetectDiscAsync(path, delegate(string game)
         {
-            if (game == "doa3" || game == "doa4") ImportDisc(path, game);
+            if (game == "doa3" || game == "doa4" || game == "doaxbv") ImportDisc(path, game);
             // Unknown (no Python, or detection failed) keeps the old behaviour: build it.
             else UseDisc(path);
         });

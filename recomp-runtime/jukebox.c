@@ -51,7 +51,7 @@ typedef struct Track {
 } Track;
 
 typedef struct Album {
-    char tab[16];               /* DOA2U, DOA3, DOA4 */
+    char tab[16];               /* DOA2U, DOA3, DOA4, DOAXBV */
     char title[NAME_SIZE];
     Track *tracks;
     unsigned count;
@@ -602,7 +602,8 @@ static void load_library(void)
     album_count = 0u;
     load_doa2u(&albums[album_count++]);
     load_doa1u(&albums[album_count++]);
-    static const struct { const char *folder, *tab; } KNOWN[] = {{"doa3", "DOA3"}, {"doa4", "DOA4"}};
+    static const struct { const char *folder, *tab; } KNOWN[] = {
+        {"doa3", "DOA3"}, {"doa4", "DOA4"}, {"doaxbv", "DOAXBV"}};
     for (size_t k = 0u; k < sizeof KNOWN / sizeof KNOWN[0]; ++k) {
         Album *album = &albums[album_count++];
         album->missing = "Import its disc in Launcher.exe";
@@ -628,8 +629,8 @@ static void load_library(void)
             char lower_name[64];
             snprintf(lower_name, sizeof lower_name, "%s", name);
             for (char *c = lower_name; *c != '\0'; ++c) *c = (char)tolower((unsigned char)*c);
-            if (strcmp(lower_name, "doa3") == 0 || strcmp(lower_name, "doa4") == 0 || strcmp(lower_name, "doa1u") == 0 ||
-                !folder_exists(name))
+            if (strcmp(lower_name, "doa3") == 0 || strcmp(lower_name, "doa4") == 0 ||
+                strcmp(lower_name, "doaxbv") == 0 || strcmp(lower_name, "doa1u") == 0 || !folder_exists(name))
                 continue;
             char tab[16];
             snprintf(tab, sizeof tab, "%s", name);
@@ -1296,7 +1297,7 @@ const char *recomp_jukebox_help(unsigned row)
     if (page.note[0] != '\0') return page.note;
     const Album *album = &albums[page.album];
     switch (row) {
-    case ROW_ALBUM: return "Choose DOA2U's music, or DOA3's and DOA4's from your discs.";
+    case ROW_ALBUM: return "Choose DOA2U's music, or DOA3's, DOA4's and DOAXBV's from your discs.";
     case ROW_TRACK:
         if (album->count == 0u) return "Import this game's disc in Launcher.exe to add its music.";
         snprintf(help, sizeof help, "Track %u of %u. Press A to play or stop it.", page.track + 1u, album->count);

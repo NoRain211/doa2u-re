@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Import the soundtrack of your own Dead or Alive 3 or Dead or Alive 4 for the Jukebox.
+"""Import the soundtrack of your own Dead or Alive 3, Dead or Alive 4 or Dead or Alive Xtreme
+Beach Volleyball for the Jukebox.
 
 The Jukebox (recomp-runtime/jukebox.c) plays DOA2U's own music from its disc
 and any album this tool imports into jukebox/<album>/ (beside mods/): one ADX
@@ -11,6 +12,8 @@ music file itself:
 
 - Dead or Alive 3 (Xbox): bgm.afs already holds ADX, the format DOA2U plays,
   with its own loop points, so the tracks are copied as they are.
+- Dead or Alive Xtreme Beach Volleyball (Xbox): bgm.afs holds ADX too, in the
+  order of the game's Sound Test, whose titles and artists name the tracks.
 - Dead or Alive 4 (Xbox 360): SOUND/bgm_stream.xwb holds XMA. Each track is an
   intro and a loop (the cues in snd.afs's bgm sound bank say which); both are
   decoded and joined, then encoded as ADX with the loop in its header, by
@@ -31,6 +34,7 @@ rename tracks; importing again keeps those names. Nothing this writes may be
 committed.
 
     python tools/import_soundtrack.py "D:/Games/Dead or Alive 4.iso"
+    python tools/import_soundtrack.py "D:/Games/Dead or Alive Xtreme Beach Volleyball.iso"
     python tools/import_soundtrack.py F:/DOA4U/extracted_ISO
     python tools/import_soundtrack.py --detect "D:/Games/Dead or Alive 3.iso"
 """
@@ -196,11 +200,13 @@ def open_source(path):
 
 
 def detect(source):
-    """doa3, doa4, doa2u or None, from the files on the disc."""
+    """doa3, doa4, doa2u, doaxbv or None, from the files on the disc."""
     if source.find("SOUND/bgm_stream.xwb") and source.find("snd.afs"):
         return "doa4"
     if source.find("DOA2/bgm.afs"):
         return "doa2u"
+    if source.find("bgm.afs") and (source.find("xtalkamp.bin") or source.find("datahdd.afs")):
+        return "doaxbv"
     if source.find("bgm.afs") and source.find("voice.afs"):
         return "doa3"
     return None
@@ -642,6 +648,64 @@ def import_doa3(source, out, encoder=None):
     return len(tracks)
 
 
+# bgm.afs's entries in its own order: the USA default.xbe's Sound Test table (0x2c5ee8)
+# names each song's title and artist, and the archive's name table puts the same files
+# in this order. The last four are the game's dance, volume and shop loops, named from
+# their files.
+DOAX_TRACKS = [
+    "Give me a reason - Aswad",
+    "If it don't fit - B*Witched",
+    "Jesse hold on - B*Witched",
+    "Move it like this - Baha Men",
+    "Sweet and deadly - Big Mountain",
+    "Fe real - Big Mountain",
+    "Is this love - Bob Marley",
+    "Come on over (All I want is you) - Christina Aguilera",
+    "This is it - Innosense",
+    "Lovin' you - Janet Kay",
+    "How crazy are you? - Meja",
+    "Pegaito - Olga Tanon",
+    "Me gusta - Olga Tanon",
+    "Turn it up - Raja-Nee",
+    "Bitchism - Raja-Nee",
+    "I want your girlfriend to be my girlfriend too - Reel Big Fish",
+    "The kids don't like it - Reel Big Fish",
+    "Do it - The Spice Girls",
+    "Brazilian Sugar - George Duke",
+    "Dance VHT",
+    "Dance VTN",
+    "Vol Balance S",
+    "Bgm Shop0",
+]
+
+
+def import_doax(source, out, encoder=None):
+    """Dead or Alive Xtreme Beach Volleyball's bgm.afs as the DOAXBV album, and root's SFD
+    movies' music beside it."""
+    data = source.read("bgm.afs")
+    folder = os.path.join(out, "doaxbv")
+    os.makedirs(folder, exist_ok=True)
+    kept = read_names(folder)
+    tracks = []
+    for i, (offset, length) in enumerate(afs_table(data)):
+        track = data[offset:offset + length]
+        if length < 64 or track[:2] != b"\x80\x00":
+            continue  # padding entries
+        name = f"{i + 1:02d}.adx"
+        with open(os.path.join(folder, name), "wb") as file:
+            file.write(track)
+        default = DOAX_TRACKS[i] if i < len(DOAX_TRACKS) else f"Track {i + 1:02d}"
+        label = kept.get(name, default)
+        if label == f"Track {i + 1:02d}":  # an earlier import's placeholder
+            label = default
+        tracks.append((name, -1, -1, label))
+    import_movies(source, folder, "", kept, tracks)
+    write_tracks(folder, "Dead or Alive Xtreme Beach Volleyball", tracks)
+    level_album(folder, encoder)
+    print(f"Dead or Alive Xtreme Beach Volleyball: {len(tracks)} tracks in {folder}")
+    return len(tracks)
+
+
 # ffmpeg's XMA decoder starts every wave 448 samples late and pads its end to
 # a whole 512-sample frame; the wave bank gives each wave's own length.
 XMA_DELAY = 448
@@ -780,7 +844,7 @@ def main():
     parser.add_argument("--out", default=DEFAULT_OUT, help="the Jukebox's albums (default jukebox)")
     parser.add_argument("--ffmpeg", help="ffmpeg with the xma1 decoder (default: the build's tools/ffmpeg, else PATH)")
     parser.add_argument("--adx-encoder", help="recomp_adx_encode (default: the one the game's build made)")
-    parser.add_argument("--detect", action="store_true", help="print doa3, doa4 or doa2u and stop")
+    parser.add_argument("--detect", action="store_true", help="print doa2u, doa3, doa4 or doaxbv and stop")
     parser.add_argument("--level", action="store_true",
                         help="level the loudness of every album already imported (no disc needed)")
     args = parser.parse_args()
@@ -809,13 +873,16 @@ def main():
             return 0
         if game == "doa3":
             import_doa3(source, args.out, find_encoder(args.adx_encoder))
+        elif game == "doaxbv":
+            import_doax(source, args.out, find_encoder(args.adx_encoder))
         elif game == "doa4":
             ffmpeg = resolve_ffmpeg(args.ffmpeg)
             import_doa4(source, args.out, ffmpeg, find_encoder(args.adx_encoder))
         elif game == "doa2u":
             import_doa2u(source, args.out, find_encoder(args.adx_encoder))
         else:
-            raise SystemExit("Not a Dead or Alive 3 or Dead or Alive 4 disc.")
+            raise SystemExit("Not a Dead or Alive 3, Dead or Alive 4 or Dead or Alive Xtreme "
+                             "Beach Volleyball disc.")
     except FileNotFoundError as error:
         raise SystemExit(missing_message(error, ffmpeg))
     except ValueError as error:  # a corrupt archive or bank is the disc's problem, not a crash

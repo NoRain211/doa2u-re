@@ -262,7 +262,7 @@ class JukeboxEditor : Form
             albums.Add(LoadDoa2u());
             albums.Add(LoadDoa1u());
         }
-        var known = new[] { "doa2u-movies", "doa3", "doa4" };
+        var known = new[] { "doa2u-movies", "doa3", "doa4", "doaxbv" };
         var folders = Directory.Exists(jukebox) ? Directory.GetDirectories(jukebox).Select(Path.GetFileName).ToList() : new List<string>();
         foreach (string k in known) if (!folders.Contains(k, StringComparer.OrdinalIgnoreCase)) folders.Insert(0, k);
         var order = known.Concat(folders.Where(f => !known.Contains(f.ToLowerInvariant())).OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
@@ -422,7 +422,7 @@ class JukeboxEditor : Form
         string list = Path.Combine(jukebox, folder, "tracks.txt");
         if (!File.Exists(list)) return null;
         string lower = folder.ToLowerInvariant();
-        var album = new Album { Tab = lower == "doa3" ? "DOA3" : lower == "doa4" ? "DOA4" : folder.ToUpperInvariant(), Folder = folder };
+        var album = new Album { Tab = lower == "doa3" ? "DOA3" : lower == "doa4" ? "DOA4" : lower == "doaxbv" ? "DOAXBV" : folder.ToUpperInvariant(), Folder = folder };
         album.Title = album.Tab;
         if (album.Tab.Length > 15) album.Tab = album.Tab.Substring(0, 15);
         foreach (string line in File.ReadAllLines(list, Encoding.UTF8))
