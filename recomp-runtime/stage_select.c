@@ -60,7 +60,7 @@ enum {
     MIYAMA_ENTRY = 0x16u,
     MIYAMA_STAGE = 18u,
     AERIAL_ENTRY = 4u,
-    OPERA_ENTRY = 10u,
+    OPERA_ENTRY = 9u,
 };
 #define MIYAMA_ENTRY_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc00u)
 #define WHITE_STORM_VARIANT_ADDRESS (XBOX_KERNEL_DATA_BASE + 0xc40u)
@@ -205,7 +205,7 @@ static void stage_select_find_stage(void)
     for (uint32_t row = 0u; row < count; ++row) {
         const uint32_t entry = stage_entry(guest_byte(STAGE_ROWS + row));
         if (entry == MIYAMA_ENTRY_ADDRESS && miyama_stage(stage)) {
-            /* The online match scene's stage id picks that variant again. */
+            /* A spectator's scene passes the id player 1 sent; it picks that variant again. */
             uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
             miyama[1] = miyama[2] = miyama[3] = stage;
             *recomp_memory(variant_out, 1u) = 1u;

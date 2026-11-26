@@ -18,7 +18,6 @@ static uint8_t stage_confirming[2];               /* at 0xdf57ce */
 static uint8_t stage_rows[32];                     /* at 0xdf5f10 */
 static uint8_t kernel_page[0x80];                  /* reserved page +0xc00 */
 static uint32_t white_storm_storm;                 /* at 0x6fe9d0 */
-static uint8_t stage_state[0x40];                  /* at 0x87cfa4, per stage id */
 static uint8_t stage_groups[8];                    /* at 0x693370 */
 static uint8_t time_attack_pool[0x16];             /* at 0x692ba4 */
 static uint8_t rotation_index;                     /* at 0x8783b5 */
@@ -27,6 +26,20 @@ static uint8_t online_select_flag;                 /* at 0xf252a4 */
 
 /* The ids one stage group (0x693370) holds; Up steps through them in order. */
 static const uint8_t MIYAMA_IDS[4] = {18u, 64u, 63u, 65u};
+
+/* The 21 stage entries at 0x6e22b0, with made-up ids except where the alternates
+   are: entry 4 is The Aerial Gardens (15), 8 The White Storm (0), 9 The Great
+   Opera (10) and 10 the stage after it (12), as in the retail table. */
+static void build_stage_entries(uint8_t *entries)
+{
+    for (unsigned i = 0u; i < 0x15u; ++i) memset(entries + i * 0x18u + 1u, (int)(i + 30u), 3u);
+    memset(entries + 4u * 0x18u + 1u, 15, 3u);
+    memset(entries + 8u * 0x18u + 1u, 0, 3u);
+    memset(entries + 9u * 0x18u + 1u, 10, 3u);
+    memset(entries + 10u * 0x18u + 1u, 12, 3u);
+    entries[0x15u * 0x18u] = 1u;
+    memset(entries + 0x15u * 0x18u + 1u, 0xff, 3u);
+}
 
 uint8_t *recomp_memory(uint32_t address, size_t width)
 {
@@ -48,8 +61,6 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
         return &time_attack_pool[address - 0x692ba4u];
     if (address == 0x8783b5u && width == 1u) return &rotation_index;
     if (address == 0x6fe9d0u && width == 4u) return (uint8_t *)&white_storm_storm;
-    if (address >= 0x87cfa4u && address + width <= 0x87cfa4u + sizeof stage_state)
-        return &stage_state[address - 0x87cfa4u];
     if (address == 0xdf57b4u && width == 4u) return (uint8_t *)&selected_mode;
     if (address == 0xf252a4u && width == 1u) return &online_select_flag;
     abort();
@@ -114,13 +125,7 @@ static int test_stage_select(void)
     const char *failed = NULL;
     uint8_t *modes = &stage_table[4], *entries = &stage_table[0x10];
     modes[2] = 0x10u; modes[3] = 5u; modes[4] = 0u; modes[5] = 0x15u; /* tag: 16-20, regular: 0-20 */
-    for (unsigned i = 0u; i < 0x15u; ++i) memset(entries + i * 0x18u + 1u, (int)(i + 30u), 3u);
-    /* The retail ids of the three rows with selectable alternates. */
-    memset(entries + 4u * 0x18u + 1u, 15, 3u); /* The Aerial Gardens, day */
-    memset(entries + 8u * 0x18u + 1u, 0, 3u);  /* The White Storm */
-    memset(entries + 10u * 0x18u + 1u, 10, 3u); /* The Great Opera, on fire */
-    entries[0x15u * 0x18u] = 1u;
-    memset(entries + 0x15u * 0x18u + 1u, 0xff, 3u);
+    build_stage_entries(entries);
     if (call_cdecl(0x001354a0u, 2u, 0u) != 23u || stage_table[0xa] != 23u ||
         stage_rows[20] != 20u || stage_rows[21] != 0x16u || stage_rows[22] != 0x15u) failed = "regular rows";
     else if (call_cdecl(0x00135510u, 21u, 0u) != 18u || call_cdecl(0x00135510u, 3u, 1u) != 33u ||
@@ -129,6 +134,8 @@ static int test_stage_select(void)
         kernel_page[4] != 61u || kernel_page[5] != 0u || kernel_page[8] != 14u || kernel_page[9] != 0u ||
         kernel_page[12] != 36u || kernel_page[13] != 0u) failed = "Miyama entry";
     else if (call_cdecl(0x00135410u, 22u, 0u) != 0x6e22b0u + 0x15u * 0x18u) failed = "Random entry";
+    else if (call_cdecl(0x00135410u, 9u, 0u) != XBOX_KERNEL_DATA_BASE + 0xc68u ||
+        call_cdecl(0x00135410u, 10u, 0u) != 0x6e22b0u + 10u * 0x18u) failed = "Opera entry";
     if (failed != NULL) {
         fprintf(stderr, "FAIL stage select: %s\n", failed);
         return 0;
@@ -234,9 +241,7 @@ static int test_stage_alts(void)
     uint8_t *entries = &stage_table[0x10];
     uint8_t *aerial = recomp_memory(XBOX_KERNEL_DATA_BASE + 0xc50u, 0x18u);
     uint8_t *opera = recomp_memory(XBOX_KERNEL_DATA_BASE + 0xc68u, 0x18u);
-    memset(entries + 4u * 0x18u + 1u, 15, 3u);
-    memset(entries + 8u * 0x18u + 1u, 0, 3u);
-    memset(entries + 10u * 0x18u + 1u, 10, 3u);
+    build_stage_entries(entries);
     memset(aerial + 1u, 15, 3u);
     memset(opera + 1u, 10, 3u);
     kernel_page[0x40] = 0u; /* White Storm variant: clear */
@@ -254,11 +259,15 @@ static int test_stage_alts(void)
     *recomp_memory_u32(0x87d298u) = 0x2u; /* D-pad Down */
     if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
         aerial[1] != 15u || commit_id != 15u)) failed = "Aerial down";
-    stage_cursor = 10u; /* The Great Opera */
+    stage_cursor = 9u; /* The Great Opera */
     *recomp_memory_u32(0x87d298u) = 0x1u;
     if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
         opera[1] != 11u || opera[2] != 11u ||
         opera[3] != 11u || commit_id != 11u)) failed = "Opera up";
+    if (failed == NULL && (entries[9u * 0x18u + 1u] != 10u ||
+        entries[9u * 0x18u + 2u] != 10u || entries[9u * 0x18u + 3u] != 10u ||
+        entries[4u * 0x18u + 1u] != 15u || entries[4u * 0x18u + 2u] != 15u ||
+        entries[4u * 0x18u + 3u] != 15u)) failed = "retail ids kept";
     call_cdecl(0x001354a0u, 2u, 0u); /* a rebuilt list keeps the alt */
     if (failed == NULL && opera[1] != 11u) failed = "kept Opera alt";
     *recomp_memory_u32(0x87d298u) = 0x2u;
@@ -292,7 +301,7 @@ static int test_stage_alts(void)
     if (failed == NULL && (call_cdecl(0x00135580u, 1u, 0x3000u) != 4u || variant_out != 1u ||
         aerial[1] != 1u || aerial[2] != 1u || aerial[3] != 1u)) failed = "find Aerial night";
     variant_out = 9u;
-    if (failed == NULL && (call_cdecl(0x00135580u, 11u, 0x3000u) != 10u || variant_out != 1u ||
+    if (failed == NULL && (call_cdecl(0x00135580u, 11u, 0x3000u) != 9u || variant_out != 1u ||
         opera[1] != 11u || opera[2] != 11u || opera[3] != 11u)) failed = "find Opera calm";
     if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
     return failed == NULL;
