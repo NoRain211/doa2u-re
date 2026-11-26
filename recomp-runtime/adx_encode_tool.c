@@ -7,11 +7,14 @@
    DOA4's music; loop points are in samples, end exclusive, and override the
    WAV's own smpl loop.
 
-   recomp_adx_encode --level dB in.adx out.adx: the ADX again, its loudness
-   (RMS over the whole track) brought to dB (dBFS), keeping its loop. Peaks the
-   gain would push past -1 dBFS are rounded off rather than clipped. It prints
-   the gain it applied. import_soundtrack.py levels every album with it so they
-   play as loud as DOA2U's own music. */
+   recomp_adx_encode --level dB [loop start] [loop end] in.adx out.adx: the ADX
+   again, its loudness (RMS over the whole track) brought to dB (dBFS), keeping
+   its loop: the given samples as tracks.txt holds them, else its own header's
+   loop (-1) or none (-2). Peaks the gain would push past -1 dBFS are rounded
+   off rather than clipped. It prints the gain it applied. import_soundtrack.py
+   levels every album with it so they play as loud as DOA2U's own music, and a
+   loop only tracks.txt knows (a DOA4 album ffmpeg encoded before the game was
+   built) reaches the game through its ADX header this way. */
 #include "adx_decoder.h"
 #include "adx_encoder.h"
 #include "atomic_file.h"
@@ -52,7 +55,9 @@ static int write_file(const char *path, const unsigned char *data, size_t size)
     return recomp_atomic_commit(out, temporary, path, written) ? 1 : 0;
 }
 
-static int level(double target, const char *from, const char *to)
+/* Tracks' loop points in tracks.txt's terms: a start of -1 keeps the header's own
+   loop, -2 (or any other negative) plays once, and samples given as >= 0 win. */
+static int level(double target, int64_t loop_start, int64_t loop_end, const char *from, const char *to)
 {
     long length = 0;
     unsigned char *data = read_file(from, &length);
@@ -60,11 +65,14 @@ static int level(double target, const char *from, const char *to)
     RecompAdxDecoder decoder;
     uint32_t at = recomp_adx_open(&decoder, data, (uint32_t)length);
     if (at == 0u) { fprintf(stderr, "%s: not an ADX file the game plays\n", from); free(data); return 1; }
-    int64_t loop_start = -1, loop_end = -1;
-    const uint32_t loop = data[0x12] == 3u ? 0x18u : data[0x12] == 4u ? 0x24u : 0u;
-    if (loop != 0u && loop + 0x14u <= at && be32(data + loop) != 0u) {
-        loop_start = be32(data + loop + 4u);
-        loop_end = be32(data + loop + 12u);
+    if (loop_start == -1) {
+        const uint32_t loop = data[0x12] == 3u ? 0x18u : data[0x12] == 4u ? 0x24u : 0u;
+        if (loop != 0u && loop + 0x14u <= at && be32(data + loop) != 0u) {
+            loop_start = be32(data + loop + 4u);
+            loop_end = be32(data + loop + 12u);
+        }
+    } else if (loop_start < 0 || loop_end <= loop_start) {
+        loop_start = loop_end = -1;
     }
     const uint32_t channels = decoder.channels, rate = decoder.sample_rate;
     int16_t *pcm = malloc(((size_t)decoder.total_samples + RECOMP_ADX_FRAME_SAMPLES) * channels * sizeof *pcm);
@@ -103,9 +111,15 @@ static int level(double target, const char *from, const char *to)
 
 int main(int argc, char **argv)
 {
-    if (argc == 5 && strcmp(argv[1], "--level") == 0) return level(strtod(argv[2], NULL), argv[3], argv[4]);
+    if (argc >= 2 && strcmp(argv[1], "--level") == 0) {
+        if (argc == 5) return level(strtod(argv[2], NULL), -1, -1, argv[3], argv[4]);
+        if (argc == 7)
+            return level(strtod(argv[2], NULL), strtoll(argv[3], NULL, 10), strtoll(argv[4], NULL, 10),
+                argv[5], argv[6]);
+    }
     if (argc != 3 && argc != 5) {
-        fprintf(stderr, "usage: %s in.wav out.adx [loop_start loop_end]\n", argv[0]);
+        fprintf(stderr, "usage: %s in.wav out.adx [loop_start loop_end]\n"
+            "       %s --level dB [loop_start loop_end] in.adx out.adx\n", argv[0], argv[0]);
         return 2;
     }
     long length = 0;

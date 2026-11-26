@@ -232,6 +232,28 @@ class ImportFailureTests(unittest.TestCase):
             run.assert_not_called()
             self.assertEqual(outside.read_bytes(), b"outside")
 
+    def test_level_album_hands_tracks_txt_loops_to_the_encoder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [
+                ("one.adx", 1000, 5000, "One"), ("two.adx", -2, -2, "Two"), ("three.adx", -1, -1, "Three")])
+            for name in ("one.adx", "two.adx", "three.adx"):
+                Path(folder, name).write_bytes(b"old")
+            calls = []
+
+            def encode(args, **kwargs):
+                calls.append(args)
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 3)
+            by_track = {os.path.basename(args[-2]): args[:-2] for args in calls}
+            # A loop only tracks.txt knows reaches the header; -2 keeps it absent; -1 leaves it to the file.
+            self.assertEqual(by_track["one.adx"][3:5], ["1000", "5000"])
+            self.assertEqual(by_track["two.adx"][3:5], ["-2", "-2"])
+            self.assertEqual(by_track["three.adx"][3:5], [])
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", Path(folder, "tracks.txt").read_text())
+
     def test_only_a_missing_ffmpeg_is_reported_as_ffmpeg(self):
         source = mock.Mock()
         here = tempfile.gettempdir()

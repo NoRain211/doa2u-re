@@ -492,14 +492,19 @@ def level_album(folder, encoder):
     the same input rather than levelling the tracks that worked a second time. Once they all
     succeeded, the #level mark is written first and the scratch files then replace the tracks: if
     a replace fails (a track open elsewhere), that track keeps its scratch file and a rerun
-    swaps it in rather than levelling again. Returns how many tracks it levelled successfully."""
+    swaps it in rather than levelling again. Returns how many tracks it levelled successfully.
+
+    A row's own loop points go to the encoder too. The game loops an assigned track from its ADX
+    header, and a DOA4 album ffmpeg encoded before the game was built has its loop only in
+    tracks.txt; levelling with that row (and this mark, which the earlier mark lacked) puts the
+    loop in the header, so long matches keep the music playing."""
     path = os.path.join(folder, "tracks.txt")
     try:
         with open(path, encoding="utf-8") as file:
             lines = file.read().splitlines()
     except OSError:
         return 0
-    mark = f"#level\t{LEVEL_DB}"
+    mark = f"#level\t{LEVEL_DB}\tloop"
     if mark in lines:
         for line in lines:  # finish a swap that a failed replace cut short
             parts = line.split("\t")
@@ -519,7 +524,13 @@ def level_album(folder, encoder):
                 continue
             track = os.path.join(folder, track_name(parts[0]))
             scratch = track + ".level"
-            result = run_tool([encoder, "--level", str(LEVEL_DB), track, scratch], capture_output=True, text=True)
+            try:
+                # -1 says the header has the loop; anything else (a loop or no loop) is the row's.
+                loop = [] if int(parts[1]) == -1 and int(parts[2]) == -1 else [parts[1], parts[2]]
+            except ValueError:
+                loop = []
+            result = run_tool([encoder, "--level", str(LEVEL_DB), *loop, track, scratch],
+                capture_output=True, text=True)
             if result.returncode != 0:
                 failed = True
                 print(f"  {parts[0]}: not levelled ({result.stderr.strip()})")
