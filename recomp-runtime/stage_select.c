@@ -55,8 +55,6 @@ enum {
 extern void sub_000FED70(void);
 extern void sub_0012F360(void);
 extern void sub_001357F0(void);
-/* The session's player slot: 1 when this side is player 0, the host. */
-extern void sub_00298F70(void);
 
 /* One stage group (0x693370) holds these and 27 with identical descriptors. */
 static const uint8_t MIYAMA_STAGES[4] = {MIYAMA_STAGE, 64u, 63u, 65u};
@@ -88,23 +86,6 @@ static uint8_t stage_row_entry(uint32_t row)
     return guest_byte(STAGE_ROWS + (row < count ? row : count - 1u));
 }
 
-/* frontend_online_select_enabled (0xcfa20); offline modes also set game mode 5,
-   so the mode alone does not mark a Live match. */
-static bool stage_select_online(void)
-{
-    return *recomp_memory_u32(FRONTEND_SELECTED_MODE) == FRONTEND_ONLINE_MODE &&
-        guest_byte(ONLINE_SELECT_FLAG) != 0u;
-}
-
-/* The session host is player 0 (0x298f70 returns 1 for it), and only it owns
-   the Miyama season online: every peer sends its row's id but loads the id it
-   receives, so a guest's Up or Down would change the host's stage and not its
-   own. An unknown slot (-1) is treated as a guest. */
-static bool online_host(void)
-{
-    return kernel_call_lifted(sub_00298F70, NULL, 0u) == 1u;
-}
-
 static void stage_select_build_rows(void)
 {
     uint32_t list = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
@@ -114,7 +95,9 @@ static void stage_select_build_rows(void)
     uint8_t *rows = recomp_memory(STAGE_ROWS, count + 2u);
     uint8_t row = 0u;
     for (; row < count; ++row) rows[row] = (uint8_t)(first + row);
-    const bool online = stage_select_online();
+    /* frontend_online_select_enabled (0xcfa20); offline modes also set game mode 5 */
+    const bool online = *recomp_memory_u32(FRONTEND_SELECTED_MODE) == FRONTEND_ONLINE_MODE &&
+        guest_byte(ONLINE_SELECT_FLAG) != 0u;
     if (list == STAGE_REGULAR_LIST || (list == STAGE_TAG_LIST && online)) {
         uint8_t *miyama = recomp_memory(MIYAMA_ENTRY_ADDRESS, STAGE_ENTRY_SIZE);
         const uint8_t selected = miyama[1];
@@ -150,12 +133,9 @@ static void stage_select_find_stage(void)
     for (uint32_t row = 0u; row < count; ++row) {
         const uint32_t entry = stage_entry(guest_byte(STAGE_ROWS + row));
         if (entry == MIYAMA_ENTRY_ADDRESS && miyama_stage(stage)) {
-            /* The online match scene's stage id picks that variant again, except
-               on the session host: its entry is the pick every peer sends, so a
-               peer's id must not replace it. */
+            /* The online match scene's stage id picks that variant again. */
             uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
-            if (!(stage_select_online() && online_host()))
-                miyama[1] = miyama[2] = miyama[3] = stage;
+            miyama[1] = miyama[2] = miyama[3] = stage;
             *recomp_memory(variant_out, 1u) = 1u;
             kernel_return(0u, row);
             return;
@@ -176,10 +156,8 @@ static void stage_select_find_stage(void)
 
 /* 0x1357f0 (pad slot): on the Miyama row, Up steps the entry to its next
    variant and Down to its previous one, reloading the preview; that is the
-   only way to reach the other three, and X does nothing. Online only the
-   session host steps; a guest's entry follows the host's id, so its Up and Down
-   do nothing. Every other row, press and frame is the game's own handler, whose
-   hidden Y and Left trigger picks below 64 stay. */
+   only way to reach the other three, and X does nothing. Every other row, press and frame is the game's
+   own handler, whose hidden Y and Left trigger picks below 64 stay. */
 static void stage_select_confirm_input(void)
 {
     const uint32_t pad_slot = *recomp_memory_u32(recomp_runtime.registers.esp + 4u);
@@ -191,10 +169,6 @@ static void stage_select_confirm_input(void)
     const bool up = (pressed & (STAGE_PAD_UP | STAGE_PAD_STICK_UP)) != 0u;
     const bool down = (pressed & (STAGE_PAD_DOWN | STAGE_PAD_STICK_DOWN)) != 0u;
     if (entry == MIYAMA_ENTRY_ADDRESS && !confirming && (up || down)) {
-        if (stage_select_online() && !online_host()) {
-            kernel_return(0u, 0u);
-            return;
-        }
         uint8_t *miyama = recomp_memory(entry, STAGE_ENTRY_SIZE);
         const uint8_t id = miyama_step_stage(miyama[1], up ? 1u : 3u);
         miyama[1] = miyama[2] = miyama[3] = id;

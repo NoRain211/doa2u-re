@@ -22,7 +22,6 @@ static uint8_t time_attack_pool[0x16];             /* at 0x692ba4 */
 static uint8_t rotation_index;                     /* at 0x8783b5 */
 static uint32_t selected_mode;                     /* at 0xdf57b4 */
 static uint8_t online_select_flag;                 /* at 0xf252a4 */
-static uint32_t local_slot = 0xffffffffu;          /* what 0x298f70 reports */
 
 /* The ids one stage group (0x693370) holds; Up steps through them in order. */
 static const uint8_t MIYAMA_IDS[4] = {18u, 64u, 63u, 65u};
@@ -94,11 +93,6 @@ void sub_001357F0(void)
     ++original_calls;
     original_slot = arg(1u);
     ret(0x77u);
-}
-/* online_get_local_player_slot: 1 for the session host, 0 for a guest. */
-void sub_00298F70(void)
-{
-    ret(local_slot);
 }
 
 /* Stage select lists the regular stages, then Tengu's boss stage, then Random;
@@ -215,65 +209,6 @@ static int test_miyama_variants(void)
     return failed == NULL;
 }
 
-/* Online, the session host owns the Miyama season: its Up and Down still step
-   the row, a guest's do nothing, and find-stage leaves the host's pick alone
-   while a guest takes the id it receives. Offline is unchanged. */
-static int test_miyama_online_host(void)
-{
-    const char *failed = NULL;
-    selected_mode = 0x12u;
-    online_select_flag = 1u;
-    if (call_cdecl(0x001354a0u, 2u, 0u) != 23u || stage_rows[21] != 0x16u) failed = "online rows";
-    stage_cursor = 21u;
-    pad_slots[3u * 8u] = 1u; /* slot 3 reads pad 1 */
-    *recomp_memory_u32(0x87d268u) = 0x400u;
-    *recomp_memory_u32(0x87d298u) = 0x1u; /* pad 1's D-pad Up */
-
-    local_slot = 1u; /* the session host steps and commits */
-    kernel_page[1] = kernel_page[2] = kernel_page[3] = 18u;
-    sfx_played = 0u;
-    commit_id = 0u;
-    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u ||
-        kernel_page[1] != 64u || sfx_played != 0x23u || commit_id != 64u)) failed = "host up";
-
-    /* find-stage leaves the host's pick alone. */
-    variant_out = 9u;
-    if (failed == NULL && (call_cdecl(0x00135580u, 18u, 0x3000u) != 21u || variant_out != 1u ||
-        kernel_page[1] != 64u || kernel_page[2] != 64u || kernel_page[3] != 64u)) failed = "host keeps pick";
-
-    local_slot = 0u; /* a guest's Up and Down do nothing */
-    for (unsigned i = 0u; i < 2u && failed == NULL; ++i) {
-        *recomp_memory_u32(0x87d298u) = i == 0u ? 0x1u : 0x2u;
-        sfx_played = 0u;
-        commit_id = 0u;
-        if (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u || kernel_page[1] != 64u ||
-            sfx_played != 0u || commit_id != 0u) failed = "guest stays";
-    }
-    /* The guest's entry takes the host's id. */
-    kernel_page[1] = kernel_page[2] = kernel_page[3] = 18u;
-    variant_out = 9u;
-    if (failed == NULL && (call_cdecl(0x00135580u, 65u, 0x3000u) != 21u || variant_out != 1u ||
-        kernel_page[1] != 65u || kernel_page[2] != 65u || kernel_page[3] != 65u)) failed = "guest follows";
-
-    local_slot = 0xffffffffu; /* an unknown slot behaves as a guest */
-    *recomp_memory_u32(0x87d298u) = 0x1u;
-    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u || kernel_page[1] != 65u))
-        failed = "unknown slot";
-
-    /* Offline keeps its own cycling and find-stage. */
-    selected_mode = 0u;
-    online_select_flag = 0u;
-    kernel_page[1] = kernel_page[2] = kernel_page[3] = 18u;
-    *recomp_memory_u32(0x87d298u) = 0x1u;
-    if (failed == NULL && (call_cdecl(0x001357f0u, 3u, 0xdeadu) != 0u || kernel_page[1] != 64u))
-        failed = "offline up";
-    variant_out = 9u;
-    if (failed == NULL && (call_cdecl(0x00135580u, 65u, 0x3000u) != 21u || variant_out != 1u ||
-        kernel_page[1] != 65u)) failed = "offline find";
-    if (failed != NULL) fprintf(stderr, "FAIL stage select: %s\n", failed);
-    return failed == NULL;
-}
-
 /* The lifted stage pickers, as the game runs them: the fill copies the pool
    and the group it sees, the draw returns a set value, and the next-stage
    pick either steps the 21-stage rotation or draws from it through 0xc4410. */
@@ -361,6 +296,5 @@ static int test_mode_rotations(void)
 int main(void)
 {
     if (recomp_stage_select_lookup_manual(0x00135400u) != NULL) return 1;
-    return test_stage_select() && test_miyama_variants() && test_miyama_online_host() &&
-        test_mode_rotations() ? 0 : 1;
+    return test_stage_select() && test_miyama_variants() && test_mode_rotations() ? 0 : 1;
 }

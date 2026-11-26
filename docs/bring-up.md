@@ -862,21 +862,15 @@ black void in game, so it is left out of the cycle and X on the row does
 nothing. All four share label 61 and thumbnails 14 and 36, so only the preview
 changes. The entry's id bytes hold the pick, and it stays across visits to
 the screen. Random's `row_stage(row, 0)` and the confirm take the current
-variant. During a Live match each peer sends its row's id (`0x293f00`), the
-receiver keeps it at `0xf0a564`, and the match scene loads that id through
-`0x135580` and `0x12f360`, so locally stepping both sides' seasons would swap.
-Online only the session host steps: `0x298f70` returns 1 for player 0, that
-side keeps its entry when a peer's id arrives, and it is the id every peer
-receives and loads; the other peers' Up and Down do nothing and their
-find-stage writes the host's id into the entry. Offline find-stage still
-writes the peer's id back and offline play is unchanged. Replays restore the
-stage id itself (`0x136bb0`), so any variant replays without a row. Played in
-game: the Up cycle, a fight on each variant, the X, Y and Left trigger picks,
-the kept variant and Random; 27 was the black void. Live's host pick and the
-online match scene's restore were not tested. The variant is a stage id the
-game already syncs, the entry sits in the kernel page that rollback restores,
-and Up is read from the lockstepped per-player pad block, so both sides need
-this build, which netplay's build check already requires.
+variant; find-stage (`0x135580`), which only the online match scene uses,
+writes the peer's id back. Replays restore the stage id itself (`0x136bb0`),
+so any variant replays without a row. Played in game: the Up cycle, a fight
+on each variant, the X, Y and Left trigger picks, the kept variant and
+Random; 27 was the black void. Online play and the online match scene's
+restore were not tested. The variant is a stage id the game already syncs, the entry
+sits in the kernel page that rollback restores, and Up is read from the
+lockstepped per-player pad block, so both sides need this build, which
+netplay's build check already requires.
 
 Modes that pick stages without Stage Select read fixed lists, so Miyama is
 added to those too. Time Attack (game mode 4) fills one stage per opponent
