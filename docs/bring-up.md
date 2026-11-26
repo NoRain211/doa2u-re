@@ -875,13 +875,14 @@ find-stage. Stepping a variant changes the id without moving the row, so before
 the countdown runs the peer kept the season the cursor landed on and fought a
 different one; issue #337 reported that desync. The step now broadcasts the new
 id itself, under the row-change path's guard (an online select and a local
-side). Two runners in a Live single battle repeated the test: both showed the
-same Miyama preview before the Up, and the joining side's screen, which took
-no input, changed to the same stepped variant and then fought on it. That
-test's slowed renderer, used to make the unpaced select navigable, failed its
-own frame-30 rollback check; a normal-speed control with no stage-select
-input matched the other side through frame 600, so the failure is not the
-stage pick. The variant is still a stage id the
+side). Two runners in a Live single battle repeated the test: the joining side
+moved to The Miyama, pressed Up and confirmed with A, and the other side, which
+took no input, showed the same stepped variant; both fought on autumn Miyama
+and their guest RAM matched through frame 600. A pick left to the timer after
+a cursor move fails the frame-30 check instead, with or without this change:
+each pad's key-repeat latch (`+0x28` of its `g_pad_state` record, copied to
+`g_player_pads` at `0x87d288`) keeps that side's last frontend press, a
+direction on the chooser and A on the other side. The variant is still a stage id the
 game already carries, the entry sits in the kernel page that rollback
 restores, and Up is read from the lockstepped per-player pad block, so both
 sides need this build, which netplay's build check already requires.
