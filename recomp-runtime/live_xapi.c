@@ -130,7 +130,11 @@ enum {
     LIVE_QOS_DEFAULT_RTT_MS = 50, /* (50*3+199)/100 = 3, the shipped delay */
 
     LIVE_TASK_SLOTS = 16,
-    LIVE_TASK_REQUESTS = 4,
+    /* One request per distinct board: the logon profile read asks for six
+       boards in one XOnlineStatRead (online_start_stat_read_alt 0x2a3740 with
+       the six pairs at 0xf19240), and a stat write sends one record per stat
+       block the player slot holds (0x2ee8 bytes, 0x3e8 per block: twelve). */
+    LIVE_TASK_REQUESTS = 12,
     LIVE_DETACHED_REQUESTS = 8,
 };
 
@@ -230,6 +234,11 @@ typedef struct LiveTask {
     uint32_t handle;
     uint32_t kind;
     RecompLiveRequest requests[LIVE_TASK_REQUESTS];
+    /* A stat read batches consecutive records that name the same board into
+       one request. These say which of the call's records each request covers,
+       so a reply fills only those and never another board's record. */
+    uint32_t record_first[LIVE_TASK_REQUESTS];
+    uint32_t record_span[LIVE_TASK_REQUESTS];
     unsigned request_count;
     uint32_t out[2];  /* guest out-pointers a finished task fills */
     uint32_t capacity;
@@ -1428,8 +1437,8 @@ static RecompLiveStat live_read_stat(uint32_t entry)
 static void live_stat_write(void)
 {
     const RecompLiveBackend *backend = live_backend();
-    const uint32_t count = kernel_arg(1), records = kernel_arg(2), task_out = kernel_arg(4);
-    if (count == 0u || records == 0u || task_out == 0u || backend == NULL || backend->stat_write == NULL) {
+    const uint32_t requested = kernel_arg(1), records = kernel_arg(2), task_out = kernel_arg(4);
+    if (requested == 0u || records == 0u || task_out == 0u || backend == NULL || backend->stat_write == NULL) {
         kernel_return(4u, LIVE_E_INVALIDARG);
         return;
     }
@@ -1438,7 +1447,16 @@ static void live_stat_write(void)
         kernel_return(4u, LIVE_E_FAIL);
         return;
     }
-    for (uint32_t i = 0u; i < count && task->request_count < LIVE_TASK_REQUESTS; ++i) {
+    uint32_t count = requested;
+    if (count > LIVE_TASK_REQUESTS) {
+        /* The player slot holds at most twelve stat blocks (0x2ee8 bytes at
+           0x3e8 each); more means a changed layout, so say it rather than
+           dropping records without a word. */
+        fprintf(stderr, "recomp live: stat write names %u records, keeping %u\n",
+            requested, (unsigned)LIVE_TASK_REQUESTS);
+        count = LIVE_TASK_REQUESTS;
+    }
+    for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t record = records + i * LIVE_STAT_RECORD_BYTES;
         uint64_t xuid = 0u;
         live_load(&xuid, record + LIVE_STAT_XUID, sizeof xuid);
@@ -1499,9 +1517,11 @@ static void live_stat_read(void)
     /* The library puts every record of the call in one request, each with its
        own board; the backend takes the xuids of one board per call. The
        RANKINGS friend page reads up to 100 records (ranking_read_query_start 0x29d9d0 with the
-       friend count + 1), so batch them instead of one request per record. */
+       friend count + 1), so batch them instead of one request per record. The
+       logon profile read instead names six boards for the local player, which
+       needs six requests, not one. */
     uint64_t batch[RECOMP_LIVE_MAX_FRIENDS];
-    uint32_t batch_count = 0u, batch_board = 0u;
+    uint32_t batch_count = 0u, batch_board = 0u, batch_first = 0u;
     for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t record = records + i * LIVE_STAT_RECORD_BYTES;
         uint64_t xuid = 0u;
@@ -1513,16 +1533,24 @@ static void live_stat_read(void)
                 kernel_return(4u, LIVE_E_FAIL);
                 return;
             }
+            task->record_first[task->request_count - 1u] = batch_first;
+            task->record_span[task->request_count - 1u] = batch_count;
             batch_count = 0u;
         }
-        if (batch_count == 0u) batch_board = board;
+        if (batch_count == 0u) {
+            batch_board = board;
+            batch_first = i;
+        }
         batch[batch_count++] = xuid;
     }
-    if (batch_count != 0u &&
-        !live_task_add(task, backend->stat_read(backend->self, batch_board, batch, batch_count))) {
-        live_task_release(task);
-        kernel_return(4u, LIVE_E_FAIL);
-        return;
+    if (batch_count != 0u) {
+        if (!live_task_add(task, backend->stat_read(backend->self, batch_board, batch, batch_count))) {
+            live_task_release(task);
+            kernel_return(4u, LIVE_E_FAIL);
+            return;
+        }
+        task->record_first[task->request_count - 1u] = batch_first;
+        task->record_span[task->request_count - 1u] = batch_count;
     }
     if (task->request_count == 0u) {
         live_task_release(task);
@@ -1694,7 +1722,12 @@ static void live_stat_read_results(void)
             RECOMP_LIVE_MAX_LEADER_ROWS);
         if (rows > RECOMP_LIVE_MAX_LEADER_ROWS) rows = RECOMP_LIVE_MAX_LEADER_ROWS;
         if (rows == 0u) continue;
-        for (uint32_t i = 0u; i < count && records != 0u; ++i) {
+        /* Only this request's own records: the profile read names the same
+           player on six boards, and a reply for one board must not land in
+           the others (its score would become the player's grade points). */
+        const uint32_t first = task->record_first[r];
+        const uint32_t last = first + task->record_span[r];
+        for (uint32_t i = first; i < last && i < count && records != 0u; ++i) {
             const uint32_t record = records + i * LIVE_STAT_RECORD_BYTES;
             uint64_t xuid = 0u;
             live_load(&xuid, record + LIVE_STAT_XUID, sizeof xuid);
