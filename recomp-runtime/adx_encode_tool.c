@@ -57,8 +57,12 @@ static int write_file(const char *path, const unsigned char *data, size_t size)
 }
 
 /* Tracks' loop points in tracks.txt's terms: a start of -1 keeps the header's own
-   loop, -2 (or any other negative) plays once, and samples given as >= 0 win. */
-static int level(double target, int64_t loop_start, int64_t loop_end, const char *from, const char *to)
+   loop, -2 (or any other negative) plays once, and samples given as >= 0 win.
+   Points the caller gave (loop_given) must fit the track: one that does not is an
+   error, so the album stays as it was and its row keeps the points. An own header
+   loop that does not fit is dropped, as it would never trigger in the game. */
+static int level(double target, int64_t loop_start, int64_t loop_end, bool loop_given,
+    const char *from, const char *to)
 {
     long length = 0;
     unsigned char *data = read_file(from, &length);
@@ -72,8 +76,8 @@ static int level(double target, int64_t loop_start, int64_t loop_end, const char
             loop_start = be32(data + loop + 4u);
             loop_end = be32(data + loop + 12u);
         }
-    } else if (loop_start < 0 || loop_end <= loop_start) {
-        loop_start = loop_end = -1;
+    } else if (loop_start < 0) {
+        loop_start = loop_end = -1; /* -2: no loop */
     }
     const uint32_t channels = decoder.channels, rate = decoder.sample_rate;
     int16_t *pcm = malloc(((size_t)decoder.total_samples + RECOMP_ADX_FRAME_SAMPLES) * channels * sizeof *pcm);
@@ -102,7 +106,13 @@ static int level(double target, int64_t loop_start, int64_t loop_end, const char
     const int64_t wanted_start = loop_start, wanted_end = loop_end;
     if (loop_end > (int64_t)frames) loop_end = frames;
     if (loop_start >= 0 && loop_end <= loop_start) {
-        fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples; levelled without a loop\n",
+        if (loop_given) {
+            fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples\n",
+                from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
+            free(pcm);
+            return 1;
+        }
+        fprintf(stderr, "%s: its own loop %lld..%lld does not fit its %u samples; levelled without one\n",
             from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
         loop_start = loop_end = -1;
     }
@@ -143,14 +153,14 @@ int main(int argc, char **argv)
             fprintf(stderr, "%s: --level wants a number of dB\n", argv[0]);
             return 2;
         }
-        if (argc == 5) return level(target, -1, -1, argv[3], argv[4]);
+        if (argc == 5) return level(target, -1, -1, false, argv[3], argv[4]);
         int64_t loop_start, loop_end;
         if (!loop_arguments(argv, 3, &loop_start, &loop_end)) {
             fprintf(stderr, "%s: loop points are whole samples, not %s and %s\n",
                 argv[0], argv[3], argv[4]);
             return 2;
         }
-        return level(target, loop_start, loop_end, argv[5], argv[6]);
+        return level(target, loop_start, loop_end, true, argv[5], argv[6]);
     }
     if (argc != 3 && argc != 5) return usage(argv[0]);
     int64_t given_start = -1, given_end = -1;
@@ -166,6 +176,12 @@ int main(int argc, char **argv)
     int16_t *pcm = recomp_wav_read(data, (size_t)length, &frames, &channels, &rate, &loop_start, &loop_end);
     free(data);
     if (pcm == NULL) { fprintf(stderr, "%s: not a mono or stereo PCM WAV\n", argv[1]); return 1; }
+    if (argc == 5 && (given_start < 0 || given_end <= given_start || given_end > (int64_t)frames)) {
+        fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples\n",
+            argv[0], (long long)given_start, (long long)given_end, (unsigned)frames);
+        free(pcm);
+        return 1;
+    }
     if (argc == 5) {
         loop_start = given_start;
         loop_end = given_end;

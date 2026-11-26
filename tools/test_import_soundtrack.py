@@ -296,6 +296,35 @@ class ImportFailureTests(unittest.TestCase):
             self.assertEqual(text.count("#level"), 1)
             self.assertEqual(Path(folder, "one.adx").read_bytes(), b"levelled")
 
+    def test_a_failed_encoder_keeps_the_rows_loop_points(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", 1000, 5000, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            failed = SimpleNamespace(returncode=1,
+                stderr="its loop 1000..5000 does not fit its 900 samples", stdout="")
+            with mock.patch.object(soundtrack.subprocess, "run", return_value=failed):
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            text = Path(folder, "tracks.txt").read_text()
+            # The header does not hold it, so the row keeps naming the loop a rerun can retry.
+            self.assertIn("one.adx\t1000\t5000\tOne", text)
+            self.assertNotIn("#level", text)
+            self.assertEqual(Path(folder, "one.adx").read_bytes(), b"old")
+
+    def test_a_legacy_album_with_a_bad_row_name_only_takes_the_new_mark(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", -1, -1, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            path = Path(folder, "tracks.txt")
+            path.write_text(path.read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}") +
+                "bad name.adx\t-1\t-1\tBad\n", encoding="utf-8")
+            with mock.patch.object(soundtrack.subprocess, "run") as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
+            run.assert_not_called()
+            text = path.read_text()
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
+            self.assertIn("bad name.adx\t-1\t-1\tBad", text)
+
     def test_only_a_missing_ffmpeg_is_reported_as_ffmpeg(self):
         source = mock.Mock()
         here = tempfile.gettempdir()

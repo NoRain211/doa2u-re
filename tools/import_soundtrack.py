@@ -502,7 +502,12 @@ def finish_swaps(folder, lines):
     for line in lines:
         parts = line.split("\t")
         if not line.startswith("#") and len(parts) >= 4:
-            track = os.path.join(folder, track_name(parts[0]))
+            try:
+                track = os.path.join(folder, track_name(parts[0]))
+            except ValueError:
+                print(f"warning: {os.path.basename(folder)}: {parts[0]!r} is not a track file name; "
+                    "its row is left as it is.")
+                continue
             if os.path.exists(track + ".level"):
                 swap_levelled(folder, track + ".level", track)
 
