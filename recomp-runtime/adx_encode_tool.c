@@ -104,17 +104,21 @@ static int level(double target, int64_t loop_start, int64_t loop_end, bool loop_
         pcm[i] = (int16_t)lrint(v > 32767.0 ? 32767.0 : v < -32768.0 ? -32768.0 : v);
     }
     const int64_t wanted_start = loop_start, wanted_end = loop_end;
-    if (loop_end > (int64_t)frames) loop_end = frames;
-    if (loop_start >= 0 && loop_end <= loop_start) {
-        if (loop_given) {
+    if (loop_given) {
+        if (loop_start >= 0 && (loop_start >= (int64_t)frames || loop_end > (int64_t)frames ||
+                loop_end <= loop_start)) {
             fprintf(stderr, "%s: its loop %lld..%lld does not fit its %u samples\n",
                 from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
             free(pcm);
             return 1;
         }
-        fprintf(stderr, "%s: its own loop %lld..%lld does not fit its %u samples; levelled without one\n",
-            from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
-        loop_start = loop_end = -1;
+    } else {
+        if (loop_end > (int64_t)frames) loop_end = frames;
+        if (loop_start >= 0 && loop_end <= loop_start) {
+            fprintf(stderr, "%s: its own loop %lld..%lld does not fit its %u samples; levelled without one\n",
+                from, (long long)wanted_start, (long long)wanted_end, (unsigned)frames);
+            loop_start = loop_end = -1;
+        }
     }
     size_t size = 0u;
     unsigned char *adx = recomp_adx_encode(pcm, frames, channels, rate, loop_start, loop_end, &size);

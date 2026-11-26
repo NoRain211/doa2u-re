@@ -497,18 +497,23 @@ def has_explicit_loop(line):
     return loop is not None and loop[0] >= 0
 
 
+def album_track(folder, name):
+    """The track a tracks.txt row names, or None when its name is not one (left alone, said once)."""
+    try:
+        return os.path.join(folder, track_name(name))
+    except ValueError:
+        print(f"warning: {os.path.basename(folder)}: {name!r} is not a track file name; "
+            "its row is left as it is.")
+        return None
+
+
 def finish_swaps(folder, lines):
     """Finishes a swap a failed replace cut short: a levelled copy left beside its track."""
     for line in lines:
         parts = line.split("\t")
         if not line.startswith("#") and len(parts) >= 4:
-            try:
-                track = os.path.join(folder, track_name(parts[0]))
-            except ValueError:
-                print(f"warning: {os.path.basename(folder)}: {parts[0]!r} is not a track file name; "
-                    "its row is left as it is.")
-                continue
-            if os.path.exists(track + ".level"):
+            track = album_track(folder, parts[0])
+            if track is not None and os.path.exists(track + ".level"):
                 swap_levelled(folder, track + ".level", track)
 
 
@@ -555,7 +560,9 @@ def level_album(folder, encoder):
             parts = line.split("\t")
             if line.startswith("#") or len(parts) < 4:
                 continue
-            track = os.path.join(folder, track_name(parts[0]))
+            track = album_track(folder, parts[0])
+            if track is None:
+                continue
             scratch = track + ".level"
             loop = track_loop(parts)
             if loop is None:

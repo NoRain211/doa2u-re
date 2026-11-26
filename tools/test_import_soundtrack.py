@@ -217,7 +217,7 @@ class ImportFailureTests(unittest.TestCase):
             self.assertTrue(lines[2].startswith("01_bgm_x____evil_.adx\t"))
             self.assertEqual(run.call_count, 1)
 
-    def test_level_album_rejects_track_names_outside_the_album(self):
+    def test_level_album_leaves_track_names_outside_the_album_alone(self):
         with tempfile.TemporaryDirectory() as base:
             folder = os.path.join(base, "album")
             os.makedirs(folder)
@@ -227,8 +227,7 @@ class ImportFailureTests(unittest.TestCase):
                 for name in ("../outside.adx", str(outside.resolve()), "sub/outside.adx", ".", ".."):
                     Path(folder, "tracks.txt").write_text(
                         f"#title\tAlbum\n{name}\t-1\t-1\tEscape\n", encoding="utf-8")
-                    with self.assertRaises(ValueError):
-                        soundtrack.level_album(folder, "encoder")
+                    self.assertEqual(soundtrack.level_album(folder, "encoder"), 0)
             run.assert_not_called()
             self.assertEqual(outside.read_bytes(), b"outside")
 
@@ -309,6 +308,28 @@ class ImportFailureTests(unittest.TestCase):
             self.assertIn("one.adx\t1000\t5000\tOne", text)
             self.assertNotIn("#level", text)
             self.assertEqual(Path(folder, "one.adx").read_bytes(), b"old")
+
+    def test_a_legacy_album_relevels_around_a_bad_row_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            soundtrack.write_tracks(folder, "Album", [("one.adx", 1000, 5000, "One")])
+            Path(folder, "one.adx").write_bytes(b"old")
+            path = Path(folder, "tracks.txt")
+            path.write_text(path.read_text().replace(
+                "#title\tAlbum", f"#title\tAlbum\n#level\t{soundtrack.LEVEL_DB}") +
+                "bad name.adx\t-1\t-1\tBad\n", encoding="utf-8")
+
+            def encode(args, **kwargs):
+                self.assertEqual(args[3:5], ["1000", "5000"])
+                Path(args[-1]).write_bytes(b"levelled")
+                return SimpleNamespace(returncode=0, stderr="", stdout="ok")
+
+            with mock.patch.object(soundtrack.subprocess, "run", side_effect=encode) as run:
+                self.assertEqual(soundtrack.level_album(folder, "encoder"), 1)
+            self.assertEqual(run.call_count, 1)
+            text = path.read_text()
+            self.assertIn("one.adx\t-1\t-1\tOne", text)
+            self.assertIn("bad name.adx\t-1\t-1\tBad", text)
+            self.assertIn(f"#level\t{soundtrack.LEVEL_DB}\tloop", text)
 
     def test_a_legacy_album_with_a_bad_row_name_only_takes_the_new_mark(self):
         with tempfile.TemporaryDirectory() as folder:
