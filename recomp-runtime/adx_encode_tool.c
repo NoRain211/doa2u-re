@@ -72,6 +72,7 @@ static int level(double target, int64_t loop_start, int64_t loop_end, bool loop_
     if (at == 0u) { fprintf(stderr, "%s: not an ADX file the game plays\n", from); free(data); return 1; }
     bool from_header = false;
     if (loop_start == -1) {
+        loop_end = -1; /* -1 without a header loop is no loop, not half the caller's pair */
         const uint32_t loop = data[0x12] == 3u ? 0x18u : data[0x12] == 4u ? 0x24u : 0u;
         if (loop != 0u && loop + 0x14u <= at && be32(data + loop) != 0u) {
             loop_start = be32(data + loop + 4u);
