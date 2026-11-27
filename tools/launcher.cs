@@ -241,12 +241,15 @@ static class SdlPad
     static extern int SDL_GetGamepadTypeForID(int instanceId);
     [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
     static extern void SDL_free(IntPtr memory);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern void SDL_UpdateGamepads();
     static bool started;
     // True when the first gamepad is a PlayStation one, as tools/launcher_sdl.cpp reads it.
     public static bool PlayStation()
     {
         if (!started) started = SDL_Init(InitGamepad);
         if (!started) return false;
+        SDL_UpdateGamepads(); // no event loop here, so this is what notices hotplugged pads
         int count;
         IntPtr ids = SDL_GetGamepads(out count);
         if (ids == IntPtr.Zero) return false;
