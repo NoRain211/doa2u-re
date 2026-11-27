@@ -831,6 +831,10 @@ static void qos_tick(uint64_t now)
                     qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
                     continue;
                 }
+                if (peer == NULL) { /* forgotten mid-request: nothing to probe */
+                    qos_finish(entry, RECOMP_LIVE_QOS_NO_REPLY);
+                    continue;
+                }
                 if (now >= entry->next_ms) qos_probe(request, entry, peer, e, now);
                 continue;
             }
@@ -849,7 +853,9 @@ static void qos_tick(uint64_t now)
 
 bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas, uint32_t count)
 {
-    if (slot >= RECOMP_LIVE_QOS_SLOTS || count > RECOMP_LIVE_MAX_RESULTS ||
+    /* Only the pump advances a request, and it runs while the socket is up;
+       a closed transport keeps the shipped figure instead of pending forever. */
+    if (!live.open || slot >= RECOMP_LIVE_QOS_SLOTS || count > RECOMP_LIVE_MAX_RESULTS ||
         (count != 0u && virtual_inas == NULL))
         return false;
     LiveQosRequest *request = &live.qos[slot];

@@ -1195,6 +1195,11 @@ int main(void)
 
     recomp_live_transport_close();
     check("a closed transport receives nothing", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
+    {
+        const uint32_t qos_ina = ina_b;
+        check("a closed transport starts no qos, which only its pump would settle",
+            !recomp_live_transport_qos_start(0u, &qos_ina, 1u));
+    }
 
     /* --- the matchmaker's name is looked up off the frame thread --- */
     while (read_socket(server_socket, packet, sizeof packet, &client_endpoint, 20u) >= 0) {
