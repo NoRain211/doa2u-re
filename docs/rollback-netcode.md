@@ -199,6 +199,20 @@ runs on the game's own Live messages, unsynced. A desync, a timeout or a
 failed rewind hands the fight back to the game's Live code without stopping
 the runner. See [Xbox Live](xbox-live.md).
 
+Start opens the game's online pause menu on both sides. The game's pause poll
+(`0xdbb90`, online branch at `0xdbb50`) reads the lockstepped per-player pads,
+so the side that pressed Start and the other side both open their own menu on
+the same frame: PAUSED with CONTINUE, COMMAND LIST, FRIENDS, PLAYERS, ONLINE
+OPTIONS and QUIT SESSION (`0xdb400`, items from `0x695ae0`; the offline menu
+also offers CHARACTER SELECT and QUIT). The fight keeps running behind the
+menus with the same two pad streams, so the round timer and both fighters
+advance, and the pauser's local pads are cleared once (`0x292e50`). Each side
+closes only its own menu with A or B, and the game's lockstep resumes
+(`0xdb280`). The menu's two bytes, `g_pause_menu_player` (`0x878390`) and
+`g_pause_menu_open` (`0x87ae02`), are therefore one side's own; the fight
+never reads them, so the desync check leaves them out (see "Desync checks",
+and `live_fight_rules.c`).
+
 ## Transport and pacing
 
 `netplay.c` sends one UDP packet per frame. It carries the sender's frame,
@@ -357,7 +371,12 @@ the log says so, with the slowest check.
 A Live fight hashes only the fight: the match and fighter block, the battle
 state and the game's Mersenne Twister. Everything else, including each side's
 Live layer, profile, HUD, 2D draw state, cloth and stage effects keyed to
-frames since boot, is ignored (`live_fight_rules.c`). With the whole of guest
+frames since boot, is ignored (`live_fight_rules.c`). Inside the fight block,
+the bytes each player's own pause menu keeps (`0x878390`, `0x87ae02`) and the
+camera, matrices and music track their widescreen and 5.1 choices shape are
+left out too; no fight update reads them. Without that, pausing either side
+failed the next check, which compared the pauser's `0x878390` with the other
+side's. With the whole of guest
 RAM hashed, the first live round failed its first check after the HUD
 appeared, at frame 1,500, and both sides' guest RAM at that frame differed in
 15 bytes, all of them HUD colours. SyncTest and the dumps still compare them.

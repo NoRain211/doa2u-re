@@ -124,7 +124,10 @@ matrices, which the 16:9 camera sets differently, and the music track), so
 players with different settings can fight each other. A desync, a timeout or a failed rewind ends the session without
 stopping the runner; the other player gets a goodbye and the game announces
 that a player left. A fight waits 15 s for a silent opponent before it ends.
-A save the game writes mid-fight waits for the other player's input; if
+Start opens the game's own online pause menu on both sides, since its pause
+poll reads the lockstepped pads; the fight keeps running behind the menus and
+each side closes its own. A save the game writes mid-fight waits for the
+other player's input; if
 that input proves a frame before the save mispredicted, the runner stops
 (`rollback:save-mispredicted`), since the save cannot be taken back. See [rollback netcode](rollback-netcode.md) for how the
 game's own lockstep works.

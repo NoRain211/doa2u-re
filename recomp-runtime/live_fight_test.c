@@ -164,13 +164,16 @@ static void test_hash_ranges(void)
         if (!inside) outside += ignored[i].stop - ignored[i].start;
     }
     CHECK(outside + kept_bytes == RECOMP_XBOX_RAM_SIZE);
-    /* Frames since boot, what a player's widescreen and 5.1 choices change and
-       what the menu demo scenes leave behind stay out; the fighters, their
-       bones, the round timer, the match's life and tag settings, the bytes the
-       fight reads beside the demo's state, and the random numbers stay in. */
+    /* Frames since boot, what a player's widescreen and 5.1 choices change,
+       each side's own pause menu and what the menu demo scenes leave behind
+       stay out; the fighters, their bones, the round timer, the match's life
+       and tag settings, the bytes the fight reads beside the demo's state, and
+       the random numbers stay in. */
     static const struct { uint32_t address; bool skipped; } probes[] = {
         {0x0087d56cu, true}, {0x00877c6cu, true}, {0x00879bf8u, true}, {0x00879c10u, true},
         {0x0087a93cu, true}, {0x0087d360u, true}, {0x0087d39cu, true}, {0x0087f538u, true},
+        {0x00878390u, true}, {0x0087ae02u, true}, /* the pause menu's player and open flag */
+        {0x00878391u, false}, {0x0087ae03u, false}, /* the bytes after them stay in */
         {0x00863a8cu, false}, {0x0087f539u, false}, {0x008a3968u, false}, {0x008a5768u, false},
         {0x00876050u, false}, {0x00877c9cu, false}, {0x0087d498u, false}, {0x0087d49du, false},
         {0x0087d5a4u, false}, {0x0087d63cu, false}, {0x0087f51du, false},
