@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from extract_iso import private_pattern, redact_private
 from package_test import build_launchers
-from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
+from run_game import open_launcher, prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
 
 
 def runner(code, output=()):
@@ -410,6 +410,17 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                         run(1, vulkan=True)
                 prepare.assert_not_called()
 
+
+    def test_launcher_without_a_build_asks_for_the_iso(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch("run_game.ROOT", root):
+                with self.assertRaisesRegex(ValueError, "not built yet.*build_game.sh"):
+                    open_launcher()
+                (root / "private/program").mkdir(parents=True)
+                (root / "private/program/receipt.json").write_text("{}")
+                with self.assertRaisesRegex(ValueError, "is missing; rebuild"):
+                    open_launcher()
 
 if __name__ == "__main__":
     unittest.main()
