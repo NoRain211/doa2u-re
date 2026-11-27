@@ -130,7 +130,15 @@ enum {
     LIVE_QOS_DEFAULT_RTT_MS = 50, /* (50*3+199)/100 = 3, the shipped delay */
 
     LIVE_TASK_SLOTS = 16,
-    LIVE_TASK_REQUESTS = 4,
+    /* One request per stat write record, and one XOnlineStatWrite call carries
+       at most the 12 records of the game's upload context (0xf0a738 + i*0x2ee8
+       holds twelve 0x3e8-byte slots, then the count at +0x2ee4; see
+       online_stat_values_queue 0x297150 and online_stat_write_records_fill
+       0x2942c0). The matchmaker's STAT_WRITE packet names one board and one
+       XUID, so records cannot share a request; the cap must cover a whole call
+       or the tail of an upload is lost. live_client.c keeps 16 request slots,
+       so the 12 requests of a full call fit its table. */
+    LIVE_TASK_REQUESTS = 12,
     LIVE_DETACHED_REQUESTS = 8,
 };
 
@@ -483,10 +491,46 @@ static uint32_t live_task_hresult(uint32_t hresult)
     return hresult != 0u && (hresult & 0x80000000u) != 0u ? hresult : LIVE_E_FAIL;
 }
 
+/* A stat write is one request per record, while the console library packed
+   every record of a call into one service request (xonline_stat_write_request
+   0x3a4d86, service 0x388) and the game reads only that single task result
+   (online_stat_task_update 0x29f610, which on failure moves DAT_00f24ac8 to its
+   error state and does not retry). Stopping at the first refused record would
+   also cancel the resends of records the server has not acknowledged yet, which
+   one console request never did, so poll every record and report the first
+   refusal only after all of them have settled. The records the service
+   accepted stay written. */
+static uint32_t live_task_poll_stat_write(LiveTask *task)
+{
+    const RecompLiveBackend *backend = live_backend();
+    bool pending = false;
+    uint32_t failure = 0u;
+    for (unsigned i = 0u; i < task->request_count; ++i) {
+        uint32_t hresult = 0u;
+        const RecompLiveStatus status = backend->poll(backend->self, task->requests[i], &hresult);
+        if (status == RECOMP_LIVE_PENDING) {
+            pending = true;
+            continue;
+        }
+        if (status == RECOMP_LIVE_FAILED && failure == 0u) failure = live_task_hresult(hresult);
+    }
+    if (pending) return LIVE_TASK_RUNNING;
+    task->complete = true;
+    if (failure != 0u) {
+        task->final = failure;
+        live_task_drop_requests(task);
+    } else {
+        task->final = live_task_finished(task);
+    }
+    return task->final;
+}
+
 static uint32_t live_task_poll(LiveTask *task)
 {
     const RecompLiveBackend *backend = live_backend();
     if (task->complete) return task->final;
+    if (task->kind == LIVE_KIND_STAT_WRITE && backend != NULL && backend->poll != NULL)
+        return live_task_poll_stat_write(task);
     if (task->request_count != 0u && backend != NULL && backend->poll != NULL) {
         bool pending = false;
         for (unsigned i = 0u; i < task->request_count; ++i) {
@@ -1433,12 +1477,22 @@ static void live_stat_write(void)
         kernel_return(4u, LIVE_E_INVALIDARG);
         return;
     }
+    /* One backend request per record: the matchmaker's STAT_WRITE packet names
+       one board and one XUID, so records cannot share one. A call larger than
+       the game's own 12-record upload context cannot be queued, and returning a
+       task for it would upload the first 12 and claim the rest succeeded. */
+    if (count > LIVE_TASK_REQUESTS) {
+        fprintf(stderr, "recomp live: stat write has %u records, over the %u record cap\n", (unsigned)count,
+            (unsigned)LIVE_TASK_REQUESTS);
+        kernel_return(4u, LIVE_E_FAIL);
+        return;
+    }
     LiveTask *task = live_task_new(LIVE_KIND_STAT_WRITE);
     if (task == NULL) {
         kernel_return(4u, LIVE_E_FAIL);
         return;
     }
-    for (uint32_t i = 0u; i < count && task->request_count < LIVE_TASK_REQUESTS; ++i) {
+    for (uint32_t i = 0u; i < count; ++i) {
         const uint32_t record = records + i * LIVE_STAT_RECORD_BYTES;
         uint64_t xuid = 0u;
         live_load(&xuid, record + LIVE_STAT_XUID, sizeof xuid);
@@ -1466,7 +1520,13 @@ static void live_stat_write(void)
                 if (stat.type == LIVE_STAT_TYPE_STRING) continue;
                 stats[n++] = stat;
             }
-        if (!live_task_add(task, backend->stat_write(backend->self, board, xuid, stats, n))) {
+        const RecompLiveRequest request = backend->stat_write(backend->self, board, xuid, stats, n);
+        if (!live_task_add(task, request)) {
+            /* Only a backend out of request slots gets here (live_client.c holds
+               16). Fail the call rather than upload some records and claim the
+               whole call succeeded; the request built for this record is not in
+               the task yet and would otherwise never be released. */
+            if (request != 0u && backend->release != NULL) backend->release(backend->self, request);
             live_task_release(task);
             kernel_return(4u, LIVE_E_FAIL);
             return;
