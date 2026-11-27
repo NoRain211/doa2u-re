@@ -63,7 +63,7 @@ MAX_FRIENDS = 100  # RECOMP_LIVE_MAX_FRIENDS
 MAX_MUTES = 250  # RECOMP_LIVE_MAX_MUTES
 MAX_STAT_WRITE = 64  # RECOMP_LIVE_MAX_STAT_ATTRS; group 7 writes 61
 MAX_STATS = 64  # kept per account and board; group 7 reads back 62
-MAX_BOARDS = 48  # distinct boards an account's stats may name; DOA2U uses 0..47
+MAX_BOARDS = 49  # distinct boards an account's stats may name; DOA2U uses 0..48
 MAX_FEEDBACK_KINDS = 16  # distinct feedback types one target may receive
 MAX_FEEDBACK_COUNT = 1 << 20  # a type's count saturates here, so a flood cannot grow the store without bound
 MAX_RANKINGS = 256  # cached board rankings; the oldest makes room for a new board
@@ -131,6 +131,14 @@ STAT_RATING = 0xFFFE  # -2, XONLINE_STAT_RATING: the score a board ranks by (ran
 STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
 STATROW_BODY = struct.Struct(">IIBBIQ16sIB")  # request, hresult, index, total, board total, XUID, gamertag, rank, count
 LEADERS_BODY = struct.Struct(">IIQIB")  # request, board, pivot XUID, first rank, count
+# The ranking pages read boards 35-38 (world) and 43-46 (friends), which the game
+# never writes, after uploading the same row to 31-34 and 39-42: one page index
+# names a read board in 0x7c02b0 and its write board in 0x7c02bc
+# (live_ranking_page_set_board 0x2b5bf0, upload_own_row 0x2b6140). A read of one
+# of the former serves its pair's rows, so the list is not empty. Board 43 also
+# keeps its own rows: a match's end writes character usage there
+# (ranking_write_character_stats_board 0x297870).
+RANKING_READ_BOARDS = {35: 31, 36: 32, 37: 33, 38: 34, 43: 39, 44: 40, 45: 41, 46: 42}
 # One MUTELIST packet carries this many: 1,200 bytes less the header, nonce and count.
 MAX_MUTELIST = (MAX_PACKET - (ASKED - TOKEN) - MUTELIST_BODY.size) // 8
 
@@ -629,7 +637,7 @@ class Matchmaker:
                 rows.discard(xuid)
                 if not rows:
                     del self.stats_by_board[board]
-            self.rankings.pop(board, None)
+            self.invalidate_board(board)
         for key in [key for key in self.live_pairs if xuid in key]:
             del self.live_pairs[key]
         self.met = {key: when for key, when in self.met.items() if xuid not in key}
@@ -1053,9 +1061,40 @@ class Matchmaker:
         self.stats.setdefault((board, xuid), {}).update(incoming)
         self.stats_by_board.setdefault(board, set()).add(xuid)
         self.boards_of.setdefault(xuid, set()).add(board)
-        self.rankings.pop(board, None)
+        self.invalidate_board(board)
         self.dirty = True
         return self.done(req, HRESULT_OK, sender, nonce)
+
+    def board_stats(self, board, xuid):
+        """The row a read of board serves: its own, or its ranking read pair's."""
+        stats = self.stats.get((board, xuid))
+        if stats:
+            return stats
+        source = RANKING_READ_BOARDS.get(board)
+        return self.stats.get((source, xuid), {}) if source is not None else {}
+
+    def board_rows(self, board):
+        """The (XUID, stats) rows a read of board serves.
+
+        A ranking read board also serves the rows of the board the game uploads
+        to (RANKING_READ_BOARDS), and its own rows win where it has one."""
+        source = RANKING_READ_BOARDS.get(board)
+        xuids = set(self.stats_by_board.get(board, ()))
+        if source is not None:
+            xuids.update(self.stats_by_board.get(source, ()))
+        rows = []
+        for xuid in xuids:
+            stats = self.board_stats(board, xuid)
+            if stats and xuid in self.accounts:
+                rows.append((xuid, stats))
+        return rows
+
+    def invalidate_board(self, board):
+        """Drops board's cached ranking, and those of the read boards it feeds."""
+        self.rankings.pop(board, None)
+        for read_board, source in RANKING_READ_BOARDS.items():
+            if source == board:
+                self.rankings.pop(read_board, None)
 
     def board_ranking(self, board):
         """(rank, XUID) from the highest score down, cached."""
@@ -1067,16 +1106,14 @@ class Matchmaker:
         A board ranks by its score stat, STAT_RATING (-2), which the game writes on
         every ranking board. The lowest id was ranked before and that is a profile
         byte, not a score. A row whose write carried no score still appears, after
-        every scored row, by its lowest id as before."""
+        every scored row, by its lowest id as before. A ranking read board ranks
+        the rows its pair serves (board_rows), so the two agree."""
         cached = self.rankings.pop(board, None)
         if cached is not None:
             self.rankings[board] = cached  # most recently used last
             return cached
         rows = []
-        for xuid in self.stats_by_board.get(board, ()):
-            stats = self.stats.get((board, xuid))
-            if not stats or xuid not in self.accounts:
-                continue
+        for xuid, stats in self.board_rows(board):
             if STAT_RATING in stats:
                 rows.append((0, -stat_number(stats[STAT_RATING]), xuid))
             else:
@@ -1102,7 +1139,7 @@ class Matchmaker:
         ranking, ranks = tally
         if rank is None:
             rank = ranks.get(xuid, 0)
-        stats = self.stats.get((board, xuid), {})
+        stats = self.board_stats(board, xuid)
         account = self.accounts.get(xuid)
         items = sorted(stats.items())[:MAX_STATS]
         body = STATROW_BODY.pack(req, hresult, index, total, len(ranking), xuid,

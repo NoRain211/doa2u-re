@@ -837,6 +837,66 @@ class LiveTest(unittest.TestCase):
         self.assertNotIn((1, A), self.server.stats)
         self.assertEqual(rows[0][8], 1)  # B's own row still carries its stat
 
+    def test_a_world_ranking_read_serves_the_board_it_is_uploaded_from(self):
+        self.online()
+        # The game uploads a world ranking row to 31..34 and reads the list from
+        # 35..38, which nothing writes (live_ranking_page_set_board 0x2b5bf0).
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 31, A, ((5, 1, 7), (0xFFFE, 2, 100)))),
+                  A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 31, B, ((0xFFFE, 2, 300),))), B_AT, 0.0)
+        rows = self.stats(req=70, now=1.0, board=35, xuids=(A, B))
+        self.assertEqual([(row[5], row[7], row[8]) for row in rows], [(A, 2, 2), (B, 1, 1)])
+        body = mm.ASKED - mm.TOKEN + mm.STATROW_BODY.size
+        self.assertEqual([mm.STAT_ITEM.unpack_from(rows[0][9], body + index * mm.STAT_ITEM.size) for index in range(2)],
+                         [(5, 1, 7), (0xFFFE, 2, 100)])
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=71, now=1.0, board=35)], [(B, 1), (A, 2)])
+        # Projected, not copied: the read board keeps no row of its own.
+        self.assertFalse([key for key in self.server.stats if key[0] == 35])
+        self.assertNotIn(35, self.server.stats_by_board)
+
+    def test_a_write_to_either_board_of_a_ranking_pair_drops_its_cached_ranking(self):
+        self.online()
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 32, A, ((0xFFFE, 2, 100),))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 32, B, ((0xFFFE, 2, 200),))), B_AT, 0.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=72, now=1.0, board=36)], [(B, 1), (A, 2)])
+        # A later write to the upload board reorders what the read board serves.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 32, A, ((0xFFFE, 2, 400),))), A_AT, 2.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=73, now=3.0, board=36)], [(A, 1), (B, 2)])
+
+    def test_a_friends_ranking_read_serves_its_upload_board_and_board_43s_own_rows(self):
+        self.online()
+        # Friends pages upload to 39..42 and read 43..46. Board 43 also keeps the
+        # character usage a match's end writes (ranking_write_character_stats_board).
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 39, A, ((0xFFFE, 2, 50),))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 43, B, ((0, 1, 3), (0xFFFE, 2, 200)))),
+                  B_AT, 0.0)
+        rows = self.stats(req=74, now=1.0, board=43, xuids=(A, B))
+        self.assertEqual([(row[5], row[7], row[8]) for row in rows], [(A, 2, 1), (B, 1, 2)])
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=75, now=1.0, board=43)], [(B, 1), (A, 2)])
+        # 44..46 project from 40..42, each from its own board.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 41, C, ((0xFFFE, 2, 7),))), C_AT, 0.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=76, now=1.0, board=45)], [(C, 1)])
+        self.assertEqual([(row[0], row[3], row[4]) for row in self.leaders(req=77, now=1.0, board=44)], [(77, 0, 0)])
+
+    def test_a_ranking_read_board_with_no_upload_reads_as_empty(self):
+        self.online()
+        # Nothing writes 37, so it lists nothing and a pivot gets its empty row.
+        self.assertEqual([(row[0], row[3], row[4]) for row in self.leaders(req=78, now=1.0, board=37)],
+                         [(78, 0, 0)])
+        self.assertEqual([(row[5], row[7], row[8]) for row in self.leaders(req=79, now=1.0, board=37, pivot=A)],
+                         [(A, 1, 0)])
+        rows = self.stats(req=80, now=1.0, board=37, xuids=(A,))
+        self.assertEqual((rows[0][5], rows[0][7], rows[0][8]), (A, 0, 0))
+
+    def test_a_row_written_to_a_ranking_read_board_wins_over_its_projection(self):
+        self.online()
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 38, A, ((0xFFFE, 2, 100),))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 34, A, ((0xFFFE, 2, 900),))), A_AT, 1.0)
+        rows = self.stats(req=81, now=2.0, board=38, xuids=(A,))
+        self.assertEqual(mm.STAT_ITEM.unpack_from(rows[0][9], mm.ASKED - mm.TOKEN + mm.STATROW_BODY.size),
+                         (0xFFFE, 2, 100))
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=82, now=2.0, board=38)], [(A, 1)])
+
     def test_an_empty_stat_write_stores_nothing_and_takes_no_board(self):
         self.online()
         req = self.next_request()

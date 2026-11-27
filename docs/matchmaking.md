@@ -375,6 +375,23 @@ profile byte that was ranked before is never the score. A row whose write
 carried no -2 still appears, after every row that has one, by its
 lowest-numbered stat id as before.
 
+The ranking page table names a read board and a write board for each of its
+eight pages. `live_ranking_page_update` (`0x2b7110`) walks all eight once:
+`live_ranking_page_set_board` (`0x2b5bf0`, table `0x7c02b0`, now
+`g_ranking_page_read_config`) picks the board to read, and
+`live_ranking_page_upload_own_row` (`0x2b6140`, table `0x7c02bc`, now
+`g_ranking_page_write_config`) uploads the player's row to the write board of
+the same page index. Pages 0 to 3 read boards 35 to 38 and write 31 to 34;
+pages 4 to 7 read 43 to 46 and write 39 to 42. Nothing in the game writes 35
+to 38 or 44 to 46, so a read of one of those answers the rows of its pair: the
+same stats and -2 values, and a rank from the merged board. `LEADERS` and
+`STAT_READ` both serve them, and a friend's `STAT_READ` is that friend's
+projected row or the no-data shape. Nothing is copied into a read board, and a
+write to either board of a pair drops both cached rankings. Board 43 is a read
+board and also a writer's target, since a match's end records each character's
+matches and wins there (`ranking_write_character_stats_board` `0x297870`); a
+row written to 43 wins over the row projected to it from 39.
+
 A row exists only once a write carried a stat: an empty write answers success
 and stores nothing, so it takes neither one of the account's boards nor a
 place in a ranking. A player with no row reads as no data, not as zeros: a
@@ -447,7 +464,7 @@ an address, and an address may open 16 pairs. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
 672-byte attributes, 512-byte filters, 25 search results, 100 friends and
 pending requests, 250 mutes (147 fit one MUTELIST packet, so it is cut
-there), 48 boards per account (the game's whole 0..47 board range; a board
+there), 49 boards per account (the game's whole 0..48 board range; a board
 only counts once a write carried a stat), 256 board
 rankings cached (the oldest makes room), 16 feedback types per target with
 each count saturating at `MAX_FEEDBACK_COUNT`, 64 stats per write and 64 per
