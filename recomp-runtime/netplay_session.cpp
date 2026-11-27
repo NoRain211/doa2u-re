@@ -491,6 +491,11 @@ static void clearSessionPads()
     std::memset(recomp_memory(0x00878310u, 0x80u), 0, 0x80u);
     std::memset(recomp_memory(0x00877f00u, 0x400u), 0, 0x400u);
     std::memset(recomp_memory(0x0087ad80u, 0x80u), 0, 0x80u);
+    /* g_spectator_view_mode: a spectator copies the host's broadcast view mode
+       here (spectator_apply_host_state, 0x100970) and only the watch state
+       zeroes it, so a fighter who last watched starts with the last one, and
+       the fight's draw and bone code branch on it. */
+    *recomp_memory(0x00875c10u, 1u) = 0u;
 }
 
 static void startLiveSession(std::uint32_t swap)
