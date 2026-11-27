@@ -312,12 +312,18 @@ class LiveSession:
         self.kid, self.key, self.host, self.digest = kid, key, host, digest
         self.slots, self.attributes = list(slots), bytes(attributes)
         self.born = self.updated = now
+        self.members = {host.xuid}  # the host, and each guest whose pair with it the game answered
 
     @property
     def open(self):
         # The counts are XOnlineMatchSessionCreate's: public filled, public
         # open, private filled, private open. Only an open slot is joinable.
         return self.slots[1] > 0 or self.slots[3] > 0
+
+    @property
+    def public_open(self):
+        """True while a public slot is open: SEARCH lists public sessions, not invite-only ones."""
+        return self.slots[1] > 0
 
 
 class Invite:
@@ -432,8 +438,10 @@ class Matchmaker:
         for key in [key for key, when in self.met.items() if now - when > MET_SECONDS]:
             del self.met[key]
         # A session is only joinable while its host is online.
-        for kid in [kid for kid, session in self.sessions.items() if not online(session.host, now)]:
+        gone = {kid for kid, session in self.sessions.items() if not online(session.host, now)}
+        for kid in gone:
             del self.sessions[kid]
+        self.drop_session_invites(gone)  # an invite to a session that has ended joins nothing
         expired = [key for key, when in self.requests.items() if now - when > REQUEST_SECONDS]
         for key in expired:
             del self.requests[key]
@@ -621,6 +629,8 @@ class Matchmaker:
         for key in [key for key in self.live_pairs if xuid in key]:
             del self.live_pairs[key]
         self.met = {key: when for key, when in self.met.items() if xuid not in key}
+        for session in self.sessions.values():
+            session.members.discard(xuid)  # an evicted account is not a member of a session it left
         self.dirty = True
         return True
 
@@ -708,12 +718,18 @@ class Matchmaker:
             given = self.taken_tag(wanted, xuid)
             if given is not None and given != account.gamertag:
                 account.gamertag, self.dirty = given, True
+        if account.endpoint is not None and account.endpoint != sender:
+            # A LOGON from another socket is another process at this account: the
+            # sessions the old one hosted cannot be reached any more, and without
+            # this they would outlive it as long as the new one heartbeats.
+            self.end_sessions(account)
         if account.endpoint is not None and self.by_endpoint.get(account.endpoint) is account:
             del self.by_endpoint[account.endpoint]
         account.endpoint, account.nonce, account.seen = sender, nonce, now
         account.digest, account.title = digest, title
         account.state, account.kid = state, kid
         self.by_endpoint[sender] = account
+        self.note_session_member(account, now)
         return logged(HRESULT_OK, account.ina, account.gamertag)
 
     def live_session_put(self, body, nonce, sender, now):
@@ -751,19 +767,14 @@ class Matchmaker:
             return self.done(req, E_ACCESSDENIED, sender, nonce)
         if kid == bytes(8):
             # A runner that quits logs off: its sessions go, and friends see it offline at once.
-            mine = {kid for kid, session in self.sessions.items() if session.host is me}
-            for kid in mine:
-                del self.sessions[kid]
-            for key in [key for key in self.invites.naming(me.xuid) if self.invites[key].kid in mine]:
-                del self.invites[key]
+            self.end_sessions(me)
             del self.by_endpoint[me.endpoint]
             me.endpoint = None
             return self.done(req, HRESULT_OK, sender, nonce)
         if session is None or session.host is not me:
             return self.done(req, E_INVALIDARG, sender, nonce)
         del self.sessions[kid]
-        for key in [key for key in self.invites.naming(me.xuid) if self.invites[key].kid == kid]:
-            del self.invites[key]
+        self.drop_session_invites({kid})
         return self.done(req, HRESULT_OK, sender, nonce)
 
     def done(self, req, hresult, sender, nonce):
@@ -790,7 +801,7 @@ class Matchmaker:
         if me is None:
             return self.result(req, E_ACCESSDENIED, sender, nonce)
         rows = [session for session in self.sessions.values()
-                if session.digest == me.digest and session.open and session.host is not me]
+                if session.digest == me.digest and session.public_open and session.host is not me]
         rows.sort(key=lambda session: session.born, reverse=True)  # newest first
         return self.result(req, HRESULT_OK, sender, nonce, rows)
 
@@ -804,6 +815,23 @@ class Matchmaker:
             return self.result(req, E_INVALIDARG, sender, nonce)
         return self.result(req, HRESULT_OK, sender, nonce, [session])
 
+    def end_sessions(self, account):
+        """Deletes the sessions an account hosts, as its logoff or a new socket ends them."""
+        mine = {kid for kid, session in self.sessions.items() if session.host is account}
+        for kid in mine:
+            del self.sessions[kid]
+        self.drop_session_invites(mine)
+        return mine
+
+    def drop_session_invites(self, kids):
+        """Deletes every invite that names a session that has ended."""
+        if not kids:
+            return
+        gone = [key for key, invite in self.invites.items() if invite.kid in kids]
+        for key in gone:
+            del self.invites[key]
+        self.dirty = self.dirty or bool(gone)
+
     def hosts_session(self, account):
         """True when the account hosts a Live session from SESSION_PUT that is still alive."""
         return any(session.host is account for session in self.sessions.values())
@@ -811,6 +839,36 @@ class Matchmaker:
     def live_pairs_at(self, address):
         """The Live pairs address opened; pairs others opened with its players do not count."""
         return sum(1 for pair in self.live_pairs.values() if pair.opener == address)
+
+    def session_members(self, first, second):
+        """True when both accounts are members of one live session.
+
+        The game's presence names the session it is in: the in-session bit and
+        XNKID that XOnlineNotificationSetState gets from 0x2a1340, which
+        online_session_join sets on every join and each LOGON heartbeat carries.
+        A lobby then has its members send to each other directly (the fighters'
+        lockstep and input, a spectator's state stream), and the host may not be
+        fighting. A guest becomes a member when it has a full pair with the
+        session's host, so a search result's XNKID alone reaches nobody.
+        """
+        if not first.state & second.state & PRESENCE_SESSION or first.kid != second.kid:
+            return False
+        session = self.sessions.get(first.kid)
+        return (session is not None and first.xuid in session.members and
+                second.xuid in session.members)
+
+    def note_session_member(self, account, now):
+        """Records a guest in the session its presence names once its host has answered it."""
+        if not account.state & PRESENCE_SESSION:
+            return
+        session = self.sessions.get(account.kid)
+        if session is None:
+            return
+        if account.xuid != session.host.xuid:
+            pair = self.live_pairs.get(frozenset((account.xuid, session.host.xuid)))
+            if pair is None or pair.met is None or now - pair.used > PAIR_SECONDS:
+                return
+        session.members.add(account.xuid)
 
     def live_connect(self, body, nonce, sender, now):
         req, ina = CONNECT_BODY.unpack(body)
@@ -823,21 +881,30 @@ class Matchmaker:
         key = frozenset((me.xuid, other.xuid))
         pair = self.live_pairs.get(key)
         hosting = self.hosts_session(other)
+        fresh = pair is None or now - pair.used > PAIR_SECONDS
         # An address is the other player's to learn only when they host a Live
-        # session, or when they connected here first: a joiner may connect back.
-        if (pair is None or now - pair.used > PAIR_SECONDS) and not hosting:
+        # session, when they connected here first (a joiner may connect back),
+        # or when both are members of one live session.
+        members = not hosting and self.session_members(me, other)
+        if fresh and not hosting and not members:
             return []
-        if key not in self.live_pairs and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
+        # Member pairs are bounded by the session, so a lobby behind one router
+        # does not spend its address's cap on its own players.
+        if key not in self.live_pairs and not members and self.live_pairs_at(sender[0]) >= PAIRS_PER_ADDRESS:
             return []
-        if pair is None or now - pair.used > PAIR_SECONDS:
+        if fresh:
             pair = self.live_pairs[key] = LivePair(now, self.random_bytes(8), sender[0])
-        if hosting:
-            pair.used = now  # a CONNECT to a player who still hosts keeps the pair; one-sided repeats do not
+        if hosting or members:
+            # A CONNECT to a player who still hosts, or to a fellow member while the
+            # session lives, keeps the pair; one-sided repeats do not.
+            pair.used = now
         pair.connected.add(me.xuid)
         if len(pair.connected) == 2 and pair.met is None:
             pair.met = now  # the first time both connected, which a repeat must not push later
         if pair.met is not None:
             self.met[key] = pair.met  # fixed per pair, so a repeat cannot push it later, but a rematch can
+        self.note_session_member(me, now)
+        self.note_session_member(other, now)
         self.connects += 1
         relay = 1 if self.relay_only else 0
         empty = ("0.0.0.0", 0)
@@ -893,12 +960,10 @@ class Matchmaker:
             if (xuid, me.xuid) in self.requests:
                 flags |= FRIEND_RECEIVED_REQUEST
             invite = self.invites.get((me.xuid, xuid))
-            if invite is not None and invite.answer is None:
+            if invite is not None:
                 flags |= FRIEND_SENT_INVITE
-            elif invite is not None:
-                flags |= FRIEND_INVITE_ACCEPTED if invite.answer == 1 else FRIEND_INVITE_REJECTED
             invite = self.invites.get((xuid, me.xuid))
-            if invite is not None and invite.answer is None:
+            if invite is not None:
                 flags |= FRIEND_RECEIVED_INVITE
         kid = other.kid if other is not None and other.state & PRESENCE_SESSION else bytes(8)
         return (xuid, padded(other.gamertag if other is not None else b"", 16), flags,
@@ -964,6 +1029,7 @@ class Matchmaker:
             invite.answer, invite.seen = answer, now
             self.dirty = True
             pushes = self.push(xuid, 3, me.xuid, invite.kid, now)
+            del self.invites[(xuid, me.xuid)]  # the push tells the inviter; an answered invite joins nothing
         else:
             return self.done(req, E_INVALIDARG, sender, nonce)
         return self.done(req, HRESULT_OK, sender, nonce) + pushes
@@ -1186,6 +1252,9 @@ class Matchmaker:
                 from_xuid, to_xuid = xuids(entry["from"], entry["to"])
             except BAD_ENTRY:
                 skipped += 1
+                continue
+            if invite.answer is not None:
+                self.dirty = True  # an answered invite is not kept; the store predates the clearing
                 continue
             self.invites[(from_xuid, to_xuid)] = invite
         for entry in entries("mutes"):

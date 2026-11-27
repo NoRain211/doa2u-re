@@ -316,39 +316,57 @@ four counts are `XOnlineMatchSessionCreate`'s: public filled, public open,
 private filled, private open. The game's search record keeps the Live
 service's order instead, public open, private open, public filled, private
 filled, and `recomp-runtime/live_xapi.c` writes them that way. A session is
-listed while it has an open slot (public or private, slots 1 or 3 in the
-create order), its host is online and its digest matches the searcher's,
-newest first, at most 25. A host does not see its own session. FIND answers
-any session still there, so an invite still works when the session has
-filled.
+listed while it has an open public slot (slot 1 in the create order), its host
+is online and its digest matches the searcher's, newest first, at most 25. A
+session whose only open slot is private is invite-only: FIND answers it, so an
+invite works, but SEARCH does not list it. A host does not see its own session.
+FIND answers any session still there, so an invite still works when the
+session has filled. A session goes when its host logs off with a zero session
+id, when its host is 20 s silent, and when the same account logs on from
+another socket, which means the process that made it is gone; its invites go
+with it.
 
 CONNECT picks the other player's account by virtual address, and only when
-that player hosts a Live session from SESSION_PUT that is still alive, or
-when the two already have a pair from an earlier CONNECT, so a host can
-connect back to the joiner who came to it. Otherwise it is dropped: virtual
-addresses are sequential, so without this any account could make any online
-player reveal their public endpoint. Joining a friend means CONNECTing to the
-host of the friend's session, which hosts one. Both get an LPEER with the
-other's endpoint and the pair's token, whichever side asks first, and then
-punch or relay; a punch carries that token instead of the socket's nonce,
-which stays with the server. The side that receives an LPEER it did not ask
-for CONNECTs back, so both sides have asked. The pairing is by the two XUIDs,
-lasts 10 minutes past its last relayed packet or CONNECT to a player who
-still hosts, and an address may open at most 16 (pairs others opened with its
-players do not count); `--relay-only` zeroes both endpoints and sets the
-relay flag. The LAN endpoint stays zero: LOGON carries none, so Live players
-behind one router punch through their public addresses. A token belongs to
-one pairing: once it expires, another CONNECT makes a new pair and a new
-token.
+that player hosts a Live session from SESSION_PUT that is still alive, when
+the two already have a pair from an earlier CONNECT, so a host can connect
+back to the joiner who came to it, or when both are members of one live
+session. The last case is a lobby's members reaching each other: the two
+fighters exchange lockstep and input, and a spectator subscribes to a
+fighter's state stream, and the host may not be fighting. Membership is the
+session the game names in its presence, the in-session bit and XNKID that
+`XOnlineNotificationSetState` gets from `0x2a1340`, which
+`online_session_join` sets on every join and each LOGON heartbeat carries. A
+guest becomes a member when a full pair with the session's host shows the
+host answered it, so a search result's XNKID alone does not admit anyone; the
+host is a member from SESSION_PUT. The presence is the client's word, so
+whoever can pair with a public host may claim its session, as it could join
+it. Otherwise CONNECT is dropped: virtual addresses are sequential, so
+without this any account could make any online player reveal their public
+endpoint. Joining a friend means CONNECTing to the host of the friend's
+session, which hosts one. Both get an LPEER with the other's endpoint and the
+pair's token, whichever side asks first, and then punch or relay; a punch
+carries that token instead of the socket's nonce, which stays with the
+server. The side that receives an LPEER it did not ask for CONNECTs back, so
+both sides have asked. The pairing is by the two XUIDs, lasts 10 minutes past
+its last relayed packet or CONNECT to a player who still hosts or to a fellow
+member while the session lives, and an address may open at most 16 (pairs
+others opened with its players do not count, nor do pairs between members of
+one session, so a lobby behind one router does not fill it); `--relay-only`
+zeroes both endpoints and sets the relay flag. Two members who answer each
+other are a full pair, so a match between them can write its results. The LAN
+endpoint stays zero: LOGON carries none, so Live players behind one router
+punch through their public addresses. A token belongs to one pairing: once it
+expires, another CONNECT makes a new pair and a new token.
 
 ### Friends, invites, mutes and rankings
 
 `FRIEND_OP` ops are 1 request, 2 answer a request, 3 remove, 4 game invite, 5
 revoke an invite and 6 answer an invite. A request in both directions makes
-friends at once. The friend flags are the game's: online, playing, joinable,
-sent or received request, sent or received invite, invite accepted or
-rejected. An invite names the inviter's own session and stays until it is
-answered or revoked; answering it tells the inviter which way it went.
+friends at once. The friend flags from a row are the game's: online, playing,
+joinable, sent or received request, and sent or received invite; the game
+keeps its own accepted or rejected flag from the answer. An invite names the
+inviter's own session and is cleared when it is answered, revoked or its
+session ends; the answer's PUSH tells the inviter which way it went.
 
 A Live mutelist has no request that adds a name in the game's API, so the
 server only serves what the store holds or a test sets: the game reads it at
@@ -409,10 +427,10 @@ there), 48 boards per account (the game's whole 0..47 board range), 256 board
 rankings cached (the oldest makes room), 16 feedback types per target, 64 stats per write and 64 per account
 and board (a full group-7 write is 61; the game reads back its
 62 entries, the last a rank the client makes from the row), 100 XUIDs per
-read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
-request a week. When the account table is full, a new XUID drops the
-account that has been offline longest, those without stats or friends first,
-with everything that names it:
+read, 100 leader rows. An unanswered invite lasts 10 minutes and an
+unanswered friend request a week. When the account table is full, a new
+XUID drops the account that has been offline longest, those without stats or
+friends first, with everything that names it:
 friendships in both directions, pending requests and invites, stats rows,
 feedback, mutes, Live pairings and cached rankings. If every account is
 online, the new account is refused. Those caps are per address, so filling
@@ -445,8 +463,7 @@ Without `--store` everything is in memory and a restart forgets it. With
   loop-clock seconds, loads its accounts as heard now;
 - friends as pairs of XUIDs, and pending friend requests the same way plus
   when each was made;
-- invites: session id, from, to, when it was made and the answer once there
-  is one;
+- invites still pending: session id, from, to and when it was made;
 - each player's mute list, as pairs of XUIDs;
 - stats: board, XUID and its entries.
 

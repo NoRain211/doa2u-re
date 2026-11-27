@@ -432,7 +432,7 @@ class LiveTest(unittest.TestCase):
     def test_search_takes_only_the_same_build_other_hosts_and_open_slots_newest_first(self):
         self.online()
         first = self.put(now=0.0)[2]
-        second = self.put(sender=C_AT, now=1.0, slots=(0, 0, 2, 2))[2]
+        second = self.put(sender=C_AT, now=1.0, slots=(0, 2, 2, 0))[2]
         # C logs on again with another build, as a patched runner would; its new session is not listed.
         self.logon(C_AT, C, now=2.0, digest=OTHER_BUILD)
         self.put(sender=C_AT, now=2.0, req=3)
@@ -444,6 +444,16 @@ class LiveTest(unittest.TestCase):
         own = self.search(A_AT, now=4.0, req=10)
         self.assertEqual([row[4][0] for row in own], [second])  # never its own session
         self.assertEqual(own[0][3], 1)
+
+    def test_search_lists_only_sessions_with_a_public_open_slot(self):
+        self.online()
+        kid = self.put(now=0.0, slots=(1, 0, 2, 2))[2]  # an invite-only session
+        self.assertEqual(self.search(B_AT, now=0.1)[0][3], 0)
+        # FIND still answers it, so an invited player joins it.
+        found = self.row(self.one(live(mm.FIND, find_body(self.next_request(), kid)), B_AT, 0.1, mm.RESULT))
+        self.assertEqual((found[1], found[4][0]), (0, kid))
+        self.put(kid=kid, slots=(0, 2, 2, 2), now=0.2)  # a public slot opens
+        self.assertEqual([row[4][0] for row in self.search(B_AT, now=0.3)], [kid])
 
     def test_connect_pairs_a_host_and_a_joiner_and_feeds_the_live_relay(self):
         self.online()
@@ -590,6 +600,62 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(self.send(live_relaying(ina_a), B_AT, later + 2.0)), 1)
         self.assertEqual(pair.used, later + 2.0)
 
+    def test_members_of_one_lobby_connect_and_relay_to_each_other(self):
+        self.online()
+        kid = self.put(now=0.0)[2]  # A hosts
+        ina = {xuid: struct.unpack(">I", self.server.accounts[xuid].ina)[0] for xuid in (A, B, C)}
+
+        def add(sender, target, now):
+            return self.send(live(mm.CONNECT, connect_body(self.next_request(), ina[target])), sender, now)
+
+        def join(sender, xuid, now):
+            # The game's presence: in a session, and which one (0x2a1340).
+            self.logon(sender, xuid, now=now, state=mm.PRESENCE_SESSION | 3, kid=kid)
+
+        join(A_AT, A, 0.0)
+        join(B_AT, B, 0.0)
+        self.assertEqual(len(add(B_AT, A, 0.1)), 2)  # B joins and the host answers
+        self.assertEqual(len(add(A_AT, B, 0.2)), 2)
+        # C names the session before its host has answered it: a search result's
+        # XNKID alone admits nobody.
+        join(C_AT, C, 0.0)
+        self.assertEqual(add(C_AT, B, 0.3), [])
+        self.assertEqual(add(B_AT, C, 0.3), [])
+        # C joins too.
+        self.assertEqual(len(add(C_AT, A, 0.4)), 2)
+        self.assertEqual(len(add(A_AT, C, 0.5)), 2)
+        # The two guests reach each other even though neither hosts.
+        answers = dict((to, packet) for packet, to in add(B_AT, C, 0.6))
+        self.assertEqual(sorted(answers), sorted([B_AT, C_AT]))
+        pair = self.server.live_pairs[frozenset((B, C))]
+        for to, packet in answers.items():
+            peer = C if to == B_AT else B
+            peer_ina, public, lan, token, relay = mm.LPEER_BODY.unpack_from(packet, mm.ASKED - mm.TOKEN)
+            self.assertEqual((peer_ina, public, lan, relay),
+                             (ina[peer], mm.endpoint(C_AT if peer == C else B_AT), bytes(6), 0))
+            self.assertEqual(token, pair.token)
+        # The relay carries their traffic, not just the introduction.
+        claimed = guest(port=2000)
+        expected = claimed[:5] + self.server.accounts[B].ina + claimed[9:]
+        self.assertEqual(self.send(live_relaying(ina[C], port=2000), B_AT, 0.7),
+                         [(mm.header(mm.RELAY) + nonce(C_AT) + expected, C_AT)])
+        self.assertEqual(len(add(C_AT, B, 0.8)), 2)  # C answers: a full pair
+        self.assertIn(frozenset((B, C)), self.server.met)
+        # The host reaches a member without a pair with it, because membership
+        # belongs to the session, not to the pair.
+        del self.server.live_pairs[frozenset((A, B))]
+        self.assertEqual(len(add(A_AT, B, 0.9)), 2)
+        # The session ending ends the membership: a pair with a member, or
+        # between members, is refused once it is gone.
+        req = self.next_request()
+        self.assertEqual(self.done(self.one(live(mm.SESSION_DEL, mm.SESSION_DEL_BODY.pack(req, kid)), A_AT, 1.0,
+                                              mm.DONE))[1], 0)
+        del self.server.live_pairs[frozenset((A, B))]
+        del self.server.live_pairs[frozenset((B, C))]
+        self.assertEqual(add(A_AT, B, 1.1), [])
+        self.assertEqual(add(B_AT, C, 1.1), [])
+        self.assertEqual(add(C_AT, B, 1.1), [])
+
     def test_connect_relay_only_hides_the_endpoints(self):
         self.server.relay_only = True
         self.online()
@@ -684,7 +750,8 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.friends(B_AT)[0][7], kid)  # the friend's session
         accepted = self.send(live(mm.FRIEND_OP, friend_op_body(10, 6, A, 1, kid)), B_AT, 2.0)
         self.assertEqual(mm.PUSH_BODY.unpack_from(accepted[1][0], mm.ASKED - mm.TOKEN), (3, B, kid))
-        self.assertEqual(self.friends()[0][5], mm.FRIEND_ONLINE | mm.FRIEND_INVITE_ACCEPTED)
+        self.assertNotIn((A, B), self.server.invites)  # the answer's PUSH is what tells the inviter
+        self.assertEqual(self.friends()[0][5], mm.FRIEND_ONLINE)  # no accepted flag left to show
         self.assertEqual(self.done(self.one(live(mm.FRIEND_OP, friend_op_body(11, 6, A, 0, kid)), B_AT, 2.5,
                                               mm.DONE))[1], mm.E_INVALIDARG)  # answered once already
         self.assertEqual(self.done(self.one(live(mm.FRIEND_OP, friend_op_body(12, 5, B, kid=kid)), A_AT, 3.0,
@@ -1096,6 +1163,33 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.search(B_AT, now=5.0)[0][3], 1)
         self.assertEqual(self.search(B_AT, now=mm.LIVE_SECONDS + 1.0)[0][3], 0)  # the host went quiet
         self.assertEqual(self.server.sessions, {})
+
+    def test_a_hosts_new_socket_ends_the_sessions_it_left(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.logon(A_AT, A, now=0.5, state=0x13, kid=kid)  # presence: in that session
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        self.assertIn((A, B), self.server.invites)
+        # A restarted: its new socket heartbeats while the old socket's sessions
+        # would otherwise live as long as the account stayed online.
+        moved = (A_AT[0], A_AT[1] + 1)
+        self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)
+        self.assertEqual(self.server.sessions, {})
+        self.assertNotIn((A, B), self.server.invites)
+        self.assertEqual(self.put(sender=moved, now=3.0)[1], 0)  # the new process hosts its own
+        self.assertEqual(self.search(B_AT, now=3.1)[0][3], 1)
+
+    def test_an_invite_goes_when_its_session_ends(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        self.assertIn((A, B), self.server.invites)
+        # The host goes quiet before the invite's own ten minutes: its session
+        # ends, and an invite that names it has nothing to join.
+        later = mm.LIVE_SECONDS + 2.0
+        self.logon(B_AT, B, now=later)  # this packet sweeps
+        self.assertEqual(self.server.sessions, {})
+        self.assertNotIn((A, B), self.server.invites)
 
     def test_the_store_round_trips_accounts_friends_invites_mutes_and_stats(self):
         with tempfile.TemporaryDirectory() as folder:
