@@ -834,12 +834,14 @@ static void qos_tick(uint64_t now)
                 if (now >= entry->next_ms) qos_probe(request, entry, peer, e, now);
                 continue;
             }
-            if (entry->received >= LIVE_QOS_MIN_REPLIES) {
+            /* Every probe answered: the counts are final. Otherwise wait for
+               the window to pass, so a slow last answer is not counted as
+               loss, and even then one answer is not a median. */
+            if (entry->received == entry->sent) {
                 qos_finish(entry, RECOMP_LIVE_QOS_ANSWERED);
             } else if (now >= entry->deadline_ms) {
-                /* One answered probe is not a median: keep the shipped figure
-                   rather than set the game's delay from a lucky packet. */
-                qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
+                qos_finish(entry, entry->received >= LIVE_QOS_MIN_REPLIES ? RECOMP_LIVE_QOS_ANSWERED
+                                                                          : RECOMP_LIVE_QOS_FALLBACK);
             }
         }
     }
