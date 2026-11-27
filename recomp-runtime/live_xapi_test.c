@@ -47,6 +47,13 @@ enum {
     LEADER_STATS = 0x6b00,
     DEST = 0x6c00,
     GROUP7_LEADER_STATS = 0x7000, /* 62 row entries of 16 bytes */
+    /* A whole stat upload: the game's own context holds 12 records, so the
+       tests use boards 0x20.. for twelve, 0x30.. for a refused one, and a call
+       of 17 records for one more than a task carries. */
+    UPLOAD_BOARD = 0x20,
+    REFUSE_BOARD = 0x30,
+    UPLOAD_RECORDS = 0x7400, /* 17 records of 0x18 bytes */
+    UPLOAD_ENTRIES = 0x7600, /* one 16-byte entry per record */
     GUEST_BYTES = 0x800000,
     HEAP_START = 0x600000,
     PROFILE_XUID = 0x007ef8e0u + 0xabe8u,
@@ -177,6 +184,35 @@ static RecompLiveStatus corrupting_poll(void *self, RecompLiveRequest id, uint32
         return RECOMP_LIVE_FAILED;
     }
     return corrupt_inner->poll(self, id, hresult);
+}
+
+/* A backend that refuses one record's write (the in-memory backend refuses
+   XUID 0) and counts the polls of that record's and the last record's request.
+   A task that stops at the first refusal never polls the later ones. */
+static const RecompLiveBackend *refuse_inner;
+static RecompLiveBackend refuse_backend;
+static RecompLiveRequest refuse_request;
+static RecompLiveRequest tail_request;
+static unsigned refuse_polls;
+static unsigned tail_polls;
+
+static RecompLiveRequest refusing_stat_write(void *self, uint32_t board, uint64_t xuid,
+    const RecompLiveStat *stats, uint32_t count)
+{
+    const bool refused = board == REFUSE_BOARD + 2u;
+    const RecompLiveRequest request = refuse_inner->stat_write(self, board, refused ? 0u : xuid, stats, count);
+    if (refused) refuse_request = request;
+    if (board == REFUSE_BOARD + 4u) tail_request = request;
+    return request;
+}
+
+static RecompLiveStatus refusing_poll(void *self, RecompLiveRequest id, uint32_t *hresult)
+{
+    if (id != 0u) {
+        if (id == refuse_request) ++refuse_polls;
+        if (id == tail_request) ++tail_polls;
+    }
+    return refuse_inner->poll(self, id, hresult);
 }
 
 RecompRuntime recomp_runtime;
@@ -850,6 +886,85 @@ int main(void)
     const uint32_t group7_write = peek32(TASK_OUT);
     check("group 7 write completes", wait_task(group7_write) == TASK_SUCCESS);
     close_task(group7_write);
+
+    /* --- one upload's records. The game's upload context holds twelve
+       (0xf0a738 + i*0x2ee8), and every record must reach the backend. A task
+       used to hold four requests, so a longer call dropped the rest and still
+       reported success. Each record is its own matchmaker STAT_WRITE (one
+       board and one XUID), so read each board back on its own. --- */
+    for (uint32_t i = 0u; i < 12u; ++i) {
+        set_stat_record(UPLOAD_RECORDS + i * 0x18u, local_xuid, UPLOAD_BOARD + i, 1u,
+            UPLOAD_ENTRIES + i * 16u);
+        set_stat_entry(UPLOAD_ENTRIES + i * 16u, 1u, 2u, 100 + (int64_t)i);
+    }
+    check("a twelve-record stat write starts",
+        call(thunk_stat_write, (const uint32_t[]){12u, UPLOAD_RECORDS, 0u, TASK_OUT}, 4u) == 0u);
+    const uint32_t upload_task = peek32(TASK_OUT);
+    check("the twelve-record stat write completes", wait_task(upload_task) == TASK_SUCCESS);
+    close_task(upload_task);
+    bool upload_ok = true;
+    for (uint32_t i = 0u; i < 12u && upload_ok; ++i) {
+        set_stat_record(REQUEST, local_xuid, UPLOAD_BOARD + i, 1u, STAT_ENTRIES);
+        set_stat_entry(STAT_ENTRIES, 1u, 0u, 0);
+        if (call(thunk_stat_read, read_args, 4u) != 0u) {
+            upload_ok = false;
+            break;
+        }
+        const uint32_t read = peek32(TASK_OUT);
+        upload_ok = wait_task(read) == TASK_SUCCESS &&
+            call(thunk_stat_read_result, (const uint32_t[]){read, 1u, REQUEST, 32u, TAG_OUT}, 5u) == 0u &&
+            peek16(STAT_ENTRIES) == 1u && peek64(STAT_ENTRIES + 8u) == 100 + (int64_t)i;
+        close_task(read);
+    }
+    check("all twelve records of the write landed", upload_ok);
+
+    /* --- a refused record fails the task but does not cancel the records
+       after it. The console library sent the whole call as one service request
+       (xonline_stat_write_request 0x3a4d86) and the game reads one task result
+       (online_stat_task_update 0x29f610), so the port uploads every record and
+       reports the refusal once all of them have settled. --- */
+    for (uint32_t i = 0u; i < 5u; ++i) {
+        set_stat_record(UPLOAD_RECORDS + i * 0x18u, local_xuid, REFUSE_BOARD + i, 1u,
+            UPLOAD_ENTRIES + i * 16u);
+        set_stat_entry(UPLOAD_ENTRIES + i * 16u, 1u, 2u, 200 + (int64_t)i);
+    }
+    refuse_request = 0u;
+    tail_request = 0u;
+    refuse_polls = 0u;
+    tail_polls = 0u;
+    refuse_inner = presence_inner;
+    refuse_backend = *presence_inner;
+    refuse_backend.stat_write = refusing_stat_write;
+    refuse_backend.poll = refusing_poll;
+    recomp_live_backend_set(&refuse_backend);
+    check("a stat write with one refused record starts",
+        call(thunk_stat_write, (const uint32_t[]){5u, UPLOAD_RECORDS, 0u, TASK_OUT}, 4u) == 0u);
+    const uint32_t refused_task = peek32(TASK_OUT);
+    check("the refused record fails the task", wait_task(refused_task) == E_FAIL);
+    check("the refused record and the ones after it were polled", refuse_polls != 0u && tail_polls != 0u);
+    set_stat_record(REQUEST, local_xuid, REFUSE_BOARD + 4u, 1u, STAT_ENTRIES);
+    set_stat_entry(STAT_ENTRIES, 1u, 0u, 0);
+    check("the record after a refused one reads back", call(thunk_stat_read, read_args, 4u) == 0u);
+    const uint32_t after_refusal = peek32(TASK_OUT);
+    check("its read completes", wait_task(after_refusal) == TASK_SUCCESS);
+    check("its read result", call(thunk_stat_read_result,
+        (const uint32_t[]){after_refusal, 1u, REQUEST, 32u, TAG_OUT}, 5u) == 0u);
+    check("the value the failed upload wrote", peek64(STAT_ENTRIES + 8u) == 204);
+    close_task(after_refusal);
+    close_task(refused_task);
+    recomp_live_backend_set(&presence_backend);
+
+    /* --- a call with more records than the game's context holds is refused as
+       a whole, never as an upload of a prefix that claims success. --- */
+    for (uint32_t i = 0u; i < 17u; ++i) {
+        set_stat_record(UPLOAD_RECORDS + i * 0x18u, local_xuid, UPLOAD_BOARD + i, 1u,
+            UPLOAD_ENTRIES + i * 16u);
+        set_stat_entry(UPLOAD_ENTRIES + i * 16u, 1u, 2u, 300 + (int64_t)i);
+    }
+    poke32(TASK_OUT, 0xabcdef01u);
+    check("a seventeen-record stat write is refused",
+        call(thunk_stat_write, (const uint32_t[]){17u, UPLOAD_RECORDS, 0u, TASK_OUT}, 4u) == E_FAIL);
+    check("and leaves no task", peek32(TASK_OUT) == 0xabcdef01u);
 
     set_stat_record(REQUEST, local_xuid, 7u, 62u, GROUP7_STATS);
     for (uint16_t id = 0u; id < 59u; ++id) set_stat_entry(GROUP7_STATS + id * 16u, id, 0u, 0);
