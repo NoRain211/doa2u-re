@@ -130,15 +130,15 @@ enum {
     LIVE_QOS_DEFAULT_RTT_MS = 50, /* (50*3+199)/100 = 3, the shipped delay */
 
     LIVE_TASK_SLOTS = 16,
-    /* One request per stat write record, and one XOnlineStatWrite call carries
-       at most the 12 records of the game's upload context (0xf0a738 + i*0x2ee8
-       holds twelve 0x3e8-byte slots, then the count at +0x2ee4; see
-       online_stat_values_queue 0x297150 and online_stat_write_records_fill
-       0x2942c0). The matchmaker's STAT_WRITE packet names one board and one
-       XUID, so records cannot share a request; the cap must cover a whole call
-       or the tail of an upload is lost. live_client.c keeps 48 request slots,
-       enough for a full write and a full read at once. */
-    LIVE_TASK_REQUESTS = 12,
+    /* One request per record: the matchmaker's STAT_WRITE and STAT_READ name one
+       board each, so records on different boards cannot share a request. One
+       XOnlineStatWrite carries at most the 12 records of the game's upload
+       context (0xf0a738 + i*0x2ee8 holds twelve 0x3e8-byte slots, then the
+       count at +0x2ee4; online_stat_values_queue 0x297150), and the sign-in
+       profile read asks for six boards (43, 9, 12, 13, 14, 11) in one
+       XOnlineStatRead. live_client.c keeps 48 request slots, enough for a full
+       write and a full read at once. */
+    LIVE_TASK_REQUESTS = 16,
     LIVE_DETACHED_REQUESTS = 8,
 };
 
@@ -1478,9 +1478,10 @@ static void live_stat_write(void)
         return;
     }
     /* One backend request per record: the matchmaker's STAT_WRITE packet names
-       one board and one XUID, so records cannot share one. A call larger than
-       the game's own 12-record upload context cannot be queued, and returning a
-       task for it would upload the first 12 and claim the rest succeeded. */
+       one board and one XUID, so records cannot share one. A call larger than a
+       task holds (the game's own context holds 12) cannot be queued, and
+       returning a task for it would upload a prefix and claim the rest
+       succeeded. */
     if (count > LIVE_TASK_REQUESTS) {
         fprintf(stderr, "recomp live: stat write has %u records, over the %u record cap\n", (unsigned)count,
             (unsigned)LIVE_TASK_REQUESTS);

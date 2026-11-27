@@ -48,11 +48,11 @@ enum {
     DEST = 0x6c00,
     GROUP7_LEADER_STATS = 0x7000, /* 62 row entries of 16 bytes */
     /* A whole stat upload: the game's own context holds 12 records, so the
-       tests use boards 0x20.. for twelve, 0x30.. for a refused one and 0x40..
-       for the call that is one record too large. */
+       tests use boards 0x20.. for twelve, 0x30.. for a refused one, and a call
+       of 17 records for one more than a task carries. */
     UPLOAD_BOARD = 0x20,
     REFUSE_BOARD = 0x30,
-    UPLOAD_RECORDS = 0x7400, /* 13 records of 0x18 bytes */
+    UPLOAD_RECORDS = 0x7400, /* 17 records of 0x18 bytes */
     UPLOAD_ENTRIES = 0x7600, /* one 16-byte entry per record */
     GUEST_BYTES = 0x800000,
     HEAP_START = 0x600000,
@@ -956,14 +956,14 @@ int main(void)
 
     /* --- a call with more records than the game's context holds is refused as
        a whole, never as an upload of a prefix that claims success. --- */
-    for (uint32_t i = 0u; i < 13u; ++i) {
+    for (uint32_t i = 0u; i < 17u; ++i) {
         set_stat_record(UPLOAD_RECORDS + i * 0x18u, local_xuid, UPLOAD_BOARD + i, 1u,
             UPLOAD_ENTRIES + i * 16u);
         set_stat_entry(UPLOAD_ENTRIES + i * 16u, 1u, 2u, 300 + (int64_t)i);
     }
     poke32(TASK_OUT, 0xabcdef01u);
-    check("a thirteen-record stat write is refused",
-        call(thunk_stat_write, (const uint32_t[]){13u, UPLOAD_RECORDS, 0u, TASK_OUT}, 4u) == E_FAIL);
+    check("a seventeen-record stat write is refused",
+        call(thunk_stat_write, (const uint32_t[]){17u, UPLOAD_RECORDS, 0u, TASK_OUT}, 4u) == E_FAIL);
     check("and leaves no task", peek32(TASK_OUT) == 0xabcdef01u);
 
     set_stat_record(REQUEST, local_xuid, 7u, 62u, GROUP7_STATS);
