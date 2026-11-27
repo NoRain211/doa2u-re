@@ -24,18 +24,20 @@ running until you freeze it.
 | Move | **W A S D** | Left stick |
 | Down / up | **Q** / **E** | Left / right trigger |
 | Look | Arrow keys, or drag with the right mouse button | Right stick |
-| Zoom in / out | **Z** / **X** | (move closer with the left stick) |
+| Field of view (zoom in / out) | **Z** / **X** | D-pad up / down |
+| Roll | **[** / **]** | Hold the left shoulder, right stick left / right |
 | Faster / slower | **Shift** / **Ctrl** (held) | **A** / **B** (held) |
 | Next camera the game built | **C** | **X** |
 | Back to the view it started from | **R** | **Y** |
 | Freeze / resume the game (P works anywhere, camera on or off) | **P** | **Start** (while flying) |
-| Clean view: hide the panel and the game's 2D overlay | **H** | Left shoulder |
+| Clean view: hide the panel and the game's 2D overlay | **H** | Left shoulder (hides when let go, if the stick did not roll) |
 | Advance one frame while frozen; hold to keep stepping | **.** (period) | Right shoulder |
 | Turn to the next fighter | **\\** (backslash) | D-pad left |
 | Screenshot of the game's frame, without the panel | **F12** (works with the camera off too) | D-pad right (while flying) |
 
 While the camera flies, a panel near the top centre names the camera and whether
-the game is frozen; a line along the bottom lists the controls: the
+the game is frozen, shows the field of view as a slider and the roll in degrees,
+and a line along the bottom lists the controls: the
 keyboard's after a key was last used, the controller's after a controller was
 (and from the start on a Steam Deck). The camera starts where the game's
 camera was. Its speed scales with how far the game's camera stood from what
@@ -72,9 +74,10 @@ angles from the working copy's own eye and target, as DOA3's does.
 Every direct call in the lifted program asks `recomp_lookup_manual` first, so
 `recomp-runtime/free_camera_adapter.c` wraps that build without changing the
 generated program or its hash. With the camera allowed, the wrapper puts the
-free camera's eye, target and field of view in both places and a level roll
-in the working copy, then runs the lifted build (`sub_000399D0`). The game
-then builds its matrices, and culls, for the free camera. When the camera is
+free camera's eye, target and field of view in both places and its roll in the
+working copy (+0xDC), then runs the lifted build (`sub_000399D0`). The game
+then builds its matrices, and culls, for the free camera. The direction a
+positive roll tips the picture was not checked in a run. When the camera is
 given back, the game's camera logic takes the object over again. The flying
 itself is `recomp-runtime/free_camera.c`, shared with the DOA3 and DOAXBV
 ports and tested by `free_camera_test.c`.

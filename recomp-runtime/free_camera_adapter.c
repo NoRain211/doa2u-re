@@ -33,10 +33,9 @@
    Every direct call in the lifted program asks recomp_lookup_manual first, so
    this file wraps that build without changing the generated program: the
    wrapper puts the free camera's eye, target and field of view in both places
-   for that build and leaves them there, so the game also culls for the free
-   camera. It levels the working copy's roll too, since the free camera has no
-   roll of its own. When the camera is put away the game's camera logic takes
-   the object over again.
+   for that build and its roll in the working copy, and leaves them there, so
+   the game also culls for the free camera. When the camera is put away the
+   game's camera logic takes the object over again.
 
    The free camera flies the first object built after it is taken up, again
    whenever the one it flies stops being built, and C or the X button moves
@@ -45,7 +44,8 @@
    While it flies, the pad and keyboard are its own and the game sees a still
    pad: left stick or WASD move, right stick, the arrow keys or a right-mouse
    drag look, the triggers or Q / E go down / up, A or Shift is fast, B or
-   Ctrl slow, Z / X zoom (keys only). Y or R returns to the view it started
+   Ctrl slow, Z / X or the d-pad's up / down zoom, and [ / ] or the left
+   shoulder with the right stick roll. Y or R returns to the view it started
    from, and the d-pad's left or \ turns it to the next fighter. The arrow
    keys press the d-pad for the game, so the camera leaves those buttons out
    while the keys are down. F12, or the d-pad's right while flying, saves a
@@ -53,11 +53,12 @@
    as in the DOA3 port.
 
    P, or START while flying, freezes the scene (scene_freeze_adapter.c);
-   H or the left shoulder hides the game's 2D overlay and this panel, and .
-   or the right shoulder moves a frozen scene on one frame (held, it keeps
-   stepping). Putting the camera away thaws the scene. The game polls the
-   controller from a task the freeze skips, so while frozen the freeze calls
-   back once a frame and the controls are sampled here. */
+   H or the left shoulder hides the game's 2D overlay and this panel, the
+   shoulder when let go if it did not roll, and . or the right shoulder moves
+   a frozen scene on one frame (held, it keeps stepping). Putting the camera
+   away thaws the scene. The game polls the controller from a task the freeze
+   skips, so while frozen the freeze calls back once a frame and the controls
+   are sampled here. */
 enum {
     CAMERA_BUILD = 0x000399D0u,
     CAMERA_FIRST = 0x00805F70u,
@@ -70,6 +71,8 @@ enum {
     BUILD_TARGET = 0xB8u,
     BUILD_FOV = 0xD8u,
     BUILD_ROLL = 0xDCu,
+    XBOX_DPAD_UP = 0x0001u,
+    XBOX_DPAD_DOWN = 0x0002u,
     XBOX_DPAD_LEFT = 0x0004u,
     XBOX_DPAD_RIGHT = 0x0008u,
     XBOX_START = 0x0010u,
@@ -77,6 +80,8 @@ enum {
     XBOX_RIGHT_THUMB = 0x0080u,
     ANALOG_PRESSED = 0x20u,
     STEP_REPEAT_AFTER_MS = 500u,
+    /* The panel's field of view slider, in cells. */
+    FOV_BAR_CELLS = 16,
     /* Each fighter's bones: 32 matrices of 64 bytes from 0x00875C20, 0x800
        bytes apart, hips first. Slots 2 and 3 are tag partners. */
     FIGHTER_BONES = 0x00875C20u,
@@ -109,6 +114,7 @@ static struct {
     bool online;              /* this run has Live or a synctest */
     bool active, started;
     bool toggle_held, freeze_held, overlay_held, cycle_held, reset_held, aim_held, step_held, shot_held;
+    bool shoulder_held, shoulder_rolled; /* the left shoulder's hold, and its right stick use */
     bool r3_held;             /* the right stick's click, last sample */
     uint64_t step_since;
     uint32_t object;          /* the camera object flown, 0 for the next built */
@@ -253,15 +259,30 @@ static void hint_panel(void)
     recomp_overlay_clear(&text);
     if (state.active && !recomp_scene_freeze_overlay_hidden()) {
         recomp_overlay_set_title(&text, "Free camera");
-        if (state.started)
+        if (state.started) {
             recomp_overlay_add_line(&text, "Camera %u%s", (state.object - CAMERA_FIRST) / CAMERA_STRIDE + 1u,
                 recomp_scene_freeze_active() ? "   Frozen" : "   Running");
+            /* The lens between the shared model's limits. A log scale gives
+               the narrow lenses a fight uses as much room as the wide ones. */
+            const float fov = state.camera.fov;
+            int cell = 0;
+            if (isfinite(fov) && fov > RECOMP_FREE_CAMERA_FOV_MIN)
+                cell = (int)lroundf(logf(fov / RECOMP_FREE_CAMERA_FOV_MIN) /
+                    logf(RECOMP_FREE_CAMERA_FOV_MAX / RECOMP_FREE_CAMERA_FOV_MIN) * (FOV_BAR_CELLS - 1));
+            if (cell < 0) cell = 0;
+            if (cell >= FOV_BAR_CELLS) cell = FOV_BAR_CELLS - 1;
+            char bar[FOV_BAR_CELLS + 1];
+            for (int i = 0; i < FOV_BAR_CELLS; ++i) bar[i] = i < cell ? '=' : i == cell ? '|' : '-';
+            bar[FOV_BAR_CELLS] = '\0';
+            recomp_overlay_add_line(&text, "FOV %3d deg  [%s]", (int)lroundf(fov * 57.29578f), bar);
+            recomp_overlay_add_line(&text, "Roll %3d deg", (int)lroundf(state.camera.roll * 57.29578f));
+        }
         recomp_overlay_set_hint(&text, state.controller_hints > 0
             ? "Sticks fly  LT/RT down/up  A fast  B slow\n"
-              "X camera  Y reset  D-pad left fighter\n"
-              "Start freeze  RB step  LB hide  D-pad right screenshot  R3 off"
-            : "WASD fly  Q/E down/up  arrows or right-drag look  Z/X zoom\n"
-              "Shift fast  Ctrl slow  C camera  R reset  \\ fighter\n"
+              "X camera  Y reset  D-pad up/down FOV  D-pad left fighter\n"
+              "LB+RS roll (tap hides)  RB step  Start freeze  D-pad right shot  R3 off"
+            : "WASD fly  Q/E down/up  arrows or right-drag look  Z/X FOV\n"
+              "Shift fast  Ctrl slow  C camera  R reset  [/] roll  \\ fighter\n"
               "P freeze  . step  H hide  F12 screenshot  F1 off");
     }
     recomp_overlay_publish(RECOMP_OVERLAY_FREE_CAMERA, &text);
@@ -328,9 +349,22 @@ static void capture(uint32_t port, RecompInputGamepad *g, uint16_t stick_clicks)
     state.freeze_held = freeze;
     const bool paused = recomp_scene_freeze_active();
 
-    const bool overlay = (state.active || paused) && (KEY(H) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_WHITE)));
-    if (overlay && !state.overlay_held) recomp_scene_freeze_set_overlay_hidden(!recomp_scene_freeze_overlay_hidden());
-    state.overlay_held = overlay;
+    /* H hides on press anywhere. The left shoulder rolls with the right stick
+       while it is held, and hides on release only when the stick did not
+       roll during that hold. */
+    const bool hide_key = (state.active || paused) && KEY(H);
+    if (hide_key && !state.overlay_held) recomp_scene_freeze_set_overlay_hidden(!recomp_scene_freeze_overlay_hidden());
+    state.overlay_held = hide_key;
+    const float roll_stick = state.active ? stick(g->thumb_rx) : 0.0f;
+    const bool shoulder = state.active && pressed(g, RECOMP_INPUT_ANALOG_WHITE);
+    if (shoulder) {
+        if (roll_stick != 0.0f) state.shoulder_rolled = true;
+    } else {
+        if (state.shoulder_held && !state.shoulder_rolled && state.active)
+            recomp_scene_freeze_set_overlay_hidden(!recomp_scene_freeze_overlay_hidden());
+        state.shoulder_rolled = false;
+    }
+    state.shoulder_held = shoulder;
 
     /* A step press moves one frame; held, it steps every frame after a while. */
     const bool step = (state.active || paused) && (KEY(PERIOD) || (state.active && pressed(g, RECOMP_INPUT_ANALOG_BLACK)));
@@ -369,7 +403,10 @@ static void capture(uint32_t port, RecompInputGamepad *g, uint16_t stick_clicks)
     memset(&c, 0, sizeof c);
     c.move[0] = stick(g->thumb_lx);
     c.move[2] = stick(g->thumb_ly);
-    c.look[0] = stick(g->thumb_rx);
+    /* The left shoulder turns the right stick's X from looking into rolling;
+       its Y still pitches. */
+    if (shoulder) c.roll = roll_stick;
+    else c.look[0] = roll_stick;
     c.look[1] = stick(g->thumb_ry);
     c.move[1] = (g->analog_buttons[RECOMP_INPUT_ANALOG_RTRIG] - g->analog_buttons[RECOMP_INPUT_ANALOG_LTRIG]) / 255.0f;
     c.fast = pressed(g, RECOMP_INPUT_ANALOG_A);
@@ -386,6 +423,12 @@ static void capture(uint32_t port, RecompInputGamepad *g, uint16_t stick_clicks)
     if (KEY(DOWN)) c.look[1] -= 1.0f;
     if (KEY(Z)) c.zoom += 1.0f;
     if (KEY(X)) c.zoom -= 1.0f;
+    /* The d-pad's up / down too; the arrow keys press it but are left out
+       above, so they only pitch. */
+    if (g->buttons & XBOX_DPAD_UP) c.zoom += 1.0f;
+    if (g->buttons & XBOX_DPAD_DOWN) c.zoom -= 1.0f;
+    if (KEY(RIGHT_BRACKET)) c.roll += 1.0f;
+    if (KEY(LEFT_BRACKET)) c.roll -= 1.0f;
     c.fast |= KEY(SHIFT);
     c.slow |= KEY(CONTROL);
 #undef KEY
@@ -419,8 +462,7 @@ static void store(uint32_t object, const float eye[3], const float target[3], fl
     recomp_guest_store(object + BUILD_EYE, eye, 12);
     recomp_guest_store(object + BUILD_TARGET, target, 12);
     recomp_guest_store(object + BUILD_FOV, &fov, 4);
-    const float level = 0.0f;
-    recomp_guest_store(object + BUILD_ROLL, &level, 4);
+    recomp_guest_store(object + BUILD_ROLL, &state.camera.roll, 4);
 }
 
 static bool begin_from(uint32_t object)

@@ -33,6 +33,7 @@ int main(void)
         return 1;
     }
     check(near(camera.heading, 0.0f) && near(camera.pitch, 0.0f), "level view down +Z");
+    check(near(camera.roll, 0.0f), "begin is level in roll");
     check(near(camera.focus, 10.0f) && near(camera.speed, 5.0f), "focus and speed from the gap");
     recomp_free_camera_target(&camera, target);
     check(near(target[0], 1.0f) && near(target[1], 2.0f) && near(target[2], 13.0f),
@@ -76,9 +77,26 @@ int main(void)
     recomp_free_camera_step(&camera, &controls, 0.5f);
     check(camera.fov < before, "zooming in narrows the field of view");
 
+    memset(&controls, 0, sizeof controls);
+    controls.roll = 1.0f;
+    float level_heading = camera.heading;
+    float level_pitch = camera.pitch;
+    float level_x = camera.position[0];
+    float level_y = camera.position[1];
+    float level_z = camera.position[2];
+    recomp_free_camera_step(&camera, &controls, 0.5f);
+    check(near(camera.roll, 0.6f), "a full roll axis turns 1.2 radians a second");
+    check(near(camera.position[0], level_x) && near(camera.position[1], level_y) &&
+        near(camera.position[2], level_z) && near(camera.heading, level_heading) &&
+        near(camera.pitch, level_pitch),
+        "rolling moves nothing and leaves the view level");
+    for (int i = 0; i < 200; ++i) recomp_free_camera_step(&camera, &controls, 0.1f);
+    check(fabsf(camera.roll) <= 3.1416f, "a long roll wraps into half a turn");
+
     const float origin[3] = {0.0f, 0.0f, 0.0f};
     const float to_left[3] = {5.0f, 0.0f, 0.0f};
     check(recomp_free_camera_begin(&camera, origin, ahead, 0.8f), "begin at the origin");
+    check(near(camera.roll, 0.0f), "begin clears a rolled camera");
     check(recomp_free_camera_look_at(&camera, to_left), "look at a point");
     recomp_free_camera_target(&camera, target);
     check(near(camera.position[0], 0.0f) && target[0] > 9.9f && fabsf(target[2]) < 1e-3f,

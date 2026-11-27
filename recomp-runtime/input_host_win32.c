@@ -64,7 +64,7 @@ static unsigned long long tick_ms(void)
 enum {
     VK_BACK = 0x08, VK_RETURN = 0x0d, VK_SHIFT = 0x10, VK_CONTROL = 0x11,
     VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_F1 = 0x70, VK_F3 = 0x72, VK_F12 = 0x7b,
-    VK_OEM_PERIOD = 0xbe, VK_OEM_3 = 0xc0, VK_OEM_5 = 0xdc,
+    VK_OEM_PERIOD = 0xbe, VK_OEM_3 = 0xc0, VK_OEM_4 = 0xdb, VK_OEM_5 = 0xdc, VK_OEM_6 = 0xdd,
 };
 
 static bool pressed(int key)
@@ -526,6 +526,8 @@ bool recomp_input_host_key(RecompInputHostKey key)
     case RECOMP_INPUT_HOST_KEY_SHIFT: return pressed(VK_SHIFT);
     case RECOMP_INPUT_HOST_KEY_CONTROL: return pressed(VK_CONTROL);
     case RECOMP_INPUT_HOST_KEY_F3: return pressed(VK_F3);
+    case RECOMP_INPUT_HOST_KEY_LEFT_BRACKET: return pressed(VK_OEM_4);
+    case RECOMP_INPUT_HOST_KEY_RIGHT_BRACKET: return pressed(VK_OEM_6);
     case RECOMP_INPUT_HOST_KEY_COUNT: break;
     }
     return false;
