@@ -142,7 +142,7 @@ the cap 0`.
 | 12 LOGON | player, after each NONCE | the CHALLENGE's request, XUID, 32-byte answer, 64-hex build digest, title id, presence state, presence session id, gamertag length and 15 bytes | 13 LOGGED: request, result, the player's virtual address, the gamertag actually given |
 | 14 SESSION_PUT | host | request, session id (zeros creates), 4 slot counts, attribute length and bytes | 15 SESSION_OK: request, result, session id, 16-byte key |
 | 16 SESSION_DEL | host | request, session id; zero logs off | 25 DONE |
-| 17 SEARCH | anyone | request, procedure, filter length and bytes | 18 RESULT, one per session |
+| 17 SEARCH | anyone | request, procedure (1), filter length and bytes | 18 RESULT, one per session |
 | 19 FIND | anyone | request, session id | 18 RESULT |
 | 20 CONNECT | either player | request, the other player's virtual address | 21 LPEER to both |
 | 21 LPEER | server | the other's virtual address, public endpoint, LAN endpoint, the pair's 8-byte token, relay flag | — |
@@ -317,10 +317,43 @@ private filled, private open. The game's search record keeps the Live
 service's order instead, public open, private open, public filled, private
 filled, and `recomp-runtime/live_xapi.c` writes them that way. A session is
 listed while it has an open slot (public or private, slots 1 or 3 in the
-create order), its host is online and its digest matches the searcher's,
-newest first, at most 25. A host does not see its own session. FIND answers
-any session still there, so an invite still works when the session has
-filled.
+create order), its host is online, its digest matches the searcher's and its
+attributes answer the search's filters, newest first, at most 25. A host does
+not see its own session. FIND answers any session still there, so an invite
+still works when the session has filled.
+
+The filters are the game's own. Quick Match and OptiMatch both send
+procedure 1 with seven 16-byte records, which `online_match_search_start`
+0x29f940 builds from OptiMatch's page, or from its own defaults for Quick
+Match: an id, flags, a value and a length each, in the guest's little-endian
+byte order. Id 0 makes the value an equality and 0xf00000 is the wildcard the
+page writes for "any". The records are positional, and each slot names one
+attribute of the session blob a host packs from `DAT_00f24918`:
+
+| Slot | Attribute | Meaning | The game's "any" |
+| --- | --- | --- | --- |
+| 0 | 0 | the mode, which every session writes as 3 | a wildcard record |
+| 1 | 1 | a match setting the create page stores, 0 to 5 | a wildcard record |
+| 2 | 2 | a second one, 0 or 1 | a wildcard record |
+| 3 | 13 | the highest rank points the host takes | 19 |
+| 4 | 14 | the lowest rank points the host takes | 0 |
+| 5 | 15 | the voice setting | a wildcard record |
+| 6 | 16 | the language | a wildcard record |
+
+Quick Match passes no page, so it sends mode 3, the whole rank range 19..0
+and a wildcard in every other slot, and lists what it always did. A session
+answers a slot when the attribute it carries equals the record's value; a
+session's own 0 for voice or language means it takes any, as the game's own
+check in `online_search_filter_results` 0x2a4740 reads those two. The
+searcher's rank range and the host's only have to meet. The RESULT total
+counts the sessions that matched. A block that is not those seven records,
+another procedure, or no block at all lists every open session as before, and
+a session that carries no attributes cannot be excluded by them.
+
+The filters reach the server as the game writes them:
+`recomp-runtime/live_xapi.c` forwards the guest's array and
+`recomp-runtime/live_client.c` copies it into the packet unchanged, so a
+client from before this rule gets the same filtered list without a change.
 
 CONNECT picks the other player's account by virtual address, and only when
 that player hosts a Live session from SESSION_PUT that is still alive, or

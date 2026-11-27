@@ -59,6 +59,16 @@ ACCOUNTS_PER_ADDRESS = 4  # new XUIDs a minute; each keeps a gamertag
 ACCOUNTS_PER_DAY = 16  # and a day, so one address takes 256 days to fill MAX_ACCOUNTS
 MAX_ATTRIBUTES = 0x2a0  # what XOnlineMatchSearchParse writes into a search record
 MAX_FILTERS = 512
+# The seven search slots match these offsets in a session's 27-attribute blob,
+# which the guest packs from DAT_00f24918 and parses with the 27-entry spec at
+# 0x7bfd00: the mode, the create page's first two settings, the rank points pair
+# (highest, then lowest) and the voice and language settings. Values are the
+# guest's little-endian 8-byte integers. live_join_setup_enter 0x2ab840 feeds
+# the same slots into the create page, and online_search_filter_results 0x2a4740
+# checks the last four against the searcher's grade, voice state and language.
+SEARCH_SLOT = (0x00, 0x08, 0x10, 0x152, 0x15a, 0x162, 0x16a)
+SEARCH_RANK_MAX, SEARCH_RANK_MIN = 3, 4  # slots: the searcher's own rank range
+SEARCH_ANY_VALUE = (SEARCH_SLOT[5], SEARCH_SLOT[6])  # a session's own 0 here means any voice or language
 MAX_FRIENDS = 100  # RECOMP_LIVE_MAX_FRIENDS
 MAX_MUTES = 250  # RECOMP_LIVE_MAX_MUTES
 MAX_STAT_WRITE = 64  # RECOMP_LIVE_MAX_STAT_ATTRS; group 7 writes 61
@@ -107,6 +117,15 @@ SESSION_PUT_BODY = struct.Struct(">I8s4IH")  # request, kid, four slot counts, a
 SESSION_OK_BODY = struct.Struct(">II8s16s")  # request, hresult, kid, key
 SESSION_DEL_BODY = struct.Struct(">I8s")
 SEARCH_BODY = struct.Struct(">IIH")  # request, procedure, filter length
+# XOnlineMatchSearch procedure 1 carries the game's seven OptiMatch filters, one
+# 16-byte record each as online_match_search_start 0x29f940 builds them:
+# [id][flags][value][length], in the guest's own little-endian order. Id 0 is an
+# integer equality and 0xf00000 the wildcard it writes for a dialog's "any".
+SEARCH_FILTER = struct.Struct("<4I")
+SEARCH_FILTER_COUNT = 7
+SEARCH_FILTER_BYTES = SEARCH_FILTER.size * SEARCH_FILTER_COUNT  # 112
+SEARCH_PROCEDURE = 1
+SEARCH_ANY_ID = 0x00f00000
 FIND_BODY = struct.Struct(">I8s")
 CONNECT_BODY = struct.Struct(">II")  # request, the other player's virtual address
 LPEER_BODY = struct.Struct(">I6s6s8sB")  # virtual address, public endpoint, LAN endpoint, pair token, relay
@@ -278,6 +297,62 @@ def name_banned(name):
 
 def ina_bytes(ina):
     return struct.unpack(">I", ina)[0]
+
+
+def search_wanted(filters):
+    """What an OptiMatch search asks of a session: its (offset, value) equalities
+    and its rank range, as (lowest, highest). None when the block is not the seven
+    records the game writes, and the search then lists every open session."""
+    if len(filters) != SEARCH_FILTER_BYTES:
+        return None
+    equalities, ranks = [], {}
+    for slot in range(SEARCH_FILTER_COUNT):
+        ident, _flags, value, _length = SEARCH_FILTER.unpack_from(filters, slot * SEARCH_FILTER.size)
+        if ident == SEARCH_ANY_ID:
+            continue
+        if ident != 0:
+            return None
+        if slot in (SEARCH_RANK_MAX, SEARCH_RANK_MIN):
+            ranks[slot] = value
+        else:
+            equalities.append((SEARCH_SLOT[slot], value))
+    if len(ranks) != 2:
+        return equalities, None  # the game always sends both, so one wildcard means any rank
+    return equalities, (ranks[SEARCH_RANK_MIN], ranks[SEARCH_RANK_MAX])
+
+
+def integer_attribute(attributes, offset):
+    """One integer attribute of a session's blob, or None when the blob does not carry it."""
+    if offset + 8 > len(attributes):
+        return None
+    return struct.unpack_from("<I", attributes, offset)[0]
+
+
+def search_matches(attributes, wanted):
+    """True when a session carrying these attributes answers the search's filters."""
+    if wanted is None:
+        return True
+    equalities, ranks = wanted
+    for offset, value in equalities:
+        stored = integer_attribute(attributes, offset)
+        # The game always sends all 27 attributes, so a short blob is another
+        # client's: a value it does not carry cannot exclude it.
+        if stored is None:
+            continue
+        # A session's own 0 for voice or language means it takes any, as the game
+        # reads those two in online_search_filter_results.
+        if stored != value and (stored != 0 or offset not in SEARCH_ANY_VALUE):
+            return False
+    if ranks is not None:
+        lowest, highest = ranks
+        session_low = integer_attribute(attributes, SEARCH_SLOT[SEARCH_RANK_MIN])
+        session_high = integer_attribute(attributes, SEARCH_SLOT[SEARCH_RANK_MAX])
+        # A host advertises the rank points it accepts, so the two ranges only
+        # have to meet; the game's own "any" is the whole range 0..19.
+        if session_low is not None and session_high is not None and \
+                max(session_low, lowest) > min(session_high, highest):
+            return False
+    return True
 
 
 def xuid_of(proof):
@@ -785,12 +860,16 @@ class Matchmaker:
         return answers
 
     def live_search(self, body, nonce, sender, now):
-        req, procedure, length = SEARCH_BODY.unpack_from(body)
+        req, procedure, _length = SEARCH_BODY.unpack_from(body)
         me = self.online_at(sender, now)
         if me is None:
             return self.result(req, E_ACCESSDENIED, sender, nonce)
+        # Quick Match sends the same procedure with every wildcard, so it still
+        # lists every open session; only OptiMatch's own values narrow the list.
+        wanted = search_wanted(body[SEARCH_BODY.size:]) if procedure == SEARCH_PROCEDURE else None
         rows = [session for session in self.sessions.values()
-                if session.digest == me.digest and session.open and session.host is not me]
+                if session.digest == me.digest and session.open and session.host is not me
+                and search_matches(session.attributes, wanted)]
         rows.sort(key=lambda session: session.born, reverse=True)  # newest first
         return self.result(req, HRESULT_OK, sender, nonce, rows)
 
