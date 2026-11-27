@@ -758,13 +758,7 @@ int main(void)
     rollback_active = true;
     rollback_hidden = false;
     rollback_frame = 0u;
-    /* A datagram a finished session left queued must not reach the next one. */
-    size = (int)guest_wire(packet, ina_b, port_1000, (const uint8_t *)"stale", 5u);
-    send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
-    recomp_live_transport_pump(netplay_now_ms());
     recomp_live_transport_session_begin();
-    check("a new session drops the last one's queued datagram",
-        guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     for (unsigned i = 0u; i < 2u; ++i) {
         const uint8_t body[2] = {(uint8_t)('r'), (uint8_t)('0' + i)};
         size = (int)guest_wire(packet, ina_b, port_1000, body, sizeof body);
@@ -806,12 +800,15 @@ int main(void)
     rollback_hidden = true;
     check("a new session does not replay the last one", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     rollback_hidden = false;
+    /* What the game has not read yet outlives the session: after a KO its own
+       lockstep reads what the other side sent. */
     size = (int)guest_wire(packet, ina_b, port_1000, (const uint8_t *)"ended", 5u);
     send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
     recomp_live_transport_pump(netplay_now_ms());
     recomp_live_transport_session_end();
-    check("a session end drops what the game never read", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     rollback_active = false;
+    check("a session end keeps what the game has not read", guest_read(data, sizeof data, &from_ina, &from_port) == 5 &&
+        memcmp(data, "ended", 5u) == 0);
 
     /* --- the relay: introduced relayed, a relayed packet, and the fallback --- */
     memset(&intro, 0, sizeof intro);
@@ -852,11 +849,6 @@ int main(void)
     intro.public_port = htons(9u); /* nothing listens there */
     memcpy(intro.token, RELAY_TOKEN, sizeof intro.token);
     recomp_live_transport_peer(&intro);
-    /* A datagram queued for a peer with no path belongs to the session that
-       sent it; a new session must not flush it when the relay opens. */
-    check("a send with no path waits",
-        recomp_live_transport_guest_send(ina_d, port_1000, (const uint8_t *)"old", 3u) == 3);
-    recomp_live_transport_session_begin();
     recomp_live_transport_pump(netplay_now_ms() + 6000u);
     check("the fallback relays after 5 s", recomp_live_transport_reachable(ina_d));
     check("and says so", recomp_live_transport_relay(ina_d));

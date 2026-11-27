@@ -74,7 +74,7 @@ struct RollbackRun {
     // Live: the round handshake's start request, and what the game's lockstep stop and a
     // vanished peer leave for the session's end.
     bool livePending = false, liveStopPending = false, liveLockstepStopped = false, liveAbandon = false;
-    // Live: this session ended before its stop frame, so the game's own session ends with it.
+    // Live: the other player left or went quiet, so the game's own session ends with this one.
     bool liveFailed = false;
     // Live: the last pads of a finished fight, repeated by the frame pump over
     // the frames that follow instead of sleeping on the frame thread.
@@ -378,11 +378,12 @@ static void finishLiveSession()
     rollback.livePending = rollback.liveStopPending = rollback.liveLockstepStopped = rollback.liveAbandon = false;
     rollback.pads[0] = rollback.pads[1] = RecompInputGamepad{};
     recomp_live_transport_session_end();
-    /* Live: a session that ended before its stop leaves the game's session too,
-       but nothing in the game has told it: its own lockstep and Live pages would
-       wait on a player that is not coming. Queue the leave datagram a departing
-       console sends from the opponent's virtual address, after the queues were
-       cleared so it is the only thing waiting for the game. */
+    /* Live: the other player is gone, but nothing in the game has told it: its
+       own lockstep and Live pages would wait on a player that is not coming.
+       Queue the leave datagram a departing console sends, from the opponent's
+       virtual address. A desync or a failed rewind leaves both players
+       connected, and the game's lockstep carries the match on, so those do not
+       send it. */
     if (rollback.liveFailed) recomp_live_transport_session_leave(rollback.net.peer_address);
     rollback.liveFailed = false;
     /* RECOMP_ROLLBACK_FLIP belongs to the session it was set for; a rematch must
@@ -436,7 +437,8 @@ static void handBackToGame(void *, const char *stop_id)
 static bool failSession(RecompLiveEnd end)
 {
     static const RecompLiveEndOps ops = {nullptr, tellOpponent, stopRunner, handBackToGame};
-    if (rollback.mode == RollbackMode::Live) rollback.liveFailed = true;
+    if (rollback.mode == RollbackMode::Live && (end == RECOMP_LIVE_END_TIMEOUT || end == RECOMP_LIVE_END_PEER_LEFT))
+        rollback.liveFailed = true;
     return recomp_live_end_session(rollback.mode == RollbackMode::Live, end, &ops);
 }
 

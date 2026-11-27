@@ -1036,10 +1036,10 @@ void recomp_live_transport_unbind_rollback(void)
 }
 
 /* A new session counts frames from 0 again, so the last session's datagrams
-   must not replay in it (stale entries broke rematches). Its game datagrams
-   are stale in the same way: a lockstep packet still queued for the guest, or
-   one waiting on a peer's route, would reach the next match's first frames,
-   where the game reads them with a frame counter that restarted. */
+   must not replay in it (stale entries broke rematches), and neither may the
+   last session's rollback packets. The guest's own queue stays: after a KO the
+   game's lockstep takes over and needs the datagrams the other side already
+   sent, and the per-peer queues hold datagrams still waiting for a route. */
 static void clear_log(void)
 {
     memset(live.log, 0, sizeof live.log);
@@ -1048,41 +1048,22 @@ static void clear_log(void)
     live.replay_at = 0u;
 }
 
-static void clear_guest(void)
-{
-    live.guest_head = 0u;
-    live.guest_count = 0u;
-}
-
 static void clear_rollback(void)
 {
     live.rollback_head = 0u;
     live.rollback_count = 0u;
 }
 
-static void clear_peer_queues(void)
-{
-    for (unsigned i = 0u; i < LIVE_PEERS; ++i) {
-        if (!live.peers[i].used) continue;
-        live.peers[i].queue_head = 0u;
-        live.peers[i].queue_count = 0u;
-    }
-}
-
 void recomp_live_transport_session_begin(void)
 {
     clear_log();
-    clear_guest();
     clear_rollback();
-    clear_peer_queues();
 }
 
 void recomp_live_transport_session_end(void)
 {
     clear_log();
-    clear_guest();
     clear_rollback();
-    clear_peer_queues();
 }
 
 /* The game's own leave datagram: size - 2 at the start, type 17 at byte 2 and
