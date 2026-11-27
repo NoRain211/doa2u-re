@@ -237,14 +237,17 @@ typedef struct LiveTask {
     uint32_t stat_count;
     uint32_t stat_ids; /* the leaderboard's requested id list (shorts) */
     uint32_t final;
+    uint64_t next_ms; /* friends enumerate: when its next query is due */
     bool complete;
     bool keep; /* the request still holds a result the guest reads */
+    bool delivered; /* friends enumerate: a list was handed over at least once */
 } LiveTask;
 
 static LiveTask live_tasks[LIVE_TASK_SLOTS];
 static uint32_t live_next_handle = 0x4c000001u;
 static uint32_t live_logon_users;
 static uint32_t live_logon_slot; /* which of the four XONLINE_USER records */
+static uint64_t live_now_ms; /* the frame pump's clock, for the friends refresh */
 static uint32_t live_search_scratch;
 static uint32_t live_search_pointers;
 static uint32_t live_qos_pool;
@@ -406,6 +409,7 @@ static bool live_task_add(LiveTask *task, RecompLiveRequest request)
 }
 
 static uint32_t live_task_finished(LiveTask *task);
+static uint32_t live_friends_poll(LiveTask *task);
 
 static void live_task_complete_now(LiveTask *task)
 {
@@ -452,9 +456,6 @@ static uint32_t live_task_finished(LiveTask *task)
         live_finish_logon();
         result = LIVE_TASK_LOGON_SUCCESS;
         break;
-    case LIVE_KIND_FRIENDS_ENUMERATE:
-        result = LIVE_TASK_RESULTS;
-        break;
     case LIVE_KIND_FRIENDS_STARTUP:
     case LIVE_KIND_MUTELIST_STARTUP:
         result = LIVE_TASK_IDLE;
@@ -487,6 +488,7 @@ static uint32_t live_task_poll(LiveTask *task)
 {
     const RecompLiveBackend *backend = live_backend();
     if (task->complete) return task->final;
+    if (task->kind == LIVE_KIND_FRIENDS_ENUMERATE) return live_friends_poll(task);
     if (task->request_count != 0u && backend != NULL && backend->poll != NULL) {
         bool pending = false;
         for (unsigned i = 0u; i < task->request_count; ++i) {
@@ -869,6 +871,51 @@ static void live_friends_enumerate(void)
        continues that handle and reads 0x1500F1 from the task, not from this
        return. */
     kernel_return(3u, 0u);
+}
+
+/* The enumerate task is long lived: the game starts it once per online session
+   (online_friends_poll 0x29f540 keeps it in DAT_00f24908) and closes it only
+   when XOnlineFriendsEnumerateFinish runs at logoff. Online, the game continues
+   the task every frame from online_update (0x2a5530) and calls
+   XOnlineFriendsGetLatest each time it reads 0x1500f1, copying the records into
+   g_friends, which the list and detail pages read afresh each frame
+   (friend_ui_state 0x2a0030, FUN_002a9930). The retail task keeps answering
+   while it is open, so a friend who logs on, enters or leaves a session, or
+   sends an invite shows up without reopening the page. It does not here: the
+   backend keeps one list and only the server's PUSH re-queries it. A period
+   refresh from the task itself closes that gap for a server that only reports
+   status when asked, and it bounds both the staleness and the load (the query
+   goes out only while the guest polls an open task). Between queries the task
+   stays running, as the retail one does while it waits. */
+enum { LIVE_FRIENDS_REFRESH_MS = 10000u };
+
+static uint32_t live_friends_poll(LiveTask *task)
+{
+    const RecompLiveBackend *backend = live_backend();
+    if (backend == NULL || backend->friends_enumerate == NULL) return LIVE_E_FAIL;
+    if (task->request_count != 0u) {
+        uint32_t hresult = 0u;
+        const RecompLiveStatus status = backend->poll != NULL
+            ? backend->poll(backend->self, task->requests[0], &hresult) : RECOMP_LIVE_DONE;
+        if (status == RECOMP_LIVE_PENDING) return LIVE_TASK_RUNNING;
+        live_task_drop_requests(task);
+        if (status == RECOMP_LIVE_FAILED) {
+            /* The first failure is the caller's to see; a later one keeps the
+               list already handed over and waits for the next period. */
+            if (!task->delivered) return live_task_hresult(hresult);
+            task->next_ms = live_now_ms + LIVE_FRIENDS_REFRESH_MS;
+            return LIVE_TASK_RUNNING;
+        }
+        task->delivered = true;
+        task->next_ms = live_now_ms + LIVE_FRIENDS_REFRESH_MS;
+        return LIVE_TASK_RESULTS;
+    }
+    if (task->next_ms == 0u || live_now_ms >= task->next_ms) {
+        task->next_ms = live_now_ms + LIVE_FRIENDS_REFRESH_MS;
+        if (live_task_add(task, backend->friends_enumerate(backend->self))) return LIVE_TASK_RUNNING;
+        if (!task->delivered) return LIVE_E_FAIL;
+    }
+    return LIVE_TASK_RUNNING;
 }
 
 static void live_friends_latest(void)
@@ -1963,6 +2010,7 @@ static void live_xnet_random(void)
 void recomp_live_pump(uint64_t now_ms)
 {
     const RecompLiveBackend *backend = live_backend();
+    live_now_ms = now_ms;
     if (backend == NULL) return;
     live_pump_detached();
     if (backend->tick != NULL) backend->tick(backend->self, now_ms);
