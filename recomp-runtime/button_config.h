@@ -20,6 +20,9 @@ extern "C" {
    all their defaults, and the screen closing, when the host saves. */
 typedef struct RecompButtonConfigHost {
     const char *(*bound)(unsigned binding, bool pad);
+    /* The same source as the screen shows it: "Cross" on a PlayStation pad,
+       "A" and the settings files' names everywhere else. */
+    const char *(*label)(unsigned binding, bool pad);
     void (*listen)(unsigned binding, bool pad);
     bool (*listening)(void);
     void (*reset)(bool pad);

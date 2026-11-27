@@ -126,6 +126,11 @@ const char *recomp_rebind_name(unsigned binding, bool pad)
     return recomp_input_host_source_name(pad, recomp_input_host_bound(binding, pad));
 }
 
+const char *recomp_rebind_label(unsigned binding, bool pad)
+{
+    return recomp_input_host_source_label(pad, recomp_input_host_bound(binding, pad));
+}
+
 void recomp_rebind_save(void)
 {
     if (!changed.exchange(false)) return;

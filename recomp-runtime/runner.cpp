@@ -28,6 +28,7 @@
 #include "live_xapi.h"
 #include "netplay_session.h"
 #include "perf_overlay.h"
+#include "playstation_buttons.h"
 #include "rollback.h"
 #include "runner_load.h"
 #include "save_transaction.h"
@@ -116,6 +117,7 @@ static void filterHostPad(std::uint32_t port, RecompInputGamepad *gamepad, bool 
 
 static bool sampleInput(std::uint32_t port, RecompInputGamepad *gamepad)
 {
+    recomp_playstation_buttons_set_active(recomp_input_host_playstation_pad());
     bool present = false;
     if (recomp_netplay_session_pad(port, gamepad, &present)) return present;
     if (port != 0u) {
@@ -277,8 +279,8 @@ static void installPcSettings(bool online)
     // The renderer may not have a window yet; it keeps the mode until it has one.
     recomp_d3d_presenter_set_display_mode(choices[RECOMP_PC_DISPLAY_MODE]);
     recomp_pc_settings_set_live(RECOMP_PC_DISPLAY_MODE, true);
-    const RecompButtonConfigHost rebind{recomp_rebind_name, recomp_rebind_listen, recomp_rebind_listening,
-        recomp_rebind_reset, recomp_rebind_save};
+    const RecompButtonConfigHost rebind{recomp_rebind_name, recomp_rebind_label, recomp_rebind_listen,
+        recomp_rebind_listening, recomp_rebind_reset, recomp_rebind_save};
     recomp_button_config_install(&rebind);
     // Both renderers rebuild their targets live (applyQuality in each presenter).
     const bool quality = recomp_d3d_presenter_quality_live();
@@ -739,6 +741,7 @@ int main(int argc, char **argv)
     recomp_disc_root_path = discRoot.c_str();
     static const std::string netplayDigest = installMods(discRoot);
     recomp_texture_pack_configure(textureFolder());
+    recomp_playstation_buttons_configure(textureFolder());
     recomp_netplay_session_init({discPath, netplayDigest.c_str(), &inputPulses, scriptedInputOnly, guestRam});
     recomp_netplay_session_start_live();
     bootGuest();

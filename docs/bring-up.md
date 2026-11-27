@@ -998,7 +998,11 @@ An explicit XInputPoll binding remains unresolved.
 The shared SDL host maps four gamepads and keeps a keyboard controller on
 port zero. Enter is Start, arrows are the D-pad, Z/X are A/B, A/S are X/Y,
 Q/W are White/Black and E/R are the triggers. Keyboard input requires window
-focus. Options, Controller, Rebind opens the game's Button Config screen on
+focus. A PlayStation pad (SDL3's PS3, PS4 or PS5 type) names its own buttons
+on the screens this runtime draws: Cross, Circle, Square, Triangle, L1, R1,
+L2, R2, Select/Share/Create and Start/Options. The settings files keep the
+Xbox names. Options, Controller, Rebind opens the game's Button Config
+screen on
 the keys and host pad buttons (`button_config.c`, `rebind.cpp`), which
 `rebind.cpp` loads from and saves to the files `RECOMP_KEYBOARD_SETTINGS` and
 `RECOMP_CONTROLLER_SETTINGS` name (`settings_file.cpp`). `--input-start-pulse-at <poll>` sends a one-sample Start edge through

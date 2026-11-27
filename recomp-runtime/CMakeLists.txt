@@ -365,7 +365,13 @@ endif()
 # music for tools/import_soundtrack.py, into the game's ADX.
 add_executable(recomp_mod_loader_test mod_loader.c adx_encoder.c adx_decoder.c mod_loader_test.c)
 add_test(NAME recomp-runtime-mod-loader COMMAND recomp_mod_loader_test)
-add_executable(recomp_jukebox_test jukebox_test.c mod_loader.c adx_encoder.c adx_decoder.c)
+add_executable(recomp_jukebox_test jukebox_test.c mod_loader.c adx_encoder.c adx_decoder.c
+    input_host_win32.c input_keyboard_win32.c)
+# jukebox.c asks the input host what this pad calls its A button.
+recomp_use_sdl3(recomp_jukebox_test)
+if(WIN32)
+    target_link_libraries(recomp_jukebox_test PRIVATE user32)
+endif()
 add_test(NAME recomp-runtime-jukebox COMMAND recomp_jukebox_test)
 add_executable(recomp_adx_encode adx_encode_tool.c adx_encoder.c adx_decoder.c)
 if(NOT MSVC)
@@ -421,7 +427,7 @@ add_test(NAME recomp-runtime-input-pulses COMMAND recomp_input_pulse_source_test
 
 add_library(recomp_keyboard STATIC input_keyboard_win32.c)
 add_executable(recomp_input_host_test input_host_win32.c rebind.cpp settings_file.cpp input_host_win32_test.c)
-target_compile_definitions(recomp_input_host_test PRIVATE RECOMP_INPUT_TEST_FOCUSED)
+target_compile_definitions(recomp_input_host_test PRIVATE RECOMP_INPUT_TEST_FOCUSED RECOMP_INPUT_TEST_PAD_TYPE)
 target_link_libraries(recomp_input_host_test PRIVATE recomp_keyboard)
 recomp_use_sdl3(recomp_input_host_test)
 if(WIN32)
@@ -603,7 +609,7 @@ target_include_directories(recomp_texture_upscale_test PRIVATE "${_xbrz_dir}")
 add_test(NAME recomp-runtime-texture-upscale COMMAND recomp_texture_upscale_test)
 # Texture packs (texture_pack.cpp): edited images replace a guest texture and
 # RECOMP_TEXTURE_DUMP writes dumps, in the same names DOA2U-XBERecomp uses.
-add_library(recomp_texture_pack STATIC texture_pack.cpp)
+add_library(recomp_texture_pack STATIC texture_pack.cpp playstation_buttons.cpp)
 target_include_directories(recomp_texture_pack PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${_sdl_gpu_presenter} PUBLIC recomp_texture_pack)
 if(WIN32)
@@ -617,6 +623,11 @@ if(WIN32 OR SDL3_FOUND)
     target_link_libraries(recomp_texture_pack_test PRIVATE recomp_texture_pack)
     recomp_use_sdl3(recomp_texture_pack_test)
     add_test(NAME recomp-runtime-texture-pack COMMAND recomp_texture_pack_test)
+    # The PlayStation button art and its private key mapping.
+    add_executable(recomp_playstation_buttons_test playstation_buttons_test.cpp)
+    target_link_libraries(recomp_playstation_buttons_test PRIVATE recomp_texture_pack)
+    recomp_use_sdl3(recomp_playstation_buttons_test)
+    add_test(NAME recomp-runtime-playstation-buttons COMMAND recomp_playstation_buttons_test)
 endif()
 if(WIN32)
     # Tests tell the SDL_GPU presenter from the Direct3D 11 one.

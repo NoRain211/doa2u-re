@@ -46,6 +46,16 @@ int recomp_input_host_bound(unsigned binding, bool pad);
 void recomp_input_host_bind(unsigned binding, bool pad, int source);
 /* A source's name as the JSON files spell it; NULL when it cannot be bound. */
 const char *recomp_input_host_source_name(bool pad, int source);
+/* A source's name on screen: the JSON name, or on a PlayStation pad Cross,
+   Circle, Square, Triangle, L1, R1, L2, R2, Select/Share/Create and
+   Start/Options. The files keep the JSON names. */
+const char *recomp_input_host_source_label(bool pad, int source);
+/* What presses a binding on the active pad, as the Button Config screen
+   shows it; NULL for a binding with no pad button. */
+const char *recomp_input_host_binding_label(unsigned binding);
+/* True when the pad the menus speak for (port 0's, else the first connected)
+   is a PlayStation pad: SDL3's PS3, PS4 or PS5 type. */
+bool recomp_input_host_playstation_pad(void);
 /* The source a name stands for, in any case; -1 when it names none that can be bound. */
 int recomp_input_host_source(bool pad, const char *name);
 /* A bindings file's entries: each given binding takes its source (-1 for

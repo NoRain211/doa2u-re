@@ -96,6 +96,26 @@ struct Settings {
 };
 
 struct Color { Uint8 r, g, b; };
+
+// True when the first open gamepad is a PlayStation one: the top bar's prompts
+// then name its buttons. SDL's debug font has no cross, circle, square or
+// triangle, so they are spelled out.
+bool playstationPad()
+{
+    int count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    bool playstation = false;
+    for (int i = 0; ids != nullptr && i < count; ++i) {
+        SDL_Gamepad *pad = SDL_GetGamepadFromID(ids[i]);
+        if (pad == nullptr) continue;
+        const SDL_GamepadType type = SDL_GetGamepadType(pad);
+        playstation = type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 ||
+            type == SDL_GAMEPAD_TYPE_PS5;
+        break;
+    }
+    SDL_free(ids);
+    return playstation;
+}
 constexpr Color kDark{42, 29, 21}, kWhite{243, 238, 232}, kSand{241, 197, 143};
 constexpr Color kMuted{191, 178, 165}, kGold{232, 191, 138}, kBar{13, 10, 9};
 
@@ -718,17 +738,25 @@ struct Launcher {
         }
 
         // Top bar: title and build state on the left, button prompts on the right. The short title
-        // leaves the prompts room beside "NOT BUILT YET - UPDATE".
+        // leaves the prompts room beside "NOT BUILT YET - UPDATE"; a PlayStation pad's spelled-out
+        // names are wider, so they take two rows of two.
         text(kSide, (kTopH - 8) / 2, std::string("DOA2U - ") + (built ? "READY TO PLAY" : "NOT BUILT YET")
             + (pending.empty() ? "" : " - UPDATE"), kMuted);
-        float x = kWidth - kSide;
-        for (const auto &hint : {std::pair<const char *, const char *>{"B", "BACK"}, {"A", "SELECT"}, {"<>", "CHANGE"}, {"LB/RB", "PAGE"}}) {
+        const bool ps = playstationPad();
+        const std::pair<const char *, const char *> hints[] = {
+            {ps ? "CIRCLE" : "B", "BACK"}, {ps ? "CROSS" : "A", "SELECT"},
+            {"<>", "CHANGE"}, {ps ? "L1/R1" : "LB/RB", "PAGE"}};
+        const size_t per_row = ps ? 2u : 4u;
+        float x = kWidth - kSide, y = ps ? 4.0f : (kTopH - 8) / 2;
+        for (size_t i = 0; i < std::size(hints); ++i) {
+            if (i == per_row) { x = kWidth - kSide; y += 14.0f; }
+            const auto &hint = hints[i];
             x -= SDL_strlen(hint.second) * 8;
-            text(x, (kTopH - 8) / 2, hint.second, kMuted);
+            text(x, y, hint.second, kMuted);
             const float w = static_cast<float>(SDL_strlen(hint.first) * 8 + 8);
             x -= w + 6;
-            fill({x, (kTopH - 12) / 2, w, 12}, {242, 227, 207});
-            text(x + 4, (kTopH - 8) / 2, hint.first, kDark);
+            fill({x, y - 2, w, 12}, {242, 227, 207});
+            text(x + 4, y, hint.first, kDark);
             x -= 16;
         }
 

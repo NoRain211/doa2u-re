@@ -24,6 +24,9 @@ bool recomp_rebind_listening(void);
 void recomp_rebind_reset(bool pad);
 /* The name of what presses a binding, as the JSON files spell it; NULL for nothing. */
 const char *recomp_rebind_name(unsigned binding, bool pad);
+/* The same source as the screens show it: a PlayStation pad's own button
+   names in place of the Xbox ones; NULL for nothing. */
+const char *recomp_rebind_label(unsigned binding, bool pad);
 /* The files RECOMP_KEYBOARD_SETTINGS and RECOMP_CONTROLLER_SETTINGS name
    hold each button's key or pad button, such as {"a": "Space", "y": ""}
    ("" for nothing); a button left out keeps its default. Load reads them
