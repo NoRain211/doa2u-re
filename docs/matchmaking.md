@@ -351,9 +351,11 @@ token.
 revoke an invite and 6 answer an invite. A request in both directions makes
 friends at once. The friend flags are the game's: online, playing, joinable,
 sent or received request, sent or received invite, invite accepted or
-rejected. An invite names the inviter's own session and stays until it is
-revoked, expires or its session ends, so the inviter's list shows the answer;
-answering it tells the inviter which way it went.
+rejected. An invite names the inviter's own session. An unanswered invite
+stays until it is revoked, expires (ten minutes) or its session ends. Answering
+it tells the inviter which way it went, and the answered invite stays, so the
+inviter's list shows the answer, until it expires or its session ends; it can
+no longer be revoked.
 
 A Live mutelist has no request that adds a name in the game's API, so the
 server only serves what the store holds or a test sets: the game reads it at

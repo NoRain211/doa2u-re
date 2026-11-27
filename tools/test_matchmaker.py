@@ -1116,11 +1116,25 @@ class LiveTest(unittest.TestCase):
         # A restarted: its new socket heartbeats while the old socket's sessions
         # would otherwise live as long as the account stayed online.
         moved = (A_AT[0], A_AT[1] + 1)
-        self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)
+        self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)  # nonce() differs by endpoint
         self.assertEqual(self.server.sessions, {})
         self.assertNotIn((A, B), self.server.invites)
         self.assertEqual(self.put(sender=moved, now=3.0)[1], 0)  # the new process hosts its own
         self.assertEqual(self.search(B_AT, now=3.1)[0][3], 1)
+
+    def test_a_hosts_rebound_port_keeps_its_sessions(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        # The same process behind a NAT that moved its port: same socket nonce,
+        # so its lobby and invite stay.
+        moved = (A_AT[0], A_AT[1] + 1)
+        same = nonce(A_AT)
+        real = nonce
+        with mock.patch(f"{__name__}.nonce", lambda sender: same if sender == moved else real(sender)):
+            self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)
+        self.assertEqual(len(self.server.sessions), 1)
+        self.assertIn((A, B), self.server.invites)
 
     def test_an_invite_goes_when_its_session_ends(self):
         self.online()

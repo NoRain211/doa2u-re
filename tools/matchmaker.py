@@ -715,10 +715,11 @@ class Matchmaker:
             given = self.taken_tag(wanted, xuid)
             if given is not None and given != account.gamertag:
                 account.gamertag, self.dirty = given, True
-        if account.endpoint is not None and account.endpoint != sender:
-            # A LOGON from another socket is another process at this account: the
-            # sessions the old one hosted cannot be reached any more, and without
-            # this they would outlive it as long as the new one heartbeats.
+        if account.endpoint is not None and account.nonce != nonce:
+            # Another socket nonce is another process at this account: the sessions
+            # the old one hosted cannot be reached any more, and without this they
+            # would outlive it as long as the new one heartbeats. A new source port
+            # with the same nonce is a NAT rebind of the same process, which keeps them.
             self.end_sessions(account)
         if account.endpoint is not None and self.by_endpoint.get(account.endpoint) is account:
             del self.by_endpoint[account.endpoint]
