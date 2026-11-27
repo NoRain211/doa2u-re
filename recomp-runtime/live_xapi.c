@@ -1926,7 +1926,7 @@ static void live_qos_write_entry(uint32_t guest, uint32_t index, const RecompLiv
 static void live_qos_refresh(unsigned slot)
 {
     if (slot >= LIVE_QOS_HANDLES) return;
-    if (live_qos_slots[slot].guest == 0u || !live_qos_slots[slot].started || live_qos_slots[slot].done) return;
+    if (live_qos_slots[slot].guest == 0u || !live_qos_slots[slot].started) return;
     const uint32_t count = live_qos_slots[slot].count;
     RecompLiveQosEntry entries[LIVE_QOS_ENTRIES];
     bool done = false;
@@ -2027,11 +2027,16 @@ static void live_qos_release(void)
 }
 
 /* Once per frame, after the transport has heard the socket: copy each live
-   handle's settled entries and its pending count. */
+   handle's settled entries and its pending count. A settled handle is left
+   alone unless a rollback rewind put a pending count back in it, since
+   rewriting it every frame would mark its pages dirty in every save. */
 static void live_qos_pump(void)
 {
-    for (unsigned i = 0u; i < LIVE_QOS_HANDLES; ++i)
-        if (live_qos_slots[i].guest != 0u) live_qos_refresh(i);
+    for (unsigned i = 0u; i < LIVE_QOS_HANDLES; ++i) {
+        if (live_qos_slots[i].guest == 0u) continue;
+        if (live_qos_slots[i].done && live_u32(live_qos_slots[i].guest + 4u) == 0u) continue;
+        live_qos_refresh(i);
+    }
 }
 
 static void live_title_xnaddr(void)
