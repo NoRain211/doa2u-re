@@ -59,7 +59,11 @@ enum {
     LIVE_CONNECT_MS = 1000u,
     LIVE_CONNECT_GIVE_UP_MS = 60000u,
 
-    LIVE_REQUEST_SLOTS = 16u,
+    /* A full stat write (12 records) and a full stat read (12 board batches)
+       may be in flight with the friends refresh, a leaderboard and the detached
+       friend operations; a request resent every 500 ms keeps even all of them
+       under the matchmaker's 100 Live packets a second. */
+    LIVE_REQUEST_SLOTS = 48u,
     LIVE_CONNECT_SLOTS = 8u, /* one per peer slot in live_transport.c */
     LIVE_GROUP_CHILDREN = 8u,
     LIVE_REMEMBERED_INVITES = 8u,

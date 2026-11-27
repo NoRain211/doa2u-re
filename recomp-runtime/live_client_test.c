@@ -713,14 +713,14 @@ static void checkInviteNeedsEverySlot(const RecompLiveIdentity *identity)
     backend = recomp_live_client_attach(&copy, "PLAYER", transcript_digest, NULL);
     check("attach for the short-table invite test", backend != NULL);
     recomp_live_client_tick(1000u);
-    /* Ten mutes hold ten of the sixteen slots, so six are free. */
-    RecompLiveRequest held[10];
+    /* 42 mutes hold 42 of the 48 slots, so six are free. */
+    RecompLiveRequest held[42];
     unsigned held_count = 0u;
-    for (unsigned i = 0u; i < 10u; ++i) {
+    for (unsigned i = 0u; i < 42u; ++i) {
         held[i] = backend->mutelist(backend->self);
         if (held[i] != 0u) ++held_count;
     }
-    check("ten asks hold ten slots", held_count == 10u);
+    check("42 asks hold 42 slots", held_count == 42u);
     const uint8_t kid[8] = {1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u};
     const uint64_t xuids[8] = {0x0009000000000201ull, 0x0009000000000202ull, 0x0009000000000203ull,
         0x0009000000000204ull, 0x0009000000000205ull, 0x0009000000000206ull, 0x0009000000000207ull,

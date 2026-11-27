@@ -136,8 +136,8 @@ enum {
        online_stat_values_queue 0x297150 and online_stat_write_records_fill
        0x2942c0). The matchmaker's STAT_WRITE packet names one board and one
        XUID, so records cannot share a request; the cap must cover a whole call
-       or the tail of an upload is lost. live_client.c keeps 16 request slots,
-       so the 12 requests of a full call fit its table. */
+       or the tail of an upload is lost. live_client.c keeps 48 request slots,
+       enough for a full write and a full read at once. */
     LIVE_TASK_REQUESTS = 12,
     LIVE_DETACHED_REQUESTS = 8,
 };
@@ -1523,7 +1523,7 @@ static void live_stat_write(void)
         const RecompLiveRequest request = backend->stat_write(backend->self, board, xuid, stats, n);
         if (!live_task_add(task, request)) {
             /* Only a backend out of request slots gets here (live_client.c holds
-               16). Fail the call rather than upload some records and claim the
+               48). Fail the call rather than upload some records and claim the
                whole call succeeded; the request built for this record is not in
                the task yet and would otherwise never be released. */
             if (request != 0u && backend->release != NULL) backend->release(backend->self, request);
