@@ -545,7 +545,12 @@ static void test_fight_pair_lockstep(void)
     set_member(RECORD_C, spectator, spectator_ina, true);
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
 
-    /* One participant is no longer in the table: no pair either. */
+    /* One participant is no longer in the table: no pair either, even though
+       the slots alone would pair (slot 1 is marked local). */
+    set_member(RECORD_B, local_fighter, local_ina, true);
+    set_member(RECORD_C, spectator, spectator_ina, false);
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 0u;
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
     *recomp_memory(LOCKSTEP_FLAGS, 1u) = 1u;
     set_lockstep_pair(other, 0x0009000000000009ull);
     set_local_xuid(other);

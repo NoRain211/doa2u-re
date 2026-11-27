@@ -27,8 +27,9 @@ bool recomp_game_round_live(void);
    count at 0xf099ec) to that member's sockaddr at +0x14 with sin_addr at
    +0x18. The local fighter is the one whose XUID is the local player's
    (g_local_xuid 0xf191f4); a player who is neither participant is a
-   spectator and gets no pair. Without a usable lockstep pair, as the game
-   does, slots 0 and 1 are the fighters, where the local member is the one
+   spectator and gets no pair, as does a flagged pair the runner cannot
+   resolve. While bit 0 is clear, as the game does, slots 0 and 1 are the
+   fighters, where the local member is the one
    whose XUID is the logged-on user's (g_online_users 0xf1cba8, +0) or that is
    marked at +0x2c. Writes the fighters' virtual addresses (network order) to
    local and opponent when not NULL. False when no pair can be named, cannot

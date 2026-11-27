@@ -63,12 +63,15 @@ static uint32_t session_player_address(uint64_t xuid)
 }
 
 /* The pair the game's own lockstep picked, which in a 3+ player session need
-   not be slots 0 and 1. False when it cannot name both, or marks a spectator
-   (neither participant is the local player) so the caller does not fall back
-   to the slots. */
-static bool lockstep_fight_pair(uint32_t *local, uint32_t *opponent, bool *spectator)
+   not be slots 0 and 1. Sets flagged while bit 0 of the lockstep flags names
+   that pair; the game then never reads the slots (online_get_local_player_slot
+   0x298f70 answers -1 for a local XUID matching neither participant), so the
+   caller must not fall back to them. False when it cannot name both, or the
+   local player is neither participant (a spectator). */
+static bool lockstep_fight_pair(uint32_t *local, uint32_t *opponent, bool *flagged)
 {
     if ((*recomp_memory(LOCKSTEP_FLAGS, 1u) & 1u) == 0u) return false;
+    *flagged = true;
     const uint64_t first = read_xuid(LOCKSTEP_PLAYER0);
     const uint64_t second = read_xuid(LOCKSTEP_PLAYER1);
     if (first == 0u || second == 0u) return false;
@@ -88,7 +91,6 @@ static bool lockstep_fight_pair(uint32_t *local, uint32_t *opponent, bool *spect
         if (opponent != NULL) *opponent = first_ina;
         return true;
     }
-    *spectator = true;
     return false;
 }
 
@@ -123,11 +125,12 @@ static bool slot_fight_pair(uint32_t *local, uint32_t *opponent)
 
 bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent)
 {
-    bool spectator = false;
-    if (lockstep_fight_pair(local, opponent, &spectator)) return true;
-    /* A spectator is not a fighter: pairing it with two others would roll back
-       someone else's fight. */
-    if (spectator) return false;
+    bool flagged = false;
+    if (lockstep_fight_pair(local, opponent, &flagged)) return true;
+    /* A flagged pair the runner cannot use names no fighters: a spectator, or
+       a participant gone from the table. The slots would roll back someone
+       else's fight. */
+    if (flagged) return false;
     /* Without the lockstep pair the game itself takes slots 0 and 1 as the
        fighters and the slot marked at +0x2c as the local one
        (online_get_local_player_slot 0x298f70), in a lobby of any size. A
