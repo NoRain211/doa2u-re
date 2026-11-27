@@ -1242,10 +1242,13 @@ class Matchmaker:
                     if not 0 <= kind <= 0xffffffff or count < 1:
                         raise ValueError("not a feedback count")
                     counts[kind] = min(count, MAX_FEEDBACK_COUNT)
+                # The cap holds per target, so a second entry for one XUID counts too.
+                if len(self.feedback_kinds.get(xuid, set()) | set(counts)) > MAX_FEEDBACK_KINDS:
+                    raise ValueError("too many feedback types")
             except BAD_ENTRY:
                 skipped += 1
                 continue
-            for kind, count in sorted(counts.items())[:MAX_FEEDBACK_KINDS]:
+            for kind, count in counts.items():
                 self.feedback[(xuid, kind)] = count
                 self.feedback_kinds.setdefault(xuid, set()).add(kind)
         for entry in entries("stats"):

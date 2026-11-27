@@ -383,8 +383,11 @@ game reads a stat entry left at type 0 as nothing
 (`ranking_row_to_profile_counters` `0x29b590`, `ranking_profile_load_from_rows`
 `0x29b730`). The game pre-fills each entry's type from its group before a read
 (`ranking_stat_entries_init` `0x294510`), so `recomp-runtime/live_xapi.c` writes
-type 0 for every requested id the row has no value for, as the retail service
-did; an untouched entry would read as a real zero.
+type 0 for every requested stored id the row has no value for, as the retail
+service did; an untouched entry would read as a real zero. The ids it derives
+itself are the exception: the score (-2) reads as an INT64 0 when the row has
+none, and that zero is what `live_ranking_record_is_new_best` compares against
+for the empty pivot row below.
 
 A `LEADERS` ask that names a pivot XUID with no row on an offline record
 board (Time Attack, the shortest victory and Survival: boards 7, 8 and 15 to

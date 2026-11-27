@@ -891,6 +891,21 @@ class LiveTest(unittest.TestCase):
             self.assertEqual(server.feedback, {(A, 4): mm.MAX_FEEDBACK_COUNT})
             self.assertIn("skipped 2 malformed entries", errors.getvalue())
 
+    def test_a_feedback_store_over_the_type_cap_is_skipped_per_target(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            full = [[kind, 1] for kind in range(mm.MAX_FEEDBACK_KINDS)]
+            # Two entries for one target together pass the cap, so the second is
+            # skipped; one entry over it alone is skipped whole, not cut down.
+            Path(path).write_text(json.dumps({"version": 1, "feedback": [
+                {"xuid": A, "types": full}, {"xuid": A, "types": [[99, 1]]},
+                {"xuid": B, "types": full + [[99, 1]]}]}), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(store=path, random_bytes=self.random)
+            self.assertEqual(sorted(server.feedback), [(A, kind) for kind in range(mm.MAX_FEEDBACK_KINDS)])
+            self.assertIn("skipped 2 malformed entries", errors.getvalue())
+
     def test_a_stat_write_needs_a_pair_not_just_a_claimed_session(self):
         self.online()
         kid = self.put(now=0.0)[2]  # A hosts
