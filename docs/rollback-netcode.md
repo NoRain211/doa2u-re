@@ -191,8 +191,12 @@ Limits of this stage:
 (`battle_online_round_start`) runs as on the Xbox, including its ready
 handshake. The rollback session starts on the first frame after it returns,
 as `RollbackMode::Live` in `netplay_session.cpp`, and replaces the game's
-delay-based lockstep for the rest of the match. The player index comes from
-the two fighters' virtual addresses, which both sides read the same way.
+delay-based lockstep for the rest of the match. The fighters are the game's
+own lockstep participants (their XUIDs in `g_lockstep_player0_id` and
+`g_lockstep_player1_id`, resolved through the session table), so a 3+ player
+lobby pairs the right two and a spectator, being neither, gets no rollback.
+The player index comes from the two fighters' virtual addresses, which both
+sides read the same way.
 Either side's request to stop its lockstep rides a pad bit, so both sides end
 the session on the same frame; what follows (results, win poses, the lobby)
 runs on the game's own Live messages, unsynced. A desync, a timeout or a
