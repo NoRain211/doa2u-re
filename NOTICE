@@ -29,6 +29,12 @@ are under the Apache License 2.0; its glslang code is under glslang's BSD,
 MIT and Apache 2.0 licenses. Each keeps its own notices. LWJGL's build is
 under the BSD 3-Clause license.
 
+SDL3, release 3.4.16 (libsdl-org/SDL), drives input, audio and video, and the
+Windows ZIP carries its official VC build's x64 SDL3.dll beside Launcher.exe
+so the launcher can name a PlayStation pad's buttons. SDL3 is Copyright (C)
+1997-2026 Sam Lantinga and contributors, under the zlib license, whose text is
+in recomp-runtime/licenses/SDL3.txt.
+
 The same renderer turns SPIR-V into DXIL for SDL_GPU's Direct3D 12 backend
 with SDL_shadercross (libsdl-org/SDL_shadercross, revision
 1ff05bec573988a98ef9e0260b4da44f512b8367), under the zlib license, whose text

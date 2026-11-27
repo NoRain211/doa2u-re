@@ -226,6 +226,39 @@ static class Pad
     }
 }
 
+// PlayStation pads through SDL3, whose DLL the release puts beside this launcher.
+static class SdlPad
+{
+    // SDL_INIT_GAMEPAD, and SDL_GamepadType's PS3, PS4 and PS5 values (SDL_gamepad.h).
+    const uint InitGamepad = 0x2000;
+    const int TypePs3 = 4, TypePs4 = 5, TypePs5 = 6;
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    static extern bool SDL_Init(uint flags);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern IntPtr SDL_GetGamepads(out int count);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern int SDL_GetGamepadTypeForID(int instanceId);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern void SDL_free(IntPtr memory);
+    static bool started;
+    // True when the first gamepad is a PlayStation one, as tools/launcher_sdl.cpp reads it.
+    public static bool PlayStation()
+    {
+        if (!started) started = SDL_Init(InitGamepad);
+        if (!started) return false;
+        int count;
+        IntPtr ids = SDL_GetGamepads(out count);
+        if (ids == IntPtr.Zero) return false;
+        try
+        {
+            int type = count > 0 ? SDL_GetGamepadTypeForID(Marshal.ReadInt32(ids)) : 0;
+            return type == TypePs3 || type == TypePs4 || type == TypePs5;
+        }
+        finally { SDL_free(ids); }
+    }
+}
+
 // Updates the install from the newest GitHub release ZIP through tools\update.py, which the other launchers share.
 // The ZIP's VERSION file says what is installed; a source checkout has none and is never updated.
 static class Updater
@@ -314,6 +347,9 @@ class LauncherForm : Form
     readonly Timer padTimer = new Timer { Interval = 50 };
     int padHeld;
     DateTime padRepeat = DateTime.MaxValue;
+    // The top bar's prompts name a PlayStation pad; SDL is asked at most once a second.
+    bool playstationPad;
+    DateTime padTypeChecked = DateTime.MinValue;
     Point? drag;
     RectangleF[] tabs, values;
     RectangleF discord;
@@ -626,6 +662,17 @@ class LauncherForm : Form
         catch (Win32Exception) { notice = "No browser opened; visit " + DiscordUrl; }
     }
 
+    // A launcher without SDL3.dll, or an SDL3 old enough to lack these calls, keeps the Xbox names.
+    bool PlayStationPad()
+    {
+        if (DateTime.UtcNow - padTypeChecked < TimeSpan.FromSeconds(1)) return playstationPad;
+        padTypeChecked = DateTime.UtcNow;
+        try { playstationPad = SdlPad.PlayStation(); }
+        catch (DllNotFoundException) { playstationPad = false; }
+        catch (EntryPointNotFoundException) { playstationPad = false; }
+        return playstationPad;
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
@@ -672,7 +719,10 @@ class LauncherForm : Form
         }
         discord = DrawDiscordBadge(g, cx - 12, TopH / 2f);
         float x = discord.X - 16;
-        foreach (var hint in new[] { new[] { "B", "BACK" }, new[] { "A", "SELECT" }, new[] { "", "CHANGE" }, new[] { "LB/RB", "PAGE" } })
+        bool ps = PlayStationPad();
+        foreach (var hint in new[] {
+            new[] { ps ? "CIRCLE" : "B", "BACK" }, new[] { ps ? "CROSS" : "A", "SELECT" },
+            new[] { "", "CHANGE" }, new[] { ps ? "L1/R1" : "LB/RB", "PAGE" } })
         {
             float textW = g.MeasureString(hint[1], smallFont).Width;
             x -= textW;

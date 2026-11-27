@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import ast
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -59,6 +61,21 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertTrue(shipped("recomp-runtime/kernel_file.c", "linux"))
         # build_game.py --disassemble reads it.
         self.assertTrue(shipped("tools/doa2u/seed_functions.json", "windows"))
+
+    def test_windows_sdl3_dll_sits_beside_the_launcher(self):
+        # Launcher.exe P/Invokes SDL3.dll to name a PlayStation pad's buttons; the license ships where the DLL does.
+        self.assertTrue(shipped("recomp-runtime/licenses/SDL3.txt", "windows"))
+        self.assertFalse(shipped("recomp-runtime/licenses/SDL3.txt", "linux"))
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "sdl3.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr(package_test.SDL3[2] + "lib/x64/SDL3.dll", b"dll")
+            out = Path(folder) / "package.zip"
+            with mock.patch.object(package_test, "download", return_value=source), \
+                    zipfile.ZipFile(out, "w") as package:
+                package_test.bundle_file(package, "DOA2U-1/", *package_test.SDL3, "lib/x64/SDL3.dll")
+            with zipfile.ZipFile(out) as package:
+                self.assertEqual(package.read("DOA2U-1/SDL3.dll"), b"dll")
 
     def test_prebuilt_launcher_entry_is_executable(self):
         info = package_test.executable("DOA2U-1/tools/artifacts/launcher-linux-x86_64")
