@@ -28,8 +28,7 @@ WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", "tools/jukebox_edi
     "audio_output_xaudio2.cpp", "audio_output_xaudio2_test.cpp", "audio_output_xaudio2_host_test.cpp",
     "audio_xtalk_xapo.cpp", "audio_xtalk_xapo.h", "audio_capture_xapo.cpp", "audio_capture_xapo.h",
     "audio_capture_xapo_test.cpp", "xaudio2_reverb.h", "xaudio2_reverb_test.cpp",
-    "d3d_presenter_d3d11.cpp", "d3d_presenter_thread.cpp", "overlay_d3d11.cpp", "overlay_d3d11.h",
-    "licenses/SDL3.txt"))}
+    "d3d_presenter_d3d11.cpp", "d3d_presenter_thread.cpp", "overlay_d3d11.cpp", "overlay_d3d11.h"))}
 # The SDL_GPU presenter ships everywhere: Windows builds it as its Vulkan renderer.
 POSIX_ONLY = {"build_game.sh", "launcher.sh", "run_game.sh", "docs/building.md", *(f"recomp-runtime/{name}" for name in (
     "audio_output_sdl.cpp", "audio_output_sdl_test.cpp", "audio_matrix_ramp.h", "audio_reverb.cpp", "audio_reverb.h",

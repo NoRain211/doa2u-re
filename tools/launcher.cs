@@ -243,10 +243,16 @@ static class SdlPad
     static extern void SDL_free(IntPtr memory);
     [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
     static extern void SDL_UpdateGamepads();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr LoadLibrary(string path);
+    // Bind SDL3.dll from this launcher's folder only, never the current directory or PATH;
+    // the imports above then resolve to this module.
+    static readonly bool Loaded = LoadLibrary(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SDL3.dll")) != IntPtr.Zero;
     static bool started;
     // True when the first gamepad is a PlayStation one, as tools/launcher_sdl.cpp reads it.
     public static bool PlayStation()
     {
+        if (!Loaded) return false;
         if (!started) started = SDL_Init(InitGamepad);
         if (!started) return false;
         SDL_UpdateGamepads(); // no event loop here, so this is what notices hotplugged pads
@@ -673,6 +679,7 @@ class LauncherForm : Form
         try { playstationPad = SdlPad.PlayStation(); }
         catch (DllNotFoundException) { playstationPad = false; }
         catch (EntryPointNotFoundException) { playstationPad = false; }
+        catch (BadImageFormatException) { playstationPad = false; }
         return playstationPad;
     }
 

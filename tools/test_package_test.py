@@ -63,9 +63,9 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertTrue(shipped("tools/doa2u/seed_functions.json", "windows"))
 
     def test_windows_sdl3_dll_sits_beside_the_launcher(self):
-        # Launcher.exe P/Invokes SDL3.dll to name a PlayStation pad's buttons; the license ships where the DLL does.
+        # NOTICE names SDL3's license on every platform, so every ZIP carries it.
         self.assertTrue(shipped("recomp-runtime/licenses/SDL3.txt", "windows"))
-        self.assertFalse(shipped("recomp-runtime/licenses/SDL3.txt", "linux"))
+        self.assertTrue(shipped("recomp-runtime/licenses/SDL3.txt", "linux"))
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "sdl3.zip"
             with zipfile.ZipFile(source, "w") as archive:
