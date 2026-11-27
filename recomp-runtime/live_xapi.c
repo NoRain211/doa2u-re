@@ -886,7 +886,9 @@ static void live_friends_enumerate(void)
    refresh from the task itself closes that gap for a server that only reports
    status when asked, and it bounds both the staleness and the load (the query
    goes out only while the guest polls an open task). Between queries the task
-   stays running, as the retail one does while it waits. */
+   keeps answering 0x1500f1 once it has a list, as it did before the refresh,
+   so a change the backend learns another way (a PUSH, this runner's own
+   friend operations) reaches g_friends on the next frame. */
 enum { LIVE_FRIENDS_REFRESH_MS = 10000u };
 
 static uint32_t live_friends_poll(LiveTask *task)
@@ -904,7 +906,7 @@ static uint32_t live_friends_poll(LiveTask *task)
                list already handed over and waits for the next period. */
             if (!task->delivered) return live_task_hresult(hresult);
             task->next_ms = live_now_ms + LIVE_FRIENDS_REFRESH_MS;
-            return LIVE_TASK_RUNNING;
+            return LIVE_TASK_RESULTS;
         }
         task->delivered = true;
         task->next_ms = live_now_ms + LIVE_FRIENDS_REFRESH_MS;
@@ -915,7 +917,7 @@ static uint32_t live_friends_poll(LiveTask *task)
         if (live_task_add(task, backend->friends_enumerate(backend->self))) return LIVE_TASK_RUNNING;
         if (!task->delivered) return LIVE_E_FAIL;
     }
-    return LIVE_TASK_RUNNING;
+    return task->delivered ? LIVE_TASK_RESULTS : LIVE_TASK_RUNNING;
 }
 
 static void live_friends_latest(void)

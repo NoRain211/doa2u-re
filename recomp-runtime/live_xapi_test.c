@@ -669,8 +669,10 @@ int main(void)
     check("the game reads the refreshed flags", call(thunk_friends_latest,
         (const uint32_t[]){0u, 100u, FRIENDS}, 3u) == 3u && (peek32(FRIENDS + 0x1cu) & 0x10u) == 0u);
     recomp_live_pump(19999u);
-    check("no query inside the refresh period", wait_task(enumerate_task) == TASK_RUNNING &&
-        refresh_queries == 1u);
+    /* Between queries the task keeps answering with the list it holds, so a
+       change the backend learns by PUSH reaches the game at once. */
+    check("no query inside the refresh period, and the list is still a result",
+        wait_task(enumerate_task) == TASK_RESULTS && refresh_queries == 1u);
     recomp_live_pump(20000u);
     check("the next period asks again", wait_task(enumerate_task) == TASK_RUNNING && refresh_queries == 2u);
     check("the next refreshed list arrives", wait_task(enumerate_task) == TASK_RESULTS &&
