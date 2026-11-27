@@ -1022,13 +1022,14 @@ static void logLiveScreen()
     recomp_game_live_screen(&now);
     if (logged && now.game_mode == last.game_mode && now.scene == last.scene &&
         now.scene_table == last.scene_table && now.live_page == last.live_page &&
-        now.session_players == last.session_players && now.match_role == last.match_role &&
-        now.lockstep_flags == last.lockstep_flags)
+        now.live_overlay == last.live_overlay && now.session_players == last.session_players &&
+        now.match_role == last.match_role && now.lockstep_flags == last.lockstep_flags)
         return;
     logged = true;
     last = now;
-    std::fprintf(stderr, "recomp live: screen: mode %u, scene %u of 0x%08x, page %s, %u in session, role %u, "
-        "lockstep 0x%02x\n", now.game_mode, now.scene, now.scene_table, recomp_game_live_page_name(now.live_page),
+    std::fprintf(stderr, "recomp live: screen: mode %u, scene %u of 0x%08x, page %s, over it %s, %u in session, "
+        "role %u, lockstep 0x%02x\n", now.game_mode, now.scene, now.scene_table,
+        recomp_game_live_page_name(now.live_page), recomp_game_live_page_name(now.live_overlay),
         now.session_players, now.match_role, now.lockstep_flags);
 }
 

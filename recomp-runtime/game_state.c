@@ -62,9 +62,15 @@ enum {
     GAME_MODE = 0x00878392u,
     FRONTEND_SCENE = 0x00df5dd8u,
     FRONTEND_SCENE_TABLE = 0x00df5e08u,
-    LIVE_PAGES = 0x00f25bc0u,
-    LIVE_PAGE_INDEX = LIVE_PAGES + 0x96u, /* signed byte; the stack's 32 dwords end at +0x80 */
-    LIVE_PAGE_SHOWN = LIVE_PAGES + 0x9cu, /* set while a page is up; clear outside the Live menus */
+    /* Two page stacks share one layout: the pages at +0, the top's index at
+       +0x96 (a signed byte; the 32 dwords end at +0x80) and a flag at +0x9c
+       that live_page_apply_navigation sets while a page is up. The main one
+       (frontend_online_select_enabled reads its flag), and the one
+       live_pages_update draws over it (friends, voice and settings pages). */
+    LIVE_PAGES = 0x00f25208u,
+    LIVE_OVERLAY_PAGES = 0x00f25bc0u,
+    LIVE_PAGE_INDEX = 0x96u,
+    LIVE_PAGE_SHOWN = 0x9cu,
     LIVE_PAGE_STACK = 0x20u,
     SESSION_PLAYER_COUNT = 0x00f099ecu,
     MATCH_ROLE = 0x00f09a44u,
@@ -80,17 +86,22 @@ static const char *const LIVE_PAGE_NAMES[] = {
     "ranking_resume",
 };
 
+static int32_t live_top_page(uint32_t stack)
+{
+    const int8_t index = (int8_t)*recomp_memory(stack + LIVE_PAGE_INDEX, 1u);
+    if (*recomp_memory(stack + LIVE_PAGE_SHOWN, 1u) == 0u || index < 0 || (uint32_t)index >= LIVE_PAGE_STACK)
+        return -1;
+    const int32_t page = (int32_t)*recomp_memory_u32(stack + 4u * (uint32_t)index);
+    return page >= 0 && page < (int32_t)(sizeof LIVE_PAGE_NAMES / sizeof *LIVE_PAGE_NAMES) ? page : -1;
+}
+
 void recomp_game_live_screen(RecompGameLiveScreen *screen)
 {
     screen->game_mode = *recomp_memory(GAME_MODE, 1u);
     screen->scene = *recomp_memory(FRONTEND_SCENE, 1u);
     screen->scene_table = *recomp_memory_u32(FRONTEND_SCENE_TABLE);
-    const int8_t index = (int8_t)*recomp_memory(LIVE_PAGE_INDEX, 1u);
-    screen->live_page = -1;
-    if (*recomp_memory(LIVE_PAGE_SHOWN, 1u) != 0u && index >= 0 && (uint32_t)index < LIVE_PAGE_STACK) {
-        const int32_t page = (int32_t)*recomp_memory_u32(LIVE_PAGES + 4u * (uint32_t)index);
-        if (page >= 0 && page < (int32_t)(sizeof LIVE_PAGE_NAMES / sizeof *LIVE_PAGE_NAMES)) screen->live_page = page;
-    }
+    screen->live_page = live_top_page(LIVE_PAGES);
+    screen->live_overlay = live_top_page(LIVE_OVERLAY_PAGES);
     screen->session_players = *recomp_memory_u32(SESSION_PLAYER_COUNT);
     screen->match_role = *recomp_memory_u32(MATCH_ROLE);
     screen->lockstep_flags = *recomp_memory(LOCKSTEP_FLAGS, 1u);

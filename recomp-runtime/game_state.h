@@ -31,16 +31,18 @@ bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent);
 
 /* Where the game is, for the Live log: g_game_mode (0x878392), the frontend
    scene (g_frontend_scene_current 0xdf5dd8, an index into the table at
-   g_frontend_scene_table_ptr 0xdf5e08), the Live page on top of the page stack
-   live_page_apply_navigation (0x2aaf20) walks (pages at 0xf25bc0, the stack
-   index at +0x96, -1 for none or while its shown flag at +0x9c is clear,
-   outside the Live menus), g_session_player_count (0xf099ec),
-   g_match_role (0xf09a44) and g_online_lockstep_flags (0xf0a548). */
+   g_frontend_scene_table_ptr 0xdf5e08), the Live page on top of each of the
+   two page stacks live_page_apply_navigation (0x2aaf20) walks (the main one at
+   0xf25208, and the one live_pages_update draws over it at 0xf25bc0; -1 for
+   none, or while the stack's shown flag is clear outside the Live menus),
+   g_session_player_count (0xf099ec), g_match_role (0xf09a44) and
+   g_online_lockstep_flags (0xf0a548). */
 typedef struct RecompGameLiveScreen {
     uint8_t game_mode;
     uint8_t scene;
     uint32_t scene_table;
     int32_t live_page;
+    int32_t live_overlay;
     uint32_t session_players;
     uint32_t match_role;
     uint8_t lockstep_flags;

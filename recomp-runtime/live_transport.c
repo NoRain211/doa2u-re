@@ -214,12 +214,12 @@ static struct {
     uint64_t log_ms; /* the last per-peer datagram line */
 } live;
 
-/* A virtual address (network order) for the log. */
+/* A virtual address for the log. The peer table holds it as the matchmaker's
+   big-endian number (live_client.c reads it with get32be), first octet on top. */
 static void ina_text(uint32_t virtual_ina, char out[16])
 {
-    uint8_t b[4];
-    memcpy(b, &virtual_ina, sizeof b);
-    snprintf(out, 16, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+    snprintf(out, 16, "%u.%u.%u.%u", (unsigned)(virtual_ina >> 24), (unsigned)(virtual_ina >> 16 & 0xffu),
+        (unsigned)(virtual_ina >> 8 & 0xffu), (unsigned)(virtual_ina & 0xffu));
 }
 
 static unsigned log_type(const uint8_t *data, size_t size)
