@@ -530,12 +530,23 @@ static void test_fight_pair_lockstep(void)
     set_local_xuid(spectator);
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
 
-    /* A 3+ player session without a usable lockstep pair never falls back to
-       slots 0 and 1, where one fighter may sit beside a spectator. */
+    /* Without the lockstep pair a 3+ player session uses slots 0 and 1, as
+       online_get_local_player_slot does: from the fighter marked in slot 1 it
+       pairs with slot 0, and from a spectator, marked in neither slot, it
+       names no pair. */
     *recomp_memory(LOCKSTEP_FLAGS, 1u) = 0u;
+    set_member(RECORD_A, first, first_ina, false);
+    set_member(RECORD_B, local_fighter, local_ina, true);
+    set_member(RECORD_C, spectator, spectator_ina, false);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == local_ina);
+    CHECK(opponent == first_ina);
+    set_member(RECORD_B, local_fighter, local_ina, false);
+    set_member(RECORD_C, spectator, spectator_ina, true);
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
 
     /* One participant is no longer in the table: no pair either. */
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 1u;
     set_lockstep_pair(other, 0x0009000000000009ull);
     set_local_xuid(other);
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));

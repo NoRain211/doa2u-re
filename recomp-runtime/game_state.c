@@ -128,8 +128,9 @@ bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent)
     /* A spectator is not a fighter: pairing it with two others would roll back
        someone else's fight. */
     if (spectator) return false;
-    /* Slots 0 and 1 are only the fighters while the session has two players;
-       with more, the lockstep pair is the only safe answer. */
-    if (*recomp_memory_u32(SESSION_PLAYER_COUNT) > FIGHTER_SLOTS) return false;
+    /* Without the lockstep pair the game itself takes slots 0 and 1 as the
+       fighters and the slot marked at +0x2c as the local one
+       (online_get_local_player_slot 0x298f70), in a lobby of any size. A
+       spectator is in neither slot, so the slots name no local fighter. */
     return slot_fight_pair(local, opponent);
 }

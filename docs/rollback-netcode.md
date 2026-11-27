@@ -195,6 +195,8 @@ delay-based lockstep for the rest of the match. The fighters are the game's
 own lockstep participants (their XUIDs in `g_lockstep_player0_id` and
 `g_lockstep_player1_id`, resolved through the session table), so a 3+ player
 lobby pairs the right two and a spectator, being neither, gets no rollback.
+While the lockstep flags do not mark that pair, the game itself takes session
+slots 0 and 1, and so does the runner.
 The player index comes from the two fighters' virtual addresses, which both
 sides read the same way.
 Either side's request to stop its lockstep rides a pad bit, so both sides end
