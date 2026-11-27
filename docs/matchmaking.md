@@ -466,10 +466,12 @@ The Live client in `recomp-runtime/live_client.c` sends those kinds through
 the transport's socket: a request goes out again every 500 ms and fails after
 5 s, a logon is a CHALLENGE and then the LOGON that answers its NONCE, a
 logged-on player logs on again that way every 5 s with its presence, a PUSH
-makes it ask for its friend list again, and an LPEER becomes the peer intro the
-transport punches with. A game datagram to a paired player goes out as a
-LIVE_RELAY that names that player's virtual address, and the server sends it
-on as RELAY. The transport owns the request's nonce and cookie and
+makes it ask for its friend list again, and while the game keeps its friends
+enumerate task open the list is asked for again every 10 s, because the server
+reports a friend's presence and session only when asked. An LPEER becomes the
+peer intro the transport punches with. A game datagram to a paired player goes
+out as a LIVE_RELAY that names that player's virtual address, and the server
+sends it on as RELAY. The transport owns the request's nonce and cookie and
 the one retry a COOKIE answer asks for; the client fills in only the magic,
 version, kind and body. The LOGON carries DOA2U's title id, `0x54430006`,
 from the XBE certificate (VA `0x10184` + 8), so a friend row names the title a

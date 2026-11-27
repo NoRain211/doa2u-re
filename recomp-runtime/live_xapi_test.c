@@ -53,6 +53,7 @@ enum {
 };
 
 enum {
+    TASK_RUNNING = 0u,
     TASK_SUCCESS = 0x001500f0u,
     TASK_RESULTS = 0x001500f1u,
     TASK_IDLE = 0x001500f2u,
@@ -369,6 +370,30 @@ static void counting_presence(void *self, uint32_t state, const uint8_t kid[8])
         presence_inner->presence(self, state, kid);
 }
 
+/* A friend list that changes between queries: the open friends enumerate task
+   must ask the service again, or the game keeps the list it copied at sign-in.
+   Ann's joinable bit flips on every query, the way a friend leaving and
+   re-entering a session does. */
+static const RecompLiveBackend *refresh_inner;
+static unsigned refresh_queries;
+static RecompLiveBackend refresh_backend;
+
+static RecompLiveRequest counting_friends_enumerate(void *self)
+{
+    ++refresh_queries;
+    return refresh_inner->friends_enumerate(self);
+}
+
+static uint32_t toggling_friends(void *self, RecompLiveFriend *out, uint32_t capacity)
+{
+    const uint32_t count = refresh_inner->friends(self, out, capacity);
+    if (count != 0u) {
+        if ((refresh_queries & 1u) != 0u) out[0].flags &= ~RECOMP_LIVE_FRIEND_JOINABLE;
+        else out[0].flags |= RECOMP_LIVE_FRIEND_JOINABLE;
+    }
+    return count;
+}
+
 /* The 27 attribute specs XOnlineMatchSearchResultsLen is called with
    (0x7bfd00): 3 integers, 9 wide strings of 34, 5 integers, the blob of 8,
    one integer and 8 more wide strings. */
@@ -627,6 +652,34 @@ int main(void)
     check("friend invite kid", memcmp(&guest[cara + 0x28u], invite_kid, sizeof invite_kid) == 0);
     check("friend received invite", peek32(cara + 0x1cu) == 0x08000001u);
     check("friend title", peek32(cara + 0x30u) == 0x54430006u);
+
+    /* The task stays open for the whole session, so the list has to refresh
+       while the game polls it: a friend's state never gets a second
+       XOnlineFriendsGetLatest otherwise. */
+    refresh_inner = presence_inner;
+    refresh_backend = *refresh_inner;
+    refresh_backend.friends_enumerate = counting_friends_enumerate;
+    refresh_backend.friends = toggling_friends;
+    refresh_queries = 0u;
+    recomp_live_backend_set(&refresh_backend);
+    recomp_live_pump(10000u);
+    check("the open friend list asks again after a period", wait_task(enumerate_task) == TASK_RUNNING &&
+        refresh_queries == 1u);
+    check("the refreshed list is a result", wait_task(enumerate_task) == TASK_RESULTS);
+    check("the game reads the refreshed flags", call(thunk_friends_latest,
+        (const uint32_t[]){0u, 100u, FRIENDS}, 3u) == 3u && (peek32(FRIENDS + 0x1cu) & 0x10u) == 0u);
+    recomp_live_pump(19999u);
+    /* Between queries the task keeps answering with the list it holds, so a
+       change the backend learns by PUSH reaches the game at once. */
+    check("no query inside the refresh period, and the list is still a result",
+        wait_task(enumerate_task) == TASK_RESULTS && refresh_queries == 1u);
+    recomp_live_pump(20000u);
+    check("the next period asks again", wait_task(enumerate_task) == TASK_RUNNING && refresh_queries == 2u);
+    check("the next refreshed list arrives", wait_task(enumerate_task) == TASK_RESULTS &&
+        call(thunk_friends_latest, (const uint32_t[]){0u, 100u, FRIENDS}, 3u) == 3u &&
+        (peek32(FRIENDS + 0x1cu) & 0x10u) != 0u);
+    recomp_live_backend_set(&presence_backend);
+
     check("friends finish", call1(thunk_friends_finish, enumerate_task) == 0u &&
         wait_task(enumerate_task) == TASK_SUCCESS);
     close_task(enumerate_task);
