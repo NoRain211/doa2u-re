@@ -96,6 +96,29 @@ def search_body(req=3, procedure=0, filters=b""):
     return mm.SEARCH_BODY.pack(req, procedure, len(filters)) + filters
 
 
+def search_filters(*slots):
+    """The seven records OptiMatch packs, one per search slot; None is the wildcard
+    the game writes for a dialog's "any", a number the value it sends otherwise."""
+    assert len(slots) == mm.SEARCH_FILTER_COUNT
+    return b"".join(struct.pack("<4I", mm.SEARCH_ANY_ID, 0, 0xFFFFFFFF, 0x7FFFFFFF) if value is None
+                    else struct.pack("<4I", 0, 0, value, 0) for value in slots)
+
+
+def attributes(mode=3, first=0, second=0, ranks=(0, 19), voice=0, language=0):
+    """The 27-attribute blob a host packs from DAT_00f24918, zeros elsewhere.
+    ranks is (lowest, highest) in the game's rank points, as the create page stores
+    them; the offsets are the guest's little-endian integers (0x7bfd00's spec)."""
+    blob = bytearray(0x292)
+    struct.pack_into("<Q", blob, 0x00, mode)
+    struct.pack_into("<Q", blob, 0x08, first)
+    struct.pack_into("<Q", blob, 0x10, second)
+    struct.pack_into("<Q", blob, 0x152, ranks[1])
+    struct.pack_into("<Q", blob, 0x15A, ranks[0])
+    struct.pack_into("<Q", blob, 0x162, voice)
+    struct.pack_into("<Q", blob, 0x16A, language)
+    return bytes(blob)
+
+
 def find_body(req=4, kid=NO_KID):
     return mm.FIND_BODY.pack(req, kid)
 
@@ -193,10 +216,10 @@ class LiveTest(unittest.TestCase):
                         sender, now, mm.SESSION_OK)
         return mm.SESSION_OK_BODY.unpack(body)
 
-    def search(self, sender=A_AT, now=0.0, req=None):
+    def search(self, sender=A_AT, now=0.0, req=None, procedure=0, filters=b""):
         req = self.next_request() if req is None else req
         return [self.row(packet[mm.ASKED - mm.TOKEN:]) for packet, _ in
-                self.send(live(mm.SEARCH, search_body(req)), sender, now)]
+                self.send(live(mm.SEARCH, search_body(req, procedure, filters)), sender, now)]
 
     def row(self, body):
         """The request, hresult, index, total and the fields of one RESULT body."""
@@ -444,6 +467,59 @@ class LiveTest(unittest.TestCase):
         own = self.search(A_AT, now=4.0, req=10)
         self.assertEqual([row[4][0] for row in own], [second])  # never its own session
         self.assertEqual(own[0][3], 1)
+
+    def optimatch(self, *slots, sender=B_AT, now=10.0):
+        """An OptiMatch search with the game's seven filters, and the kids it lists."""
+        rows = self.search(sender, now=now, procedure=mm.SEARCH_PROCEDURE, filters=search_filters(*slots))
+        return [row[4][0] for row in rows if row[4] is not None]
+
+    def test_optimatch_lists_only_the_sessions_whose_settings_it_asks_for(self):
+        self.online()
+        narrow = self.put(now=0.0, attrs=attributes(first=2, second=1, ranks=(5, 12), voice=1, language=3))[2]
+        wide = self.put(now=1.0, attrs=attributes(first=4, second=0, ranks=(0, 19)))[2]
+        unstated = self.put(sender=C_AT, now=2.0, attrs=attributes(first=5, second=1, ranks=(13, 19), voice=2,
+                                                                 language=5))[2]
+        # Quick Match sends the same procedure with every wildcard: the list as it was.
+        self.assertEqual([row[4][0] for row in self.search(B_AT, now=10.0)], [unstated, wide, narrow])
+        self.assertEqual(self.optimatch(3, None, None, 19, 0, None, None), [unstated, wide, narrow])
+        # OptiMatch's own settings: mode, the create page's first two, rank, voice, language.
+        matched = self.search(B_AT, now=10.0, procedure=1, filters=search_filters(3, 2, 1, 19, 0, 1, 3))
+        self.assertEqual([(row[4][0], row[3]) for row in matched], [(narrow, 1)])  # the total counts the matches
+        self.assertEqual(self.optimatch(3, 4, 0, 19, 0, 2, None), [wide])
+
+    def test_a_session_that_states_no_voice_or_language_takes_any(self):
+        self.online()
+        english = self.put(now=0.0, attrs=attributes(voice=1, language=3))[2]
+        unstated = self.put(now=1.0, attrs=attributes())[2]  # both zero, as a host who takes any sends them
+        other = self.put(sender=C_AT, now=2.0, attrs=attributes(voice=2, language=5))[2]
+        self.assertEqual(self.optimatch(3, None, None, 19, 0, None, 3), [unstated, english])
+        self.assertEqual(self.optimatch(3, None, None, 19, 0, 2, None), [other, unstated])
+
+    def test_optimatch_meets_a_session_whose_rank_range_overlaps_its_own(self):
+        self.online()
+        middle = self.put(now=0.0, attrs=attributes(ranks=(5, 12)))[2]
+        any_rank = self.put(now=1.0, attrs=attributes(ranks=(0, 19)))[2]
+        top = self.put(sender=C_AT, now=2.0, attrs=attributes(ranks=(13, 19)))[2]
+        self.assertEqual(self.optimatch(3, None, None, 6, 0, None, None), [any_rank, middle])
+        self.assertEqual(self.optimatch(3, None, None, 19, 19, None, None), [top, any_rank])
+        self.assertEqual(self.optimatch(3, None, None, 19, 0, None, None), [top, any_rank, middle])
+
+    def test_a_search_this_server_does_not_understand_lists_every_open_session(self):
+        self.online()
+        first = self.put(now=0.0, attrs=attributes(first=2))[2]
+        second = self.put(sender=C_AT, now=1.0, attrs=attributes(first=4))[2]
+        everything = lambda filters: [row[4][0] for row in self.search(
+            B_AT, now=10.0, procedure=1, filters=filters)]
+        self.assertEqual(everything(bytes(16)), [second, first])  # not seven records
+        self.assertEqual(everything(struct.pack("<4I", 0x00100000, 0, 1, 0) * 7), [second, first])  # not one it writes
+        self.assertEqual(everything(search_filters(3, 2, 0, 19, 0, None, None)), [first])  # and its own still filters
+
+    def test_a_session_that_carries_no_attributes_is_never_excluded(self):
+        self.online()
+        bare = self.put(now=0.0, attrs=b"")[2]
+        self.assertEqual([row[4][0] for row in self.search(B_AT, now=10.0)], [bare])
+        self.assertEqual(self.optimatch(3, None, None, 19, 0, None, None), [bare])
+        self.assertEqual(self.optimatch(3, 1, None, 19, 0, None, None), [bare])
 
     def test_connect_pairs_a_host_and_a_joiner_and_feeds_the_live_relay(self):
         self.online()
