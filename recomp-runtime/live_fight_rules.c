@@ -57,9 +57,10 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
        view-projection one, and the music track. Each side's pause menu is
        local too: g_pause_menu_player (0x878390, the side whose menu is open)
        and g_pause_menu_open (0x87ae02) are written by the pause poll
-       (0xdbb90 -> 0xdbb50) and read only by the menu (0xdb400), the HUD and
-       draw code, never by a fight update, so a pause on one side alone leaves
-       both fights identical.
+       (pause_menu_poll 0xdbb90 -> pause_menu_open 0xdbb50) and read only by
+       the menu (pause_menu_page_update 0xdb400), the HUD and draw code, never
+       by a fight update, so a pause on one side alone leaves both fights
+       identical.
        Also what the title and menu demo scenes leave behind (marked "demo"):
        their manager's state (0x87d578-0x87d644, 0x87f2b0-0x87f51c; the scene
        is picked at random) and the fight state their fights write and a Live

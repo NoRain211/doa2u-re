@@ -200,15 +200,18 @@ failed rewind hands the fight back to the game's Live code without stopping
 the runner. See [Xbox Live](xbox-live.md).
 
 Start opens the game's online pause menu on both sides. The game's pause poll
-(`0xdbb90`, online branch at `0xdbb50`) reads the lockstepped per-player pads,
+(`pause_menu_poll`, `0xdbb90`; online branch at `pause_menu_open`, `0xdbb50`)
+reads the lockstepped per-player pads,
 so the side that pressed Start and the other side both open their own menu on
 the same frame: PAUSED with CONTINUE, COMMAND LIST, FRIENDS, PLAYERS, ONLINE
-OPTIONS and QUIT SESSION (`0xdb400`, items from `0x695ae0`; the offline menu
-also offers CHARACTER SELECT and QUIT). The fight keeps running behind the
+OPTIONS and QUIT SESSION (`pause_menu_page_update`, `0xdb400`, items from
+`0x695ae0`; the offline menu also offers CHARACTER SELECT and QUIT). The fight
+keeps running behind the
 menus with the same two pad streams, so the round timer and both fighters
 advance, and the pauser's local pads are cleared once (`0x292e50`). Each side
 closes only its own menu with A or B, and the game's lockstep resumes
-(`0xdb280`). The menu's two bytes, `g_pause_menu_player` (`0x878390`) and
+(`pause_menu_close`, `0xdb280`). The menu's two bytes, `g_pause_menu_player`
+(`0x878390`) and
 `g_pause_menu_open` (`0x87ae02`), are therefore one side's own; the fight
 never reads them, so the desync check leaves them out (see "Desync checks",
 and `live_fight_rules.c`).
