@@ -390,7 +390,8 @@ projected row or the no-data shape. Nothing is copied into a read board, and a
 write to either board of a pair drops both cached rankings. Board 43 is a read
 board and also a writer's target, since a match's end records each character's
 matches and wins there (`ranking_write_character_stats_board` `0x297870`); a
-row written to 43 wins over the row projected to it from 39.
+read of 43 serves the row projected from 39 with 43's own stats over it, id by
+id, so a usage row with no score keeps the score uploaded to 39.
 
 A row exists only once a write carried a stat: an empty write answers success
 and stores nothing, so it takes neither one of the account's boards nor a

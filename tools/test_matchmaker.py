@@ -878,6 +878,17 @@ class LiveTest(unittest.TestCase):
         self.assertEqual([(row[5], row[7]) for row in self.leaders(req=76, now=1.0, board=45)], [(C, 1)])
         self.assertEqual([(row[0], row[3], row[4]) for row in self.leaders(req=77, now=1.0, board=44)], [(77, 0, 0)])
 
+    def test_board_43s_usage_row_keeps_the_score_uploaded_to_39(self):
+        self.online()
+        # The match-end usage write carries no score; the friends ranking upload
+        # to 39 still ranks the player on 43.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 39, A, ((0xFFFE, 2, 300),))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 43, A, ((0, 1, 3),))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 39, B, ((0xFFFE, 2, 200),))), B_AT, 0.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=81, now=1.0, board=43)], [(A, 1), (B, 2)])
+        rows = self.stats(req=82, now=1.0, board=43, xuids=(A,))
+        self.assertEqual((rows[0][5], rows[0][8]), (A, 2))  # usage and score together
+
     def test_a_ranking_read_board_with_no_upload_reads_as_empty(self):
         self.online()
         # Nothing writes 37, so it lists nothing; it is not a record board, so a

@@ -1066,12 +1066,14 @@ class Matchmaker:
         return self.done(req, HRESULT_OK, sender, nonce)
 
     def board_stats(self, board, xuid):
-        """The row a read of board serves: its own, or its ranking read pair's."""
-        stats = self.stats.get((board, xuid))
-        if stats:
-            return stats
+        """The row a read of board serves: its ranking read pair's, under its own.
+
+        Board 43 also keeps the character usage a match's end writes, often with
+        no score, so its own stats win per id rather than as a whole row."""
+        own = self.stats.get((board, xuid), {})
         source = RANKING_READ_BOARDS.get(board)
-        return self.stats.get((source, xuid), {}) if source is not None else {}
+        projected = self.stats.get((source, xuid), {}) if source is not None else {}
+        return {**projected, **own} if projected and own else own or projected
 
     def board_rows(self, board):
         """The (XUID, stats) rows a read of board serves.
