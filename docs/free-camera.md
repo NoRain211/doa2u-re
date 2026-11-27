@@ -74,8 +74,8 @@ angles from the working copy's own eye and target, as DOA3's does.
 Every direct call in the lifted program asks `recomp_lookup_manual` first, so
 `recomp-runtime/free_camera_adapter.c` wraps that build without changing the
 generated program or its hash. With the camera allowed, the wrapper puts the
-free camera's eye, target, field of view and roll in both places (roll at
-+0x34 and +0xDC), then runs the lifted build (`sub_000399D0`). The game
+free camera's eye, target, field of view and roll in both places (the roll
+at +0x34 and +0xDC), then runs the lifted build (`sub_000399D0`). The game
 then builds its matrices, and culls, for the free camera. The direction a
 positive roll tips the picture was not checked in a run. When the camera is
 given back, the game's camera logic takes the object over again. The flying
