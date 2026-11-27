@@ -390,8 +390,9 @@ static void test_stop_lockstep(void)
     CHECK(recomp_runtime.registers.esp == 0x1004u); /* kernel_call_guest restores ESP */
 }
 
-/* The session player records: g_session_players 0xf192a8, records at 0xf0a5a0,
-   sockaddr sin_addr at +0x18, XUID at +0, the local mark at +0x2c. */
+/* The session player records: g_session_player_record_ptrs 0xf192a8, records
+   at g_session_player_records 0xf0a5a0, sockaddr sin_addr at +0x18, XUID at
+   +0, the local mark at +0x2c. */
 enum {
     RECORD_BYTES = 0x30,
     RECORD_A = 0x00f0a5a0u,

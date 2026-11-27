@@ -17,10 +17,11 @@ bool recomp_game_round_live(void)
     return true;
 }
 
-/* One session player's record (0xf0a5a0, 8 x 0x30): XUID at +0, the peer's
-   sockaddr at +0x14 with sin_addr at +0x18, and +0x2c marks the local
-   player. g_session_players (0xf192a8, 8 slots) points at one record per
-   session slot, and g_session_player_count (0xf099ec) says how many. */
+/* One session player's record (g_session_player_records 0xf0a5a0, 8 x 0x30):
+   XUID at +0, the peer's sockaddr at +0x14 with sin_addr at +0x18, and +0x2c
+   marks the local player. g_session_player_record_ptrs (0xf192a8, 8 slots)
+   points at one record per session slot, and g_session_player_count (0xf099ec)
+   says how many. */
 enum {
     SESSION_PLAYERS = 0x00f192a8u,
     SESSION_PLAYER_COUNT = 0x00f099ecu,
