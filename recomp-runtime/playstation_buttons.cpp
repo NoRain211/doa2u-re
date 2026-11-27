@@ -26,6 +26,15 @@ enum class Glyph {
 std::unordered_map<uint64_t, std::vector<Glyph>> rules;
 std::atomic<bool> playstation{false};
 
+/* The game's 64x32 prompts: A/B, X/Y, and L/R. These are texture hashes, not
+   retail images; the file beside the launcher adds other resolutions. */
+void addBuiltInRules()
+{
+    rules[0x41b28f3648cd7b19ull] = {Glyph::Cross, Glyph::Circle};
+    rules[0x63b8da55f36de4c2ull] = {Glyph::Square, Glyph::Triangle};
+    rules[0x6d9306247838ceb2ull] = {Glyph::L1, Glyph::R1};
+}
+
 std::string trim(const std::string &text)
 {
     const char *space = " \t\r\n";
@@ -224,6 +233,7 @@ void drawGlyph(std::vector<uint8_t> &pixels, uint32_t width, uint32_t height,
 void recomp_playstation_buttons_configure(const std::string &textures_folder)
 {
     rules.clear();
+    addBuiltInRules();
     const fs::path path = fs::u8path(textures_folder) / "playstation-buttons.txt";
     std::ifstream file(path, std::ios::binary);
     if (!file) return;

@@ -189,7 +189,8 @@ keeps running.
   writes each texture once to `textures\dumps` to edit. A8 and V8U8 textures
   are left as the game draws them. A PlayStation pad shows original Cross,
   Circle, Square, Triangle and L1/R1 icons in place of the game's Xbox button
-  prompts when `textures\playstation-buttons.txt` lists their textures' keys,
+  prompts. The game's 64x32 prompts are built in; a
+  `textures\playstation-buttons.txt` file adds keys for other resolutions,
   one per line as `<key> = cross,circle` (the key is in a dump's file name).
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is

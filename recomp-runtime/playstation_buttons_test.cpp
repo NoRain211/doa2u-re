@@ -42,6 +42,21 @@ int main()
     fs::create_directories(root, error);
     const fs::path folder = root / "textures";
     fs::create_directories(folder, error);
+
+    RecompTexturePackImage image;
+    uint8_t blue, green, red, alpha;
+    /* The game's 64x32 prompts work with no file beside the launcher. */
+    recomp_playstation_buttons_configure(folder.u8string());
+    expect("inactive first", !recomp_playstation_buttons_active());
+    expect("inactive", !recomp_playstation_buttons_image(kFaces, 64u, 32u, image));
+    recomp_playstation_buttons_set_active(true);
+    expect("active", recomp_playstation_buttons_active());
+    expect("built-in faces", recomp_playstation_buttons_image(0x41b28f3648cd7b19ull, 64u, 32u, image));
+    texel(image, 16u, 16u, blue, green, red, alpha);
+    expect("built-in cross", alpha == 255u && red > 200u && green > 200u && blue > 200u);
+    expect("built-in shoulders", recomp_playstation_buttons_image(0x6d9306247838ceb2ull, 64u, 32u, image));
+    recomp_playstation_buttons_set_active(false);
+
     {
         std::ofstream file(folder / "playstation-buttons.txt", std::ios::binary);
         file << "# the game's A/B and X/Y icons\n"
@@ -54,7 +69,6 @@ int main()
              << "00000000000000ab = square\n";
     }
 
-    RecompTexturePackImage image;
     recomp_playstation_buttons_configure(folder.u8string());
     expect("inactive first", !recomp_playstation_buttons_active());
 
@@ -71,7 +85,6 @@ int main()
     expect("faces shape", image.format == RECOMP_TEXTURE_PACK_BGRA8 && image.width == 64u &&
         image.height == 32u && image.generate_mips && image.levels.size() == 1u &&
         image.levels[0].pitch == 64u * 4u && image.levels[0].bytes.size() == 64u * 32u * 4u);
-    uint8_t blue, green, red, alpha;
     texel(image, 0u, 0u, blue, green, red, alpha);
     expect("corner clear", alpha == 0u);
     /* Both disc centres are opaque and shaded; Cross's bars meet in white. */
@@ -103,6 +116,20 @@ int main()
     texel(image, 16u, 16u, blue, green, red, alpha);
     const bool pink = alpha == 255u && red > 150u && green < 140u && blue > 150u;
     expect("last mapping wins", pink);
+
+    /* A file line replaces a built-in entry, and the other built-ins stay. */
+    const fs::path overrides = root / "overrides";
+    fs::create_directories(overrides, error);
+    {
+        std::ofstream file(overrides / "playstation-buttons.txt", std::ios::binary);
+        file << "41b28f3648cd7b19 = triangle\n";
+    }
+    recomp_playstation_buttons_configure(overrides.u8string());
+    expect("built-in overridden", recomp_playstation_buttons_image(0x41b28f3648cd7b19ull, 32u, 32u, image));
+    /* One symbol sits at the centre; the default's left Cross disc is blue at x=8. */
+    texel(image, 8u, 16u, blue, green, red, alpha);
+    expect("override is one symbol", alpha == 255u && green > red + 40u && green > blue + 40u);
+    expect("other built-in kept", recomp_playstation_buttons_image(0x6d9306247838ceb2ull, 64u, 32u, image));
 
     fs::remove_all(root, error);
     if (failures == 0) std::puts("playstation buttons: ok");

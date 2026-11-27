@@ -12,31 +12,31 @@
    drives the game, original Cross, Circle, Square, Triangle and L1/R1 art
    replaces them.
 
-   Those textures' pack keys hash retail bytes, so they are not in this source.
-   Run with RECOMP_TEXTURE_DUMP=png (or the launcher's Texture Dump row), open
-   the dumped 64x32 button icons, and list their keys beside the launcher in
-   textures/playstation-buttons.txt:
+   The three 64x32 prompts' pack keys are built in, so the art works with no
+   file. Their keys are texture hashes, not retail bytes. Other resolutions
+   take a file beside the launcher, textures/playstation-buttons.txt, whose
+   lines replace a built-in entry for the same key:
 
        # <16 hex digits> = <glyph>[,<glyph>...]
        0123456789abcdef = cross,circle
 
    A line's glyphs split its texture into equal cells from left to right. The
    names are cross, circle, square, triangle, l1, r1, l2 and r2. The file is
-   read once at start; without it the game keeps its own icons. A texture pack's
-   replacement for the same key wins. */
+   read once at start. A texture pack's replacement for the same key wins. */
 void recomp_playstation_buttons_configure(const std::string &textures_folder);
 
 /* Set from the game thread as input is sampled; the presenters read it while
    they upload textures. */
 void recomp_playstation_buttons_set_active(bool active);
 bool recomp_playstation_buttons_active(void);
-/* True when a PlayStation pad is active and the private mapping has at least
-   one key: the presenters then hash textures to look for replacements. */
+/* True when a PlayStation pad is active and the built-in or file mapping has
+   at least one key: the presenters then hash textures to look for
+   replacements. */
 bool recomp_playstation_buttons_replacing(void);
 
 /* The replacement art for a guest texture key, drawn at the guest size, when a
-   PlayStation pad is active and the private mapping names the key; false
-   otherwise, leaving out untouched. */
+   PlayStation pad is active and the built-in or file mapping names the key;
+   false otherwise, leaving out untouched. */
 bool recomp_playstation_buttons_image(uint64_t key, uint32_t width, uint32_t height,
     RecompTexturePackImage &out);
 
