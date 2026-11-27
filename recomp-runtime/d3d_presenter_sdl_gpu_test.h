@@ -15,3 +15,8 @@ void d3d_backend_join_precompile(RecompD3dPresenter *presenter)
 {
     if (presenter->precompile.joinable()) presenter->precompile.join();
 }
+
+void d3d_backend_wait_upscales(RecompD3dPresenter *presenter)
+{
+    presenter->upscaler.wait();
+}

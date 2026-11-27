@@ -348,6 +348,8 @@ its own guest surface, laid end to end as the level locks read them, so a
 minified sample reads the level the game stored. A level count or span that
 disagrees with that storage keeps level 0 alone. Mipped 2D art keeps the
 guest's levels and is not upscaled: only single-level art gets the larger copy.
+That copy is drawn on the presenter's upscaler thread (`texture_upscale.h`);
+the plain texture is sampled until a later draw of the same art swaps it in.
 Pixel-shader creation, deletion, binding and
 constants retain the 5849 layout; native custom shading supports the sister
 presenter's four-tap filter in its doubled and identity-scale variants, with

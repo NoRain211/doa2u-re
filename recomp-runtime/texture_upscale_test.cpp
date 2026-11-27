@@ -51,6 +51,28 @@ int main()
     expect("threads", recomp_texture_upscale(noise.data(), w, h, 3u, out) && out.size() == single.size() * 4u &&
         std::memcmp(out.data(), single.data(), out.size()) == 0);
 
+    /* The upscaler's thread gives the same picture; a cancelled job, or one
+       already taken, gives nothing. */
+    {
+        RecompTextureUpscaler upscaler;
+        const uint64_t first = upscaler.submit(noise, w, h, 3u);
+        const uint64_t dropped = upscaler.submit(noise, w, h, 3u);
+        const uint64_t failed = upscaler.submit(std::vector<uint8_t>(4u), 1u, 1u, 7u);
+        upscaler.cancel(dropped);
+        upscaler.wait();
+        std::vector<uint8_t> larger;
+        expect("job ids", first != 0u && dropped != 0u && failed != 0u && first != dropped && dropped != failed);
+        expect("thread picture", upscaler.take(first, larger) && larger.size() == single.size() * 4u &&
+            std::memcmp(larger.data(), single.data(), larger.size()) == 0);
+        expect("taken once", !upscaler.take(first, larger));
+        expect("cancelled", !upscaler.take(dropped, larger));
+        expect("failed job", upscaler.take(failed, larger) && larger.empty());
+        upscaler.cancel(0u);
+        upscaler.cancel(first);
+        // Jobs still queued when the upscaler goes are dropped.
+        for (int i = 0; i < 4; ++i) upscaler.submit(noise, w, h, 3u);
+    }
+
     if (failures == 0) std::printf("texture upscale: all tests passed\n");
     return failures == 0 ? 0 : 1;
 }

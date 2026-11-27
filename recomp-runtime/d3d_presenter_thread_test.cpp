@@ -714,6 +714,8 @@ static bool testTextureBurst()
     return passed;
 }
 
+#include "d3d_presenter_upscale_test.h"
+
 static bool testPointMinMagFilter()
 {
     char folder[MAX_PATH], path[MAX_PATH];
@@ -4967,7 +4969,7 @@ int main()
 #endif
         !testTicks() || !testFrameClockPacing() ||
         !testCapturedDraw() || !testMipSampler() || !testUncompressedMipChain() ||
-        !testTextureBurst() || !testPointMinMagFilter() ||
+        !testTextureBurst() || !testUpscaleSwap() || !testPointMinMagFilter() ||
         !testLines() || !testLighting() ||
         !testReflectionStage2() || !testReflectionStage2(true) || !testReflectionStage2(false, true) ||
         !testReflectionAddress(false) || !testReflectionAddress(true) || !testReflectionAddress(true, true) ||
