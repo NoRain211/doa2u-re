@@ -2849,6 +2849,8 @@ uint32_t virtualKey(SDL_Scancode code)
     case SDL_SCANCODE_PERIOD: return 0xbeu;
     case SDL_SCANCODE_GRAVE: return 0xc0u;
     case SDL_SCANCODE_BACKSLASH: return 0xdcu;
+    case SDL_SCANCODE_LEFTBRACKET: return 0xdbu;
+    case SDL_SCANCODE_RIGHTBRACKET: return 0xddu;
     default: return RECOMP_INPUT_KEY_COUNT;
     }
 }

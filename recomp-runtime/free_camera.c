@@ -9,10 +9,9 @@ enum { AXES = 3 };
 static const float PI = 3.14159265358979f;
 /* Radians per second at full stick. */
 static const float TURN_RATE = 1.8f;
+static const float ROLL_RATE = 1.2f;
 /* Just short of straight up or down, where the heading would be lost. */
 static const float PITCH_LIMIT = 1.55f;
-static const float FOV_MIN = 0.05f;
-static const float FOV_MAX = 2.6f;
 static const float ZOOM_RATE = 1.2f;
 static const float SPEED_MIN = 0.01f;
 
@@ -55,7 +54,9 @@ bool recomp_free_camera_begin(RecompFreeCamera *camera,
     camera->heading = atan2f(view[0], view[2]);
     camera->pitch = clampf(asinf(clampf(view[1] / distance, -1.0f, 1.0f)),
         -PITCH_LIMIT, PITCH_LIMIT);
-    camera->fov = isfinite(fov) ? clampf(fov, FOV_MIN, FOV_MAX) : 1.0f;
+    camera->fov = isfinite(fov)
+        ? clampf(fov, RECOMP_FREE_CAMERA_FOV_MIN, RECOMP_FREE_CAMERA_FOV_MAX) : 1.0f;
+    camera->roll = 0.0f;
     /* Crossing the gap to the target in about two seconds suits both a
        close-up and a wide shot. */
     camera->speed = distance * 0.5f > SPEED_MIN ? distance * 0.5f : SPEED_MIN;
@@ -84,7 +85,9 @@ void recomp_free_camera_step(RecompFreeCamera *camera,
         -PITCH_LIMIT, PITCH_LIMIT);
     camera->fov = clampf(
         camera->fov * expf(-clampf(controls->zoom, -1.0f, 1.0f) * ZOOM_RATE * seconds),
-        FOV_MIN, FOV_MAX);
+        RECOMP_FREE_CAMERA_FOV_MIN, RECOMP_FREE_CAMERA_FOV_MAX);
+    camera->roll += clampf(controls->roll, -1.0f, 1.0f) * ROLL_RATE * seconds;
+    camera->roll = remainderf(camera->roll, 2.0f * PI);
 
     float forward[AXES];
     forward_of(camera, forward);
@@ -137,7 +140,8 @@ bool recomp_free_camera_frame(RecompFreeCamera *camera, const float point[3],
     for (unsigned i = 0u; i < AXES; ++i) {
         camera->position[i] = point[i] - view[i] / length * distance;
     }
-    camera->fov = isfinite(fov) ? clampf(fov, FOV_MIN, FOV_MAX) : camera->fov;
+    camera->fov = isfinite(fov)
+        ? clampf(fov, RECOMP_FREE_CAMERA_FOV_MIN, RECOMP_FREE_CAMERA_FOV_MAX) : camera->fov;
     camera->focus = distance;
     camera->speed = distance * 0.5f > SPEED_MIN ? distance * 0.5f : SPEED_MIN;
     return recomp_free_camera_look_at(camera, point);

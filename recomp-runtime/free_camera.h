@@ -16,8 +16,12 @@ typedef struct RecompFreeCamera {
     /* Radians. Heading grows turning left, toward +X; pitch is positive
        looking up. */
     float heading, pitch;
-    /* Vertical field of view in radians. */
+    /* Vertical field of view in radians, from RECOMP_FREE_CAMERA_FOV_MIN to
+       RECOMP_FREE_CAMERA_FOV_MAX. */
     float fov;
+    /* Radians in [-pi, pi], zero level; positive is the ] key's direction.
+       Moving and looking stay level whatever the roll. */
+    float roll;
     /* World units per second at full stick, scaled from the distance between
        the game's eye and target when the camera starts. */
     float speed;
@@ -36,12 +40,16 @@ typedef struct RecompFreeCameraControls {
     float turn[2];
     /* Positive narrows the field of view. */
     float zoom;
+    /* Positive rolls the camera toward a positive roll. */
+    float roll;
     bool fast, slow;
 } RecompFreeCameraControls;
 
 enum {
     RECOMP_FREE_CAMERA_FAST_SCALE = 4,
 };
+#define RECOMP_FREE_CAMERA_FOV_MIN 0.05f
+#define RECOMP_FREE_CAMERA_FOV_MAX 2.6f
 
 /* Starts the camera where the game's camera is. False leaves it untouched
    when eye and target coincide or are not finite. */
