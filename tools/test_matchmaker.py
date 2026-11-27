@@ -432,7 +432,7 @@ class LiveTest(unittest.TestCase):
     def test_search_takes_only_the_same_build_other_hosts_and_open_slots_newest_first(self):
         self.online()
         first = self.put(now=0.0)[2]
-        second = self.put(sender=C_AT, now=1.0, slots=(0, 0, 2, 2))[2]
+        second = self.put(sender=C_AT, now=1.0, slots=(0, 2, 2, 0))[2]
         # C logs on again with another build, as a patched runner would; its new session is not listed.
         self.logon(C_AT, C, now=2.0, digest=OTHER_BUILD)
         self.put(sender=C_AT, now=2.0, req=3)
@@ -444,6 +444,16 @@ class LiveTest(unittest.TestCase):
         own = self.search(A_AT, now=4.0, req=10)
         self.assertEqual([row[4][0] for row in own], [second])  # never its own session
         self.assertEqual(own[0][3], 1)
+
+    def test_search_lists_only_sessions_with_a_public_open_slot(self):
+        self.online()
+        kid = self.put(now=0.0, slots=(1, 0, 2, 2))[2]  # an invite-only session
+        self.assertEqual(self.search(B_AT, now=0.1)[0][3], 0)
+        # FIND still answers it, so an invited player joins it.
+        found = self.row(self.one(live(mm.FIND, find_body(self.next_request(), kid)), B_AT, 0.1, mm.RESULT))
+        self.assertEqual((found[1], found[4][0]), (0, kid))
+        self.put(kid=kid, slots=(0, 2, 2, 2), now=0.2)  # a public slot opens
+        self.assertEqual([row[4][0] for row in self.search(B_AT, now=0.3)], [kid])
 
     def test_connect_pairs_a_host_and_a_joiner_and_feeds_the_live_relay(self):
         self.online()
@@ -1096,6 +1106,47 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.search(B_AT, now=5.0)[0][3], 1)
         self.assertEqual(self.search(B_AT, now=mm.LIVE_SECONDS + 1.0)[0][3], 0)  # the host went quiet
         self.assertEqual(self.server.sessions, {})
+
+    def test_a_hosts_new_socket_ends_the_sessions_it_left(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.logon(A_AT, A, now=0.5, state=0x13, kid=kid)  # presence: in that session
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        self.assertIn((A, B), self.server.invites)
+        # A restarted: its new socket heartbeats while the old socket's sessions
+        # would otherwise live as long as the account stayed online.
+        moved = (A_AT[0], A_AT[1] + 1)
+        self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)  # nonce() differs by endpoint
+        self.assertEqual(self.server.sessions, {})
+        self.assertNotIn((A, B), self.server.invites)
+        self.assertEqual(self.put(sender=moved, now=3.0)[1], 0)  # the new process hosts its own
+        self.assertEqual(self.search(B_AT, now=3.1)[0][3], 1)
+
+    def test_a_hosts_rebound_port_keeps_its_sessions(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        # The same process behind a NAT that moved its port: same socket nonce,
+        # so its lobby and invite stay.
+        moved = (A_AT[0], A_AT[1] + 1)
+        same = nonce(A_AT)
+        real = nonce
+        with mock.patch(f"{__name__}.nonce", lambda sender: same if sender == moved else real(sender)):
+            self.assertEqual(self.logon(moved, A, now=2.0)[1], 0)
+        self.assertEqual(len(self.server.sessions), 1)
+        self.assertIn((A, B), self.server.invites)
+
+    def test_an_invite_goes_when_its_session_ends(self):
+        self.online()
+        kid = self.put(now=0.0)[2]
+        self.send(live(mm.FRIEND_OP, friend_op_body(self.next_request(), 4, B, kid=kid)), A_AT, 1.0)
+        self.assertIn((A, B), self.server.invites)
+        # The host goes quiet before the invite's own ten minutes: its session
+        # ends, and an invite that names it has nothing to join.
+        later = mm.LIVE_SECONDS + 2.0
+        self.logon(B_AT, B, now=later)  # this packet sweeps
+        self.assertEqual(self.server.sessions, {})
+        self.assertNotIn((A, B), self.server.invites)
 
     def test_the_store_round_trips_accounts_friends_invites_mutes_and_stats(self):
         with tempfile.TemporaryDirectory() as folder:

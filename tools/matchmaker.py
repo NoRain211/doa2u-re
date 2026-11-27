@@ -319,6 +319,11 @@ class LiveSession:
         # open, private filled, private open. Only an open slot is joinable.
         return self.slots[1] > 0 or self.slots[3] > 0
 
+    @property
+    def public_open(self):
+        """True while a public slot is open: SEARCH lists public sessions, not invite-only ones."""
+        return self.slots[1] > 0
+
 
 class Invite:
     def __init__(self, kid, answer, now):
@@ -432,8 +437,10 @@ class Matchmaker:
         for key in [key for key, when in self.met.items() if now - when > MET_SECONDS]:
             del self.met[key]
         # A session is only joinable while its host is online.
-        for kid in [kid for kid, session in self.sessions.items() if not online(session.host, now)]:
+        gone = {kid for kid, session in self.sessions.items() if not online(session.host, now)}
+        for kid in gone:
             del self.sessions[kid]
+        self.drop_session_invites(gone)  # an invite to a session that has ended joins nothing
         expired = [key for key, when in self.requests.items() if now - when > REQUEST_SECONDS]
         for key in expired:
             del self.requests[key]
@@ -708,6 +715,12 @@ class Matchmaker:
             given = self.taken_tag(wanted, xuid)
             if given is not None and given != account.gamertag:
                 account.gamertag, self.dirty = given, True
+        if account.endpoint is not None and account.nonce != nonce:
+            # Another socket nonce is another process at this account: the sessions
+            # the old one hosted cannot be reached any more, and without this they
+            # would outlive it as long as the new one heartbeats. A new source port
+            # with the same nonce is a NAT rebind of the same process, which keeps them.
+            self.end_sessions(account)
         if account.endpoint is not None and self.by_endpoint.get(account.endpoint) is account:
             del self.by_endpoint[account.endpoint]
         account.endpoint, account.nonce, account.seen = sender, nonce, now
@@ -751,19 +764,14 @@ class Matchmaker:
             return self.done(req, E_ACCESSDENIED, sender, nonce)
         if kid == bytes(8):
             # A runner that quits logs off: its sessions go, and friends see it offline at once.
-            mine = {kid for kid, session in self.sessions.items() if session.host is me}
-            for kid in mine:
-                del self.sessions[kid]
-            for key in [key for key in self.invites.naming(me.xuid) if self.invites[key].kid in mine]:
-                del self.invites[key]
+            self.end_sessions(me)
             del self.by_endpoint[me.endpoint]
             me.endpoint = None
             return self.done(req, HRESULT_OK, sender, nonce)
         if session is None or session.host is not me:
             return self.done(req, E_INVALIDARG, sender, nonce)
         del self.sessions[kid]
-        for key in [key for key in self.invites.naming(me.xuid) if self.invites[key].kid == kid]:
-            del self.invites[key]
+        self.drop_session_invites({kid})
         return self.done(req, HRESULT_OK, sender, nonce)
 
     def done(self, req, hresult, sender, nonce):
@@ -790,7 +798,7 @@ class Matchmaker:
         if me is None:
             return self.result(req, E_ACCESSDENIED, sender, nonce)
         rows = [session for session in self.sessions.values()
-                if session.digest == me.digest and session.open and session.host is not me]
+                if session.digest == me.digest and session.public_open and session.host is not me]
         rows.sort(key=lambda session: session.born, reverse=True)  # newest first
         return self.result(req, HRESULT_OK, sender, nonce, rows)
 
@@ -803,6 +811,23 @@ class Matchmaker:
         if session is None:
             return self.result(req, E_INVALIDARG, sender, nonce)
         return self.result(req, HRESULT_OK, sender, nonce, [session])
+
+    def end_sessions(self, account):
+        """Deletes the sessions an account hosts, as its logoff or a new socket ends them."""
+        mine = {kid for kid, session in self.sessions.items() if session.host is account}
+        for kid in mine:
+            del self.sessions[kid]
+        self.drop_session_invites(mine)
+        return mine
+
+    def drop_session_invites(self, kids):
+        """Deletes every invite that names a session that has ended."""
+        if not kids:
+            return
+        gone = [key for key, invite in self.invites.items() if invite.kid in kids]
+        for key in gone:
+            del self.invites[key]
+        self.dirty = self.dirty or bool(gone)
 
     def hosts_session(self, account):
         """True when the account hosts a Live session from SESSION_PUT that is still alive."""

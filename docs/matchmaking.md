@@ -316,11 +316,15 @@ four counts are `XOnlineMatchSessionCreate`'s: public filled, public open,
 private filled, private open. The game's search record keeps the Live
 service's order instead, public open, private open, public filled, private
 filled, and `recomp-runtime/live_xapi.c` writes them that way. A session is
-listed while it has an open slot (public or private, slots 1 or 3 in the
-create order), its host is online and its digest matches the searcher's,
-newest first, at most 25. A host does not see its own session. FIND answers
-any session still there, so an invite still works when the session has
-filled.
+listed while it has an open public slot (slot 1 in the create order), its host
+is online and its digest matches the searcher's, newest first, at most 25. A
+session whose only open slot is private is invite-only: FIND answers it, so an
+invite works, but SEARCH does not list it. A host does not see its own session.
+FIND answers any session still there, so an invite still works when the
+session has filled. A session goes when its host logs off with a zero session
+id, when its host is 20 s silent, and when the same account logs on from
+another socket, which means the process that made it is gone; its invites go
+with it.
 
 CONNECT picks the other player's account by virtual address, and only when
 that player hosts a Live session from SESSION_PUT that is still alive, or
@@ -347,8 +351,11 @@ token.
 revoke an invite and 6 answer an invite. A request in both directions makes
 friends at once. The friend flags are the game's: online, playing, joinable,
 sent or received request, sent or received invite, invite accepted or
-rejected. An invite names the inviter's own session and stays until it is
-answered or revoked; answering it tells the inviter which way it went.
+rejected. An invite names the inviter's own session. An unanswered invite
+stays until it is revoked, expires (ten minutes) or its session ends. Answering
+it tells the inviter which way it went, and the answered invite stays, so the
+inviter's list shows the answer, until it expires or its session ends; it can
+no longer be revoked.
 
 A Live mutelist has no request that adds a name in the game's API, so the
 server only serves what the store holds or a test sets: the game reads it at
@@ -410,9 +417,9 @@ rankings cached (the oldest makes room), 16 feedback types per target, 64 stats 
 and board (a full group-7 write is 61; the game reads back its
 62 entries, the last a rank the client makes from the row), 100 XUIDs per
 read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
-request a week. When the account table is full, a new XUID drops the
-account that has been offline longest, those without stats or friends first,
-with everything that names it:
+request a week. When the account table is full, a new
+XUID drops the account that has been offline longest, those without stats or
+friends first, with everything that names it:
 friendships in both directions, pending requests and invites, stats rows,
 feedback, mutes, Live pairings and cached rankings. If every account is
 online, the new account is refused. Those caps are per address, so filling
