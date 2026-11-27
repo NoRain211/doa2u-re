@@ -600,62 +600,6 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(len(self.send(live_relaying(ina_a), B_AT, later + 2.0)), 1)
         self.assertEqual(pair.used, later + 2.0)
 
-    def test_members_of_one_lobby_connect_and_relay_to_each_other(self):
-        self.online()
-        kid = self.put(now=0.0)[2]  # A hosts
-        ina = {xuid: struct.unpack(">I", self.server.accounts[xuid].ina)[0] for xuid in (A, B, C)}
-
-        def add(sender, target, now):
-            return self.send(live(mm.CONNECT, connect_body(self.next_request(), ina[target])), sender, now)
-
-        def join(sender, xuid, now):
-            # The game's presence: in a session, and which one (0x2a1340).
-            self.logon(sender, xuid, now=now, state=mm.PRESENCE_SESSION | 3, kid=kid)
-
-        join(A_AT, A, 0.0)
-        join(B_AT, B, 0.0)
-        self.assertEqual(len(add(B_AT, A, 0.1)), 2)  # B joins and the host answers
-        self.assertEqual(len(add(A_AT, B, 0.2)), 2)
-        # C names the session before its host has answered it: a search result's
-        # XNKID alone admits nobody.
-        join(C_AT, C, 0.0)
-        self.assertEqual(add(C_AT, B, 0.3), [])
-        self.assertEqual(add(B_AT, C, 0.3), [])
-        # C joins too.
-        self.assertEqual(len(add(C_AT, A, 0.4)), 2)
-        self.assertEqual(len(add(A_AT, C, 0.5)), 2)
-        # The two guests reach each other even though neither hosts.
-        answers = dict((to, packet) for packet, to in add(B_AT, C, 0.6))
-        self.assertEqual(sorted(answers), sorted([B_AT, C_AT]))
-        pair = self.server.live_pairs[frozenset((B, C))]
-        for to, packet in answers.items():
-            peer = C if to == B_AT else B
-            peer_ina, public, lan, token, relay = mm.LPEER_BODY.unpack_from(packet, mm.ASKED - mm.TOKEN)
-            self.assertEqual((peer_ina, public, lan, relay),
-                             (ina[peer], mm.endpoint(C_AT if peer == C else B_AT), bytes(6), 0))
-            self.assertEqual(token, pair.token)
-        # The relay carries their traffic, not just the introduction.
-        claimed = guest(port=2000)
-        expected = claimed[:5] + self.server.accounts[B].ina + claimed[9:]
-        self.assertEqual(self.send(live_relaying(ina[C], port=2000), B_AT, 0.7),
-                         [(mm.header(mm.RELAY) + nonce(C_AT) + expected, C_AT)])
-        self.assertEqual(len(add(C_AT, B, 0.8)), 2)  # C answers: a full pair
-        self.assertIn(frozenset((B, C)), self.server.met)
-        # The host reaches a member without a pair with it, because membership
-        # belongs to the session, not to the pair.
-        del self.server.live_pairs[frozenset((A, B))]
-        self.assertEqual(len(add(A_AT, B, 0.9)), 2)
-        # The session ending ends the membership: a pair with a member, or
-        # between members, is refused once it is gone.
-        req = self.next_request()
-        self.assertEqual(self.done(self.one(live(mm.SESSION_DEL, mm.SESSION_DEL_BODY.pack(req, kid)), A_AT, 1.0,
-                                              mm.DONE))[1], 0)
-        del self.server.live_pairs[frozenset((A, B))]
-        del self.server.live_pairs[frozenset((B, C))]
-        self.assertEqual(add(A_AT, B, 1.1), [])
-        self.assertEqual(add(B_AT, C, 1.1), [])
-        self.assertEqual(add(C_AT, B, 1.1), [])
-
     def test_connect_relay_only_hides_the_endpoints(self):
         self.server.relay_only = True
         self.online()
