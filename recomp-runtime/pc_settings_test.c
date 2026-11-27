@@ -281,7 +281,7 @@ int main(void)
 {
     recomp_runtime.registers.esp = STACK;
     make_layout();
-    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 0, 0, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1};
+    const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 0, 0, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
     const RecompButtonConfigHost rebind = {host_bound, host_listen, host_listening, host_reset, host_rebind_closed};
     recomp_runner_assets_reset();
@@ -305,10 +305,12 @@ int main(void)
         recomp_pc_settings_choices(RECOMP_PC_FRAME_RATE) == 2u &&
         recomp_pc_settings_choices(RECOMP_PC_SHARPEN) == 4u && recomp_pc_settings_choices(RECOMP_PC_AO) == 2u &&
         recomp_pc_settings_choices(RECOMP_PC_RENDERER) == 3u && recomp_pc_settings_choices(RECOMP_PC_DISPLAY_MODE) == 3u &&
+        recomp_pc_settings_choices(RECOMP_PC_HITBOXES) == 3u &&
         recomp_pc_settings_choices(99u) == 0u);
     expect("live rows", recomp_pc_settings_applies_now(RECOMP_PC_UNLOCKS) &&
         recomp_pc_settings_applies_now(RECOMP_PC_FREE_CAMERA) &&
         recomp_pc_settings_applies_now(RECOMP_PC_DEDICATION) && recomp_pc_settings_applies_now(RECOMP_PC_FIGHT_HUD) &&
+        recomp_pc_settings_applies_now(RECOMP_PC_HITBOXES) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_SCREEN) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_SHARPEN) && !recomp_pc_settings_applies_now(RECOMP_PC_AO) &&
         !recomp_pc_settings_applies_now(RECOMP_PC_MSAA));
@@ -449,11 +451,12 @@ int main(void)
     nav_delta = 0;
     label_calls = 0u;
     hook(draw, &context, 1u);
-    expect("hud", rd16(CURSORS + 2u) == 4u && label_list_counts[1] == 2u && ascii(label_lists[1][0]) == 'L' &&
-        ascii(label_lists[1][1]) == 'F' && ascii(values[1]) == 'D' && layout_walked == 4u); /* Life Bar, Fight HUD Damage */
+    expect("hud", rd16(CURSORS + 2u) == 4u && label_list_counts[1] == 3u && ascii(label_lists[1][0]) == 'L' &&
+        ascii(label_lists[1][1]) == 'F' && ascii(label_lists[1][2]) == 'H' && ascii(values[1]) == 'D' &&
+        ascii(values[2]) == 'O' && layout_walked == 6u); /* Life Bar, Fight HUD Damage, Hitboxes Off */
     expect("leave draw", rd32(0x0067afa0u + 4u * 19u) != draw);
     hook(rd32(0x0067af50u + 4u * 19u), &context, 1u);
-    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 4u * 28u) == 0u);
+    expect("enter resets", rd32(layout + 0xcu) == 0u && rd32(layout + 6u * 28u) == 0u);
 
     /* Back on the categories leaves Options for the main menu and saves. */
     const unsigned pc_left_before = left_options;
@@ -608,7 +611,7 @@ int main(void)
     expect("no options list while leaving", left_options == leaving);
     hook(0x0011afd0u, none, 0u);
     expect("options init clears jukebox", options_inits == 2u);
-    expect("pc page again", hook(0x0011ac90u, &page19, 1u) == 2u); /* HUD, the category it left on */
+    expect("pc page again", hook(0x0011ac90u, &page19, 1u) == 3u); /* HUD, the category it left on */
     return fails == 0 ? 0 : 1;
 }
 

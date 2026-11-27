@@ -225,6 +225,41 @@ height/480. The presenter's existing display-size and downsampling behavior
 applies. A 1080p GPU test requests 32 samples and checks the resolved output
 and shared depth after capability fallback.
 
+`hitbox_view.c` is the first world-space overlay. It runs in the hitbox slot
+beside the perf readout, after the frame's last draw, and reads only guest RAM:
+Sparring and Training's battle mode, both fighters' bone matrices at
+`0x875c20`, their side records at `0x87ae30` and the hit and collision records
+those select. The presenter keeps no camera, so `d3d8_draw_adapter.c` records the
+view, the sanitised projection and the post-fit viewport of the last
+main-target, depth-writing fixed-function 3D draw; a program draw transforms
+vertices itself, so it leaves the camera alone. The overlay composes
+view × projection itself and copies that viewport. Its translucent
+spheres and 1-pixel outlines depth-test with LESS_EQUAL, write no depth, and
+bind the frame's main depth (`no_depth=false`, `custom_depth=false`); a frame
+with no captured camera draws nothing, and an unusable draw keeps the frame's
+earlier camera. The Hitboxes row's X-ray choice keeps the same draws, target
+and bound depth but turns `depth_test_enable` off, and drops the fill and
+outline alpha to 0.35, so the volumes show through the scene; both presenters
+build their depth state from that flag, so neither needed a change. The volume
+list takes spheres, flat fan outlines and flat rings with a colour class and
+an optional side, so later sources can fill the same draws; a side
+colours a joint P1 cyan or P2 yellow, the hips a paler pair, and an unsided
+volume keeps its class colour, which stays red for attack and blue for hurt.
+The overlay draws the skeleton, each fighter's hold/throw search sector from
+`fighter_hold_target_search` (`0x104b50`) while its current hit record's
+`+0x0d` gate is set, and its stage-collision body radius from
+`fighter_move_collision_record` (`0x10b0e0`, clamped to 2.5) as a flat ring.
+The sector's origin is the fighter's root XZ, its direction is the opponent's
+`+0x18` yaw plus 0x4000 (a quarter turn), plus the record's `+0x14` angle,
+negated when the fighter's `+0x3e` flag is 1, and its half sweep is
+`0x1555 + 4368.6 / distance`, where distance is the roots' gap less the
+opponent's body radius.
+Strikes are not drawn: the game decides them from authored script data and keeps
+no world-space strike geometry. Every pointer read from a guest table is
+range-checked against the 64 MiB of guest RAM.
+Direct3D 11 frame generation treats these draws as scene and may ghost them;
+that is accepted for now.
+
 Graphics work keeps the authentic look (see `GLOSSARY.md`), one PR each.
 Two accuracy fixes have landed in both presenters: uncompressed textures keep
 their guest mip levels, and point min/mag filtering no longer stops the
@@ -964,8 +999,9 @@ The settings read and write the launchers'
 `private/launcher.json` (`pc_settings_store.cpp`; `run_game.py` names it in
 `RECOMP_LAUNCHER_SETTINGS`), keeping every key they do not own; Unlocks,
 Dedication, the life bar, the fight HUD, hit voices, the KO replay and the
-display mode apply at once, as do CPU Costumes and the Free Camera offline
-(both are off while logged on to DOA ONLINE), and the others at the next launch.
+display mode apply at once, as do CPU Costumes, the Free Camera and hitboxes
+offline (all three are off while logged on to DOA ONLINE), and the others at
+the next launch.
 
 QUIT GAME (`menu_quit.c`) is one more carousel position after the main
 menu's unlocked entries (`0x134330` builds the list, `0x1343a0` and

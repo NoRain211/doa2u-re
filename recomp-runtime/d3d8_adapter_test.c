@@ -54,6 +54,8 @@ static uint32_t create_count, submit_count, destroy_count;
 static uint32_t vblank_reset_count, wait_present_count, wait_vblank_count;
 void recomp_d3d8_state_reset(void) {}
 void recomp_d3d8_state_write_defaults(bool auto_depth) { (void)auto_depth; }
+/* The draw adapter owns the camera a Swap's overlays use; this test has none. */
+void recomp_d3d8_overlay_camera_reset(void) {}
 void recomp_d3d8_render_state_save(RecompD3dRenderStateModel *state) { (void)state; }
 void recomp_d3d8_render_state_restore(const RecompD3dRenderStateModel *state) { (void)state; }
 void recomp_d3d8_resource_reset(void) {}

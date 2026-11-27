@@ -85,8 +85,8 @@ keeps running.
   **Gameplay** and **HUD** are listed on the left, and the selected
   category's settings are on the right (A or right goes into them, B comes
   back). **Display Mode**, **Unlocks**, **CPU Costumes**, **Free Camera**,
-  **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices** and
-  **KO Replay** change at once, and so do **Resolution**, **MSAA**,
+  **Dedication**, **Life Bar**, **Fight HUD**, **Hit Voices**, **Hitboxes**
+  (Off, On or X-ray) and **KO Replay** change at once, and so do **Resolution**, **MSAA**,
   **SMAA**, **Sharpening** and **Ambient Occlusion**, on any renderer; the
   others say they apply the next time the game starts. Leaving the page saves them for the launcher too.
 - **Combo damage and critical stun.** Outside Sparring, the combo's damage
@@ -98,6 +98,16 @@ keeps running.
 - **Life bar colour.** PC SETTINGS' **Life Bar** row picks the life bars'
   colour from 16, at once, or **Custom**: any colour, set as
   `"lifeBarCustom": "RRGGBB"` in `private\launcher.json`.
+- **Sparring hitboxes.** PC SETTINGS' **Hitboxes** row has **Off**, **On** and
+  **X-ray**. On draws the two fighters' bone joints and hips as translucent
+  world-space markers in Sparring and Training, hidden by whatever is in front;
+  X-ray draws them through bodies and scenery at about a third of the alpha.
+  P1 is cyan and P2 yellow, and the hips are larger and brighter. It also draws
+  each fighter's hold/throw search area as a red outline while a throw is
+  active, and its stage-collision body radius as a ring on the floor. Strikes are not shown: the game
+  decides them from authored script data, with no world-space strike geometry.
+  The viewer changes no fight state, and it is off while logged on to DOA
+  ONLINE.
 - **Hit voices.** DOA2U's fighters are silent when hit; with your own copy
   of Dead or Alive 4, drop its ISO on the launcher (or choose it with
   **Import DOA4 Voices** on its **AUDIO** page): it imports the disc's music for

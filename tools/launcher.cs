@@ -294,7 +294,7 @@ class LauncherForm : Form
     // A notice (build progress, a refused action) replaces the information text until the next input.
     string notice;
     string gameSource;
-    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay, fightHud, displayMode; bool hitVoices; // chosen in the game's PC Settings; kept as saved
+    string lifeBarColour, lifeBarCustom, hitVoiceVolume, koReplay, fightHud, hitboxes, displayMode; bool hitVoices; // chosen in the game's PC Settings; kept as saved
     readonly string savedShape; // a saved 21:9 "W:H", or null
     bool built = File.Exists(Game.Runner);
     Process build;
@@ -406,6 +406,7 @@ class LauncherForm : Form
             Index = !hitVoices ? 0 : hitVoiceVolume == "quiet" ? 1 : hitVoiceVolume == "loud" ? 3 : 2 };
         koReplay = Game.Str(settings, "koReplay", "dynamic");
         fightHud = Game.Str(settings, "fightHud", Game.Bool(settings, "comboHud", true) ? "both" : "original"); // comboHud came first
+        hitboxes = Game.Str(settings, "hitboxes", Game.Bool(settings, "hitboxes", false) ? "on" : "off"); // was a boolean: true was On
         displayMode = Game.Str(settings, "displayMode", "borderless"); // the game's PC SETTINGS row
         chooseGame = new Row { Label = "Disc 2 ISO", Info = SourceName(), Action = "game" };
         updateRow = new Row { Label = "Update", Info = UpdateStatus(), Action = "update" };
@@ -532,6 +533,7 @@ class LauncherForm : Form
             { "checkUpdates", checkAtStart.Index == 1 }, { "game_source", gameSource },
             { "lifeBarColour", lifeBarColour }, { "lifeBarCustom", lifeBarCustom }, { "hitVoices", voiceSetting.Index != 0 },
             { "hitVoiceVolume", voiceSetting.Index == 1 ? "quiet" : voiceSetting.Index == 3 ? "loud" : "normal" }, { "koReplay", koReplay }, { "fightHud", fightHud },
+            { "hitboxes", hitboxes },
             { "displayMode", displayMode } };
     }
 

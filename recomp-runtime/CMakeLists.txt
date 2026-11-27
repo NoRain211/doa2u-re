@@ -307,8 +307,11 @@ add_executable(recomp_cpu_costume_test cpu_costume.c cpu_costume_test.c)
 add_test(NAME recomp-runtime-cpu-costume COMMAND recomp_cpu_costume_test)
 add_executable(recomp_combo_hud_test combo_hud.c combo_hud_test.c)
 add_test(NAME recomp-runtime-combo-hud COMMAND recomp_combo_hud_test)
+add_executable(recomp_hitbox_view_test hitbox_view.c hitbox_view_test.c)
+add_test(NAME recomp-runtime-hitbox-view COMMAND recomp_hitbox_view_test)
 if(NOT MSVC)
     target_link_libraries(recomp_combo_hud_test PRIVATE m)
+    target_link_libraries(recomp_hitbox_view_test PRIVATE m)
 endif()
 add_executable(recomp_ko_replay_test ko_replay.c ko_replay_test.c)
 add_test(NAME recomp-runtime-ko-replay COMMAND recomp_ko_replay_test)
@@ -886,7 +889,7 @@ if(RECOMP_PROGRAM_DIR)
         xbox_adpcm.c mwply_adapter.c sfd_movie.c sfd_format.c movie_color_model.c stage_select.c
         input_model.c input_adapter.c input_host_win32.c input_pulse_source.c
         synctest.c synctest_modules.c rollback.c netplay.c netplay_names.c rebind.cpp cpu_costume.c combo_hud.c
-        hit_voice.c ko_replay.c
+        hit_voice.c ko_replay.c hitbox_view.c
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c jukebox.c
         story_roster.c

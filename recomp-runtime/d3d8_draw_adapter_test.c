@@ -2153,6 +2153,96 @@ static int split_tests(void)
     return 0;
 }
 
+static int camera_tests(void)
+{
+    if (setjmp(stopped) != 0) { fprintf(stderr, "Unexpected camera stop: %s\n", stop_reason); return 1; }
+    initialize();
+    recomp_d3d8_overlay_camera_reset();
+    RecompD3dOverlayCamera camera;
+    CHECK(!recomp_d3d8_overlay_camera(&camera));
+    float view[16] = {0}, projection[16] = {0};
+    view[0] = view[5] = view[10] = view[15] = 1.0f;
+    view[12] = 7.0f;
+    projection[0] = 2.0f;
+    projection[5] = -2.0f;
+    projection[10] = 1.0f;
+    projection[15] = 1.0f;
+    recomp_guest_store(DEVICE + 0xc60u, view, sizeof view);
+    recomp_guest_store(DEVICE + 0xca0u, projection, sizeof projection);
+    CHECK(recomp_d3d_set_z_enable(&state, 1u));
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x2u;
+    target = (RecompD3dPresenterTarget){0};
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    CHECK(recomp_d3d8_overlay_camera(&camera) && memcmp(camera.view, view, sizeof view) == 0 &&
+        memcmp(camera.projection, projection, sizeof projection) == 0);
+    CHECK(camera.viewport[0] == 0.0f && camera.viewport[1] == 0.0f &&
+        camera.viewport[2] == 720.0f && camera.viewport[3] == 480.0f);
+
+    /* A pretransformed 2D draw and an offscreen target carry no scene camera. */
+    recomp_d3d8_overlay_camera_reset();
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x144u;
+    invoke(0x348240u, 5u, 3u, VERTICES, 28u);
+    CHECK(!recomp_d3d8_overlay_camera(&camera));
+    *recomp_memory_u32(DEVICE + 0x798u) = 0x2u;
+    target.offscreen = true;
+    target.color = texture;
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    CHECK(!recomp_d3d8_overlay_camera(&camera));
+
+    /* A draw that reaches capture with a non-finite viewport is rejected, and
+       the earlier camera from this frame stays. */
+    target = (RecompD3dPresenterTarget){0};
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    CHECK(recomp_d3d8_overlay_camera(&camera) && memcmp(camera.view, view, sizeof view) == 0);
+    const float min_z = 0.0f, nan = NAN;
+    recomp_guest_store(DEVICE + 0xef0u, &nan, sizeof nan); /* the viewport's MinZ */
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    recomp_guest_store(DEVICE + 0xef0u, &min_z, sizeof min_z);
+    CHECK(recomp_d3d8_overlay_camera(&camera) && memcmp(camera.view, view, sizeof view) == 0 &&
+        !isnan(camera.viewport[4]));
+
+    /* A non-finite view is dropped before capture; it leaves the earlier one. */
+    view[0] = NAN;
+    recomp_guest_store(DEVICE + 0xc60u, view, sizeof view);
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    CHECK(recomp_d3d8_overlay_camera(&camera) && camera.view[0] == 1.0f);
+
+    /* From an empty frame, none of them leaves a camera. */
+    recomp_d3d8_overlay_camera_reset();
+    invoke(0x348240u, 5u, 3u, VERTICES, 12u);
+    CHECK(!recomp_d3d8_overlay_camera(&camera));
+    view[0] = 1.0f;
+    recomp_guest_store(DEVICE + 0xc60u, view, sizeof view);
+
+    /* A program draw transforms vertices itself, so it leaves no camera. */
+    enum { PROGRAM = 0x9000u };
+    for (uint32_t i = 0u; i < 16u; ++i) *recomp_memory_u32(PROGRAM + 0x1cu + i * 16u) = 2u;
+    *recomp_memory_u32(PROGRAM + 4u) = 0x10u;
+    *recomp_memory_u32(PROGRAM + 8u) = 1u;
+    *recomp_memory_u32(PROGRAM + 0xcu) = 5u;
+    *recomp_memory_u32(PROGRAM + 0x1cu) = 0x32u;
+    *recomp_memory_u32(PROGRAM + 0x38u) = 12u;
+    *recomp_memory_u32(PROGRAM + 0x3cu) = 0x32u;
+    *recomp_memory_u32(PROGRAM + 0xa8u) = 24u;
+    *recomp_memory_u32(PROGRAM + 0xacu) = 0x22u;
+    const uint32_t upload[5] = {(4u << 18u) | 0xb00u, 1u, 2u, 3u, 4u};
+    recomp_guest_store(PROGRAM + 0x114u, upload, sizeof upload);
+    const float one = 1.0f, two = 2.0f;
+    recomp_guest_store(DEVICE + 0x95cu, &one, 4u);
+    recomp_guest_store(DEVICE + 0x960u, &one, 4u);
+    recomp_guest_store(DEVICE + 0x96cu, &one, 4u);
+    recomp_guest_store(DEVICE + 0x970u, &one, 4u);
+    recomp_guest_store(DEVICE + 0x948u, &two, 4u);
+    *recomp_memory_u32(DEVICE + 0x798u) = PROGRAM + 1u;
+    *recomp_memory_u32(DEVICE + 0xf88u) = 0x7000u;
+    *recomp_memory_u32(STAGES + 20u) = 1u;
+    *recomp_memory_u32(STAGES + 48u) = *recomp_memory_u32(STAGES + 64u) = 2u;
+    const uint32_t submitted_before = submits;
+    invoke(0x348240u, 5u, 3u, VERTICES, 32u);
+    CHECK(submits == submitted_before + 1u && !recomp_d3d8_overlay_camera(&camera));
+    return 0;
+}
+
 int main(void)
 {
     initialize();
@@ -2160,7 +2250,7 @@ int main(void)
         distortion_tests() || factor_tests() || position_texgen_tests() || effect_tests() ||
         stage1_transform_tests() || program_tests() || bump_tests() ||
         volume_tests() || reflection_inverse_tests() || reflection_coverage_tests() || frame_buffer_tests() || depth_bias_tests() ||
-        split_tests()) return 1;
+        split_tests() || camera_tests()) return 1;
     puts("PASS D3D8 pixel lifecycle/constants and semantic draw ABI/snapshots");
     return 0;
 }

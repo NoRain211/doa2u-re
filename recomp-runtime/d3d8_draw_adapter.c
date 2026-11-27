@@ -1717,6 +1717,52 @@ static void submit_pieces(const RecompD3dPresenterCommand *command, bool screen_
 /* Shared identity indices for non-indexed draws (count is at most 65536). */
 static uint16_t draw_indices[65536u];
 
+/* The frame's overlay camera, as the last main-target scene draw left it. */
+static struct {
+    bool valid;
+    RecompD3dOverlayCamera camera;
+} overlay_camera;
+
+bool recomp_d3d8_overlay_camera(RecompD3dOverlayCamera *camera)
+{
+    if (!overlay_camera.valid) return false;
+    *camera = overlay_camera.camera;
+    return true;
+}
+
+void recomp_d3d8_overlay_camera_reset(void) { overlay_camera.valid = false; }
+
+/* One line as ambient occlusion's aoSceneDraw: a main-target depth write in
+   world space. Only a fixed-function draw carries the view x projection that
+   produced its pixels, so a program draw leaves the camera alone. */
+static bool overlay_scene_draw(const RecompD3dPresenterDrawCommand *draw, const RecompD3dVertexLayout *layout)
+{
+    return !draw->target.offscreen && !draw->target.no_depth && !draw->target.custom_depth &&
+        !layout->pretransformed && draw->has_transform &&
+        draw->depth.depth_test_enable && draw->depth.depth_write_enable;
+}
+
+/* Keeps the previous camera when this draw's is not usable, so a later draw
+   cannot wipe the frame's camera. */
+static void capture_overlay_camera(uint32_t device, const RecompD3dPresenterDrawCommand *draw)
+{
+    RecompD3dOverlayCamera camera;
+    recomp_guest_load(camera.view, device + 0xc60u, sizeof camera.view);
+    memcpy(camera.projection, draw->projection, sizeof camera.projection);
+    memcpy(camera.viewport, draw->viewport, sizeof camera.viewport);
+    bool any_view = false, any_projection = false;
+    for (uint32_t i = 0u; i < 16u; ++i) {
+        if (!isfinite(camera.view[i]) || !isfinite(camera.projection[i])) return;
+        any_view = any_view || camera.view[i] != 0.0f;
+        any_projection = any_projection || camera.projection[i] != 0.0f;
+    }
+    for (uint32_t i = 0u; i < 6u; ++i)
+        if (!isfinite(camera.viewport[i])) return;
+    if (!any_view || !any_projection || camera.viewport[2] <= 0.0f || camera.viewport[3] <= 0.0f) return;
+    overlay_camera.camera = camera;
+    overlay_camera.valid = true;
+}
+
 uint32_t recomp_d3d8_draw_submitted(void)
 {
     return draw_submitted;
@@ -1930,6 +1976,7 @@ static void submit_draw(uint32_t primitive, uint32_t count, uint32_t vertices,
     /* After the texture: a 2D draw of a render target is a screen effect (fit_2d_layer). */
     if (layout.pretransformed && !program) recomp_d3d8_fit_2d_layer(draw);
     else recomp_d3d8_fit_3d_viewport(draw);
+    if (overlay_scene_draw(draw, &layout)) capture_overlay_camera(device, draw);
     if (draw->texture.volume_depth != 0u &&
         (program || points || draw->fvf != 0x142u ||
          *recomp_memory_u32(device + PIXEL_HANDLE) != 0u ||

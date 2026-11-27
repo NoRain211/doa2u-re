@@ -52,13 +52,14 @@ int main()
         c[RECOMP_PC_SHARPEN] == 0u && c[RECOMP_PC_AO] == 0u &&
         c[RECOMP_PC_SCREEN] == 1u && c[RECOMP_PC_RENDERER] == 0u && c[RECOMP_PC_INTRO] == 0u &&
         c[RECOMP_PC_UNLOCKS] == 0u && c[RECOMP_PC_CPU_COSTUMES] == 0u && c[RECOMP_PC_DEDICATION] == 0u &&
-        c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u && c[RECOMP_PC_DISPLAY_MODE] == 1u);
+        c[RECOMP_PC_FIGHT_HUD] == 3u && c[RECOMP_PC_FRAME_RATE] == 0u && c[RECOMP_PC_DISPLAY_MODE] == 1u &&
+        c[RECOMP_PC_HITBOXES] == 0u);
 
     // A launcher's file, with keys the page does not own.
     write(path, "{\"height\":2160,\"msaa\":8,\"smaa\":false,\"sharpen\":\"medium\",\"widescreen\":true,\"screen\":\"2560:1080\","
         "\"vulkan\":true,\"vrr\":false,\"frameRate\":\"display\",\"skipIntro\":true,\"surround\":true,\"unlockAll\":false,"
         "\"freeCamera\":true,\"randomCpuCostumes\":true,\"dedicationCard\":false,\"checkUpdates\":true,"
-        "\"ambientOcclusion\":true,\"comboHud\":false,"
+        "\"ambientOcclusion\":true,\"comboHud\":false,\"hitboxes\":true,"
         "\"game_source\":\"D:\\\\Games\\\\doa2.iso\",\"window\":{\"x\":1,\"y\":[2,3]}}");
     expect("read", recomp_pc_settings_read(path, store, c));
     expect("values", c[RECOMP_PC_RESOLUTION] == 4u && c[RECOMP_PC_MSAA] == 3u && c[RECOMP_PC_SMAA] == 0u &&
@@ -67,7 +68,7 @@ int main()
         c[RECOMP_PC_FRAME_RATE] == 1u &&
         c[RECOMP_PC_AUDIO] == 1u && c[RECOMP_PC_INTRO] == 1u && c[RECOMP_PC_UNLOCKS] == 1u &&
         c[RECOMP_PC_CPU_COSTUMES] == 1u && c[RECOMP_PC_FREE_CAMERA] == 1u && c[RECOMP_PC_DEDICATION] == 1u &&
-        c[RECOMP_PC_FIGHT_HUD] == 0u); /* an older file's comboHud Off */
+        c[RECOMP_PC_FIGHT_HUD] == 0u && c[RECOMP_PC_HITBOXES] == 1u); /* an older file's comboHud Off, hitboxes true */
 
     // Saving with 21:9 still chosen keeps that shape and every other key.
     c[RECOMP_PC_MSAA] = 0u;
@@ -79,6 +80,7 @@ int main()
         saved.find("\"window\":{\"x\":1,\"y\":[2,3]}") != std::string::npos);
     expect("dedication", saved.find("\"dedicationCard\":false") != std::string::npos);
     expect("fight hud", saved.find("\"fightHud\":\"original\"") != std::string::npos);
+    expect("hitboxes saved", saved.find("\"hitboxes\":\"on\"") != std::string::npos);
     expect("sharpen saved", saved.find("\"sharpen\":\"medium\"") != std::string::npos);
     expect("occlusion saved", saved.find("\"ambientOcclusion\":true") != std::string::npos);
     expect("msaa off", saved.find("\"msaa\":1") != std::string::npos);
@@ -88,7 +90,22 @@ int main()
     expect("round trip", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_MSAA] == 0u &&
         again[RECOMP_PC_SHARPEN] == 2u && again[RECOMP_PC_AO] == 1u &&
         again[RECOMP_PC_SCREEN] == 3u && again[RECOMP_PC_UNLOCKS] == 1u && again[RECOMP_PC_DEDICATION] == 1u &&
-        again[RECOMP_PC_FRAME_RATE] == 1u);
+        again[RECOMP_PC_FRAME_RATE] == 1u && again[RECOMP_PC_HITBOXES] == 1u);
+
+    // Hitboxes was a boolean, false Off and true On; X-ray adds a third name.
+    write(path, "{\"hitboxes\":false}");
+    expect("hitboxes off", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_HITBOXES] == 0u);
+    write(path, "{\"hitboxes\":\"xray\"}");
+    expect("hitboxes x-ray", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_HITBOXES] == 2u);
+    write(path, "{\"hitboxes\":\"bogus\"}");
+    expect("unknown hitboxes", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_HITBOXES] == 0u);
+    for (std::uint8_t i = 0u; i < 3u; ++i) {
+        again[RECOMP_PC_HITBOXES] = i;
+        recomp_pc_settings_write(path, store, again);
+        const std::string names[3] = {"\"hitboxes\":\"off\"", "\"hitboxes\":\"on\"", "\"hitboxes\":\"xray\""};
+        expect("hitboxes name", read(path).find(names[i]) != std::string::npos);
+        expect("hitboxes read", recomp_pc_settings_read(path, store, again) && again[RECOMP_PC_HITBOXES] == i);
+    }
 
     // A life bar colour saves by name and reads back.
     c[RECOMP_PC_LIFE_BAR] = 10u;

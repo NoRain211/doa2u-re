@@ -850,6 +850,9 @@ static void swap(void)
             recomp_d3d_overlay_hooks[i](&target);
         }
     }
+    /* The overlays have consumed this frame's camera; the next frame's draws
+       capture their own, so a frame without a scene draw gets none. */
+    recomp_d3d8_overlay_camera_reset();
     result.command.data.present.aspect = recomp_d3d8_content_aspect();
     /* A host wait for the GPU here would stall every guest thread, including
        the vblank threads that refill CRI's audio rings (issue #69). Under the

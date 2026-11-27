@@ -60,9 +60,24 @@ extern void (*recomp_d3d_present_hook)(uint32_t swap_counter);
    before its Present, in this order. Each owner sets only its own slot. */
 enum {
     RECOMP_D3D_OVERLAY_PERF,    /* the runner's frame rate readout */
+    RECOMP_D3D_OVERLAY_HITBOXES, /* Sparring's 3D skeleton overlay (hitbox_view.c) */
     RECOMP_D3D_OVERLAY_HOOKS,
 };
 extern void (*recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HOOKS])(const RecompD3dPresenterTarget *target);
+/* The camera of the last main-target, depth-writing fixed-function 3D draw
+   this frame: the presenter keeps no camera state, so a world-space overlay
+   projects with the frame's own view and projection. A program draw transforms
+   vertices itself and is skipped. view and projection are the guest's rows;
+   viewport is six floats, X, Y, width, height, MinZ and MaxZ in target pixels,
+   after the widescreen fit. False until a scene draw carried a usable one. */
+typedef struct RecompD3dOverlayCamera {
+    float view[16];
+    float projection[16];
+    float viewport[6];
+} RecompD3dOverlayCamera;
+bool recomp_d3d8_overlay_camera(RecompD3dOverlayCamera *camera);
+/* Clears the captured camera once a Swap's overlay hooks have run. */
+void recomp_d3d8_overlay_camera_reset(void);
 /* Optional host hook at the frame boundary: guest state is final and the
    frame-locked clock has already advanced. SyncTest snapshots here. */
 extern void (*recomp_d3d_frame_boundary_hook)(uint32_t swap_counter);

@@ -9,6 +9,7 @@
 #include "fiber_adapter.h"
 #include "free_camera_adapter.h"
 #include "combo_hud.h"
+#include "hitbox_view.h"
 #include "hit_voice.h"
 #include "jukebox.h"
 #include "mod_loader.h"
@@ -163,6 +164,7 @@ static void pcSettingChanged(unsigned setting, unsigned choice, void *)
     case RECOMP_PC_HIT_VOICES: if (!pcHudLocked) recomp_hit_voice_set_choice(choice); break;
     case RECOMP_PC_KO_REPLAY: recomp_ko_replay_set_enabled(choice == 1u); break;
     case RECOMP_PC_FIGHT_HUD: if (!pcHudLocked) recomp_combo_hud_set_choice(choice); break;
+    case RECOMP_PC_HITBOXES: recomp_hitbox_view_set_choice(choice); break;
     case RECOMP_PC_DISPLAY_MODE: recomp_d3d_presenter_set_display_mode(choice); break;
     case RECOMP_PC_RESOLUTION:
     case RECOMP_PC_MSAA:
@@ -261,8 +263,8 @@ static void installPcSettings(bool online)
 #endif
     std::uint8_t choices[RECOMP_PC_SETTING_COUNT];
     recomp_pc_settings_read(launcherSettings, pcStore, choices);
-    // The rows that apply at once show what is running. Online turns the free camera
-    // and CPU costumes off for the session, so those rows keep the saved choice.
+    // The rows that apply at once show what is running. Online turns the free camera,
+    // CPU costumes and hitboxes off for the session, so those rows keep the saved choice.
     choices[RECOMP_PC_UNLOCKS] = unlockAll ? 0u : 1u;
     if (!online) {
         choices[RECOMP_PC_CPU_COSTUMES] = recomp_cpu_costume_enabled() ? 1u : 0u;
@@ -272,6 +274,7 @@ static void installPcSettings(bool online)
     recomp_hit_voice_set_choice(choices[RECOMP_PC_HIT_VOICES]);
     recomp_ko_replay_set_enabled(choices[RECOMP_PC_KO_REPLAY] == 1u);
     recomp_combo_hud_set_choice(choices[RECOMP_PC_FIGHT_HUD]);
+    recomp_hitbox_view_set_choice(choices[RECOMP_PC_HITBOXES]);
     const RecompPcSettingsHost host{pcSettingChanged, pcSettingsClosed, nullptr};
     recomp_pc_settings_install(&host, choices);
     // The renderer may not have a window yet; it keeps the mode until it has one.
@@ -479,12 +482,15 @@ static void setOnlineMode(bool online)
     recomp_free_camera_set_online(online);
     recomp_cpu_costume_set_online(online);
     recomp_ko_replay_set_online(online);
+    // A Sparring overlay is the local player's own picture: off online, and
+    // back to the saved choice when Live leaves DOA ONLINE.
+    recomp_hitbox_view_set_online(online);
     // The Jukebox plays over the game and changes its music: offline only, and off its menu entry online.
     recomp_jukebox_set_online(online);
     recomp_menu_quit_set_jukebox(online ? nullptr : recomp_jukebox_request_page);
-    // Online, those two rows apply when Live leaves DOA ONLINE, or at the next start
+    // Online, those rows apply when Live leaves DOA ONLINE, or at the next start
     // for a run that stays online; offline they apply at once.
-    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA}) {
+    for (unsigned setting : {RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA, RECOMP_PC_HITBOXES}) {
         recomp_pc_settings_set_live(setting, !online);
         recomp_pc_settings_set_after_online(setting, online && liveSwitchable);
     }
@@ -781,6 +787,7 @@ static void bootGuest()
     recomp_input_adapter_set_source(sampleInput);
     recomp_d3d_present_hook = onSwap;
     recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_PERF] = recomp_perf_overlay;
+    recomp_d3d_overlay_hooks[RECOMP_D3D_OVERLAY_HITBOXES] = recomp_hitbox_view_overlay;
     recomp_netplay_session_install(recomp_synctest_enabled());
     /* Live switches at the player's logon: the run starts offline, with the
        mods the player chose, until the game logs on. A Loopback or synctest

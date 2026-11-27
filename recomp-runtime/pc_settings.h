@@ -36,6 +36,7 @@ enum RecompPcSetting {
     RECOMP_PC_HIT_VOICES,    /* Off, Quiet, Normal, Loud (hit_voice.h) */
     RECOMP_PC_KO_REPLAY,     /* Original, Dynamic (ko_replay.h) */
     RECOMP_PC_DISPLAY_MODE,  /* Windowed, Borderless, Fullscreen (exclusive) */
+    RECOMP_PC_HITBOXES,      /* Off, On, X-ray (hitbox_view.h) */
     RECOMP_PC_SETTING_COUNT
 };
 

@@ -93,6 +93,9 @@ void choose(const Entries &entries, const RecompPcSettingsStore &store, std::uin
     // A missing or unknown mode is borderless, as the launchers default.
     const std::string display = text(entries, "displayMode", "borderless");
     choices[RECOMP_PC_DISPLAY_MODE] = display == "windowed" ? 0u : display == "fullscreen" ? 2u : 1u;
+    // hitboxes was a boolean; Off and On keep those names and X-ray adds one.
+    const std::string hitboxes = text(entries, "hitboxes", boolean(entries, "hitboxes", false) ? "on" : "off");
+    choices[RECOMP_PC_HITBOXES] = hitboxes == "on" ? 1u : hitboxes == "xray" ? 2u : 0u;
 }
 
 void put(Entries *entries, const char *key, std::string value)
@@ -180,6 +183,8 @@ bool recomp_pc_settings_write(const std::string &path, const RecompPcSettingsSto
     static const char *const DISPLAY_MODES[3] = {"windowed", "borderless", "fullscreen"};
     put(&entries, "displayMode", std::string("\"") +
         DISPLAY_MODES[choices[RECOMP_PC_DISPLAY_MODE] % 3u] + "\"");
+    static const char *const HITBOXES[3] = {"off", "on", "xray"};
+    put(&entries, "hitboxes", std::string("\"") + HITBOXES[choices[RECOMP_PC_HITBOXES] % 3u] + "\"");
     std::string out = "{";
     for (std::size_t i = 0u; i < entries.size(); ++i)
         out += (i == 0u ? "\"" : ",\"") + entries[i].first + "\":" + entries[i].second;

@@ -109,11 +109,11 @@ extern void sub_000978E0(void);
 
 #define COUNT(list) (sizeof (list) / sizeof (list)[0])
 static const uint8_t CHOICES[PC_ROWS] = {COUNT(RECOMP_PC_HEIGHTS), COUNT(RECOMP_PC_SAMPLES), 2u,
-    COUNT(RECOMP_PC_SHARPNESS), 2u, COUNT(RECOMP_PC_SCREENS), 3u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u, 3u};
+    COUNT(RECOMP_PC_SHARPNESS), 2u, COUNT(RECOMP_PC_SCREENS), 3u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 2u, 18u, 4u, 4u, 2u, 3u, 3u};
 static const bool ALWAYS_LIVE[PC_ROWS] = {
     [RECOMP_PC_UNLOCKS] = true, [RECOMP_PC_CPU_COSTUMES] = true, [RECOMP_PC_FREE_CAMERA] = true,
     [RECOMP_PC_DEDICATION] = true, [RECOMP_PC_LIFE_BAR] = true, [RECOMP_PC_FIGHT_HUD] = true,
-    [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true,
+    [RECOMP_PC_HIT_VOICES] = true, [RECOMP_PC_KO_REPLAY] = true, [RECOMP_PC_HITBOXES] = true,
 };
 /* Each category's settings, in the order shown; -1 ends a short one. */
 static const int8_t CATEGORY_SETTINGS[CATEGORIES][SHOWN] = {
@@ -123,7 +123,7 @@ static const int8_t CATEGORY_SETTINGS[CATEGORIES][SHOWN] = {
     {RECOMP_PC_AUDIO, RECOMP_PC_HIT_VOICES, -1, -1, -1, -1},
     {RECOMP_PC_UNLOCKS, RECOMP_PC_CPU_COSTUMES, RECOMP_PC_FREE_CAMERA, RECOMP_PC_KO_REPLAY, RECOMP_PC_INTRO,
      RECOMP_PC_DEDICATION},
-    {RECOMP_PC_LIFE_BAR, RECOMP_PC_FIGHT_HUD, -1, -1, -1, -1},
+    {RECOMP_PC_LIFE_BAR, RECOMP_PC_FIGHT_HUD, RECOMP_PC_HITBOXES, -1, -1, -1},
 };
 static bool live[PC_ROWS], after_online[PC_ROWS];
 enum { MAX_CHOICES = 18, HELP_NOW = 0, HELP_NEXT = 1, HELP_LEAVE = 2, HELPS = 3 };
@@ -148,13 +148,13 @@ typedef struct Language {
 static const Language LANGUAGES[5] = {
     {{u"Resolution", u"MSAA", u"SMAA", u"Sharpening", u"Ambient Occlusion", u"Screen", u"Renderer", u"VRR", u"Frame rate", u"Audio Output",
       u"Intro Movies", u"Unlocks", u"CPU Costumes", u"Free Camera", u"Dedication",
-      u"Life Bar", u"Fight HUD", u"Hit Voices", u"KO Replay", u"Display Mode"},
+      u"Life Bar", u"Fight HUD", u"Hit Voices", u"KO Replay", u"Display Mode", u"Hitboxes"},
      {{RESOLUTIONS}, {SAMPLES(u"Off")}, {u"Off", u"On"}, {SHARPEN(u"Off", u"Low", u"Medium", u"High")}, {u"Off", u"On"},
       {SHAPES(u"21:9")}, {RENDERERS},
       {u"Off", u"On"}, {u"Original", u"Display"}, {u"Stereo", u"5.1 Surround"}, {u"Play", u"Skip"}, {u"Everything", u"Earn"},
       {u"Default", u"Random"}, {u"Off", u"On"}, {u"Show", u"Hide"},
       {u"Default", u"Red", u"Orange", u"Gold", u"Yellow", u"Lime", u"Green", u"Teal", u"Cyan",
-       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Original", u"Damage", u"Stun Meter", u"Both"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}, {u"Windowed", u"Borderless", u"Fullscreen"}},
+       u"Sky Blue", u"Blue", u"Indigo", u"Purple", u"Magenta", u"Pink", u"White", u"Silver", u"Custom"}, {u"Original", u"Damage", u"Stun Meter", u"Both"}, {u"Off", u"Quiet", u"Normal", u"Loud"}, {u"Original", u"Dynamic"}, {u"Windowed", u"Borderless", u"Fullscreen"}, {u"Off", u"On", u"X-ray"}},
      {u"Takes effect immediately.",
       u"Takes effect the next time the game starts.",
       u"Takes effect when you leave DOA ONLINE."},
@@ -163,16 +163,16 @@ static const Language LANGUAGES[5] = {
       u"Anti-aliasing, sharpening and ambient occlusion.",
       u"Audio output and hit voices.",
       u"Unlocks, CPU costumes, free camera, KO replay, intro movies and dedication.",
-      u"Life bar colour and fight HUD."}},
+      u"Life bar colour, fight HUD and hitboxes."}},
     {{u"R\u00e9solution", u"MSAA", u"SMAA", u"Nettet\u00e9", u"Occlusion ambiante", u"\u00c9cran", u"Rendu", u"VRR", u"Images/s", u"Sortie audio",
       u"Vid\u00e9os d'intro", u"D\u00e9blocages", u"Costumes CPU", u"Cam\u00e9ra libre", u"D\u00e9dicace",
-      u"Barre de vie", u"Affichage combat", u"Voix des coups", u"Replay K.O.", u"Mode d'affichage"},
+      u"Barre de vie", u"Affichage combat", u"Voix des coups", u"Replay K.O.", u"Mode d'affichage", u"Zones de frappe"},
      {{RESOLUTIONS}, {SAMPLES(u"Non")}, {u"Non", u"Oui"}, {SHARPEN(u"Non", u"Faible", u"Moyenne", u"\u00c9lev\u00e9e")}, {u"Non", u"Oui"},
       {SHAPES(u"21:9")}, {RENDERERS},
       {u"Non", u"Oui"}, {u"Original", u"\u00c9cran"}, {u"St\u00e9r\u00e9o", u"5.1 Surround"}, {u"Lire", u"Passer"},
       {u"Tout", u"\u00c0 gagner"}, {u"Normaux", u"Al\u00e9atoires"}, {u"Non", u"Oui"}, {u"Afficher", u"Masquer"},
       {u"Normale", u"Rouge", u"Orange", u"Or", u"Jaune", u"Citron vert", u"Verte", u"Sarcelle", u"Cyan",
-       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Original", u"D\u00e9g\u00e2ts", u"\u00c9tourdissement", u"Les deux"}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}, {u"Fen\u00eatr\u00e9", u"Sans bordure", u"Plein \u00e9cran"}},
+       u"Bleu ciel", u"Bleue", u"Indigo", u"Violette", u"Magenta", u"Rose", u"Blanche", u"Argent", u"Perso."}, {u"Original", u"D\u00e9g\u00e2ts", u"\u00c9tourdissement", u"Les deux"}, {u"Non", u"Faible", u"Normal", u"Fort"}, {u"Original", u"Dynamique"}, {u"Fen\u00eatr\u00e9", u"Sans bordure", u"Plein \u00e9cran"}, {u"Non", u"Oui", u"Rayons X"}},
      {u"Pris en compte imm\u00e9diatement.", u"Pris en compte au prochain lancement du jeu.",
       u"Pris en compte en quittant DOA ONLINE."},
      {u"Affichage", u"Graphismes", u"Audio", u"Jeu", u"Interface"},
@@ -180,16 +180,16 @@ static const Language LANGUAGES[5] = {
       u"Anticr\u00e9nelage, nettet\u00e9 et occlusion ambiante.",
       u"Sortie audio et voix des coups.",
       u"D\u00e9blocages, costumes CPU, cam\u00e9ra libre, replay K.O., intro et d\u00e9dicace.",
-      u"Couleur de la barre de vie et affichage du combat."}},
+      u"Couleur de la barre de vie, affichage du combat et zones de frappe."}},
     {{u"Aufl\u00f6sung", u"MSAA", u"SMAA", u"Sch\u00e4rfe", u"Umgebungsverdeckung", u"Bildschirm", u"Renderer", u"VRR", u"Bildrate", u"Audioausgabe",
       u"Intro-Videos", u"Freischaltungen", u"CPU-Kost\u00fcme", u"Freie Kamera", u"Widmung",
-      u"Lebensleiste", u"Kampfanzeige", u"Treffer-Stimmen", u"K.O.-Wiederholung", u"Anzeigemodus"},
+      u"Lebensleiste", u"Kampfanzeige", u"Treffer-Stimmen", u"K.O.-Wiederholung", u"Anzeigemodus", u"Trefferzonen"},
      {{RESOLUTIONS}, {SAMPLES(u"Aus")}, {u"Aus", u"Ein"}, {SHARPEN(u"Aus", u"Niedrig", u"Mittel", u"Hoch")}, {u"Aus", u"Ein"},
       {SHAPES(u"21:9")}, {RENDERERS},
       {u"Aus", u"Ein"}, {u"Original", u"Bildschirm"}, {u"Stereo", u"5.1 Surround"}, {u"Abspielen", u"\u00dcberspringen"},
       {u"Alles", u"Erspielen"}, {u"Standard", u"Zuf\u00e4llig"}, {u"Aus", u"Ein"}, {u"Anzeigen", u"Ausblenden"},
       {u"Standard", u"Rot", u"Orange", u"Gold", u"Gelb", u"Hellgr\u00fcn", u"Gr\u00fcn", u"Petrol", u"Cyan",
-       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Original", u"Schaden", u"Bet\u00e4ubung", u"Beides"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}, {u"Fenster", u"Rahmenlos", u"Vollbild"}},
+       u"Himmelblau", u"Blau", u"Indigo", u"Lila", u"Magenta", u"Rosa", u"Wei\u00df", u"Silber", u"Eigene"}, {u"Original", u"Schaden", u"Bet\u00e4ubung", u"Beides"}, {u"Aus", u"Leise", u"Normal", u"Laut"}, {u"Original", u"Dynamisch"}, {u"Fenster", u"Rahmenlos", u"Vollbild"}, {u"Aus", u"Ein", u"R\u00f6ntgen"}},
      {u"Wirkt sofort.", u"Wirkt beim n\u00e4chsten Spielstart.",
       u"Wirkt beim Verlassen von DOA ONLINE."},
      {u"Anzeige", u"Grafik", u"Audio", u"Spiel", u"HUD"},
@@ -197,16 +197,16 @@ static const Language LANGUAGES[5] = {
       u"Kantengl\u00e4ttung, Sch\u00e4rfe und Umgebungsverdeckung.",
       u"Audioausgabe und Treffer-Stimmen.",
       u"Freischaltungen, CPU-Kost\u00fcme, freie Kamera, K.O.-Wiederholung, Intro und Widmung.",
-      u"Farbe der Lebensleiste und Kampfanzeige."}},
+      u"Farbe der Lebensleiste, Kampfanzeige und Trefferzonen."}},
     {{u"Risoluzione", u"MSAA", u"SMAA", u"Nitidezza", u"Occlusione ambientale", u"Schermo", u"Renderer", u"VRR", u"Frame rate", u"Uscita audio",
       u"Filmati iniziali", u"Sblocchi", u"Costumi CPU", u"Telecamera libera", u"Dedica",
-      u"Barra vita", u"HUD combattimento", u"Voci dei colpi", u"Replay K.O.", u"Modalit\u00e0 schermo"},
+      u"Barra vita", u"HUD combattimento", u"Voci dei colpi", u"Replay K.O.", u"Modalit\u00e0 schermo", u"Zone di collisione"},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ec"}, {SHARPEN(u"No", u"Bassa", u"Media", u"Alta")}, {u"No", u"S\u00ec"},
       {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ec"}, {u"Originale", u"Schermo"}, {u"Stereo", u"5.1 Surround"}, {u"Riproduci", u"Salta"},
       {u"Tutto", u"Da sbloccare"}, {u"Predefiniti", u"Casuali"}, {u"No", u"S\u00ec"}, {u"Mostra", u"Nascondi"},
       {u"Predefinita", u"Rossa", u"Arancione", u"Oro", u"Gialla", u"Lime", u"Verde", u"Verde acqua", u"Ciano",
-       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"Originale", u"Danni", u"Stordimento", u"Entrambi"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}, {u"Finestra", u"Senza bordi", u"Schermo intero"}},
+       u"Azzurra", u"Blu", u"Indaco", u"Viola", u"Magenta", u"Rosa", u"Bianca", u"Argento", u"Personale"}, {u"Originale", u"Danni", u"Stordimento", u"Entrambi"}, {u"No", u"Basso", u"Normale", u"Alto"}, {u"Originale", u"Dinamico"}, {u"Finestra", u"Senza bordi", u"Schermo intero"}, {u"No", u"S\u00ec", u"Raggi X"}},
      {u"Effettivo immediatamente.",
       u"Effettivo al prossimo avvio del gioco.",
       u"Effettivo all'uscita da DOA ONLINE."},
@@ -215,16 +215,16 @@ static const Language LANGUAGES[5] = {
       u"Antialiasing, nitidezza e occlusione ambientale.",
       u"Uscita audio e voci dei colpi.",
       u"Sblocchi, costumi CPU, telecamera libera, replay K.O., filmati iniziali e dedica.",
-      u"Colore della barra vita e HUD combattimento."}},
+      u"Colore della barra vita, HUD combattimento e zone di collisione."}},
     {{u"Resoluci\u00f3n", u"MSAA", u"SMAA", u"Nitidez", u"Oclusi\u00f3n ambiental", u"Pantalla", u"Renderizador", u"VRR", u"Fotogramas", u"Salida de audio",
       u"V\u00eddeos de inicio", u"Desbloqueos", u"Trajes CPU", u"C\u00e1mara libre", u"Dedicatoria",
-      u"Barra de vida", u"HUD de combate", u"Voces de golpes", u"Repetici\u00f3n K.O.", u"Modo de pantalla"},
+      u"Barra de vida", u"HUD de combate", u"Voces de golpes", u"Repetici\u00f3n K.O.", u"Modo de pantalla", u"Zonas de golpe"},
      {{RESOLUTIONS}, {SAMPLES(u"No")}, {u"No", u"S\u00ed"}, {SHARPEN(u"No", u"Baja", u"Media", u"Alta")}, {u"No", u"S\u00ed"},
       {SHAPES(u"21:9")}, {RENDERERS},
       {u"No", u"S\u00ed"}, {u"Original", u"Pantalla"}, {u"Est\u00e9reo", u"5.1 Surround"}, {u"Reproducir", u"Saltar"},
       {u"Todo", u"Ganar"}, {u"Normales", u"Aleatorios"}, {u"No", u"S\u00ed"}, {u"Mostrar", u"Ocultar"},
       {u"Normal", u"Roja", u"Naranja", u"Oro", u"Amarilla", u"Lima", u"Verde", u"Verde azulado", u"Cian",
-       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"Original", u"Da\u00f1o", u"Aturdimiento", u"Ambos"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}, {u"Ventana", u"Sin bordes", u"Pantalla completa"}},
+       u"Celeste", u"Azul", u"\u00cdndigo", u"Morada", u"Magenta", u"Rosa", u"Blanca", u"Plata", u"Propia"}, {u"Original", u"Da\u00f1o", u"Aturdimiento", u"Ambos"}, {u"No", u"Bajo", u"Normal", u"Alto"}, {u"Original", u"Din\u00e1mica"}, {u"Ventana", u"Sin bordes", u"Pantalla completa"}, {u"No", u"S\u00ed", u"Rayos X"}},
      {u"Se aplica de inmediato.",
       u"Se aplica la pr\u00f3xima vez que inicies el juego.",
       u"Se aplica al salir de DOA ONLINE."},
@@ -233,7 +233,7 @@ static const Language LANGUAGES[5] = {
       u"Antialiasing, nitidez y oclusi\u00f3n ambiental.",
       u"Salida de audio y voces de golpes.",
       u"Desbloqueos, trajes CPU, c\u00e1mara libre, repetici\u00f3n K.O., v\u00eddeos de inicio y dedicatoria.",
-      u"Color de la barra de vida y HUD de combate."}},
+      u"Color de la barra de vida, HUD de combate y zonas de golpe."}},
 };
 
 /* The game's language (0x212e0): Japanese, English, French, German, Italian, Spanish. */
@@ -245,7 +245,7 @@ static const Language *language_text(unsigned language)
 /* Message numbers from RECOMP_RUNNER_TEXT_PC: rows, then each row's values
    one after another, then the help lines, the categories and their help. */
 enum {
-    VALUE_COUNT = 5 + 6 + 2 + 4 + 2 + 5 + 3 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 18 + 4 + 4 + 2 + 3, /* CHOICES' sum */
+    VALUE_COUNT = 5 + 6 + 2 + 4 + 2 + 5 + 3 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 18 + 4 + 4 + 2 + 3 + 3, /* CHOICES' sum */
     MSG_ROWS = 0, MSG_VALUES = PC_ROWS, MSG_HELP = MSG_VALUES + VALUE_COUNT,
     MSG_CATEGORIES = MSG_HELP + HELPS, MSG_CATEGORY_HELP = MSG_CATEGORIES + CATEGORIES,
     MSG_COUNT = MSG_CATEGORY_HELP + CATEGORIES
