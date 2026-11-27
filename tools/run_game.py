@@ -126,6 +126,10 @@ def open_launcher():
     macOS runs tools/launcher_macos.swift from launcher.sh instead."""
     launcher = runner_path(ROOT).with_name("recomp_launcher")
     if not launcher.is_file():
+        # Without a usable prebuilt launcher (tools/artifacts), only the game build makes this one.
+        if not (ROOT / "private/program/receipt.json").is_file():
+            raise ValueError('The game is not built yet. Build it from your own Disc 2 ISO with'
+                             ' ./build_game.sh "/path/to/disc2.iso" (see docs/building.md)')
         raise ValueError(f"{launcher} is missing; rebuild with ./build_game.sh")
     return subprocess.run([str(launcher), str(ROOT)]).returncode == 0
 
