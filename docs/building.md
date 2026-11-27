@@ -169,6 +169,22 @@ Non-Steam Game** in Desktop Mode. Under Steam the game and launcher open full
 screen. If one controller drives two player ports, turn Steam Input off for
 that shortcut.
 
+## Updating
+
+Clone once. To update, pull into the same clone and build again without the
+ISO; the build reuses the disc in `private/play-disc`, and your saves stay
+there:
+
+```bash
+cd doa2u-re
+git pull
+git submodule update --init --recursive
+./build_game.sh
+```
+
+The build lifts again only when the update changed the lifter or the function
+list. If it cannot find the disc, run it once with the ISO path as before.
+
 ## Differences from the Windows build
 
 - MSAA stops at the 8x SDL_GPU supports (Apple GPUs at 4x); a higher choice
