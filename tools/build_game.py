@@ -383,6 +383,12 @@ def import_disc(iso, extractor=None):
     select_xbe(extracted_disc(imported))
 
 
+def installed_version(root=ROOT):
+    """The release ZIP's VERSION, or None in a source checkout."""
+    version = root / "VERSION"
+    return version.read_text(encoding="utf-8").strip() if version.is_file() else None
+
+
 def on_steamos():
     try:
         return "ID=steamos" in Path("/etc/os-release").read_text().splitlines()
@@ -535,6 +541,8 @@ def build(build_only=False, lift_only=False, iso=None, disassemble=False, extrac
     receipt["runner_sha256"] = sha256(runner_path())
     if windows:
         receipt["vulkan_runner_sha256"] = sha256(runner_path(vulkan=True))
+    # run_game.py builds again when an update changes the release ZIP's VERSION.
+    receipt["version"] = installed_version()
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     precompile_shaders(logs)
     if iso is not None and not build_only:

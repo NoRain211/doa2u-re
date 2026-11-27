@@ -10,7 +10,8 @@ import sys
 import threading
 import uuid
 
-from build_game import ROOT, program_manifest, runner_path, selected_xbe, shader_cache
+from build_game import (ROOT, installed_version, on_steamos, program_manifest, runner_path,
+                        selected_xbe, shader_cache)
 import dedication_card as card_builder
 from extract_iso import redact_private, sha256
 
@@ -130,6 +131,23 @@ def open_launcher():
     return subprocess.run([str(launcher), str(ROOT)]).returncode == 0
 
 
+def rebuild_after_update(receipt_path):
+    """An update replaces the runtime source but not the runner built from it, so a
+    release whose VERSION differs from the build's is built again, from the disc in
+    private/play-disc, before it plays. A source checkout has no VERSION and rebuilds by hand."""
+    version = installed_version(ROOT)
+    if version is None or json.loads(receipt_path.read_text(encoding="utf-8")).get("version") == version:
+        return
+    print(f"Updated to {version}: building the game again before it starts. This takes a few minutes.",
+          flush=True)
+    # SteamOS has no compiler; its script builds in the container that made the first build.
+    command = ([str(ROOT / "build_steamdeck.sh")] if on_steamos()
+               else [sys.executable, str(ROOT / "tools/build_game.py")])
+    if subprocess.call(command, cwd=ROOT):
+        raise ValueError(f"The build after the update to {version} failed. Choose BUILD in the launcher"
+                         " with your Disc 2 ISO; if that fails too, report its last line")
+
+
 def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), analog_polls=(),
         widescreen=None, msaa=None, smaa=None, sharpen=None, ao=None, resolution=None, story_finale=False,
         skip_intro=False, unlock_all=True, surround=None, vrr=None, vulkan=False, d3d12=False,
@@ -183,6 +201,7 @@ def run(seconds, start_polls=(), a_polls=(), isolated=False, buttons_polls=(), a
     if not receipt_path.is_file():
         raise ValueError('The game is not built yet. Build it from your Disc 2 ISO and wait for '
                          '"Build complete"; if it says "Build failed", report that line')
+    rebuild_after_update(receipt_path)
     selected = selected_xbe()
     generated = ROOT / "private/program/generated"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))

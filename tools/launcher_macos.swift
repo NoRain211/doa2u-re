@@ -378,7 +378,7 @@ final class LauncherView: NSView {
                 pending = nil
                 // An install prints nothing when the release it found is no longer newer.
                 updateRow.info = output.isEmpty ? "You have the latest version"
-                    : "Updated to \(output). Run ./build_game.sh, then reopen the launcher"
+                    : "Updated to \(output). Reopen the launcher; the game builds again when it starts"
             } else if ok {
                 pending = output.isEmpty ? nil : output
                 updateRow.info = pending.map { "Version \($0) is available. Choose Install" } ?? "You have the latest version"

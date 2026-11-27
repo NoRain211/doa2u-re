@@ -445,7 +445,7 @@ struct Launcher {
             // An install prints nothing when the release it found is no longer newer.
             pending.clear();
             status = output.empty() ? "You have the latest version"
-                : "Updated to " + output + ". Run ./build_game.sh, then reopen the launcher";
+                : "Updated to " + output + ". Reopen the launcher; the game builds again when it starts";
         } else if (code == 0) {
             pending = output;
             status = pending.empty() ? "You have the latest version" : "Version " + pending + " is available. Choose Install";
@@ -480,7 +480,7 @@ struct Launcher {
     {
         const size_t slash = game_source.find_last_of('/');
         return (game_source.empty() ? std::string("No disc chosen. ") : "Disc: " + game_source.substr(slash == std::string::npos ? 0 : slash + 1) + ". ")
-            + (built ? "Built. Build again after an update" : "Not built yet: choose your Disc 2 ISO, then Build");
+            + (built ? "Built. Updates build again when the game starts" : "Not built yet: choose your Disc 2 ISO, then Build");
     }
 
     // Takes an ISO from the file dialog or a drop; anything else is refused.
