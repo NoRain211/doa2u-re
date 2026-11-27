@@ -354,16 +354,58 @@ A Live mutelist has no request that adds a name in the game's API, so the
 server only serves what the store holds or a test sets: the game reads it at
 logon and aborts the logon when it fails, so it always answers.
 
-Feedback is counted per target and type in memory and never stored, and the
-count is not in the log. A board's rank is its lowest-numbered stat id, high
-value first, ties to the lower XUID; a double is compared as its value. Stats
-may be written for oneself, or for the other player of a pairing in which
-both sides CONNECTed, for six hours from when the second of them connected,
-as the game writes both fighters' results at the end of a match. One side's
-CONNECT is only an introduction, and a repeated CONNECT does not move those
-six hours later; a rematch in a new pairing starts them again. A session id a
-client chooses at LOGON does not authorize a
-write, since search results show it.
+Feedback is counted per target and type, at most `MAX_FEEDBACK_KINDS` types a
+target, and the counts are kept in the store; a count saturates at
+`MAX_FEEDBACK_COUNT` so a flood cannot grow it without bound. The counts are
+not in the log.
+
+Stats may be written for oneself, or for the other player of a pairing in
+which both sides CONNECTed, for six hours from when the second of them
+connected, as the game writes both fighters' results at the end of a match.
+One side's CONNECT is only an introduction, and a repeated CONNECT does not
+move those six hours later; a rematch in a new pairing starts them again. A
+session id a client chooses at LOGON does not authorize a write, since search
+results show it.
+
+A board ranks by its score stat, -2 (`XONLINE_STAT_RATING`), as a signed
+number, highest first, ties to the lower XUID; a double is compared as its
+value. The game writes -2 on every ranking board (`ranking_write_stats_board`
+`0x297e60`, and the other `ranking_write_*_board` writers), so the id-0
+profile byte that was ranked before is never the score. A row whose write
+carried no -2 still appears, after every row that has one, by its
+lowest-numbered stat id as before.
+
+A row exists only once a write carried a stat: an empty write answers success
+and stores nothing, so it takes neither one of the account's boards nor a
+place in a ranking. A player with no row reads as no data, not as zeros: a
+`STATROW` for them carries their XUID, count 0 and no stat at all, and the
+game reads a stat entry left at type 0 as nothing
+(`ranking_row_to_profile_counters` `0x29b590`, `ranking_profile_load_from_rows`
+`0x29b730`). The game pre-fills each entry's type from its group before a read
+(`ranking_stat_entries_init` `0x294510`), so `recomp-runtime/live_xapi.c` writes
+type 0 for every requested stored id the row has no value for, as the retail
+service did; an untouched entry would read as a real zero. The ids it derives
+itself are the exception: the score (-2) reads as an INT64 0 when the row has
+none, and that zero is what `live_ranking_record_is_new_best` compares against
+for the empty pivot row below.
+
+A `LEADERS` ask that names a pivot XUID with no row on an offline record
+board (Time Attack, the shortest victory and Survival: boards 7, 8 and 15 to
+30) still gets one row for it, with no stats, its rank at the end of the board and the
+board's own total, so the game can compare against it. That row is what makes
+Survival and Time Attack records upload: with no row for the local XUID
+`live_ranking_record_is_new_best` (`0x2b4ca0`) answers 4 and
+`live_ranking_resume_update` (`0x2b5010`) never queues the record, which the
+game showed as "unable to renew your best record". The ask without a pivot
+lists the same rows as before, so an older client sees no change. Other
+boards get no such row, so their pages do not list a player with 0 points.
+
+Board 47 is the reliability board (`ranking_write_reliability_board`
+`0x2979b0`): ids 0..3 and 8 are set, and ids 4..7 read four globals that
+`ranking_profile_state_init` (`0x298190`) copies from a second argument its
+only caller never passes, so they take whatever the stack slot holds (the data
+it points at is zero in the XBE and nothing writes it). They carry nothing.
+Do not rank by them.
 
 A stat is 11 bytes on the wire: the id as two bytes (so the negative pseudo
 ids are their two's complement, -2 = 0xfffe), the type in one and the value as
@@ -405,9 +447,11 @@ an address, and an address may open 16 pairs. The rest are
 per entry: 4,096 accounts, 4 sessions per account and 4,096 sessions,
 672-byte attributes, 512-byte filters, 25 search results, 100 friends and
 pending requests, 250 mutes (147 fit one MUTELIST packet, so it is cut
-there), 48 boards per account (the game's whole 0..47 board range), 256 board
-rankings cached (the oldest makes room), 16 feedback types per target, 64 stats per write and 64 per account
-and board (a full group-7 write is 61; the game reads back its
+there), 48 boards per account (the game's whole 0..47 board range; a board
+only counts once a write carried a stat), 256 board
+rankings cached (the oldest makes room), 16 feedback types per target with
+each count saturating at `MAX_FEEDBACK_COUNT`, 64 stats per write and 64 per
+account and board (a full group-7 write is 61; the game reads back its
 62 entries, the last a rank the client makes from the row), 100 XUIDs per
 read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
 request a week. When the account table is full, a new XUID drops the
@@ -448,9 +492,10 @@ Without `--store` everything is in memory and a restart forgets it. With
 - invites: session id, from, to, when it was made and the answer once there
   is one;
 - each player's mute list, as pairs of XUIDs;
+- feedback: each target's XUID and the count of every type it received;
 - stats: board, XUID and its entries.
 
-Sessions, addresses, keys, presence, feedback, Live pairings and the CONNECT
+Sessions, addresses, keys, presence, Live pairings and the CONNECT
 times that allow writing another player's stats are not written. The file is
 written to a fresh temporary file beside it at most every 30 s and at exit,
 flushed and synced to the disk there, and renamed over `PATH`, so a crash

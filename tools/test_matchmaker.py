@@ -729,7 +729,7 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(mm.MUTELIST_BODY.unpack_from(self.one(live(mm.MUTES, mutes_body(9)), B_AT, 0.0,
                                                               mm.MUTELIST))[2], 0)
 
-    def test_feedback_is_counted_once_and_never_stored(self):
+    def test_feedback_is_counted_once_and_stored(self):
         self.online()
         self.assertEqual(self.done(self.one(live(mm.FEEDBACK, feedback_body(7, B, 2)), A_AT, 0.0, mm.DONE)),
                          (7, 0))
@@ -737,7 +737,7 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.done(self.one(live(mm.FEEDBACK, feedback_body(7, B, 2)), A_AT, 0.1, mm.DONE)),
                          (7, 0))  # the same request repeated is not counted twice
         self.assertEqual(self.server.feedback[(B, 2)], 1)
-        self.assertNotIn("feedback", self.server.document())
+        self.assertEqual(self.server.document()["feedback"], [{"xuid": B, "types": [[2, 1]]}])
         self.assertEqual(self.done(self.one(live(mm.FEEDBACK, feedback_body(8, 0x1234, 1)), A_AT, 0.2, mm.DONE))[1],
                          mm.E_INVALIDARG)
 
@@ -778,6 +778,133 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.leaders(req=14, now=2.0, board=9)[0][4], 0)
         self.assertEqual(self.done(self.one(live(mm.STAT_WRITE, write_body(15, 9, A, ())), A_AT, 2.0,
                                             mm.DONE))[1], 0)
+
+    def test_a_leaderboard_pivot_with_no_row_gets_its_own_empty_row(self):
+        self.online()
+        # The game reads its own row before it writes a record. With no row at all
+        # live_ranking_record_is_new_best (0x2b4ca0) answers 4 ("no row for the
+        # local XUID") and the record is never queued: Survival and Time Attack
+        # said "unable to renew your best record". The empty row is what it counts.
+        empty = self.leaders(req=50, now=1.0, board=24, pivot=A)
+        self.assertEqual([(row[0], row[5], row[7], row[4], row[8]) for row in empty], [(50, A, 1, 0, 0)])
+        self.assertEqual(len(empty), 1)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 24, B, ((0xFFFE, 2, 300),))), B_AT, 1.0)
+        late = self.leaders(req=51, now=2.0, board=24, pivot=A)
+        self.assertEqual([(row[5], row[7], row[4], row[8]) for row in late], [(A, 2, 1, 0)])  # after the last rank
+        # A list query has no pivot row and still lists only ranked players, so a
+        # 0.5.0 client sees the same rows as before.
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=52, now=2.0, board=24)], [(B, 1)])
+        # A pivot that is ranked gets the rows from its own rank down, as before.
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=53, now=2.0, board=24, pivot=B)], [(B, 1)])
+        # The grade board is no record board: a player with no row there is not
+        # listed as a player with 0 points.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 9, B, ((0xFFFE, 2, 9600),))), B_AT, 2.0)
+        self.assertNotIn(A, [row[5] for row in self.leaders(req=54, now=3.0, board=9, pivot=A)])
+
+    def test_a_board_ranks_by_its_rating_stat_signed_and_high_first(self):
+        self.online()
+        # Stat 0 is a profile byte, not a score: A leads on it and still loses.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, A, ((0, 1, 9000), (0xFFFE, 2, 100)))),
+                  A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, B, ((0, 1, 1), (0xFFFE, 2, 300)))),
+                  B_AT, 0.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=54, now=1.0)], [(B, 1), (A, 2)])
+        # The score is signed: -2 is below 100, not 65534 or some large value.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, C, ((0xFFFE, 2, -2),))), C_AT, 0.0)
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=55, now=1.0)], [(B, 1), (A, 2), (C, 3)])
+        # Equal scores keep the lower XUID first, so a board's order does not move between reads.
+        for xuid in (A, B):
+            self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 3, xuid, ((0xFFFE, 2, 50),))),
+                      A_AT if xuid == A else B_AT, 1.0)
+        self.assertEqual(self.server.board_ranking(3), [(1, min(A, B)), (2, max(A, B))])
+        # A write without the score still appears, after every row that has one.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 2, B, ((0, 1, 1), (0xFFFE, 2, -2)))),
+                  B_AT, 1.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 2, A, ((0, 1, 9000),))), A_AT, 1.0)
+        self.assertEqual(self.server.board_ranking(2), [(1, B), (2, A)])
+
+    def test_a_player_with_no_record_reads_as_no_data(self):
+        self.online()
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, B, ((1, 1, 5),))), B_AT, 0.0)
+        # A has never written this board: no row, so its answer carries no stat at
+        # all. A stat entry the game was not given stays at type 0, which it reads
+        # as no data (ranking_row_to_profile_counters 0x29b590); zeros would not be.
+        rows = self.stats(req=56, now=1.0, xuids=(B, A))
+        req, hresult, index, total, board_total, xuid, gamertag, rank, count = rows[1][:9]
+        self.assertEqual((req, hresult, index, total, board_total, xuid, rank, count),
+                         (56, 0, 1, 2, 1, A, 0, 0))
+        self.assertEqual(len(rows[1][9]), mm.ASKED - mm.TOKEN + mm.STATROW_BODY.size)  # the row and no stats
+        self.assertNotIn((1, A), self.server.stats)
+        self.assertEqual(rows[0][8], 1)  # B's own row still carries its stat
+
+    def test_an_empty_stat_write_stores_nothing_and_takes_no_board(self):
+        self.online()
+        req = self.next_request()
+        self.assertEqual(self.done(self.one(live(mm.STAT_WRITE, write_body(req, 5, A, ())), A_AT, 0.0, mm.DONE)),
+                         (req, 0))
+        self.assertEqual((self.server.stats, self.server.boards_of, self.server.stats_by_board), ({}, {}, {}))
+        for board in range(mm.MAX_BOARDS):
+            self.send(live(mm.STAT_WRITE, write_body(self.next_request(), board, A, ((1, 1, board),))), A_AT, 0.0)
+        # A full account can still send an empty record: it is a no-op, not a 48th
+        # board's worth of space taken by a row that holds nothing.
+        req = self.next_request()
+        self.assertEqual(self.done(self.one(live(mm.STAT_WRITE, write_body(req, mm.MAX_BOARDS, A, ())), A_AT, 0.0,
+                                            mm.DONE)), (req, 0))
+        self.assertEqual(len(self.server.boards_of[A]), mm.MAX_BOARDS)
+        self.assertNotIn((mm.MAX_BOARDS, A), self.server.stats)
+        self.assertNotIn(mm.MAX_BOARDS, self.server.stats_by_board)
+
+    def test_feedback_is_kept_per_target_and_type_in_the_store(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            self.server = mm.Matchmaker(store=path, random_bytes=self.random)
+            self.online()
+            for kind, times in ((2, 3), (5, 1)):
+                for _ in range(times):
+                    req = self.next_request()
+                    self.assertEqual(self.done(self.one(live(mm.FEEDBACK, feedback_body(req, B, kind)), A_AT, 0.0,
+                                                        mm.DONE)), (req, 0))
+            self.server.save(1.0)
+            stored = json.loads(Path(path).read_text(encoding="utf-8"))
+            self.assertEqual(stored["feedback"], [{"xuid": B, "types": [[2, 3], [5, 1]]}])
+            reloaded = mm.Matchmaker(store=path, random_bytes=self.random)
+            self.assertEqual((reloaded.feedback[(B, 2)], reloaded.feedback[(B, 5)]), (3, 1))
+            self.assertEqual(reloaded.feedback_kinds[B], {2, 5})
+            # A count saturates, so a flood cannot grow the store's numbers without bound.
+            self.server.feedback[(B, 2)] = mm.MAX_FEEDBACK_COUNT
+            req = self.next_request()
+            self.assertEqual(self.done(self.one(live(mm.FEEDBACK, feedback_body(req, B, 2)), A_AT, 2.0, mm.DONE)),
+                             (req, 0))
+            self.assertEqual(self.server.feedback[(B, 2)], mm.MAX_FEEDBACK_COUNT)
+
+    def test_a_malformed_feedback_store_entry_is_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            # A count of zero is no count, a huge one saturates, and a bad XUID skips its entry.
+            Path(path).write_text(json.dumps({"version": 1, "feedback": [{"xuid": B, "types": [[2, 1], [3, 0]]},
+                                                                        {"xuid": A, "types": [[4, 2 ** 70]]},
+                                                                        {"xuid": 2 ** 64, "types": []}]}),
+                                  encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(store=path, random_bytes=self.random)
+            self.assertEqual(server.feedback, {(A, 4): mm.MAX_FEEDBACK_COUNT})
+            self.assertIn("skipped 2 malformed entries", errors.getvalue())
+
+    def test_a_feedback_store_over_the_type_cap_is_skipped_per_target(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "live.json")
+            full = [[kind, 1] for kind in range(mm.MAX_FEEDBACK_KINDS)]
+            # Two entries for one target together pass the cap, so the second is
+            # skipped; one entry over it alone is skipped whole, not cut down.
+            Path(path).write_text(json.dumps({"version": 1, "feedback": [
+                {"xuid": A, "types": full}, {"xuid": A, "types": [[99, 1]]},
+                {"xuid": B, "types": full + [[99, 1]]}]}), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                server = mm.Matchmaker(store=path, random_bytes=self.random)
+            self.assertEqual(sorted(server.feedback), [(A, kind) for kind in range(mm.MAX_FEEDBACK_KINDS)])
+            self.assertIn("skipped 2 malformed entries", errors.getvalue())
 
     def test_a_stat_write_needs_a_pair_not_just_a_claimed_session(self):
         self.online()
@@ -1117,7 +1244,8 @@ class LiveTest(unittest.TestCase):
             self.assertFalse(os.path.exists(path + ".tmp"))
             text = Path(path).read_text(encoding="utf-8")
             stored = json.loads(text)
-            self.assertEqual(sorted(stored), ["accounts", "friends", "invites", "mutes", "requests", "stats", "version"])
+            self.assertEqual(sorted(stored), ["accounts", "feedback", "friends", "invites", "mutes", "requests",
+                                              "stats", "version"])
             self.assertEqual([(entry["xuid"], entry["gamertag"]) for entry in stored["accounts"]],
                              [(A, "KASUMI"), (B, "AYANE"), (C, "HAYATE")])
             self.assertNotIn(PROOF.hex(), text)  # only the hash of the proof

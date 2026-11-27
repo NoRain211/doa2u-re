@@ -65,6 +65,7 @@ MAX_STAT_WRITE = 64  # RECOMP_LIVE_MAX_STAT_ATTRS; group 7 writes 61
 MAX_STATS = 64  # kept per account and board; group 7 reads back 62
 MAX_BOARDS = 48  # distinct boards an account's stats may name; DOA2U uses 0..47
 MAX_FEEDBACK_KINDS = 16  # distinct feedback types one target may receive
+MAX_FEEDBACK_COUNT = 1 << 20  # a type's count saturates here, so a flood cannot grow the store without bound
 MAX_RANKINGS = 256  # cached board rankings; the oldest makes room for a new board
 MAX_READ_STATS = 100  # xuids in one STAT_READ: a full friends list (RECOMP_LIVE_MAX_FRIENDS), 831 bytes
 MAX_LEADERS = 100  # RECOMP_LIVE_MAX_LEADER_ROWS
@@ -122,6 +123,11 @@ MUTES_BODY = struct.Struct(">I")  # request
 FEEDBACK_BODY = struct.Struct(">IQI")  # request, XUID, type
 STAT_WRITE_BODY = struct.Struct(">IIQB")  # request, board, XUID, count
 STAT_ITEM = struct.Struct(">HBq")  # stat id, type, value
+# The offline record boards (ranking groups 2 and 3 in g_board_group 0x7bf940:
+# Time Attack, the shortest victory and Survival), which the game reads its own
+# row from before it uploads a record.
+RECORD_BOARDS = frozenset({7, 8} | set(range(15, 31)))
+STAT_RATING = 0xFFFE  # -2, XONLINE_STAT_RATING: the score a board ranks by (ranking_write_stats_board 0x297e60)
 STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
 STATROW_BODY = struct.Struct(">IIBBIQ16sIB")  # request, hresult, index, total, board total, XUID, gamertag, rank, count
 LEADERS_BODY = struct.Struct(">IIQIB")  # request, board, pivot XUID, first rank, count
@@ -198,6 +204,12 @@ class Links(dict):
 def padded(text, size):
     """ASCII text in a fixed field, zeros after it."""
     return text[:size].ljust(size, b"\0")
+
+
+def stat_number(stat):
+    """A stat's (kind, value) as a number to compare: a type-3 value is a double's bits."""
+    kind, value = stat
+    return struct.unpack(">d", struct.pack(">q", value))[0] if kind == 3 else value
 
 
 def printable(tag):
@@ -1006,7 +1018,11 @@ class Matchmaker:
         if kind not in kinds and len(kinds) >= MAX_FEEDBACK_KINDS:
             return self.done(req, E_INVALIDARG, sender, nonce)  # a new type past the target's cap
         self.feedback_kinds.setdefault(xuid, set()).add(kind)
-        self.feedback[(xuid, kind)] = self.feedback.get((xuid, kind), 0) + 1  # counted, never stored
+        # Counted per target and type and kept in the store: the count is what a
+        # later reader of the store has, so it saturates instead of growing freely.
+        count = self.feedback.get((xuid, kind), 0) + 1
+        self.feedback[(xuid, kind)] = min(count, MAX_FEEDBACK_COUNT)
+        self.dirty = True
         return self.done(req, HRESULT_OK, sender, nonce)
 
     def live_stat_write(self, body, nonce, sender, now):
@@ -1025,6 +1041,11 @@ class Matchmaker:
             if kind not in (1, 2, 3):
                 return self.done(req, E_INVALIDARG, sender, nonce)
             incoming[stat_id] = (kind, value)
+        if not incoming:
+            # The game sends an empty record for a board it has nothing on. It
+            # changes nothing and must not take one of the account's MAX_BOARDS:
+            # a row is a record, and a player with none reads as no data.
+            return self.done(req, HRESULT_OK, sender, nonce)
         if len(set(stats) | set(incoming)) > MAX_STATS:
             return self.done(req, E_FAIL, sender, nonce)
         if (board, xuid) not in self.stats and len(self.boards_of.get(xuid, ())) >= MAX_BOARDS:
@@ -1037,11 +1058,16 @@ class Matchmaker:
         return self.done(req, HRESULT_OK, sender, nonce)
 
     def board_ranking(self, board):
-        """(rank, XUID) from the highest value of the board's lowest stat id down, cached."""
+        """(rank, XUID) from the highest score down, cached."""
         return self.board_tally(board)[0]
 
     def board_tally(self, board):
-        """The board's ranking and XUID to rank, cached until that board is written."""
+        """The board's ranking and XUID to rank, cached until that board is written.
+
+        A board ranks by its score stat, STAT_RATING (-2), which the game writes on
+        every ranking board. The lowest id was ranked before and that is a profile
+        byte, not a score. A row whose write carried no score still appears, after
+        every scored row, by its lowest id as before."""
         cached = self.rankings.pop(board, None)
         if cached is not None:
             self.rankings[board] = cached  # most recently used last
@@ -1051,12 +1077,12 @@ class Matchmaker:
             stats = self.stats.get((board, xuid))
             if not stats or xuid not in self.accounts:
                 continue
-            kind, value = stats[min(stats)]
-            if kind == 3:  # the value is a double's bits
-                value = struct.unpack(">d", struct.pack(">q", value))[0]
-            rows.append((value, xuid))
-        rows.sort(key=lambda row: (-row[0], row[1]))
-        ranking = [(rank + 1, xuid) for rank, (_, xuid) in enumerate(rows)]
+            if STAT_RATING in stats:
+                rows.append((0, -stat_number(stats[STAT_RATING]), xuid))
+            else:
+                rows.append((1, -stat_number(stats[min(stats)]), xuid))
+        rows.sort()  # scored rows first, highest score first, then the lower XUID
+        ranking = [(rank + 1, row[2]) for rank, row in enumerate(rows)]
         cached = (ranking, {xuid: rank for rank, xuid in ranking})
         if len(self.rankings) >= MAX_RANKINGS:
             del self.rankings[next(iter(self.rankings))]  # the least recently used
@@ -1066,13 +1092,16 @@ class Matchmaker:
     def board_total(self, board):
         return len(self.board_ranking(board))
 
-    def stat_row(self, req, board, xuid, tally, index, total, hresult=HRESULT_OK):
+    def stat_row(self, req, board, xuid, tally, index, total, hresult=HRESULT_OK, rank=None):
         """One row, one packet: 43 body bytes plus 11 per stat, 747 at most.
 
         STAT_READ and LEADERS already answer one row per packet (index and
-        total track them), so a 61-stat group-7 row needs no split."""
+        total track them), so a 61-stat group-7 row needs no split. A row with
+        no stats is the no-data shape: the game reads a stat entry left at
+        type 0 as nothing (ranking_row_to_profile_counters 0x29b590)."""
         ranking, ranks = tally
-        rank = ranks.get(xuid, 0)
+        if rank is None:
+            rank = ranks.get(xuid, 0)
         stats = self.stats.get((board, xuid), {})
         account = self.accounts.get(xuid)
         items = sorted(stats.items())[:MAX_STATS]
@@ -1101,6 +1130,15 @@ class Matchmaker:
         if self.online_at(sender, now) is None:
             return self.stat_rows(req, board, [], sender, nonce, E_ACCESSDENIED)
         ranking, ranks = self.board_tally(board)
+        if pivot != 0 and pivot not in ranks and board in RECORD_BOARDS:
+            # A player with no row on a record board still gets their own empty
+            # row, at the end of it. The game asks for its row this way, and with
+            # no row live_ranking_record_is_new_best (0x2b4ca0) answers 4 and its
+            # record is never written; with one it compares a zero score and
+            # writes. The row has no stats, which the game reads as no data. The
+            # other boards' pages would list it as a player with 0 points.
+            return [(header(STATROW) + nonce + self.stat_row(req, board, pivot, (ranking, ranks), 0, 1,
+                                                            rank=len(ranking) + 1), sender)]
         start = ranks.get(pivot, 0) if pivot != 0 else 0
         if start == 0:
             start = max(first, 1)
@@ -1195,6 +1233,24 @@ class Matchmaker:
                 skipped += 1
                 continue
             self.mutes.setdefault(owner, set()).add(muted)
+        for entry in entries("feedback"):
+            try:
+                xuid = xuids(entry["xuid"])[0]
+                counts = {}
+                for kind, count in entry["types"]:
+                    kind, count = int(kind), int(count)
+                    if not 0 <= kind <= 0xffffffff or count < 1:
+                        raise ValueError("not a feedback count")
+                    counts[kind] = min(count, MAX_FEEDBACK_COUNT)
+                # The cap holds per target, so a second entry for one XUID counts too.
+                if len(self.feedback_kinds.get(xuid, set()) | set(counts)) > MAX_FEEDBACK_KINDS:
+                    raise ValueError("too many feedback types")
+            except BAD_ENTRY:
+                skipped += 1
+                continue
+            for kind, count in counts.items():
+                self.feedback[(xuid, kind)] = count
+                self.feedback_kinds.setdefault(xuid, set()).add(kind)
         for entry in entries("stats"):
             try:
                 stats = {(int(stat_id), int(kind), int(value)) for stat_id, kind, value in entry["stats"]}
@@ -1220,6 +1276,13 @@ class Matchmaker:
             """The wall clock's time for a time the loop clock gave."""
             return wall - max(0.0, now - seen)
 
+        def feedback_rows():
+            """Counts per target and type; MAX_FEEDBACK_KINDS bounds each target's list."""
+            by_target = {}
+            for (xuid, kind), count in self.feedback.items():
+                by_target.setdefault(xuid, []).append([kind, count])
+            return [{"xuid": xuid, "types": sorted(types)} for xuid, types in sorted(by_target.items())]
+
         return {
             "version": 1,
             # "proof" is the name earlier stores gave this hash of the proof, so they still load.
@@ -1227,6 +1290,7 @@ class Matchmaker:
                           "gamertag": account.gamertag.decode("ascii", "replace"), "title": account.title,
                           "seen": heard(account.seen)}
                          for account in self.accounts.values()],
+            "feedback": feedback_rows(),
             "friends": sorted([first, second] for first, others in self.friends.items() for second in others
                               if first < second),
             "requests": sorted([source, target, heard(when)] for (source, target), when in self.requests.items()),

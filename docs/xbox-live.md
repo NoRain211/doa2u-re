@@ -71,7 +71,10 @@ replaces them at the API boundary, like the D3D8 and DirectSound adapters:
 - `recomp-runtime/live_xapi.c` binds the guest's XOnline and XNet entry
   points (`recomp_live_lookup`, reached from `recomp_lookup_manual`). It
   writes the records the game reads (logon users, search results, friends,
-  stats, QoS) and runs the game's asynchronous tasks.
+  stats, QoS) and runs the game's asynchronous tasks. A stored stat the service
+  has no value for is written back with type 0, which the game reads as no data
+  (the score, -2, reads as an INT64 0 instead)
+  ([matchmaking](matchmaking.md#friends-invites-mutes-and-rankings)).
 - `recomp-runtime/live_backend.h` is the service those calls use. The
   matchmaker client (`live_client.c`) implements it for play;
   `live_backend_local.c` implements it in memory for tests.
@@ -137,7 +140,10 @@ game's own lockstep works.
 - Stat writes for an opponent are not tied to a played match: the client
   CONNECTs back to anyone the matchmaker introduces, so whoever CONNECTs to a
   host may write that host's stats for six hours. Each player writes their own
-  stats anyway, so the rankings trust the clients.
+  stats anyway, so the rankings trust the clients. A board ranks by the score
+  stat the game writes on it (-2), and a player with no row on a board reads
+  as no data; feedback counts are kept per target and type in the matchmaker's
+  store ([matchmaking](matchmaking.md#friends-invites-mutes-and-rankings)).
 
 ## Testing
 
