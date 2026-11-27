@@ -785,17 +785,21 @@ class LiveTest(unittest.TestCase):
         # live_ranking_record_is_new_best (0x2b4ca0) answers 4 ("no row for the
         # local XUID") and the record is never queued: Survival and Time Attack
         # said "unable to renew your best record". The empty row is what it counts.
-        empty = self.leaders(req=50, now=1.0, pivot=A)
+        empty = self.leaders(req=50, now=1.0, board=24, pivot=A)
         self.assertEqual([(row[0], row[5], row[7], row[4], row[8]) for row in empty], [(50, A, 1, 0, 0)])
         self.assertEqual(len(empty), 1)
-        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, B, ((0xFFFE, 2, 300),))), B_AT, 1.0)
-        late = self.leaders(req=51, now=2.0, pivot=A)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 24, B, ((0xFFFE, 2, 300),))), B_AT, 1.0)
+        late = self.leaders(req=51, now=2.0, board=24, pivot=A)
         self.assertEqual([(row[5], row[7], row[4], row[8]) for row in late], [(A, 2, 1, 0)])  # after the last rank
         # A list query has no pivot row and still lists only ranked players, so a
         # 0.5.0 client sees the same rows as before.
-        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=52, now=2.0)], [(B, 1)])
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=52, now=2.0, board=24)], [(B, 1)])
         # A pivot that is ranked gets the rows from its own rank down, as before.
-        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=53, now=2.0, pivot=B)], [(B, 1)])
+        self.assertEqual([(row[5], row[7]) for row in self.leaders(req=53, now=2.0, board=24, pivot=B)], [(B, 1)])
+        # The grade board is no record board: a player with no row there is not
+        # listed as a player with 0 points.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 9, B, ((0xFFFE, 2, 9600),))), B_AT, 2.0)
+        self.assertNotIn(A, [row[5] for row in self.leaders(req=54, now=3.0, board=9, pivot=A)])
 
     def test_a_board_ranks_by_its_rating_stat_signed_and_high_first(self):
         self.online()

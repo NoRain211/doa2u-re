@@ -386,14 +386,16 @@ game reads a stat entry left at type 0 as nothing
 type 0 for every requested id the row has no value for, as the retail service
 did; an untouched entry would read as a real zero.
 
-A `LEADERS` ask that names a pivot XUID with no row on the board still gets
-one row for it, with no stats, its rank at the end of the board and the
+A `LEADERS` ask that names a pivot XUID with no row on an offline record
+board (Time Attack, the shortest victory and Survival: boards 7, 8 and 15 to
+30) still gets one row for it, with no stats, its rank at the end of the board and the
 board's own total, so the game can compare against it. That row is what makes
 Survival and Time Attack records upload: with no row for the local XUID
 `live_ranking_record_is_new_best` (`0x2b4ca0`) answers 4 and
 `live_ranking_resume_update` (`0x2b5010`) never queues the record, which the
 game showed as "unable to renew your best record". The ask without a pivot
-lists the same rows as before, so an older client sees no change.
+lists the same rows as before, so an older client sees no change. Other
+boards get no such row, so their pages do not list a player with 0 points.
 
 Board 47 is the reliability board (`ranking_write_reliability_board`
 `0x2979b0`): ids 0..3 and 8 are set, and ids 4..7 read four globals that

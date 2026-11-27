@@ -123,6 +123,10 @@ MUTES_BODY = struct.Struct(">I")  # request
 FEEDBACK_BODY = struct.Struct(">IQI")  # request, XUID, type
 STAT_WRITE_BODY = struct.Struct(">IIQB")  # request, board, XUID, count
 STAT_ITEM = struct.Struct(">HBq")  # stat id, type, value
+# The offline record boards (ranking groups 2 and 3 in g_board_group 0x7bf940:
+# Time Attack, the shortest victory and Survival), which the game reads its own
+# row from before it uploads a record.
+RECORD_BOARDS = frozenset({7, 8} | set(range(15, 31)))
 STAT_RATING = 0xFFFE  # -2, XONLINE_STAT_RATING: the score a board ranks by (ranking_write_stats_board 0x297e60)
 STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
 STATROW_BODY = struct.Struct(">IIBBIQ16sIB")  # request, hresult, index, total, board total, XUID, gamertag, rank, count
@@ -1126,12 +1130,13 @@ class Matchmaker:
         if self.online_at(sender, now) is None:
             return self.stat_rows(req, board, [], sender, nonce, E_ACCESSDENIED)
         ranking, ranks = self.board_tally(board)
-        if pivot != 0 and pivot not in ranks:
-            # A player with no row on the board still gets their own empty row, at
-            # the end of it. The game asks for its row this way, and with no row
-            # live_ranking_record_is_new_best (0x2b4ca0) answers 4 and its record
-            # is never written; with one it compares a zero score and writes.
-            # The row has no stats, which the game reads as no data.
+        if pivot != 0 and pivot not in ranks and board in RECORD_BOARDS:
+            # A player with no row on a record board still gets their own empty
+            # row, at the end of it. The game asks for its row this way, and with
+            # no row live_ranking_record_is_new_best (0x2b4ca0) answers 4 and its
+            # record is never written; with one it compares a zero score and
+            # writes. The row has no stats, which the game reads as no data. The
+            # other boards' pages would list it as a player with 0 points.
             return [(header(STATROW) + nonce + self.stat_row(req, board, pivot, (ranking, ranks), 0, 1,
                                                             rank=len(ranking) + 1), sender)]
         start = ranks.get(pivot, 0) if pivot != 0 else 0
