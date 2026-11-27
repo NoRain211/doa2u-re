@@ -74,6 +74,8 @@ struct RollbackRun {
     // Live: the round handshake's start request, and what the game's lockstep stop and a
     // vanished peer leave for the session's end.
     bool livePending = false, liveStopPending = false, liveLockstepStopped = false, liveAbandon = false;
+    // Live: this session ended before its stop frame, so the game's own session ends with it.
+    bool liveFailed = false;
     // Live: the last pads of a finished fight, repeated by the frame pump over
     // the frames that follow instead of sleeping on the frame thread.
     bool liveTail = false;
@@ -376,6 +378,16 @@ static void finishLiveSession()
     rollback.livePending = rollback.liveStopPending = rollback.liveLockstepStopped = rollback.liveAbandon = false;
     rollback.pads[0] = rollback.pads[1] = RecompInputGamepad{};
     recomp_live_transport_session_end();
+    /* Live: a session that ended before its stop leaves the game's session too,
+       but nothing in the game has told it: its own lockstep and Live pages would
+       wait on a player that is not coming. Queue the leave datagram a departing
+       console sends from the opponent's virtual address, after the queues were
+       cleared so it is the only thing waiting for the game. */
+    if (rollback.liveFailed) recomp_live_transport_session_leave(rollback.net.peer_address);
+    rollback.liveFailed = false;
+    /* RECOMP_ROLLBACK_FLIP belongs to the session it was set for; a rematch must
+       not desync at the same test frame. */
+    rollback.flip = 0u;
     recomp_d3d8_set_present_suppressed(false);
     recomp_d3d8_set_gpu_work_suppressed(false);
     recomp_dsound_buffer_set_output_suppressed(false);
@@ -424,6 +436,7 @@ static void handBackToGame(void *, const char *stop_id)
 static bool failSession(RecompLiveEnd end)
 {
     static const RecompLiveEndOps ops = {nullptr, tellOpponent, stopRunner, handBackToGame};
+    if (rollback.mode == RollbackMode::Live) rollback.liveFailed = true;
     return recomp_live_end_session(rollback.mode == RollbackMode::Live, end, &ops);
 }
 
@@ -500,6 +513,7 @@ static void startLiveSession(std::uint32_t swap)
     rollback.liveStopPending = false;
     rollback.liveLockstepStopped = false;
     rollback.liveAbandon = false;
+    rollback.liveFailed = false;
     /* Live is the first mode where one runner plays several sessions in a row, so the
        match starts with its own counters, desync checks and pacing: a check frame that
        equals the last match's final comparison still compares, and the match's summary
@@ -524,11 +538,9 @@ static void startLiveSession(std::uint32_t swap)
     rollback.checkHash = 0u;
     rollback.wait = 0u;
     // A later match counts its frames from 0 again, so the last session's packets must not
-    // reach it: drop what the route still holds, then start the counters fresh.
+    // reach it: the transport drops everything its queues and receive log still hold (the
+    // last match's lockstep too), then the counters start fresh.
     recomp_live_transport_session_begin();
-    RecompRollbackSession stale;
-    recomp_rollback_init(&stale, 0u);
-    for (int i = 0; i < 8; ++i) recomp_netplay_receive(&rollback.net, &stale);
     resetNetplayCounters();
     recomp_rollback_init(&s, 0u);
     s.window = 0u; // lockstep until the frontier opens it at frame 10

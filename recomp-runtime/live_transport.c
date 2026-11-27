@@ -1036,7 +1036,10 @@ void recomp_live_transport_unbind_rollback(void)
 }
 
 /* A new session counts frames from 0 again, so the last session's datagrams
-   must not replay in it (stale entries broke rematches). */
+   must not replay in it (stale entries broke rematches). Its game datagrams
+   are stale in the same way: a lockstep packet still queued for the guest, or
+   one waiting on a peer's route, would reach the next match's first frames,
+   where the game reads them with a frame counter that restarted. */
 static void clear_log(void)
 {
     memset(live.log, 0, sizeof live.log);
@@ -1045,14 +1048,53 @@ static void clear_log(void)
     live.replay_at = 0u;
 }
 
+static void clear_guest(void)
+{
+    live.guest_head = 0u;
+    live.guest_count = 0u;
+}
+
+static void clear_rollback(void)
+{
+    live.rollback_head = 0u;
+    live.rollback_count = 0u;
+}
+
+static void clear_peer_queues(void)
+{
+    for (unsigned i = 0u; i < LIVE_PEERS; ++i) {
+        if (!live.peers[i].used) continue;
+        live.peers[i].queue_head = 0u;
+        live.peers[i].queue_count = 0u;
+    }
+}
+
 void recomp_live_transport_session_begin(void)
 {
     clear_log();
+    clear_guest();
+    clear_rollback();
+    clear_peer_queues();
 }
 
 void recomp_live_transport_session_end(void)
 {
     clear_log();
+    clear_guest();
+    clear_rollback();
+    clear_peer_queues();
+}
+
+/* The game's own leave datagram: size - 2 at the start, type 17 at byte 2 and
+   no body (the type-3/17 handler at 0x2a4ff7 sets g_online_state 0xf and
+   unregisters the session key, so the fight's pages leave a session whose
+   lockstep is gone). A departing console sends the same 3 bytes, so the game's
+   front end reads this as the other player's leave. */
+void recomp_live_transport_session_leave(uint32_t virtual_ina)
+{
+    static const uint8_t leave[3] = {1u, 0u, 17u};
+    if (virtual_ina == 0u) return;
+    queue_guest(virtual_ina, live.guest_port, leave, sizeof leave);
 }
 
 /* --- what the game may receive ---
@@ -1176,7 +1218,13 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size)
            not-ready reply (0xd00b0) would apply stale ones. Asked again
            every second (0xd1874). */
         if (handler == 5u) return payload == 0x16u;
-        return true; /* requests: their handlers write the reply */
+        /* Requests: the builder at that index makes the payload the game sends
+           (0x130d30/0x130e10's 0x14 bytes once a fighter is chosen, 0xd00b0's
+           0x54 plus the stage's state), and the peer's handler rewrites it in
+           place and answers. Nothing else is a shape one of the game's
+           senders builds. */
+        if (handler <= 9u) return payload == 0u || payload == 0x14u;
+        return payload == 0u || (payload >= 0x54u && payload <= 0x54u + 0x1du);
     }
     case 16u: { /* a record from byte 3: its subtype at 0x13, its own length at 0x17 */
         if (size < 3u + 0x18u) return false;
