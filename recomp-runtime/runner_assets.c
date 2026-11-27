@@ -19,7 +19,7 @@ enum {
     SPRITE_TEXTURE = 0x000aa9b0u,
     SPRITE_DEFS = 0x00686698u,     /* per group: 12-byte rectangles */
     SPRITE_TEXTURES = 0x0067ce78u, /* per group: texture, palette */
-    TEXTS = 128,
+    TEXTS = 256,      /* PC Settings, button config, quit and jukebox texts; 128 was full */
 };
 
 static uint32_t cursor = XBOX_RUNNER_ASSET_BASE;
