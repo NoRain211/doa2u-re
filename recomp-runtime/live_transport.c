@@ -699,7 +699,9 @@ static void log_peers(uint64_t now)
         if (!peer->used) continue;
         char ina[16], heard[32];
         ina_text(peer->virtual_ina, ina);
-        if (peer->heard) snprintf(heard, sizeof heard, "heard %.1f s ago", (double)(now - peer->heard_ms) / 1000.0);
+        /* A packet heard after the pump's clock read is newer than now. */
+        const uint64_t ago = peer->heard_ms < now ? now - peer->heard_ms : 0u;
+        if (peer->heard) snprintf(heard, sizeof heard, "heard %.1f s ago", (double)ago / 1000.0);
         else snprintf(heard, sizeof heard, "never heard");
         const char *path = peer->relay ? "relay" : peer->connected ? "direct" : "no path";
         uint32_t traffic = 0u;
