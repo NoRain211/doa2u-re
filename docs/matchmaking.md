@@ -396,10 +396,11 @@ game showed as "unable to renew your best record". The ask without a pivot
 lists the same rows as before, so an older client sees no change.
 
 Board 47 is the reliability board (`ranking_write_reliability_board`
-`0x2979b0`): ids 0..3 and 8 are set, and ids 4..7 come from four globals that
-`ranking_profile_state_init` (`0x298190`) copies from an argument its only
-caller never passes, so they are always 0 and carry nothing. Do not rank by
-them.
+`0x2979b0`): ids 0..3 and 8 are set, and ids 4..7 read four globals that
+`ranking_profile_state_init` (`0x298190`) copies from a second argument its
+only caller never passes, so they take whatever the stack slot holds (the data
+it points at is zero in the XBE and nothing writes it). They carry nothing.
+Do not rank by them.
 
 A stat is 11 bytes on the wire: the id as two bytes (so the negative pseudo
 ids are their two's complement, -2 = 0xfffe), the type in one and the value as
