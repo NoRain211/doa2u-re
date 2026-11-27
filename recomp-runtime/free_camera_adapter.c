@@ -262,10 +262,12 @@ static void hint_panel(void)
                 "P freeze  . step  H hide  F12 screenshot  F1 off");
         } else if (recomp_input_host_playstation_pad()) {
             const char *start = recomp_input_host_binding_label(RECOMP_INPUT_BIND_START);
-            recomp_overlay_set_hint(&text, "Sticks fly  L2/R2 down/up  Cross fast  Circle slow\n"
+            char hint[192];
+            snprintf(hint, sizeof hint, "Sticks fly  L2/R2 down/up  Cross fast  Circle slow\n"
                 "Square camera  Triangle reset  D-pad left fighter\n"
                 "%s freeze  R1 step  L1 hide  D-pad right screenshot  R3 off",
                 start != NULL ? start : "Options");
+            recomp_overlay_set_hint(&text, hint);
         } else {
             recomp_overlay_set_hint(&text, "Sticks fly  LT/RT down/up  A fast  B slow\n"
                 "X camera  Y reset  D-pad left fighter\n"
