@@ -76,6 +76,12 @@ bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size);
    (not chosen yet, handlers 0-3; not ready, handler 5), which it resends
    every second; recvfrom drops these without a log line. */
 bool recomp_live_game_datagram_expected_drop(const uint8_t *datagram, size_t size);
+/* The Live log's datagram counts by game type (the type byte at 2): "9x600
+   22x20" for the non-zero entries, the last index as "?" for any type past the
+   others, or "none". Returns the length written, as snprintf does within
+   capacity. Every 10 s the pump logs these per peer, and once when a peer it
+   used to hear has gone quiet. */
+size_t recomp_live_format_type_counts(char *out, size_t capacity, const uint32_t *counts, unsigned count);
 
 /* The rollback session's channel to the opponent: fills net so netplay.c's
    send goes to the opponent's route and its receive reads the rollback queue. */

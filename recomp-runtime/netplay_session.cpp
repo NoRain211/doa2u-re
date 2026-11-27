@@ -1011,6 +1011,28 @@ void recomp_netplay_session_set_vibration(std::uint32_t port, std::uint16_t left
     if (port == rollback.player && !rollback.hidden) recomp_input_host_set_vibration(0u, left, right);
 }
 
+/* A player's report of a stuck online screen needs to say which screen: one
+   line whenever the game mode, frontend scene, Live page, session size, match
+   role or lockstep flags change. */
+static void logLiveScreen()
+{
+    static RecompGameLiveScreen last;
+    static bool logged = false;
+    RecompGameLiveScreen now;
+    recomp_game_live_screen(&now);
+    if (logged && now.game_mode == last.game_mode && now.scene == last.scene &&
+        now.scene_table == last.scene_table && now.live_page == last.live_page &&
+        now.live_overlay == last.live_overlay && now.session_players == last.session_players &&
+        now.match_role == last.match_role && now.lockstep_flags == last.lockstep_flags)
+        return;
+    logged = true;
+    last = now;
+    std::fprintf(stderr, "recomp live: screen: mode %u, scene %u of 0x%08x, page %s, over it %s, %u in session, "
+        "role %u, lockstep 0x%02x\n", now.game_mode, now.scene, now.scene_table,
+        recomp_game_live_page_name(now.live_page), recomp_game_live_page_name(now.live_overlay),
+        now.session_players, now.match_role, now.lockstep_flags);
+}
+
 void recomp_netplay_session_on_swap()
 {
     pumpLiveTail();
@@ -1018,6 +1040,7 @@ void recomp_netplay_session_on_swap()
     const std::uint64_t now = netplay_now_ms(); /* the clock the transport stamps its peers with */
     recomp_live_transport_pump(now);
     recomp_live_pump(now);
+    logLiveScreen();
 }
 
 void recomp_netplay_session_exit()

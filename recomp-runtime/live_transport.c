@@ -72,6 +72,10 @@ enum {
     /* The matchmaker's cap: a Live request is at most this long, and a relay's
        whole packet at most MATCH_ASKED more, tools/matchmaker.py. */
     LIVE_MATCH_BYTES = 1200,
+    /* The Live log counts each peer's game datagrams by type (0-21, then one
+       slot for the rest) and says them this often. */
+    LIVE_LOG_TYPES = 23,
+    LIVE_LOG_MS = 10000u,
 };
 
 /* The guest's datagram: magic, kind, the sender's virtual address and port
@@ -150,6 +154,9 @@ typedef struct LivePeer {
     uint64_t heard_ms; /* that packet's time, or when the slot was claimed */
     uint64_t sent_ms;  /* the game's last datagram to it */
     uint64_t asked_ms; /* the last time this side asked the matchmaker for it */
+    uint32_t sent_types[LIVE_LOG_TYPES]; /* game datagrams since the last log line */
+    uint32_t got_types[LIVE_LOG_TYPES];
+    bool quiet_said; /* the log said it went quiet, and nothing came since */
     uint16_t queue_head;
     uint16_t queue_count;
     LiveQueued queue[LIVE_PEER_QUEUE];
@@ -204,7 +211,40 @@ static struct {
     uint16_t rollback_head;
     uint16_t rollback_count;
     LiveRollbackPacket rollback[LIVE_ROLLBACK_QUEUE];
+    uint64_t log_ms; /* the last per-peer datagram line */
 } live;
+
+/* A virtual address for the log. The peer table holds it as the matchmaker's
+   big-endian number (live_client.c reads it with get32be), first octet on top. */
+static void ina_text(uint32_t virtual_ina, char out[16])
+{
+    snprintf(out, 16, "%u.%u.%u.%u", (unsigned)(virtual_ina >> 24), (unsigned)(virtual_ina >> 16 & 0xffu),
+        (unsigned)(virtual_ina >> 8 & 0xffu), (unsigned)(virtual_ina & 0xffu));
+}
+
+static unsigned log_type(const uint8_t *data, size_t size)
+{
+    if (data == NULL || size < 3u || data[2] >= LIVE_LOG_TYPES - 1u) return LIVE_LOG_TYPES - 1u;
+    return data[2];
+}
+
+size_t recomp_live_format_type_counts(char *out, size_t capacity, const uint32_t *counts, unsigned count)
+{
+    if (out == NULL || capacity == 0u) return 0u;
+    out[0] = '\0';
+    size_t at = 0u;
+    for (unsigned i = 0u; i < count && at + 1u < capacity; ++i) {
+        if (counts[i] == 0u) continue;
+        char item[32];
+        if (i + 1u == count) snprintf(item, sizeof item, "%s?x%u", at != 0u ? " " : "", counts[i]);
+        else snprintf(item, sizeof item, "%s%ux%u", at != 0u ? " " : "", i, counts[i]);
+        const int wrote = snprintf(out + at, capacity - at, "%s", item);
+        if (wrote < 0) break;
+        at += (size_t)wrote < capacity - at ? (size_t)wrote : capacity - at - 1u;
+    }
+    if (at == 0u) at = (size_t)snprintf(out, capacity, "none");
+    return at < capacity ? at : capacity - 1u;
+}
 
 /* The session frame being run, or UINT32_MAX outside a Live fight. Replaying
    needs both: a frame run again after a rewind is not the socket's turn. */
@@ -268,7 +308,13 @@ static LivePeer *peer_claim(uint32_t virtual_ina, bool keep_heard)
     }
     if (free_slot == NULL) {
         free_slot = stale;
-        if (free_slot != NULL) peer_clear(free_slot);
+        if (free_slot != NULL) {
+            char old[16], incoming[16];
+            ina_text(free_slot->virtual_ina, old);
+            ina_text(virtual_ina, incoming);
+            fprintf(stderr, "recomp live: forgot %s, the least active player, to make room for %s\n", old, incoming);
+            peer_clear(free_slot);
+        }
     }
     if (free_slot == NULL) return NULL;
     memset(free_slot, 0, sizeof *free_slot);
@@ -641,12 +687,49 @@ static void peer_tick(LivePeer *peer, uint64_t now)
         if (peer->port[i] != 0u) send_punch(peer->address[i], peer->port[i], peer->token, false);
 }
 
+/* Every LIVE_LOG_MS: each peer's game datagrams by type both ways, or once
+   that a peer has gone quiet (not while a rollback session carries the fight). */
+static void log_peers(uint64_t now)
+{
+    if (live.log_ms == 0u) live.log_ms = now;
+    if (now < live.log_ms + LIVE_LOG_MS) return;
+    live.log_ms = now;
+    for (unsigned i = 0u; i < LIVE_PEERS; ++i) {
+        LivePeer *peer = &live.peers[i];
+        if (!peer->used) continue;
+        char ina[16], heard[32];
+        ina_text(peer->virtual_ina, ina);
+        /* A packet heard after the pump's clock read is newer than now. */
+        const uint64_t ago = peer->heard_ms < now ? now - peer->heard_ms : 0u;
+        if (peer->heard) snprintf(heard, sizeof heard, "heard %.1f s ago", (double)ago / 1000.0);
+        else snprintf(heard, sizeof heard, "never heard");
+        const char *path = peer->relay ? "relay" : peer->connected ? "direct" : "no path";
+        uint32_t traffic = 0u;
+        for (unsigned t = 0u; t < LIVE_LOG_TYPES; ++t) traffic += peer->sent_types[t] + peer->got_types[t];
+        if (traffic != 0u) {
+            char sent[256], got[256];
+            recomp_live_format_type_counts(sent, sizeof sent, peer->sent_types, LIVE_LOG_TYPES);
+            recomp_live_format_type_counts(got, sizeof got, peer->got_types, LIVE_LOG_TYPES);
+            fprintf(stderr, "recomp live: %s, game datagrams in %u s: sent %s; got %s (%s, %s)\n", ina,
+                (unsigned)(LIVE_LOG_MS / 1000u), sent, got, path, heard);
+            memset(peer->sent_types, 0, sizeof peer->sent_types);
+            memset(peer->got_types, 0, sizeof peer->got_types);
+            peer->quiet_said = false;
+        } else if (!peer->quiet_said && !(live.rollback_bound && peer->virtual_ina == live.rollback_ina)) {
+            fprintf(stderr, "recomp live: %s, no game datagrams either way in %u s (%s, %s)\n", ina,
+                (unsigned)(LIVE_LOG_MS / 1000u), path, heard);
+            peer->quiet_said = true;
+        }
+    }
+}
+
 void recomp_live_transport_pump(uint64_t now_ms)
 {
     if (!live.open) return;
     receive_all();
     for (unsigned i = 0u; i < LIVE_PEERS; ++i)
         if (live.peers[i].used) peer_tick(&live.peers[i], now_ms);
+    log_peers(now_ms);
 }
 
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port)
@@ -851,6 +934,9 @@ void recomp_live_transport_peer(const RecompLivePeerIntro *intro)
     if (moved || !known) {
         peer->punch_start = now;
         peer->next_punch = 0u; /* the next pump sends the first punch */
+        char ina[16];
+        ina_text(intro->virtual_ina, ina);
+        fprintf(stderr, "recomp live: the matchmaker %s %s\n", moved ? "moved" : "introduced", ina);
     }
     if (intro->relay) peer_relay_on(peer, "the matchmaker paired us on the relay");
     /* The datagrams that waited for a route go out once the peer answers the
@@ -861,14 +947,24 @@ void recomp_live_transport_peer(const RecompLivePeerIntro *intro)
 void recomp_live_transport_forget(uint32_t virtual_ina)
 {
     if (virtual_ina == 0u) {
+        unsigned forgot = 0u;
         for (unsigned i = 0u; i < LIVE_PEERS; ++i)
-            if (live.peers[i].used) peer_clear(&live.peers[i]);
+            if (live.peers[i].used) {
+                peer_clear(&live.peers[i]);
+                ++forgot;
+            }
         live.rollback_head = 0u;
         live.rollback_count = 0u;
+        if (forgot != 0u) fprintf(stderr, "recomp live: forgot all %u players\n", forgot);
         return;
     }
     LivePeer *peer = peer_find(virtual_ina);
-    if (peer != NULL) peer_clear(peer);
+    if (peer != NULL) {
+        char ina[16];
+        ina_text(virtual_ina, ina);
+        fprintf(stderr, "recomp live: forgot %s\n", ina);
+        peer_clear(peer);
+    }
 }
 
 bool recomp_live_transport_reachable(uint32_t virtual_ina)
@@ -903,6 +999,7 @@ int recomp_live_transport_guest_send(uint32_t virtual_ina, uint16_t port, const 
     if (session_frame() != UINT32_MAX && replaying()) return (int)size;
     LivePeer *peer = peer_for_send(virtual_ina);
     if (peer == NULL) return -1;
+    ++peer->sent_types[log_type(data, size)];
     peer->sent_ms = netplay_now_ms();
     if (!peer->waiting) {
         peer->waiting = true;
@@ -1293,6 +1390,10 @@ static void live_recvfrom(void)
         live.last_error = LIVE_WSAEWOULDBLOCK;
         kernel_return(6u, 0xffffffffu);
         return;
+    }
+    if (!replaying()) {
+        LivePeer *peer = peer_find(virtual_ina);
+        if (peer != NULL) ++peer->got_types[log_type(data, (size_t)size)];
     }
     const size_t copied = (size_t)size < length ? (size_t)size : length;
     if (copied != 0u) memcpy(recomp_memory(buffer, copied), data, copied);

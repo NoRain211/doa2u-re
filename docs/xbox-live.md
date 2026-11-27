@@ -139,10 +139,29 @@ game's own lockstep works.
   host may write that host's stats for six hours. Each player writes their own
   stats anyway, so the rankings trust the clients.
 
+## Log
+
+With Live on, the runner's log carries `recomp live:` lines that place a
+stuck online page:
+
+- `screen:` whenever the game mode, the frontend scene, the Live page on top
+  of the page stack (named after its update function in `g_live_page_table`),
+  the session's player count, the match role or the lockstep flags change
+  (`game_state.c`).
+- Each logon, session, search, friends, mutelist, feedback and stats task when
+  it starts, finishes or fails, and when the game closes one unfinished; each
+  friend or invite operation's result (`live_xapi.c`).
+- Each peer the matchmaker introduces or moves, and each one forgotten. Every
+  10 s, each peer's game datagrams by type, both ways, with its path and when
+  it was last heard; once when a peer has gone quiet (`live_transport.c`).
+
+They hold virtual addresses and task names, no gamertags or real addresses.
+
 ## Testing
 
 The Live unit tests are the ctest entries `recomp-runtime-live-xapi`,
-`-live-transport`, `-live-identity`, `-live-client` and `-live-fight`, and
+`-live-transport`, `-live-identity`, `-live-client`, `-live-fight` and
+`-game-state`, and
 `tools/test_matchmaker.py`. The client test and the
 Python test share the byte transcript in `tools/live_vectors.json`.
 

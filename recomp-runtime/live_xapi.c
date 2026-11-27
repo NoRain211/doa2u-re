@@ -233,7 +233,7 @@ typedef struct LiveTask {
     unsigned request_count;
     uint32_t out[2];  /* guest out-pointers a finished task fills */
     uint32_t capacity;
-    uint32_t board;
+    uint32_t board; /* a leaderboard's; a stat write's or read's first, for the log */
     uint32_t stat_count;
     uint32_t stat_ids; /* the leaderboard's requested id list (shorts) */
     uint32_t final;
@@ -253,6 +253,7 @@ static uint32_t live_notification_state;
 static uint8_t live_notification_kid[8];
 static bool live_notification_valid;
 static RecompLiveRequest live_detached[LIVE_DETACHED_REQUESTS];
+static const char *live_detached_names[LIVE_DETACHED_REQUESTS];
 static uint8_t live_attributes[LIVE_ATTRIBUTE_BYTES];
 static uint32_t live_attributes_size = LIVE_ATTRIBUTE_BYTES;
 static RecompLiveSession live_sessions[RECOMP_LIVE_MAX_RESULTS];
@@ -359,6 +360,40 @@ static void live_bind_profile_xuid(uint64_t xuid)
    at 0xf1ca64 (extended friend/voicemail paths) are a separate problem: they
    are not ours, and live_notification_context below keeps the game off the
    extended friends path so it uses the thunks this file owns. */
+
+/* The Live log: one line when a task starts, ends or is closed unfinished, so
+   a stuck online page shows which call it waits on. */
+static const char *live_kind_name(uint32_t kind)
+{
+    switch (kind) {
+    case LIVE_KIND_LOGON: return "logon";
+    case LIVE_KIND_SESSION_CREATE: return "session create";
+    case LIVE_KIND_SESSION_UPDATE: return "session update";
+    case LIVE_KIND_SESSION_DELETE: return "session delete";
+    case LIVE_KIND_SEARCH: return "session search";
+    case LIVE_KIND_FIND: return "session find";
+    case LIVE_KIND_FRIENDS_STARTUP: return "friends startup";
+    case LIVE_KIND_FRIENDS_ENUMERATE: return "friends enumerate";
+    case LIVE_KIND_MUTELIST_STARTUP: return "mutelist startup";
+    case LIVE_KIND_MUTELIST_GET: return "mutelist get";
+    case LIVE_KIND_FEEDBACK: return "feedback";
+    case LIVE_KIND_STAT_WRITE: return "stat write";
+    case LIVE_KIND_STAT_READ: return "stat read";
+    case LIVE_KIND_LEADER: return "leaderboard";
+    default: return NULL; /* string verification and the like: not worth a line */
+    }
+}
+
+static void live_task_log(const LiveTask *task, const char *what, uint32_t result)
+{
+    const char *name = live_kind_name(task->kind);
+    if (name == NULL) return;
+    char board[24] = "";
+    if (task->kind == LIVE_KIND_STAT_WRITE || task->kind == LIVE_KIND_STAT_READ || task->kind == LIVE_KIND_LEADER)
+        snprintf(board, sizeof board, " on board %u", task->board);
+    if (result != 0u) fprintf(stderr, "recomp live: %s%s %s 0x%08x\n", name, board, what, result);
+    else fprintf(stderr, "recomp live: %s%s %s\n", name, board, what);
+}
 
 static LiveTask *live_task_find(uint32_t handle)
 {
@@ -500,6 +535,7 @@ static uint32_t live_task_poll(LiveTask *task)
                 task->complete = true;
                 task->final = live_task_hresult(hresult);
                 live_task_drop_requests(task);
+                live_task_log(task, "failed", task->final);
                 return task->final;
             }
         }
@@ -507,17 +543,22 @@ static uint32_t live_task_poll(LiveTask *task)
     }
     task->complete = true;
     task->final = live_task_finished(task);
+    live_task_log(task, "done", 0u);
     return task->final;
 }
 
 /* Calls whose guest API returns an HRESULT at once (friend operations) still
    have a backend request in flight; finish it on the next pump. */
-static void live_detach(RecompLiveRequest request)
+static void live_detach(RecompLiveRequest request, const char *name)
 {
-    if (request == 0u) return;
+    if (request == 0u) {
+        fprintf(stderr, "recomp live: %s could not start\n", name);
+        return;
+    }
     for (unsigned i = 0u; i < LIVE_DETACHED_REQUESTS; ++i)
         if (live_detached[i] == 0u) {
             live_detached[i] = request;
+            live_detached_names[i] = name;
             return;
         }
     /* The table is small and every guest friend operation waits for the
@@ -532,7 +573,10 @@ static void live_pump_detached(void)
     for (unsigned i = 0u; i < LIVE_DETACHED_REQUESTS; ++i) {
         if (live_detached[i] == 0u) continue;
         uint32_t hresult = 0u;
-        if (backend->poll(backend->self, live_detached[i], &hresult) == RECOMP_LIVE_PENDING) continue;
+        const RecompLiveStatus status = backend->poll(backend->self, live_detached[i], &hresult);
+        if (status == RECOMP_LIVE_PENDING) continue;
+        if (status == RECOMP_LIVE_FAILED) fprintf(stderr, "recomp live: %s failed 0x%08x\n", live_detached_names[i], hresult);
+        else fprintf(stderr, "recomp live: %s done\n", live_detached_names[i]);
         if (backend->release != NULL) backend->release(backend->self, live_detached[i]);
         live_detached[i] = 0u;
     }
@@ -559,6 +603,7 @@ static bool live_task_start(LiveTask *task, RecompLiveRequest request, uint32_t 
         return false;
     }
     live_set_u32(task_out, task->handle);
+    live_task_log(task, "starts", 0u);
     return true;
 }
 
@@ -680,6 +725,9 @@ static void live_task_close(void)
         if (task == live_logon_task) {
             live_logon_task = NULL;
             live_online_changed(false);
+            fprintf(stderr, "recomp live: logoff\n");
+        } else if (!task->complete) {
+            live_task_log(task, "closed before it finished", 0u);
         }
         live_task_release(task);
     }
@@ -914,7 +962,7 @@ static void live_friends_request(void)
         kernel_return(4u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->friend_request(backend->self, xuid));
+    live_detach(backend->friend_request(backend->self, xuid), "friend request");
     kernel_return(4u, 0u);
 }
 
@@ -926,7 +974,7 @@ static void live_friends_answer_request(void)
         kernel_return(3u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->friend_answer(backend->self, xuid, live_answer(kernel_arg(3))));
+    live_detach(backend->friend_answer(backend->self, xuid, live_answer(kernel_arg(3))), "friend answer");
     kernel_return(3u, 0u);
 }
 
@@ -938,7 +986,7 @@ static void live_friends_remove(void)
         kernel_return(2u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->friend_remove(backend->self, xuid));
+    live_detach(backend->friend_remove(backend->self, xuid), "friend remove");
     kernel_return(2u, 0u);
 }
 
@@ -963,7 +1011,7 @@ static void live_friends_game_invite(void)
         kernel_return(5u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->game_invite(backend->self, kid, xuids, count));
+    live_detach(backend->game_invite(backend->self, kid, xuids, count), "game invite");
     kernel_return(5u, 0u);
 }
 
@@ -980,7 +1028,7 @@ static void live_friends_revoke_game_invite(void)
         kernel_return(5u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->revoke_invite(backend->self, kid, xuids, count));
+    live_detach(backend->revoke_invite(backend->self, kid, xuids, count), "invite revoke");
     kernel_return(5u, 0u);
 }
 
@@ -992,7 +1040,7 @@ static void live_friends_answer_game_invite(void)
         kernel_return(3u, LIVE_E_FAIL);
         return;
     }
-    live_detach(backend->answer_invite(backend->self, xuid, live_answer(kernel_arg(3))));
+    live_detach(backend->answer_invite(backend->self, xuid, live_answer(kernel_arg(3))), "invite answer");
     kernel_return(3u, 0u);
 }
 
@@ -1445,6 +1493,7 @@ static void live_stat_write(void)
         const uint32_t board = live_u32(record + LIVE_STAT_BOARD);
         const uint32_t stat_count = live_u32(record + LIVE_STAT_COUNT);
         const uint32_t array = live_u32(record + LIVE_STAT_ARRAY);
+        if (i == 0u) task->board = board;
         RecompLiveStat stats[RECOMP_LIVE_MAX_STAT_ATTRS];
         uint32_t wanted = stat_count;
         if (wanted > RECOMP_LIVE_MAX_STAT_ATTRS) {
@@ -1478,6 +1527,7 @@ static void live_stat_write(void)
         return;
     }
     live_set_u32(task_out, task->handle);
+    live_task_log(task, "starts", 0u);
     kernel_return(4u, 0u);
 }
 
@@ -1516,6 +1566,7 @@ static void live_stat_read(void)
             batch_count = 0u;
         }
         if (batch_count == 0u) batch_board = board;
+        if (i == 0u) task->board = board;
         batch[batch_count++] = xuid;
     }
     if (batch_count != 0u &&
@@ -1530,6 +1581,7 @@ static void live_stat_read(void)
         return;
     }
     live_set_u32(task_out, task->handle);
+    live_task_log(task, "starts", 0u);
     kernel_return(4u, 0u);
 }
 
