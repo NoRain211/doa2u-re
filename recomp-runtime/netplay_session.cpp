@@ -361,7 +361,6 @@ static void finishLiveSession()
     std::fprintf(stderr, "recomp live: frame %u reached after %u rollbacks "
         "(%u frames run again, %u waited, %u saves) in %.1f s\n",
         rollback.session.frame, rollback.rollbacks, rollback.replayed, rollback.waited, rollback.saves, seconds);
-    writeDump();
     // The other side may still need this side's last pads to reach the stop frame.
     // The frame pump repeats them from here (pumpLiveTail), so the frame thread is
     // not held for half a second.
@@ -843,7 +842,6 @@ static bool readRollbackConfig()
     };
     number("RECOMP_ROLLBACK_START", rollback.start);
     number("RECOMP_ROLLBACK_FRAMES", rollback.stop);
-    rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
     rollback.mode = RollbackMode::Loopback;
     rollback.player = 1u;
     if (const char *frames = std::getenv("RECOMP_ROLLBACK_FRAMES"); frames == nullptr || *frames == '\0')
@@ -960,6 +958,8 @@ void recomp_live_request_stop(void)
 
 bool recomp_netplay_session_read_env()
 {
+    // Live writes it on a desync, Loopback at its last frame.
+    rollback.dump = std::getenv("RECOMP_ROLLBACK_DUMP");
     // Live starts its sessions from the game's own pages, not from an env switch.
     if (rollback.mode == RollbackMode::Live) return true;
     return readRollbackConfig();
