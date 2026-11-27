@@ -1644,8 +1644,14 @@ static void live_fill_stat_entry(uint32_t entry, uint16_t id, const RecompLiveLe
             live_store_stat_value(entry, 0u, 0, 0u);
         else
             live_store_stat_value(entry, type, row->stats[i].value, 0u);
-        break;
+        return;
     }
+    /* A stat the row has no value for: type 0, as the retail service sent it, and
+       the game reads that as no data (ranking_row_to_profile_counters 0x29b590
+       takes a type-0 first entry for a player with no record). The record was
+       pre-filled with the group's type by FUN_00294510 0x294510 before the read,
+       so leaving the entry alone would make an absent stat a real zero. */
+    live_store_stat_value(entry, 0u, 0, 0u);
 }
 
 /* Fills the entries a stat-read record requested (the record's own id list,

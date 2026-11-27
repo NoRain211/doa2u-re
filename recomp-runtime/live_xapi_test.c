@@ -752,6 +752,24 @@ int main(void)
         peek32(STAT_ENTRIES + 0x48u) == 1u && peek32(STAT_ENTRIES + 0x4cu) == 0u);
     close_task(read_task);
 
+    /* A stat the row has no value for reads as no data, not as zero. The game
+       pre-fills every entry's type from its group before a read (FUN_00294510
+       0x294510), so an entry the service left alone would look like a real 0;
+       the retail service echoed the id with type 0 and the shim does the same. */
+    set_stat_record(REQUEST, local_xuid, 1u, 2u, STAT_ENTRIES);
+    set_stat_entry(STAT_ENTRIES + 0x00u, 1u, 1u, 0);      /* pre-filled type and value, as the game does */
+    set_stat_entry(STAT_ENTRIES + 0x10u, 0x7fffu, 1u, 7); /* an id the row never stored */
+    check("stat read with an absent stat starts", call(thunk_stat_read, read_args, 4u) == 0u);
+    const uint32_t absent_task = peek32(TASK_OUT);
+    check("the stat read with an absent stat completes", wait_task(absent_task) == TASK_SUCCESS);
+    check("its result", call(thunk_stat_read_result,
+        (const uint32_t[]){absent_task, 1u, REQUEST, 128u, TAG_OUT}, 5u) == 0u);
+    check("a stored stat is data", peek16(STAT_ENTRIES) == 1u && peek32(STAT_ENTRIES + 4u) == 2u &&
+        peek32(STAT_ENTRIES + 8u) == 42u);
+    check("an absent stat is no data", peek16(STAT_ENTRIES + 0x10u) == 0x7fffu &&
+        peek32(STAT_ENTRIES + 0x14u) == 0u && peek32(STAT_ENTRIES + 0x18u) == 0u);
+    close_task(absent_task);
+
     /* A host's stat row with an unusable type is zeroed, never a NULL string
        pointer the game would read. */
     set_stat_record(REQUEST, local_xuid, 1u, 1u, STAT_ENTRIES);
