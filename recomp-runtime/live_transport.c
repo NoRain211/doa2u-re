@@ -1056,6 +1056,10 @@ static void clear_rollback(void)
 
 void recomp_live_transport_session_begin(void)
 {
+    /* The last match's pads, acks and goodbye may still be in the socket; read
+       them now so the clear drops them instead of the new session's first pump
+       queueing them. */
+    if (live.open) receive_all();
     clear_log();
     clear_rollback();
 }

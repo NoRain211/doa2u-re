@@ -960,6 +960,13 @@ int main(void)
     send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
     recomp_netplay_receive(&net, &session);
     check("the peer's goodbye crosses the route", net.peer_left);
+    /* One still in the socket when the next session begins belongs to the last. */
+    send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+    spin_ms(20u);
+    recomp_live_transport_session_begin();
+    net.peer_left = false;
+    recomp_netplay_receive(&net, &session);
+    check("a new session drops the last one's goodbye still in the socket", !net.peer_left);
     /* This side's leave crosses more than once, so one lost datagram does not
        leave the other player waiting for the 15 s timeout. */
     recomp_netplay_send_goodbye(&net);
