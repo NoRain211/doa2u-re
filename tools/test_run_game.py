@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from extract_iso import private_pattern, redact_private
 from package_test import build_launchers
-from run_game import prepare_disc, run, runner_path, saved_settings, seed_hdd_cache
+from run_game import prepare_disc, rebuild_after_update, run, runner_path, saved_settings, seed_hdd_cache
 
 
 def runner(code, output=()):
@@ -409,6 +409,25 @@ $type.GetMethod('RedactPrivate').Invoke($null, @($line))
                     with self.assertRaisesRegex(ValueError, "no Vulkan renderer"):
                         run(1, vulkan=True)
                 prepare.assert_not_called()
+
+    def test_an_update_builds_again_before_playing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            receipt_path = root / "private/program/receipt.json"
+            receipt_path.parent.mkdir(parents=True)
+            receipt_path.write_text(json.dumps(dict(version="0.5.0")))
+            with patch("run_game.ROOT", root), patch("run_game.on_steamos", return_value=False), \
+                    patch("run_game.subprocess.call", return_value=0) as call:
+                rebuild_after_update(receipt_path)  # a source checkout has no VERSION
+                (root / "VERSION").write_text("0.5.0\n")
+                rebuild_after_update(receipt_path)
+                call.assert_not_called()
+                (root / "VERSION").write_text("0.6.0\n")
+                rebuild_after_update(receipt_path)
+                self.assertEqual(call.call_args.args[0][-1], str(root / "tools/build_game.py"))
+                call.return_value = 1
+                with self.assertRaisesRegex(ValueError, "update to 0.6.0 failed"):
+                    rebuild_after_update(receipt_path)
 
 
 if __name__ == "__main__":

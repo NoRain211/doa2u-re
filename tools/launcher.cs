@@ -457,7 +457,7 @@ class LauncherForm : Form
     }
     string BuildStatus()
     {
-        return built ? "Built. Build again after an update" : "Not built yet: choose or drop your Disc 2 ISO";
+        return built ? "Built. Updates build again when the game starts" : "Not built yet: choose or drop your Disc 2 ISO";
     }
 
     // The albums tools\import_soundtrack.py has put in jukebox\ for the game's Jukebox.
@@ -510,7 +510,7 @@ class LauncherForm : Form
         updateRow.Info = pages[UpdatePage].Info = UpdateStatus();
         if (error == null && installed && version != null)
         {
-            MessageBox.Show("Updated to " + version + ". The launcher restarts; choose Build again to apply it to the game.", Game.Title);
+            MessageBox.Show("Updated to " + version + ". The launcher restarts; the game builds again when it starts, which takes a few minutes.", Game.Title);
             Process.Start(Path.Combine(Game.Root, "Launcher.exe"));
             Close();
             return;

@@ -78,7 +78,9 @@ keeps running.
   and the staff-roll dedication card, and remembers them. `DOA2U.exe` plays with the same choices. On release
   ZIPs after 0.1.10, the settings launcher on each platform can check GitHub
   for a newer release and install it from its **UPDATE** page; **Check At
-  Start** turns the start-up check off.
+  Start** turns the start-up check off. The first start after an update,
+  from that page or a tool that unpacks the new ZIP over the old folder,
+  builds the game again from `private/play-disc` before it plays.
 - **PC Settings in the game.** The main menu has a **PC SETTINGS** entry
   beside **JUKEBOX** and **QUIT GAME**. It opens a page drawn and translated
   like the game's option pages: **Display**, **Graphics**, **Audio**,

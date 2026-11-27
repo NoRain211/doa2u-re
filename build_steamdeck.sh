@@ -18,7 +18,8 @@ if [[ "${1:-}" == "--inside" ]]; then
     exec ./build_game.sh "$@"
 fi
 
-if [[ "$#" -eq 0 ]]; then
+# After the first build, no ISO rebuilds from private/play-disc (run_game.py does so after an update).
+if [[ "$#" -eq 0 && ! -f "${ROOT}/private/program/receipt.json" ]]; then
     echo "Usage: ./build_steamdeck.sh /path/to/disc2.iso" >&2
     exit 1
 fi
