@@ -57,3 +57,46 @@ bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent)
     if (opponent != NULL) *opponent = address[1u - own];
     return true;
 }
+
+enum {
+    GAME_MODE = 0x00878392u,
+    FRONTEND_SCENE = 0x00df5dd8u,
+    FRONTEND_SCENE_TABLE = 0x00df5e08u,
+    LIVE_PAGES = 0x00f25bc0u,
+    LIVE_PAGE_INDEX = LIVE_PAGES + 0x96u, /* signed byte; the stack's 32 dwords end at +0x80 */
+    LIVE_PAGE_STACK = 0x20u,
+    SESSION_PLAYER_COUNT = 0x00f099ecu,
+    MATCH_ROLE = 0x00f09a44u,
+    LOCKSTEP_FLAGS = 0x00f0a548u,
+};
+
+static const char *const LIVE_PAGE_NAMES[] = {
+    "account_select", "logon_status", "main_menu", "join_pending", "search_setup", "search_results",
+    "join_setup", "friend_list", "friend_detail", "friend_voice_mail", "friend_feedback",
+    "recent_player_list", "recent_player_detail", "recent_player_confirm", "recent_player_voice_mail",
+    "recent_player_feedback", "voice_settings", "volume_settings", "ranking_select", "ranking_list",
+    "player_slots", "session_lobby", "session_menu", "session_settings", "match_setup", "match_wait",
+    "ranking_resume",
+};
+
+void recomp_game_live_screen(RecompGameLiveScreen *screen)
+{
+    screen->game_mode = *recomp_memory(GAME_MODE, 1u);
+    screen->scene = *recomp_memory(FRONTEND_SCENE, 1u);
+    screen->scene_table = *recomp_memory_u32(FRONTEND_SCENE_TABLE);
+    const int8_t index = (int8_t)*recomp_memory(LIVE_PAGE_INDEX, 1u);
+    screen->live_page = -1;
+    if (index >= 0 && (uint32_t)index < LIVE_PAGE_STACK) {
+        const int32_t page = (int32_t)*recomp_memory_u32(LIVE_PAGES + 4u * (uint32_t)index);
+        if (page >= 0 && page < (int32_t)(sizeof LIVE_PAGE_NAMES / sizeof *LIVE_PAGE_NAMES)) screen->live_page = page;
+    }
+    screen->session_players = *recomp_memory_u32(SESSION_PLAYER_COUNT);
+    screen->match_role = *recomp_memory_u32(MATCH_ROLE);
+    screen->lockstep_flags = *recomp_memory(LOCKSTEP_FLAGS, 1u);
+}
+
+const char *recomp_game_live_page_name(int32_t page)
+{
+    if (page < 0 || page >= (int32_t)(sizeof LIVE_PAGE_NAMES / sizeof *LIVE_PAGE_NAMES)) return "none";
+    return LIVE_PAGE_NAMES[page];
+}

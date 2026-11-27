@@ -529,6 +529,10 @@ add_test(NAME recomp-runtime-live-client COMMAND recomp_live_client_test
 add_executable(recomp_live_fight_test live_fight_rules.c live_fight.c game_state.c live_fight_test.c)
 add_test(NAME recomp-runtime-live-fight COMMAND recomp_live_fight_test)
 
+# The Live log's screen read (game_state.c) over a synthetic guest RAM.
+add_executable(recomp_game_state_test game_state.c game_state_test.c)
+add_test(NAME recomp-runtime-game-state COMMAND recomp_game_state_test)
+
 # One x87 transcendental implementation for every host (portable_math.h).
 add_library(recomp_portable_math STATIC
     musl_math/sin.c musl_math/cos.c musl_math/tan.c musl_math/__sin.c musl_math/__cos.c musl_math/__tan.c

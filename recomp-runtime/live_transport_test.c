@@ -521,9 +521,29 @@ static void check_game_datagrams(void)
     check("more than the game's buffer is dropped", !recomp_live_game_datagram_ok(d, 0x32au));
 }
 
+/* The Live log's per-type counts. */
+static void check_type_counts(void)
+{
+    uint32_t counts[23];
+    char text[64];
+    memset(counts, 0, sizeof counts);
+    recomp_live_format_type_counts(text, sizeof text, counts, 23u);
+    check("no datagrams read as none", strcmp(text, "none") == 0);
+    counts[9] = 600u;
+    counts[22] = 3u;
+    counts[0] = 1u;
+    const size_t length = recomp_live_format_type_counts(text, sizeof text, counts, 23u);
+    check("the counts read type by type, the last slot as ?", strcmp(text, "0x1 9x600 ?x3") == 0);
+    check("the length is the text's", length == strlen(text));
+    char tight[6];
+    recomp_live_format_type_counts(tight, sizeof tight, counts, 23u);
+    check("a short buffer stays terminated", strlen(tight) < sizeof tight);
+}
+
 int main(void)
 {
     check_game_datagrams();
+    check_type_counts();
 #ifdef _WIN32
     WSADATA winsock;
     if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) {
