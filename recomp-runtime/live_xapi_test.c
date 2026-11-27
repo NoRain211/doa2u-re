@@ -753,9 +753,10 @@ int main(void)
     close_task(read_task);
 
     /* A stat the row has no value for reads as no data, not as zero. The game
-       pre-fills every entry's type from its group before a read (FUN_00294510
-       0x294510), so an entry the service left alone would look like a real 0;
-       the retail service echoed the id with type 0 and the shim does the same. */
+       pre-fills every entry's type from its group before a read
+       (ranking_stat_entries_init 0x294510), so an entry the service left alone
+       would look like a real 0; the retail service echoed the id with type 0 and
+       the shim does the same. */
     set_stat_record(REQUEST, local_xuid, 1u, 2u, STAT_ENTRIES);
     set_stat_entry(STAT_ENTRIES + 0x00u, 1u, 1u, 0);      /* pre-filled type and value, as the game does */
     set_stat_entry(STAT_ENTRIES + 0x10u, 0x7fffu, 1u, 7); /* an id the row never stored */

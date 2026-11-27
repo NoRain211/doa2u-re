@@ -382,9 +382,9 @@ place in a ranking. A player with no row reads as no data, not as zeros: a
 game reads a stat entry left at type 0 as nothing
 (`ranking_row_to_profile_counters` `0x29b590`, `ranking_profile_load_from_rows`
 `0x29b730`). The game pre-fills each entry's type from its group before a read
-(`FUN_00294510` `0x294510`), so `recomp-runtime/live_xapi.c` writes type 0 for
-every requested id the row has no value for, as the retail service did; an
-untouched entry would read as a real zero.
+(`ranking_stat_entries_init` `0x294510`), so `recomp-runtime/live_xapi.c` writes
+type 0 for every requested id the row has no value for, as the retail service
+did; an untouched entry would read as a real zero.
 
 A `LEADERS` ask that names a pivot XUID with no row on the board still gets
 one row for it, with no stats, its rank at the end of the board and the

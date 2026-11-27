@@ -1578,8 +1578,9 @@ static void live_stat_text_row(LiveStatText *text, const char *tag)
 }
 
 /* Writes one requested stat entry the way the retail parser does: the type as
-   a dword at +4 (the caller pre-fills +8..+0xf with zero), an int32 in the low
-   dword at +8, an int64/double at +8, or a wide-string pointer at +8. */
+   a dword at +4 (the game pre-fills the type from the board's group and zeroes
+   +8..+0xf), an int32 in the low dword at +8, an int64/double at +8, or a
+   wide-string pointer at +8. */
 static void live_store_stat_value(uint32_t entry, uint8_t type, int64_t value,
     uint32_t string_pointer)
 {
@@ -1649,8 +1650,9 @@ static void live_fill_stat_entry(uint32_t entry, uint16_t id, const RecompLiveLe
     /* A stat the row has no value for: type 0, as the retail service sent it, and
        the game reads that as no data (ranking_row_to_profile_counters 0x29b590
        takes a type-0 first entry for a player with no record). The record was
-       pre-filled with the group's type by FUN_00294510 0x294510 before the read,
-       so leaving the entry alone would make an absent stat a real zero. */
+       pre-filled with the group's type by ranking_stat_entries_init 0x294510
+       before the read, so leaving the entry alone would make an absent stat a
+       real zero. */
     live_store_stat_value(entry, 0u, 0, 0u);
 }
 
