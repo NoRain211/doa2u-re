@@ -32,8 +32,8 @@
 
    Every direct call in the lifted program asks recomp_lookup_manual first, so
    this file wraps that build without changing the generated program: the
-   wrapper puts the free camera's eye, target and field of view in both places
-   for that build and its roll in the working copy, and leaves them there, so
+   wrapper puts the free camera's eye, target, field of view and roll in both
+   places for that build and leaves them there, so
    the game also culls for the free camera. When the camera is put away the
    game's camera logic takes the object over again.
 
@@ -67,6 +67,7 @@ enum {
     CAMERA_EYE = 0x00u,
     CAMERA_TARGET = 0x10u,
     CAMERA_FOV = 0x30u,
+    CAMERA_ROLL = 0x34u,
     BUILD_EYE = 0xA8u,
     BUILD_TARGET = 0xB8u,
     BUILD_FOV = 0xD8u,
@@ -459,6 +460,7 @@ static void store(uint32_t object, const float eye[3], const float target[3], fl
     recomp_guest_store(object + CAMERA_EYE, eye, 12);
     recomp_guest_store(object + CAMERA_TARGET, target, 12);
     recomp_guest_store(object + CAMERA_FOV, &fov, 4);
+    recomp_guest_store(object + CAMERA_ROLL, &state.camera.roll, 4);
     recomp_guest_store(object + BUILD_EYE, eye, 12);
     recomp_guest_store(object + BUILD_TARGET, target, 12);
     recomp_guest_store(object + BUILD_FOV, &fov, 4);
