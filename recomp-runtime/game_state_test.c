@@ -48,10 +48,14 @@ static void test_screen(void)
     put32(0x00f099ecu, 2u);
     put32(0x00f09a44u, 4u);
     *recomp_memory(0x00f0a548u, 1u) = 0x01u;
+    /* Outside the Live menus the zeroed stack names page 0, but nothing is shown. */
+    recomp_game_live_screen(&screen);
+    CHECK(screen.live_page == -1);
     /* Two pages deep: the main menu, then the session lobby on top. */
     put32(0x00f25bc0u, 2u);
     put32(0x00f25bc4u, 21u);
     *recomp_memory(0x00f25c56u, 1u) = 1u;
+    *recomp_memory(0x00f25c5cu, 1u) = 1u;
     recomp_game_live_screen(&screen);
     CHECK(screen.game_mode == 8u);
     CHECK(screen.scene == 12u);

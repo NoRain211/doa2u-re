@@ -33,7 +33,8 @@ bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent);
    scene (g_frontend_scene_current 0xdf5dd8, an index into the table at
    g_frontend_scene_table_ptr 0xdf5e08), the Live page on top of the page stack
    live_page_apply_navigation (0x2aaf20) walks (pages at 0xf25bc0, the stack
-   index at +0x96, -1 for none), g_session_player_count (0xf099ec),
+   index at +0x96, -1 for none or while its shown flag at +0x9c is clear,
+   outside the Live menus), g_session_player_count (0xf099ec),
    g_match_role (0xf09a44) and g_online_lockstep_flags (0xf0a548). */
 typedef struct RecompGameLiveScreen {
     uint8_t game_mode;

@@ -64,6 +64,7 @@ enum {
     FRONTEND_SCENE_TABLE = 0x00df5e08u,
     LIVE_PAGES = 0x00f25bc0u,
     LIVE_PAGE_INDEX = LIVE_PAGES + 0x96u, /* signed byte; the stack's 32 dwords end at +0x80 */
+    LIVE_PAGE_SHOWN = LIVE_PAGES + 0x9cu, /* set while a page is up; clear outside the Live menus */
     LIVE_PAGE_STACK = 0x20u,
     SESSION_PLAYER_COUNT = 0x00f099ecu,
     MATCH_ROLE = 0x00f09a44u,
@@ -86,7 +87,7 @@ void recomp_game_live_screen(RecompGameLiveScreen *screen)
     screen->scene_table = *recomp_memory_u32(FRONTEND_SCENE_TABLE);
     const int8_t index = (int8_t)*recomp_memory(LIVE_PAGE_INDEX, 1u);
     screen->live_page = -1;
-    if (index >= 0 && (uint32_t)index < LIVE_PAGE_STACK) {
+    if (*recomp_memory(LIVE_PAGE_SHOWN, 1u) != 0u && index >= 0 && (uint32_t)index < LIVE_PAGE_STACK) {
         const int32_t page = (int32_t)*recomp_memory_u32(LIVE_PAGES + 4u * (uint32_t)index);
         if (page >= 0 && page < (int32_t)(sizeof LIVE_PAGE_NAMES / sizeof *LIVE_PAGE_NAMES)) screen->live_page = page;
     }
