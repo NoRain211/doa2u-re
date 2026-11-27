@@ -750,8 +750,7 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(self.friends(B_AT)[0][7], kid)  # the friend's session
         accepted = self.send(live(mm.FRIEND_OP, friend_op_body(10, 6, A, 1, kid)), B_AT, 2.0)
         self.assertEqual(mm.PUSH_BODY.unpack_from(accepted[1][0], mm.ASKED - mm.TOKEN), (3, B, kid))
-        self.assertNotIn((A, B), self.server.invites)  # the answer's PUSH is what tells the inviter
-        self.assertEqual(self.friends()[0][5], mm.FRIEND_ONLINE)  # no accepted flag left to show
+        self.assertEqual(self.friends()[0][5], mm.FRIEND_ONLINE | mm.FRIEND_INVITE_ACCEPTED)
         self.assertEqual(self.done(self.one(live(mm.FRIEND_OP, friend_op_body(11, 6, A, 0, kid)), B_AT, 2.5,
                                               mm.DONE))[1], mm.E_INVALIDARG)  # answered once already
         self.assertEqual(self.done(self.one(live(mm.FRIEND_OP, friend_op_body(12, 5, B, kid=kid)), A_AT, 3.0,

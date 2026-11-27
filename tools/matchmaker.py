@@ -960,10 +960,12 @@ class Matchmaker:
             if (xuid, me.xuid) in self.requests:
                 flags |= FRIEND_RECEIVED_REQUEST
             invite = self.invites.get((me.xuid, xuid))
-            if invite is not None:
+            if invite is not None and invite.answer is None:
                 flags |= FRIEND_SENT_INVITE
+            elif invite is not None:
+                flags |= FRIEND_INVITE_ACCEPTED if invite.answer == 1 else FRIEND_INVITE_REJECTED
             invite = self.invites.get((xuid, me.xuid))
-            if invite is not None:
+            if invite is not None and invite.answer is None:
                 flags |= FRIEND_RECEIVED_INVITE
         kid = other.kid if other is not None and other.state & PRESENCE_SESSION else bytes(8)
         return (xuid, padded(other.gamertag if other is not None else b"", 16), flags,
@@ -1029,7 +1031,6 @@ class Matchmaker:
             invite.answer, invite.seen = answer, now
             self.dirty = True
             pushes = self.push(xuid, 3, me.xuid, invite.kid, now)
-            del self.invites[(xuid, me.xuid)]  # the push tells the inviter; an answered invite joins nothing
         else:
             return self.done(req, E_INVALIDARG, sender, nonce)
         return self.done(req, HRESULT_OK, sender, nonce) + pushes
@@ -1252,9 +1253,6 @@ class Matchmaker:
                 from_xuid, to_xuid = xuids(entry["from"], entry["to"])
             except BAD_ENTRY:
                 skipped += 1
-                continue
-            if invite.answer is not None:
-                self.dirty = True  # an answered invite is not kept; the store predates the clearing
                 continue
             self.invites[(from_xuid, to_xuid)] = invite
         for entry in entries("mutes"):

@@ -362,11 +362,11 @@ expires, another CONNECT makes a new pair and a new token.
 
 `FRIEND_OP` ops are 1 request, 2 answer a request, 3 remove, 4 game invite, 5
 revoke an invite and 6 answer an invite. A request in both directions makes
-friends at once. The friend flags from a row are the game's: online, playing,
-joinable, sent or received request, and sent or received invite; the game
-keeps its own accepted or rejected flag from the answer. An invite names the
-inviter's own session and is cleared when it is answered, revoked or its
-session ends; the answer's PUSH tells the inviter which way it went.
+friends at once. The friend flags are the game's: online, playing, joinable,
+sent or received request, sent or received invite, invite accepted or
+rejected. An invite names the inviter's own session and stays until it is
+revoked, expires or its session ends, so the inviter's list shows the answer;
+answering it tells the inviter which way it went.
 
 A Live mutelist has no request that adds a name in the game's API, so the
 server only serves what the store holds or a test sets: the game reads it at
@@ -427,8 +427,8 @@ there), 48 boards per account (the game's whole 0..47 board range), 256 board
 rankings cached (the oldest makes room), 16 feedback types per target, 64 stats per write and 64 per account
 and board (a full group-7 write is 61; the game reads back its
 62 entries, the last a rank the client makes from the row), 100 XUIDs per
-read, 100 leader rows. An unanswered invite lasts 10 minutes and an
-unanswered friend request a week. When the account table is full, a new
+read, 100 leader rows. An invite lasts 10 minutes and an unanswered friend
+request a week. When the account table is full, a new
 XUID drops the account that has been offline longest, those without stats or
 friends first, with everything that names it:
 friendships in both directions, pending requests and invites, stats rows,
@@ -463,7 +463,8 @@ Without `--store` everything is in memory and a restart forgets it. With
   loop-clock seconds, loads its accounts as heard now;
 - friends as pairs of XUIDs, and pending friend requests the same way plus
   when each was made;
-- invites still pending: session id, from, to and when it was made;
+- invites: session id, from, to, when it was made and the answer once there
+  is one;
 - each player's mute list, as pairs of XUIDs;
 - stats: board, XUID and its entries.
 
