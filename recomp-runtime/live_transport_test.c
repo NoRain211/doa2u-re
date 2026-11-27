@@ -349,7 +349,9 @@ static int read_relayed(SOCKET handle, uint8_t *packet, size_t capacity, struct 
 static bool parse_guest(const uint8_t *packet, size_t size, uint32_t *virtual_ina, uint16_t *port,
     const uint8_t **payload, size_t *payload_size)
 {
-    if (size < GUEST_HEADER || memcmp(packet, "D2GD", 4u) != 0 || (packet[4] != 1u && packet[4] != 2u)) return false;
+    if (size < GUEST_HEADER || memcmp(packet, "D2GD", 4u) != 0 ||
+        (packet[4] != 1u && packet[4] != 2u && packet[4] != 3u))
+        return false;
     parsed_kind = packet[4];
     *virtual_ina = (uint32_t)packet[5] << 24 | (uint32_t)packet[6] << 16 | (uint32_t)packet[7] << 8 | packet[8];
     memcpy(port, packet + 9u, 2u);
@@ -693,6 +695,60 @@ int main(void)
     while (read_socket(peer_socket, packet, sizeof packet, &source, 50u) > 0) { /* its answer */
     }
 
+    /* --- QoS probes on the direct path --- */
+    const uint64_t qos_t0 = netplay_now_ms() + 100u;
+    {
+        uint32_t qos_inas[2] = {ina_b, ina_f};
+        RecompLiveQosEntry qos[2];
+        bool qos_done = false;
+        check("qos starts", recomp_live_transport_qos_start(0u, qos_inas, 2u));
+        recomp_live_transport_pump(qos_t0);
+        check("qos probes are pending", recomp_live_transport_qos_results(0u, qos, 2u, &qos_done) == 2u &&
+            qos[0].state == RECOMP_LIVE_QOS_PENDING && !qos_done);
+        check("an address with no route is a no-reply entry", qos[1].state == RECOMP_LIVE_QOS_NO_REPLY &&
+            qos[1].probes_sent == 0u && qos[1].rtt_med_ms == 0xffffu);
+        for (unsigned i = 0u; i < 5u; ++i) {
+            if (i != 0u) recomp_live_transport_pump(qos_t0 + (uint64_t)i * 100u);
+            size = read_socket(peer_socket, packet, sizeof packet, &source, 1000u);
+            check("a qos probe reaches the peer", size > 0 && parse_guest(packet, (size_t)size, &from_ina,
+                &from_port, &payload, &payload_size) && parsed_kind == 3u && payload_size == 5u &&
+                payload[4] == 0u);
+            if (size <= 0) break;
+            uint8_t answer[5];
+            memcpy(answer, payload, sizeof answer);
+            answer[4] |= 1u;
+            size = (int)guest_wire(packet, ina_b, port_1000, answer, sizeof answer);
+            packet[4] = 3u;
+            send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+            recomp_live_transport_pump(qos_t0 + (uint64_t)i * 100u + 50u);
+        }
+        check("qos measures the direct path", recomp_live_transport_qos_results(0u, qos, 2u, &qos_done) == 2u &&
+            qos[0].state == RECOMP_LIVE_QOS_ANSWERED && qos_done && qos[0].probes_sent == 5u &&
+            qos[0].probes_received == 5u && qos[0].rtt_min_ms == 50u && qos[0].rtt_med_ms == 50u);
+        recomp_live_transport_qos_stop(0u);
+    }
+
+    /* A peer that never answers the probes (an older runner) keeps the
+       shipped figure, and no probe reaches the game as a datagram. */
+    {
+        uint32_t qos_ina = ina_b;
+        RecompLiveQosEntry qos;
+        bool qos_done = false;
+        check("qos fallback starts", recomp_live_transport_qos_start(0u, &qos_ina, 1u));
+        for (unsigned i = 0u; i < 5u; ++i) {
+            recomp_live_transport_pump(qos_t0 + (uint64_t)i * 100u);
+            (void)read_socket(peer_socket, packet, sizeof packet, &source, 1000u); /* the probe, unanswered */
+        }
+        check("an unanswered probe leaves the entry pending", recomp_live_transport_qos_results(0u, &qos, 1u,
+            &qos_done) == 1u && qos.state == RECOMP_LIVE_QOS_PENDING && !qos_done);
+        recomp_live_transport_pump(qos_t0 + 650u);
+        check("an old runner falls back to 50 ms", recomp_live_transport_qos_results(0u, &qos, 1u, &qos_done) ==
+            1u && qos.state == RECOMP_LIVE_QOS_FALLBACK && qos_done && qos.rtt_med_ms == 50u &&
+            qos.probes_sent == 5u && qos.probes_received == 0u);
+        check("no probe reaches the game", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
+        recomp_live_transport_qos_stop(0u);
+    }
+
     /* A punch with the other token must not move a path that already works. */
     size = (int)punch_wire(packet, ina_b, port_1000, SOCKET_NONCE);
     send_socket(intruder_socket, &client_endpoint, packet, (size_t)size);
@@ -802,6 +858,35 @@ int main(void)
         from_ina == ina_a && memcmp(payload, "back", 4u) == 0);
     check("the relay state follows the route", recomp_live_transport_relay(ina_c) &&
         !recomp_live_transport_relay(ina_b));
+
+    /* QoS probes ride the relay too, so a relayed fight's figure is the
+       relay's round trip rather than the shipped constant. */
+    {
+        uint32_t qos_inas[1] = {ina_c};
+        RecompLiveQosEntry qos;
+        bool qos_done = false;
+        const uint64_t relay_t0 = netplay_now_ms() + 100u;
+        check("relayed qos starts", recomp_live_transport_qos_start(0u, qos_inas, 1u));
+        for (unsigned i = 0u; i < 5u; ++i) {
+            recomp_live_transport_pump(relay_t0 + (uint64_t)i * 100u);
+            size = read_relayed(server_socket, packet, sizeof packet, &client_endpoint);
+            check("a qos probe is relayed", size > (int)MATCH_ASKED && parse_live_relay(packet, (size_t)size,
+                &destination, &from_ina, &from_port, &payload, &payload_size) && destination == ina_c &&
+                parsed_kind == 3u && payload_size == 5u);
+            if (size <= 0 || payload == NULL) break;
+            uint8_t answer[5];
+            memcpy(answer, payload, sizeof answer);
+            answer[4] |= 1u;
+            size = (int)guest_wire(packet + 512, ina_c, port_1000, answer, sizeof answer);
+            packet[512u + 4u] = 3u;
+            size = (int)match_relay(packet, nonce, packet + 512, (size_t)size);
+            send_socket(server_socket, &client_endpoint, packet, (size_t)size);
+            recomp_live_transport_pump(relay_t0 + (uint64_t)i * 100u + 50u);
+        }
+        check("relayed qos measures the relay", recomp_live_transport_qos_results(0u, &qos, 1u, &qos_done) ==
+            1u && qos.state == RECOMP_LIVE_QOS_ANSWERED && qos_done && qos.rtt_med_ms == 50u);
+        recomp_live_transport_qos_stop(0u);
+    }
 
     /* A rollback packet of 1,185 bytes is the largest the relay has to carry. */
     for (unsigned i = 0u; i < 1185u; ++i) data[i] = (uint8_t)(i * 7u);
@@ -940,6 +1025,23 @@ int main(void)
     check("a late goodbye is not handed to the game", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     check("no session without an opponent", !recomp_live_transport_bind_rollback(ina_b, NULL));
     check("no session without a net", !recomp_live_transport_bind_rollback(0u, &net));
+
+    /* A fight's packets have the link to themselves: a QoS lookup started
+       while the rollback session is bound settles at the shipped figure
+       without sending a probe. */
+    {
+        uint32_t qos_ina = ina_b;
+        RecompLiveQosEntry qos;
+        bool qos_done = false;
+        check("bind for the qos check", recomp_live_transport_bind_rollback(ina_b, &net));
+        check("qos starts in a fight", recomp_live_transport_qos_start(0u, &qos_ina, 1u));
+        recomp_live_transport_pump(netplay_now_ms() + 100u);
+        check("a fight sends no qos probe", read_socket(peer_socket, packet, sizeof packet, &source, 50u) < 0);
+        check("and settles at 50 ms", recomp_live_transport_qos_results(0u, &qos, 1u, &qos_done) == 1u &&
+            qos.state == RECOMP_LIVE_QOS_FALLBACK && qos_done && qos.probes_sent == 0u && qos.rtt_med_ms == 50u);
+        recomp_live_transport_qos_stop(0u);
+        recomp_live_transport_unbind_rollback();
+    }
 
     /* --- the guest's winsock and XNet thunks --- */
     check("closesocket", call(recomp_live_transport_lookup(0x00381024u), args, 1u) == 0u);
