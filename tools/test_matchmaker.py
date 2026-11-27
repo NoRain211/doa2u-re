@@ -880,11 +880,12 @@ class LiveTest(unittest.TestCase):
 
     def test_a_ranking_read_board_with_no_upload_reads_as_empty(self):
         self.online()
-        # Nothing writes 37, so it lists nothing and a pivot gets its empty row.
+        # Nothing writes 37, so it lists nothing; it is not a record board, so a
+        # pivot gets no empty row either.
         self.assertEqual([(row[0], row[3], row[4]) for row in self.leaders(req=78, now=1.0, board=37)],
                          [(78, 0, 0)])
-        self.assertEqual([(row[5], row[7], row[8]) for row in self.leaders(req=79, now=1.0, board=37, pivot=A)],
-                         [(A, 1, 0)])
+        self.assertEqual([(row[0], row[3], row[4]) for row in self.leaders(req=79, now=1.0, board=37, pivot=A)],
+                         [(79, 0, 0)])
         rows = self.stats(req=80, now=1.0, board=37, xuids=(A,))
         self.assertEqual((rows[0][5], rows[0][7], rows[0][8]), (A, 0, 0))
 
