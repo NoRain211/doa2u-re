@@ -141,8 +141,10 @@ game's own lockstep works.
 
 - No voice: the voice engine's stream creation fails and the game carries on.
 - QoS measures a paired peer's round trip and loss with the probes above, so
-  the session bars and the lockstep delay follow the real path. An old runner
-  that ignores probes keeps the shipped 50 ms. A search result has no route
+  the session bars and the lockstep delay follow the real path. The result's
+  sent and received probe counts carry the loss, but the game reads only the
+  median and the flags. An old runner that ignores probes keeps the shipped
+  50 ms. A search result has no route
   and the matchmaker carries no search-time QoS, so its entry is the
   console's no-reply (no bars, sorted last) until the matchmaker forwards a
   ping to a listed host ([matchmaking](matchmaking.md#not-done-yet)). The
