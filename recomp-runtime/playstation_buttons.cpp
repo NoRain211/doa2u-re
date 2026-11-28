@@ -260,6 +260,7 @@ bool recomp_playstation_buttons_image(uint64_t key, uint32_t width, uint32_t hei
     level.bytes.assign(static_cast<size_t>(width) * height * 4u, 0u);
     const unsigned count = static_cast<unsigned>(rule->second.size());
     const uint32_t cellWidth = width / count;
+    if (cellWidth == 0u) return false;
     for (unsigned i = 0u; i < count; ++i)
         drawCell(level.bytes, width, height, art[static_cast<size_t>(rule->second[i])], i * cellWidth, cellWidth);
     out = {};
