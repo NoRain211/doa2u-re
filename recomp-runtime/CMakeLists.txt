@@ -15,17 +15,19 @@ if(MINGW)
     add_link_options(-static)
 endif()
 
-# Official SDL3 VC build for the Windows input host; SDL3.dll is copied beside
-# each target that uses it. macOS and Linux render, play audio and read input
-# through SDL3 (docs/building.md).
+# SDL3 VC build for the Windows input host; SDL3.dll is copied beside each
+# target that uses it. It is the official 3.4.16 with the Direct3D 12
+# descriptor-heap patch (recomp-runtime/patches, NOTICE) in lib/x64/SDL3.dll;
+# use the official zip again once SDL fixes libsdl-org/SDL#16369. macOS and
+# Linux render, play audio and read input through SDL3 (docs/building.md).
 if(WIN32)
     if(POLICY CMP0135)
         cmake_policy(SET CMP0135 NEW)
     endif()
     include(FetchContent)
     FetchContent_Declare(SDL3
-        URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-devel-3.4.16-VC.zip
-        URL_HASH SHA256=1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de)
+        URL https://github.com/NoRain211/doa2u-re/releases/download/sdl3-3.4.16-d3d12-heapfix/SDL3-3.4.16-VC-d3d12-heapfix.zip
+        URL_HASH SHA256=2715ea901de8bbf6542f1b41d1651f18460d570f11146e58b94021a71f033cd5)
     FetchContent_MakeAvailable(SDL3)
     find_package(SDL3 3.4 CONFIG REQUIRED PATHS "${sdl3_SOURCE_DIR}/cmake" NO_DEFAULT_PATH)
     function(recomp_use_sdl3 target)

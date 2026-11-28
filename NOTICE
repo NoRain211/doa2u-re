@@ -54,6 +54,11 @@ atan2, log1p, expm1 and their helpers from musl 1.2.5; log2 from musl
 whose full text is in recomp-runtime/musl_math/COPYRIGHT. The files keep
 their fdlibm notices from Sun Microsystems.
 
+The Windows build's SDL3.dll is SDL 3.4.16 (zlib license, Copyright (C) 1997-2026
+Sam Lantinga and others) with recomp-runtime/patches/sdl-3.4.16-d3d12-descriptor-heaps.patch
+applied, which is hzqst/SDL commit 738690de4b295e782a5a9149b01441a2ba19c3f1. The
+patched package is the release sdl3-3.4.16-d3d12-heapfix of this repository.
+
 The macOS and Linux host layer (win32_compat, the POSIX fiber switch, the
 SDL3 audio output, the launchers and the SDL_GPU presenter's resource
 handling) adapts committed source from NoRain211/doa3-re (commit 48d05e9) and

@@ -23,6 +23,14 @@ Linux host layer comes from the sister projects
 [doaxbv-re](https://github.com/NoRain211/doaxbv-re) and
 [doa3-re](https://github.com/NoRain211/doa3-re).
 
+The Windows build fetches SDL3 3.4.16 from this repository's release
+`sdl3-3.4.16-d3d12-heapfix`, not from SDL's own zip. Only `lib/x64/SDL3.dll`
+differs: it carries `recomp-runtime/patches/sdl-3.4.16-d3d12-descriptor-heaps.patch`,
+which stops a frame with many samplers overflowing Direct3D 12's descriptor heap
+(libsdl-org/SDL#16369). To rebuild it, apply the patch to SDL's `release-3.4.16`
+source, build `SDL3-shared` in Release mode, and swap the DLL into the official
+`SDL3-devel-3.4.16-VC.zip`.
+
 The Renderer setting's D3D 12 choice starts that runner with
 `SDL_GPU_DRIVER=direct3d12`, which needs the two DXC DLLs beside it; its Vulkan
 choice stays on Vulkan whether or not they are present.
