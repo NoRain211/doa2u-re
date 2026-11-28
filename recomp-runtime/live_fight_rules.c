@@ -91,10 +91,10 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
         {0x0087d128u, 0x0087d208u}, /* demo: matrix rows */
         {0x0087d214u, 0x0087d224u}, {0x0087d228u, 0x0087d22cu}, /* g_view_half_cos_x */
         {0x0087d23au, 0x0087d23bu}, /* demo: g_match_winner_side */
-        {0x0087d320u, 0x0087d322u}, {0x0087d328u, 0x0087d32cu}, /* demo */
-        {0x0087d334u, 0x0087d33eu}, {0x0087d344u, 0x0087d35au}, /* demo */
+        {0x0087d320u, 0x0087d340u}, /* demo: four fighters' bone weight lists */
+        {0x0087d344u, 0x0087d35au}, /* demo */
         {0x0087d360u, 0x0087d3a0u}, /* the projection matrix */
-        {0x0087d3a4u, 0x0087d3a8u}, {0x0087d3b4u, 0x0087d3b5u}, /* demo */
+        {0x0087d3a4u, 0x0087d3a8u}, {0x0087d3b4u, 0x0087d3b6u}, /* demo */
         {0x0087d3f4u, 0x0087d3f8u},
         {0x0087d40bu, 0x0087d40cu}, {0x0087d413u, 0x0087d448u}, {0x0087d450u, 0x0087d480u}, /* demo */
         {0x0087d488u, 0x0087d48cu}, {0x0087d49eu, 0x0087d49fu}, /* demo */
