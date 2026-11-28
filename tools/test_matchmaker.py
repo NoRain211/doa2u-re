@@ -823,6 +823,32 @@ class LiveTest(unittest.TestCase):
         self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 2, A, ((0, 1, 9000),))), A_AT, 1.0)
         self.assertEqual(self.server.board_ranking(2), [(1, B), (2, A)])
 
+    def test_the_usage_boards_read_back_every_players_row_summed(self):
+        self.online()
+        self.server.wall = lambda: 1795775106.0  # 2026-11-27 10:25:06 UTC
+        # Picks of characters 0 and 1 (stats 0 and 1) and their wins (15 and 16),
+        # with the inverted date the game writes in -2; board 43 is every region.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 43, A,
+                                                 ((0, 1, 3), (15, 1, 2), (0xFFFE, 2, 7)))), A_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 43, B,
+                                                 ((0, 1, 1), (1, 1, 4), (16, 1, 1), (0xFFFE, 2, 9)))), B_AT, 0.0)
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 44, B, ((1, 1, 6),))), B_AT, 0.0)
+        def read(board, first=1):
+            (packet, _), = self.send(live(mm.LEADERS, leaders_body(self.next_request(), board, A, first, 10)),
+                                     A_AT, 1.0)
+            row = mm.STATROW_BODY.unpack_from(packet, mm.ASKED - mm.TOKEN)
+            base = mm.ASKED - mm.TOKEN + mm.STATROW_BODY.size
+            return row, {item[0]: item[1:] for item in
+                         (mm.STAT_ITEM.unpack_from(packet, base + i * mm.STAT_ITEM.size) for i in range(row[8]))}
+        row, stats = read(39)
+        self.assertEqual((row[3], row[4], row[5], row[7], row[8]), (1, 1, 0, 1, 32))  # one row, rank 1
+        self.assertEqual([stats[i] for i in (0, 1, 2, 15, 16)], [(1, 4), (1, 4), (1, 0), (1, 2), (1, 1)])
+        self.assertEqual(stats[30], (2, (2026 << 16 | 11 << 8 | 27) << 32 | 10 << 16 | 25))
+        self.assertEqual(stats[0xFFFE], (2, 20261127102506))  # newest first, as rank 1 must be
+        self.assertEqual(read(40)[1][1], (1, 6))  # NTSC-U sums its own board only
+        self.assertEqual(read(39, first=2)[0][3:5], (0, 1))  # no rank past 1
+        self.assertEqual(read(41)[0][3:5], (0, 0))  # nothing to sum is an empty board
+
     def test_a_player_with_no_record_reads_as_no_data(self):
         self.online()
         self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 1, B, ((1, 1, 5),))), B_AT, 0.0)

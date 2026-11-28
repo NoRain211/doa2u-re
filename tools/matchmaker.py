@@ -127,6 +127,14 @@ STAT_ITEM = struct.Struct(">HBq")  # stat id, type, value
 # Time Attack, the shortest victory and Survival), which the game reads its own
 # row from before it uploads a record.
 RECORD_BOARDS = frozenset({7, 8} | set(range(15, 31)))
+# The character usage and win rate pages (ranking subs 5 and 6 of group 0, 7
+# and 8 of group 1) read only rank 1 of boards 31-34 and 39-42
+# (live_ranking_page_decode_rows 0x2b6740). On Live an admin page summed every
+# player's row of 35-38 and 43-46 into them (live_ranking_page_update
+# 0x2b7110), so the server builds that row itself on each read.
+SUMMED_BOARDS = {31: 35, 32: 36, 33: 37, 34: 38, 39: 43, 40: 44, 41: 45, 42: 46}
+SUMMED_STATS = 30  # 0..14 the times each character was picked, 15..29 its wins
+STAT_DATE = 30  # the summed row's date, packed as (year<<16 | month<<8 | day)<<32 | hour<<16 | minute
 STAT_RATING = 0xFFFE  # -2, XONLINE_STAT_RATING: the score a board ranks by (ranking_write_stats_board 0x297e60)
 STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
 STATROW_BODY = struct.Struct(">IIBBIQ16sIB")  # request, hresult, index, total, board total, XUID, gamertag, rank, count
@@ -1129,6 +1137,8 @@ class Matchmaker:
         req, board, pivot, first, count = LEADERS_BODY.unpack(body)
         if self.online_at(sender, now) is None:
             return self.stat_rows(req, board, [], sender, nonce, E_ACCESSDENIED)
+        if board in SUMMED_BOARDS:
+            return [(header(STATROW) + nonce + self.summed_row(req, board, first), sender)]
         ranking, ranks = self.board_tally(board)
         if pivot != 0 and pivot not in ranks and board in RECORD_BOARDS:
             # A player with no row on a record board still gets their own empty
@@ -1144,6 +1154,31 @@ class Matchmaker:
             start = max(first, 1)
         rows = [xuid for _, xuid in ranking[start - 1:start - 1 + min(count, MAX_LEADERS)]]  # rank r is at r - 1
         return self.stat_rows(req, board, rows, sender, nonce)
+
+    def summed_row(self, req, board, first):
+        """Rank 1 of a summed board: each stat of every row on its source board
+        added up, dated now as the admin page dated its upload
+        (live_ranking_page_upload_own_row 0x2b6140). Every rank past 1 is empty."""
+        source = SUMMED_BOARDS[board]
+        totals = [0] * SUMMED_STATS
+        for xuid in self.stats_by_board.get(source, ()):
+            stats = self.stats.get((source, xuid), {})
+            if xuid not in self.accounts:
+                continue
+            for stat_id in range(SUMMED_STATS):
+                kind, value = stats.get(stat_id, (1, 0))
+                if kind == 1 and value > 0:
+                    totals[stat_id] += value
+        total = 1 if any(totals) else 0
+        if total == 0 or max(first, 1) != 1:
+            return STATROW_BODY.pack(req, HRESULT_OK, 0, 0, total, 0, padded(b"", 16), 0, 0)
+        when = time.gmtime(self.wall())
+        items = [(stat_id, 1, min(value, 0x7FFFFFFF)) for stat_id, value in enumerate(totals)]  # a LONG each
+        items.append((STAT_DATE, 2, (when.tm_year << 16 | when.tm_mon << 8 | when.tm_mday) << 32 |
+                      when.tm_hour << 16 | when.tm_min))
+        items.append((STAT_RATING, 2, int(time.strftime("%Y%m%d%H%M%S", when))))
+        body = STATROW_BODY.pack(req, HRESULT_OK, 0, 1, 1, 0, padded(b"", 16), 1, len(items))
+        return body + b"".join(STAT_ITEM.pack(*item) for item in items)
 
     # --store: accounts and what outlives the process, in one JSON file.
 
