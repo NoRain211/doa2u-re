@@ -96,7 +96,15 @@ replaces them at the API boundary, like the D3D8 and DirectSound adapters:
   that player again, so a host whose game restarted elsewhere is found anew;
   a quiet player the game is not sending to is left alone. An introduction
   the game did not ask for never takes the slot of a player heard in the
-  last 10 s.
+  last 10 s. The same socket carries the QoS probes: `XNetQosLookup` starts
+  a request per guest handle, and the transport sends five small `D2GD`
+  probes on the peer's own route (direct or relay). The other runner answers
+  them without passing them to its game, so the minimum and median round
+  trip and the sent/received counts are measured on the path a fight would
+  use. A peer that does not answer (an older runner, or one still opening
+  its path) keeps the shipped 50 ms, as does a search result; a peer
+  forgotten mid-request is the console's no-reply entry. Probes are at most one per 100 ms and are not
+  sent while a rollback session is bound.
 - The guest's `recvfrom` passes only datagrams shaped as the game's own
   senders build them (`recomp_live_game_datagram_ok`): each type's exact
   length, at most 8 players in a list, names that end inside their fields,
@@ -132,8 +140,19 @@ game's own lockstep works.
 ## Limits
 
 - No voice: the voice engine's stream creation fails and the game carries on.
-- QoS reports a fixed 50 ms round trip, which gives the game's shipped
-  lockstep delay; a measured one needs a backend call.
+- QoS measures a paired peer's round trip and loss with the probes above, so
+  the session bars and the lockstep delay follow the real path. The result's
+  sent and received probe counts carry the loss, but the game reads only the
+  median and the flags. An old runner that ignores probes keeps the shipped
+  50 ms. A search result has no route and the matchmaker carries no
+  search-time QoS, so it also shows the shipped 50 ms (three bars) until the
+  matchmaker forwards a ping to a listed host
+  ([matchmaking](matchmaking.md#not-done-yet)). The
+  game turns the median into its own delay batches and clamps them to 2..7:
+  50 ms gives the shipped 3, 20 ms gives 2, and 167 ms or more gives 7, so a
+  measurement never needs another clamp here. Rollback replaces the fight's
+  lockstep, and no probe is sent while it runs, so the measured delay only
+  paces the menus around a fight.
 - Stat writes for an opponent are not tied to a played match: the client
   CONNECTs back to anyone the matchmaker introduces, so whoever CONNECTs to a
   host may write that host's stats for six hours. Each player writes their own

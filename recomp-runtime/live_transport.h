@@ -69,6 +69,36 @@ void recomp_live_transport_set_local(uint32_t virtual_ina);
    connects); receive returns the size, or -1 when none is queued. */
 int recomp_live_transport_guest_send(uint32_t virtual_ina, uint16_t port, const uint8_t *data, size_t size);
 int recomp_live_transport_guest_receive(uint8_t *data, size_t capacity, uint32_t *virtual_ina, uint16_t *port);
+
+/* QoS: the game's XNetQosLookup on the same socket. live_xapi.c starts one
+   request per guest handle (slot 0..RECOMP_LIVE_QOS_SLOTS-1); the transport
+   probes each address's peer on the route its game datagrams use, so a
+   direct pairing measures the direct path and a relayed one the relay. A
+   peer's runner that predates the probes ignores them, and the entry falls
+   back to the shipped 50 ms, as does an address never paired (a search
+   result). A peer forgotten mid-request is the console's no-reply entry
+   (complete, wRtt 0xffff). */
+enum { RECOMP_LIVE_QOS_SLOTS = 8, RECOMP_LIVE_QOS_PROBES = 5 };
+typedef enum RecompLiveQosState {
+    RECOMP_LIVE_QOS_PENDING = 0,
+    RECOMP_LIVE_QOS_ANSWERED = 1, /* the peer's runner answered the probes */
+    RECOMP_LIVE_QOS_NO_REPLY = 2, /* the peer was forgotten mid-request */
+    RECOMP_LIVE_QOS_FALLBACK = 3, /* no answer, or never paired: the 50 ms default */
+} RecompLiveQosState;
+typedef struct RecompLiveQosEntry {
+    uint16_t rtt_min_ms;      /* 0 until the entry settles */
+    uint16_t rtt_med_ms;
+    uint16_t probes_sent;
+    uint16_t probes_received;
+    uint8_t state;            /* RecompLiveQosState */
+} RecompLiveQosEntry;
+/* Starts (or restarts) one request; false when the slot or count is bad. */
+bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas, uint32_t count);
+/* Copies what is known so far; returns the entries written and reports
+   whether every entry has settled. */
+uint32_t recomp_live_transport_qos_results(unsigned slot, RecompLiveQosEntry *out, uint32_t capacity,
+    bool *done);
+void recomp_live_transport_qos_stop(unsigned slot);
 /* Whether a datagram is shaped as the game's own senders build it; the
    guest's recvfrom drops any other, since the game's handlers trust them. */
 bool recomp_live_game_datagram_ok(const uint8_t *datagram, size_t size);

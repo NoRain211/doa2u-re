@@ -494,6 +494,14 @@ after it began. An address in place of a name needs no lookup.
 
 ## Not done yet
 
+- A search result carries no round-trip figure, and the matchmaker reveals no
+  endpoint before CONNECT, so a runner cannot measure a listed host's
+  latency. The game still asks for it, so each search entry reports the
+  shipped 50 ms (three bars); empty bars on every host would read as a bad
+  line rather than an unknown one. Measuring it needs a matchmaker kind that forwards a small ping to
+  the listed host and its answer back; the host would then learn the
+  searcher's endpoint, as it already does on CONNECT, unless the server
+  measures the round trip itself and puts it in RESULT.
 - The default server is one small VM. While it is down, a client cannot log
   on or list sessions, and its requests fail after 5 s.
 - Punching has only been tested on one machine, not through real routers.

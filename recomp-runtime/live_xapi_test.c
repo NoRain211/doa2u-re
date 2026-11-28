@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "live_xapi.h"
 #include "live_backend.h"
+#include "live_transport.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +48,11 @@ enum {
     LEADER_STATS = 0x6b00,
     DEST = 0x6c00,
     GROUP7_LEADER_STATS = 0x7000, /* 62 row entries of 16 bytes */
+    /* XNetQosLookup's XNADDR *apxna[]: three pointers, then the XNADDRs. */
+    QOS_XNADDRS = 0x7800,
+    QOS_XNADDR_1 = 0x7900,
+    QOS_XNADDR_2 = 0x7940,
+    QOS_XNADDR_3 = 0x7980,
     GUEST_BYTES = 0x800000,
     HEAP_START = 0x600000,
     PROFILE_XUID = 0x007ef8e0u + 0xabe8u,
@@ -127,6 +133,53 @@ RecompFunction recomp_live_transport_lookup(uint32_t guest_address)
         transport_calls[transport_count] = guest_address;
     ++transport_count;
     return transport_stub;
+}
+
+/* The transport's QoS probes, stood in for here: the guest-side copy and the
+   pending countdown are what this test checks, and the transport's own test
+   drives the wire. Every start reports the shipped 50 ms unless a test asks
+   for pending entries and sets their results. */
+static RecompLiveQosEntry qos_stub_entries[RECOMP_LIVE_MAX_RESULTS];
+static uint32_t qos_stub_addresses[RECOMP_LIVE_MAX_RESULTS];
+static uint32_t qos_stub_count;
+static bool qos_stub_pending_start;
+static unsigned qos_starts;
+static unsigned qos_stops;
+
+bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas, uint32_t count)
+{
+    (void)slot;
+    ++qos_starts;
+    qos_stub_count = count < RECOMP_LIVE_MAX_RESULTS ? count : RECOMP_LIVE_MAX_RESULTS;
+    for (uint32_t i = 0u; i < qos_stub_count; ++i) {
+        qos_stub_addresses[i] = virtual_inas != NULL ? virtual_inas[i] : 0u;
+        memset(&qos_stub_entries[i], 0, sizeof qos_stub_entries[i]);
+        qos_stub_entries[i].state = qos_stub_pending_start ? RECOMP_LIVE_QOS_PENDING
+                                                           : RECOMP_LIVE_QOS_ANSWERED;
+        qos_stub_entries[i].rtt_min_ms = 50u;
+        qos_stub_entries[i].rtt_med_ms = 50u;
+    }
+    qos_stub_pending_start = false;
+    return true;
+}
+
+uint32_t recomp_live_transport_qos_results(unsigned slot, RecompLiveQosEntry *out, uint32_t capacity, bool *done)
+{
+    (void)slot;
+    const uint32_t count = qos_stub_count < capacity ? qos_stub_count : capacity;
+    bool settled = true;
+    for (uint32_t i = 0u; i < qos_stub_count; ++i) {
+        if (qos_stub_entries[i].state == RECOMP_LIVE_QOS_PENDING) settled = false;
+        if (i < count) out[i] = qos_stub_entries[i];
+    }
+    if (done != NULL) *done = settled;
+    return count;
+}
+
+void recomp_live_transport_qos_stop(unsigned slot)
+{
+    (void)slot;
+    ++qos_stops;
 }
 
 /* The transport's peer table, which a logoff forgets. */
@@ -954,6 +1007,63 @@ int main(void)
         (guest[qos2 + 8u] & 1u) == 1u && (guest[qos2 + 8u + 0x18u] & 1u) == 1u &&
         (guest[qos2 + 8u + 2u * 0x18u] & 1u) == 0u);
     check("qos release 2", call1(thunk_qos_release, qos2) == 0u);
+
+    /* A measured lookup: the addresses reach the transport, the guest polls
+       the pending count, and each XNQOSINFO carries the probe counts and the
+       min/median the transport reported. */
+    const uint32_t qos_ina[3] = {0x0a000011u, 0x0a000012u, 0x0a000013u};
+    poke32(QOS_XNADDRS, QOS_XNADDR_1);
+    poke32(QOS_XNADDRS + 4u, QOS_XNADDR_2);
+    poke32(QOS_XNADDRS + 8u, QOS_XNADDR_3);
+    poke32(QOS_XNADDR_1, qos_ina[0]);
+    poke32(QOS_XNADDR_1 + 4u, qos_ina[0]);
+    poke32(QOS_XNADDR_2, qos_ina[1]);
+    poke32(QOS_XNADDR_2 + 4u, qos_ina[1]);
+    poke32(QOS_XNADDR_3, qos_ina[2]);
+    poke32(QOS_XNADDR_3 + 4u, qos_ina[2]);
+    qos_stub_pending_start = true;
+    const unsigned qos_starts_before = qos_starts;
+    qos_args[0] = 3u;
+    qos_args[1] = QOS_XNADDRS;
+    check("measured qos lookup", call(thunk_qos_lookup, qos_args, 12u) == 0u);
+    const uint32_t qos_measured = peek32(OUT + 0x100u);
+    check("qos addresses reach the transport", qos_starts == qos_starts_before + 1u &&
+        qos_stub_addresses[0] == qos_ina[0] && qos_stub_addresses[1] == qos_ina[1] &&
+        qos_stub_addresses[2] == qos_ina[2]);
+    check("qos starts with every entry pending", qos_measured != 0u && peek32(qos_measured) == 3u &&
+        peek32(qos_measured + 4u) == 3u && (guest[qos_measured + 8u] & 1u) == 0u &&
+        (guest[qos_measured + 8u + 2u * 0x18u] & 1u) == 0u);
+
+    /* One answer arrives: the pending count falls, and that entry is ready
+       with the contact flag, the probe counts and its min/median. */
+    memset(&qos_stub_entries[0], 0, sizeof qos_stub_entries[0]);
+    qos_stub_entries[0].state = RECOMP_LIVE_QOS_ANSWERED;
+    qos_stub_entries[0].rtt_min_ms = 73u;
+    qos_stub_entries[0].rtt_med_ms = 119u;
+    qos_stub_entries[0].probes_sent = 5u;
+    qos_stub_entries[0].probes_received = 4u;
+    recomp_live_pump(1000u);
+    const uint32_t qos_entry0 = qos_measured + 8u;
+    check("one qos entry answers", peek32(qos_measured + 4u) == 2u && guest[qos_entry0] == 3u &&
+        peek16(qos_entry0 + 2u) == 5u && peek16(qos_entry0 + 4u) == 4u &&
+        peek16(qos_entry0 + 0x0cu) == 73u && peek16(qos_entry0 + 0x0eu) == 119u);
+
+    /* An old runner falls back to 50 ms; an address with no route is the
+       console's no-reply entry, which the game sorts last and draws no bars
+       for. Both are complete, so the search stops waiting. */
+    memset(&qos_stub_entries[1], 0, sizeof qos_stub_entries[1]);
+    qos_stub_entries[1].state = RECOMP_LIVE_QOS_FALLBACK;
+    qos_stub_entries[1].probes_sent = 5u;
+    memset(&qos_stub_entries[2], 0, sizeof qos_stub_entries[2]);
+    qos_stub_entries[2].state = RECOMP_LIVE_QOS_NO_REPLY;
+    recomp_live_pump(1016u);
+    const uint32_t qos_entry1 = qos_measured + 8u + 0x18u;
+    const uint32_t qos_entry2 = qos_measured + 8u + 2u * 0x18u;
+    check("an old runner is complete at 50 ms", peek32(qos_measured + 4u) == 0u && guest[qos_entry1] == 1u &&
+        peek16(qos_entry1 + 2u) == 5u && peek16(qos_entry1 + 0x0eu) == 50u);
+    check("a no-reply entry is complete with no RTT", guest[qos_entry2] == 1u &&
+        peek16(qos_entry2 + 0x0eu) == 0xffffu);
+    check("qos measured handle releases", call1(thunk_qos_release, qos_measured) == 0u && qos_stops != 0u);
 
     /* --- XNet identity, link and startup --- */
     check("link up", call0(thunk_link_status) == 0x0bu);

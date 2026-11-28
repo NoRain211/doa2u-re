@@ -72,6 +72,21 @@ enum {
     /* The matchmaker's cap: a Live request is at most this long, and a relay's
        whole packet at most MATCH_ASKED more, tools/matchmaker.py. */
     LIVE_MATCH_BYTES = 1200,
+
+    /* QoS probes on the peer routes. The game asks for 8 probes per address
+       but only reads the median; 5 at 100 ms settle inside 650 ms and leave
+       the fight-start wait short. Two answers are the least a median can be
+       trusted from; fewer fall back to the shipped 50 ms. A peer that is
+       introduced but still punching gets this long to open a path first. */
+    LIVE_QOS_PROBES = 5,
+    LIVE_QOS_PROBE_MS = 100u,
+    LIVE_QOS_WINDOW_MS = 650u,
+    LIVE_QOS_PATH_MS = 1500u,
+    LIVE_QOS_MIN_REPLIES = 2u,
+    LIVE_QOS_BODY_BYTES = 5u, /* tag u16, entry, sequence, flags */
+    LIVE_QOS_RTT_MAX_MS = 1000u,
+    LIVE_QOS_FALLBACK_RTT_MS = 50u,
+    LIVE_QOS_NO_REPLY_RTT_MS = 0xffffu,
 };
 
 /* The guest's datagram: magic, kind, the sender's virtual address and port
@@ -82,6 +97,7 @@ static const uint8_t GUEST_MAGIC[4] = {'D', '2', 'G', 'D'};
 enum {
     GUEST_VERSION = 1u, /* a game datagram */
     GUEST_PUNCH = 2u,
+    GUEST_QOS = 3u,     /* a QoS probe or its answer; never reaches the game */
     GUEST_HEADER = 4u + 1u + 4u + 2u,
     /* The largest guest datagram the relay can carry: the server allows a
        whole request of LIVE_MATCH_BYTES, and the addressee and this header
@@ -123,6 +139,32 @@ typedef struct LiveRollbackPacket {
     uint16_t size;
     uint8_t data[RECOMP_NETPLAY_MAX_PACKET];
 } LiveRollbackPacket;
+
+/* One address of a QoS request. The probes go out as GUEST_QOS on the route
+   the peer already uses for the game, so the answer measures that path. */
+typedef struct LiveQosPeer {
+    uint32_t virtual_ina;
+    uint8_t state;    /* RecompLiveQosState */
+    uint8_t sent;     /* probes sent, at most LIVE_QOS_PROBES */
+    uint8_t received;
+    uint8_t answered; /* a bit per probe sequence that came back */
+    uint16_t rtt[LIVE_QOS_PROBES];
+    uint64_t sent_ms[LIVE_QOS_PROBES];
+    uint64_t next_ms;
+    uint64_t path_ms;     /* a peer with no route is given up here */
+    uint64_t deadline_ms; /* the window closes here once probing starts */
+    bool started;
+    bool paired;          /* a peer existed at the start: losing it is a no-reply */
+    uint16_t rtt_min_ms;
+    uint16_t rtt_med_ms;
+} LiveQosPeer;
+
+typedef struct LiveQosRequest {
+    bool used;
+    uint16_t tag; /* matches a probe's answer to this request */
+    uint16_t count;
+    LiveQosPeer peers[RECOMP_LIVE_MAX_RESULTS];
+} LiveQosRequest;
 
 /* One other player: where the matchmaker said it is, and how it answers. */
 typedef struct LivePeer {
@@ -204,6 +246,12 @@ static struct {
     uint16_t rollback_head;
     uint16_t rollback_count;
     LiveRollbackPacket rollback[LIVE_ROLLBACK_QUEUE];
+    /* QoS probes, one request per guest handle. clock_ms is the pump's now,
+       which stamps each probe and its answer so a reply's RTT is the time
+       between them even when a caller drives the pump with its own clock. */
+    uint64_t clock_ms;
+    uint16_t qos_tag;
+    LiveQosRequest qos[RECOMP_LIVE_QOS_SLOTS];
 } live;
 
 /* The session frame being run, or UINT32_MAX outside a Live fight. Replaying
@@ -307,13 +355,13 @@ static void put_ina(uint8_t *at, uint32_t virtual_ina)
 }
 
 /* Sends one guest datagram to one endpoint. */
-static void send_wire(uint32_t address, uint16_t port, uint32_t virtual_ina, uint16_t guest_port,
+static void send_wire(uint32_t address, uint16_t port, uint32_t virtual_ina, uint16_t guest_port, uint8_t kind,
     const uint8_t *data, size_t size)
 {
     uint8_t packet[GUEST_HEADER + LIVE_GUEST_BYTES];
     if (size > LIVE_GUEST_BYTES) return;
     memcpy(packet, GUEST_MAGIC, sizeof GUEST_MAGIC);
-    packet[4] = GUEST_VERSION;
+    packet[4] = kind;
     put_ina(packet + 5u, virtual_ina);
     memcpy(packet + 9u, &guest_port, 2u);
     if (size != 0u) memcpy(packet + GUEST_HEADER, data, size);
@@ -366,16 +414,21 @@ static void send_relay(uint32_t destination_ina, uint16_t guest_port, uint8_t ki
         MATCH_ASKED + 4u + GUEST_HEADER + size);
 }
 
-static void peer_send(LivePeer *peer, uint16_t port, const uint8_t *data, size_t size)
+static void peer_send_kind(LivePeer *peer, uint16_t port, uint8_t kind, const uint8_t *data, size_t size)
 {
     if (peer == NULL || !peer->introduced) return;
     peer->last_ms = netplay_now_ms();
     if (peer->relay) {
-        send_relay(peer->virtual_ina, port, GUEST_VERSION, data, size);
+        send_relay(peer->virtual_ina, port, kind, data, size);
         return;
     }
-    if (peer->connected) send_wire(peer->address_now, peer->port_now, live.local_ina, port, data, size);
+    if (peer->connected) send_wire(peer->address_now, peer->port_now, live.local_ina, port, kind, data, size);
     /* No path yet: the callers queue, and the punch above opens one. */
+}
+
+static void peer_send(LivePeer *peer, uint16_t port, const uint8_t *data, size_t size)
+{
+    peer_send_kind(peer, port, GUEST_VERSION, data, size);
 }
 
 static void peer_queue(LivePeer *peer, uint16_t port, const uint8_t *data, size_t size)
@@ -412,6 +465,69 @@ static void peer_relay_on(LivePeer *peer, const char *why)
        sending on a direct path this side never proved. */
     send_relay(peer->virtual_ina, live.guest_port, GUEST_PUNCH, peer->token, RECOMP_NETPLAY_TOKEN_BYTES);
     peer_flush(peer);
+}
+
+/* --- QoS probes ---
+   A probe's body is the tag (u16, little endian), the entry in the guest's
+   handle, the probe's sequence and a flags byte. A probe answers on the route
+   it came by, echoing those bytes; the sender times the round trip from the
+   pump's clock. The body never reaches the game. */
+
+static void qos_finish(LiveQosPeer *entry, uint8_t state)
+{
+    entry->state = state;
+    if (state == RECOMP_LIVE_QOS_ANSWERED) {
+        uint16_t sorted[LIVE_QOS_PROBES];
+        const unsigned count = entry->received;
+        memcpy(sorted, entry->rtt, count * sizeof *sorted);
+        for (unsigned i = 1u; i < count; ++i) { /* a handful: insertion sort */
+            const uint16_t value = sorted[i];
+            unsigned j = i;
+            while (j != 0u && sorted[j - 1u] > value) {
+                sorted[j] = sorted[j - 1u];
+                --j;
+            }
+            sorted[j] = value;
+        }
+        entry->rtt_min_ms = sorted[0];
+        entry->rtt_med_ms = sorted[count / 2u];
+    } else if (state == RECOMP_LIVE_QOS_FALLBACK) {
+        entry->rtt_min_ms = entry->rtt_med_ms = LIVE_QOS_FALLBACK_RTT_MS;
+    } else if (state == RECOMP_LIVE_QOS_NO_REPLY) {
+        entry->rtt_min_ms = entry->rtt_med_ms = LIVE_QOS_NO_REPLY_RTT_MS;
+    }
+}
+
+/* An answer finds its request by the tag it echoes, then the entry by its
+   index, and only from the peer that entry names. A probe is answered on the
+   path it arrived by; an old runner never sends one and never answers. */
+static void qos_packet(LivePeer *peer, const uint8_t *body)
+{
+    const uint16_t tag = (uint16_t)(body[0] | (uint16_t)body[1] << 8);
+    const unsigned index = body[2];
+    const unsigned sequence = body[3];
+    if ((body[4] & 1u) == 0u) {
+        uint8_t reply[LIVE_QOS_BODY_BYTES];
+        memcpy(reply, body, sizeof reply);
+        reply[4] |= 1u;
+        peer_send_kind(peer, live.guest_port, GUEST_QOS, reply, sizeof reply);
+        return;
+    }
+    for (unsigned i = 0u; i < RECOMP_LIVE_QOS_SLOTS; ++i) {
+        LiveQosRequest *request = &live.qos[i];
+        if (!request->used || request->tag != tag || index >= request->count) continue;
+        LiveQosPeer *entry = &request->peers[index];
+        if (entry->virtual_ina != peer->virtual_ina || entry->state != RECOMP_LIVE_QOS_PENDING) return;
+        if (sequence >= LIVE_QOS_PROBES || sequence >= entry->sent ||
+            (entry->answered & (1u << sequence)) != 0u)
+            return;
+        entry->answered |= (uint8_t)(1u << sequence);
+        uint64_t rtt = live.clock_ms > entry->sent_ms[sequence] ? live.clock_ms - entry->sent_ms[sequence] : 0u;
+        if (rtt < 1u) rtt = 1u;
+        if (rtt > LIVE_QOS_RTT_MAX_MS) rtt = LIVE_QOS_RTT_MAX_MS;
+        entry->rtt[entry->received++] = (uint16_t)rtt;
+        return;
+    }
 }
 
 /* The first datagram to an address without a route asks the backend to pair
@@ -483,7 +599,7 @@ static void queue_rollback(uint32_t virtual_ina, uint16_t port, const uint8_t *d
 static void peer_packet(const uint8_t *raw, size_t size, const struct sockaddr_in *from, bool relayed)
 {
     if (size < GUEST_HEADER || memcmp(raw, GUEST_MAGIC, sizeof GUEST_MAGIC) != 0 ||
-        (raw[4] != GUEST_VERSION && raw[4] != GUEST_PUNCH))
+        (raw[4] != GUEST_VERSION && raw[4] != GUEST_PUNCH && raw[4] != GUEST_QOS))
         return;
     uint32_t virtual_ina = (uint32_t)raw[5] << 24 | (uint32_t)raw[6] << 16 | (uint32_t)raw[7] << 8 | raw[8];
     uint16_t port;
@@ -493,6 +609,22 @@ static void peer_packet(const uint8_t *raw, size_t size, const struct sockaddr_i
     if (peer == NULL || !peer->introduced) return;
     const uint8_t *payload = raw + GUEST_HEADER;
     const size_t payload_size = size - GUEST_HEADER;
+    if (raw[4] == GUEST_QOS) {
+        /* A probe needs the path a punch made, or the server's relay; like a
+           game datagram, it must not come from anywhere else. */
+        if (payload_size != LIVE_QOS_BODY_BYTES) return;
+        if (relayed) {
+            peer_heard(peer);
+            peer_relay_on(peer, "the other player relays");
+        } else if (from == NULL || !peer->connected || peer->address_now != from->sin_addr.s_addr ||
+            peer->port_now != from->sin_port) {
+            return;
+        } else {
+            peer_heard(peer);
+        }
+        qos_packet(peer, payload);
+        return;
+    }
     if (raw[4] == GUEST_PUNCH) {
         if (relayed) {
             /* The relayed punch a switch to the relay sends. The server
@@ -641,12 +773,153 @@ static void peer_tick(LivePeer *peer, uint64_t now)
         if (peer->port[i] != 0u) send_punch(peer->address[i], peer->port[i], peer->token, false);
 }
 
+/* Sends this request's next probe, at most one per pump so a late frame
+   cannot make the probes a burst. */
+static void qos_probe(LiveQosRequest *request, LiveQosPeer *entry, LivePeer *peer, unsigned index, uint64_t now)
+{
+    uint8_t body[LIVE_QOS_BODY_BYTES];
+    const unsigned sequence = entry->sent;
+    body[0] = (uint8_t)request->tag;
+    body[1] = (uint8_t)(request->tag >> 8);
+    body[2] = (uint8_t)index;
+    body[3] = (uint8_t)sequence;
+    body[4] = 0u; /* a probe, not an answer */
+    entry->sent_ms[sequence] = now;
+    ++entry->sent;
+    entry->next_ms = now + LIVE_QOS_PROBE_MS;
+    peer_send_kind(peer, live.guest_port, GUEST_QOS, body, sizeof body);
+}
+
+/* Advances every pending entry: waits for a route, sends the probes, and
+   settles an entry once all were sent and two came back or the window shut. */
+static void qos_tick(uint64_t now)
+{
+    for (unsigned i = 0u; i < RECOMP_LIVE_QOS_SLOTS; ++i) {
+        LiveQosRequest *request = &live.qos[i];
+        if (!request->used) continue;
+        for (unsigned e = 0u; e < request->count; ++e) {
+            LiveQosPeer *entry = &request->peers[e];
+            if (entry->state != RECOMP_LIVE_QOS_PENDING) continue;
+            /* A zero address is a caller's placeholder (the local slot); it
+               keeps the shipped figure rather than a no-reply entry. */
+            if (entry->virtual_ina == 0u) {
+                qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
+                continue;
+            }
+            LivePeer *peer = peer_find(entry->virtual_ina);
+            const bool path = peer != NULL && peer->introduced && (peer->relay || peer->connected);
+            if (!entry->started) {
+                /* Never paired with this runner: a search result. Empty bars on
+                   every listed host would read as a bad line, not an unknown one.
+                   A peer forgotten since the start has left. */
+                if (peer == NULL) {
+                    qos_finish(entry, entry->paired ? RECOMP_LIVE_QOS_NO_REPLY : RECOMP_LIVE_QOS_FALLBACK);
+                    continue;
+                }
+                if (entry->path_ms == 0u) entry->path_ms = now + LIVE_QOS_PATH_MS;
+                if (path) {
+                    entry->started = true;
+                    entry->next_ms = now;
+                    entry->deadline_ms = now + LIVE_QOS_WINDOW_MS;
+                } else if (now >= entry->path_ms) {
+                    qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
+                    continue;
+                } else {
+                    continue; /* still punching, or waiting for the relay */
+                }
+            }
+            if (entry->sent < LIVE_QOS_PROBES) {
+                /* A fight's rollback traffic has the link to itself; the game
+                   asks for QoS before the session starts. */
+                if (live.rollback_bound) {
+                    qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
+                    continue;
+                }
+                if (peer == NULL) { /* forgotten mid-request: nothing to probe */
+                    qos_finish(entry, RECOMP_LIVE_QOS_NO_REPLY);
+                    continue;
+                }
+                if (now >= entry->next_ms) qos_probe(request, entry, peer, e, now);
+                continue;
+            }
+            /* Every probe answered: the counts are final. Otherwise wait for
+               the window to pass, so a slow last answer is not counted as
+               loss, and even then one answer is not a median. */
+            if (entry->received == entry->sent) {
+                qos_finish(entry, RECOMP_LIVE_QOS_ANSWERED);
+            } else if (now >= entry->deadline_ms) {
+                qos_finish(entry, entry->received >= LIVE_QOS_MIN_REPLIES ? RECOMP_LIVE_QOS_ANSWERED
+                                                                          : RECOMP_LIVE_QOS_FALLBACK);
+            }
+        }
+    }
+}
+
+bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas, uint32_t count)
+{
+    /* Only the pump advances a request, and it runs while the socket is up;
+       a closed transport keeps the shipped figure instead of pending forever. */
+    if (!live.open || slot >= RECOMP_LIVE_QOS_SLOTS || count > RECOMP_LIVE_MAX_RESULTS ||
+        (count != 0u && virtual_inas == NULL))
+        return false;
+    LiveQosRequest *request = &live.qos[slot];
+    memset(request, 0, sizeof *request);
+    /* A tag only has to tell this request's answers from another's while both
+       are in flight, so skip any tag an active request already holds. */
+    for (;;) {
+        ++live.qos_tag;
+        if (live.qos_tag == 0u) continue;
+        bool taken = false;
+        for (unsigned i = 0u; i < RECOMP_LIVE_QOS_SLOTS; ++i)
+            taken = taken || (live.qos[i].used && live.qos[i].tag == live.qos_tag);
+        if (!taken) break;
+    }
+    request->tag = live.qos_tag;
+    request->count = (uint16_t)count;
+    request->used = true;
+    for (unsigned i = 0u; i < count; ++i) {
+        request->peers[i].virtual_ina = virtual_inas[i];
+        request->peers[i].state = RECOMP_LIVE_QOS_PENDING;
+        request->peers[i].paired = virtual_inas[i] != 0u && peer_find(virtual_inas[i]) != NULL;
+    }
+    return true;
+}
+
+uint32_t recomp_live_transport_qos_results(unsigned slot, RecompLiveQosEntry *out, uint32_t capacity, bool *done)
+{
+    if (done != NULL) *done = true;
+    if (slot >= RECOMP_LIVE_QOS_SLOTS || out == NULL) return 0u;
+    const LiveQosRequest *request = &live.qos[slot];
+    if (!request->used) return 0u;
+    const uint32_t count = request->count < capacity ? request->count : capacity;
+    bool settled = true;
+    for (unsigned i = 0u; i < request->count; ++i) {
+        const LiveQosPeer *entry = &request->peers[i];
+        if (entry->state == RECOMP_LIVE_QOS_PENDING) settled = false;
+        if (i >= count) continue;
+        out[i].rtt_min_ms = entry->rtt_min_ms;
+        out[i].rtt_med_ms = entry->rtt_med_ms;
+        out[i].probes_sent = entry->sent;
+        out[i].probes_received = entry->received;
+        out[i].state = entry->state;
+    }
+    if (done != NULL) *done = settled;
+    return count;
+}
+
+void recomp_live_transport_qos_stop(unsigned slot)
+{
+    if (slot < RECOMP_LIVE_QOS_SLOTS) memset(&live.qos[slot], 0, sizeof live.qos[slot]);
+}
+
 void recomp_live_transport_pump(uint64_t now_ms)
 {
     if (!live.open) return;
+    live.clock_ms = now_ms;
     receive_all();
     for (unsigned i = 0u; i < LIVE_PEERS; ++i)
         if (live.peers[i].used) peer_tick(&live.peers[i], now_ms);
+    qos_tick(now_ms);
 }
 
 bool recomp_live_transport_open(const char *server_host, uint16_t server_port)

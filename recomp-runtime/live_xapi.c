@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "live_xapi.h"
 #include "live_backend.h"
+#include "live_transport.h"
 #include "kernel_abi.h"
 
 #include <stdbool.h>
@@ -116,18 +117,26 @@ enum {
     LIVE_LEADER_ROW_GAMERTAG = 0x0c,
     LIVE_LEADER_GAMERTAG_UNITS = 16,
 
-    /* XNQOS: dwNumProbes at +0, dwNumPending at +4, then one 0x18-byte probe
-       entry per queried address from +8. The game reads entry+0 (bit 0 =
-       complete, bit 2 = error) and entry+0xe (u16 median RTT in ms); see the
-       comment above live_qos_lookup. A search can query all 25 result slots,
-       so one handle must carry 25 entries, not eight. */
+    /* XNQOS: dwNumProbes at +0, dwNumPending at +4, then one 0x18-byte
+       XNQOSINFO per queried address from +8. The game reads entry+0 (bit 0 =
+       complete, bit 2 = target disabled) and entry+0xe (u16 median RTT in
+       ms); see the comment above live_qos_lookup. A search can query all 25
+       result slots, so one handle must carry 25 entries, not eight. */
     LIVE_QOS_HANDLES = 8, /* one search plus up to seven session peers */
     LIVE_QOS_ENTRIES = RECOMP_LIVE_MAX_RESULTS,
     LIVE_QOS_ENTRY_BYTES = 0x18,
     LIVE_QOS_BYTES = 8 + LIVE_QOS_ENTRIES * LIVE_QOS_ENTRY_BYTES,
     LIVE_QOS_FLAGS = 0x00,
-    LIVE_QOS_MEDIAN_RTT = 0x0e,
-    LIVE_QOS_DEFAULT_RTT_MS = 50, /* (50*3+199)/100 = 3, the shipped delay */
+    LIVE_QOS_PROBES_SENT = 0x02,   /* XNQOSINFO cProbesXmit */
+    LIVE_QOS_PROBES_RECEIVED = 0x04, /* cProbesRecv; sent - received is the loss */
+    LIVE_QOS_MIN_RTT = 0x0c,       /* wRttMinInMsecs */
+    LIVE_QOS_MEDIAN_RTT = 0x0e,    /* wRttMedInMsecs */
+    LIVE_QOS_UP_BITS = 0x10,       /* dwUpBitsPerSec, left 0: not measured */
+    LIVE_QOS_DOWN_BITS = 0x14,     /* dwDnBitsPerSec, left 0 */
+    LIVE_QOS_COMPLETE = 0x01,
+    LIVE_QOS_CONTACTED = 0x02,
+    LIVE_QOS_MISSING_RTT_MS = 0xffff, /* what the game reads as "no quality" */
+    LIVE_QOS_DEFAULT_RTT_MS = 50,     /* (50*3+199)/100 = 3, the shipped delay */
 
     LIVE_TASK_SLOTS = 16,
     LIVE_TASK_REQUESTS = 4,
@@ -248,7 +257,14 @@ static uint32_t live_logon_slot; /* which of the four XONLINE_USER records */
 static uint32_t live_search_scratch;
 static uint32_t live_search_pointers;
 static uint32_t live_qos_pool;
-static bool live_qos_used[LIVE_QOS_HANDLES];
+/* One guest handle per slot. The transport probes for the same slot number,
+   and the guest's XNQOS is filled in place as the answers come back. */
+static struct {
+    uint32_t guest; /* the guest's XNQOS, 0 when the slot is free */
+    uint32_t count;
+    bool started;   /* the transport is probing */
+    bool done;      /* every entry has settled; no more writes */
+} live_qos_slots[LIVE_QOS_HANDLES];
 static uint32_t live_notification_state;
 static uint8_t live_notification_kid[8];
 static bool live_notification_valid;
@@ -1823,11 +1839,14 @@ static void live_unregister_key(void) { kernel_return(1u, 0u); }
 static void live_qos_listen(void) { kernel_return(5u, 0u); }
 
 /* XNQOS layout the game reads (XNetQosLookup, retail CXo 0x39d4xx):
-     +0x00  number of addresses queried
-     +0x04  number of probes still pending; online_update case 0xb waits for 0
-     +0x08  entry 0, then one 0x18-byte entry per queried address:
-       +0x00  BYTE flags: bit 0 = complete, bit 2 = error
-       +0x0e  WORD median RTT in ms
+     +0x00  cxnqos, the number of addresses queried
+     +0x04  cxnqosPending; online_update case 0xb waits for 0
+     +0x08  entry 0, then one 0x18-byte XNQOSINFO per queried address:
+       +0x00  BYTE bFlags: bit 0 complete, bit 1 target contacted, bit 2 disabled
+       +0x02  WORD cProbesXmit, +0x04 cProbesRecv: sent - received is the loss
+       +0x0c  WORD wRttMinInMsecs
+       +0x0e  WORD wRttMedInMsecs
+       +0x10  DWORD dwUpBitsPerSec, +0x14 dwDnBitsPerSec
    DOA2U's readers, all found in Ghidra:
    - online_update 0x2a5530 waits on handle+4 before sorting the search.
    - online_search_filter_results 0x2a4740 stores handle+8+i*0x18 in the
@@ -1839,15 +1858,21 @@ static void live_qos_listen(void) { kernel_return(5u, 0u); }
      handle+0x16 (entry 0) for the local slot's peer.
    - FUN_000d1570 0xd1570 and FUN_000d2070 0xd2070 read the peer's RTT,
      compute (rtt*3+199)/100 (FUN_002946e0 0x2946e0) and set the lockstep
-     delay batches (FUN_00293a60 clamps to 2..7). With 50 ms the value is 3,
-     the shipped default; a measured RTT between about 1 and 200 ms moves it
-     from 2 to 7. No game code reads the per-probe sent/received counters or a
-     bandwidth field, so zero is correct for them.
-   The matchmaker has no QoS probe, so every queried entry is complete at
-   the documented 50 ms constant. A real RTT needs a seam the backend or the
-   transport does not have today: ppXnAddr (argument 2) holds the virtual
-   addresses, so a future backend->qos_rtt(self, virtual_ina) could answer
-   per entry without touching this layout. */
+     delay batches (FUN_00293a60 clamps to 2..7). The transport's measured
+     median puts the shipped 50 ms at 3; 20 ms gives 2, and 167 ms or more
+     gives the game's own maximum of 7. No game code reads the probe counters
+     or a bandwidth field, so the counters carry the loss and the bandwidth
+     stays 0.
+
+   The transport (live_transport.c) probes each address on the route its
+   game datagrams use and answers asynchronously; this file copies the
+   entries into the guest handle as they settle. A target runner that cannot
+   answer the probes is the shipped 50 ms (an old runner, or a peer still
+   opening its path), and so is a search result, which has no route; a peer
+   forgotten mid-request is the console's no-reply entry, complete with wRtt
+   0xffff and no bars. apxna (argument 2)
+   is the array of XNADDR pointers the game builds from the search records or
+   the session players. */
 static uint32_t live_qos_handle(unsigned slot)
 {
     return live_qos_pool + slot * LIVE_QOS_BYTES;
@@ -1862,6 +1887,72 @@ static int live_qos_slot(uint32_t handle)
     return slot < LIVE_QOS_HANDLES ? (int)slot : -1;
 }
 
+/* One XNQOSINFO from what the transport knows. Pending entries keep their
+   zeroed bytes; an answer carries the contact bit and its min/median, a
+   fallback the shipped 50 ms, and a no-reply entry wRtt 0xffff so the game's
+   sort puts it last and its bars show none. */
+static void live_qos_write_entry(uint32_t guest, uint32_t index, const RecompLiveQosEntry *entry)
+{
+    const uint32_t at = guest + 8u + index * LIVE_QOS_ENTRY_BYTES;
+    uint8_t flags = 0u;
+    uint16_t min_ms = 0u, med_ms = 0u;
+    switch ((RecompLiveQosState)entry->state) {
+    case RECOMP_LIVE_QOS_ANSWERED:
+        flags = LIVE_QOS_COMPLETE | LIVE_QOS_CONTACTED;
+        min_ms = entry->rtt_min_ms;
+        med_ms = entry->rtt_med_ms;
+        break;
+    case RECOMP_LIVE_QOS_FALLBACK:
+        flags = LIVE_QOS_COMPLETE;
+        min_ms = med_ms = LIVE_QOS_DEFAULT_RTT_MS;
+        break;
+    case RECOMP_LIVE_QOS_NO_REPLY:
+        flags = LIVE_QOS_COMPLETE;
+        min_ms = med_ms = LIVE_QOS_MISSING_RTT_MS;
+        break;
+    default: /* pending */
+        break;
+    }
+    live_store(at + LIVE_QOS_FLAGS, &flags, 1u);
+    live_store(at + LIVE_QOS_PROBES_SENT, &entry->probes_sent, 2u);
+    live_store(at + LIVE_QOS_PROBES_RECEIVED, &entry->probes_received, 2u);
+    if (flags != 0u) {
+        live_store(at + LIVE_QOS_MIN_RTT, &min_ms, 2u);
+        live_store(at + LIVE_QOS_MEDIAN_RTT, &med_ms, 2u);
+    }
+}
+
+/* Copies the transport's current entries into the guest handle and counts
+   what is still pending, which is what the game polls. */
+static void live_qos_refresh(unsigned slot)
+{
+    if (slot >= LIVE_QOS_HANDLES) return;
+    if (live_qos_slots[slot].guest == 0u || !live_qos_slots[slot].started) return;
+    const uint32_t count = live_qos_slots[slot].count;
+    RecompLiveQosEntry entries[LIVE_QOS_ENTRIES];
+    bool done = false;
+    const uint32_t written = recomp_live_transport_qos_results(slot, entries, count, &done);
+    if (written < count) {
+        /* The transport closed under a lookup (a logoff): settle it at the
+           shipped figure so the game's wait ends instead of polling forever. */
+        for (uint32_t i = 0u; i < count; ++i) {
+            memset(&entries[i], 0, sizeof entries[i]);
+            entries[i].state = RECOMP_LIVE_QOS_FALLBACK;
+        }
+        done = true;
+    }
+    uint32_t pending = 0u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        if (entries[i].state == RECOMP_LIVE_QOS_PENDING) ++pending;
+        live_qos_write_entry(live_qos_slots[slot].guest, i, &entries[i]);
+    }
+    live_store(live_qos_slots[slot].guest + 4u, &pending, 4u);
+    live_qos_slots[slot].done = done && pending == 0u;
+}
+
+/* XNetQosLookup(cxna, apxna, ...). The arrays after the count are not read:
+   the transport only needs each address's virtual ina, and the session key a
+   console would sign probes with has no place in this port's peer route. */
 static void live_qos_lookup(void)
 {
     const uint32_t handle_out = kernel_arg(12);
@@ -1873,7 +1964,7 @@ static void live_qos_lookup(void)
         live_qos_pool = recomp_kernel_allocate_pool(LIVE_QOS_HANDLES * LIVE_QOS_BYTES);
     unsigned slot = LIVE_QOS_HANDLES;
     for (unsigned i = 0u; live_qos_pool != 0u && i < LIVE_QOS_HANDLES; ++i)
-        if (!live_qos_used[i]) {
+        if (live_qos_slots[i].guest == 0u) {
             slot = i;
             break;
         }
@@ -1883,19 +1974,37 @@ static void live_qos_lookup(void)
     }
     uint32_t queried = kernel_arg(1);
     if (queried > LIVE_QOS_ENTRIES) queried = LIVE_QOS_ENTRIES;
+    uint32_t virtual_inas[LIVE_QOS_ENTRIES];
+    memset(virtual_inas, 0, sizeof virtual_inas);
+    const uint32_t addresses = kernel_arg(2); /* XNADDR *apxna[] */
+    for (uint32_t i = 0u; addresses != 0u && i < queried; ++i) {
+        const uint32_t xnaddr = live_u32(addresses + 4u * i);
+        if (xnaddr == 0u) continue;
+        uint32_t ina = live_u32(xnaddr + 4u); /* XNADDR.inaOnline */
+        if (ina == 0u) ina = live_u32(xnaddr); /* the same value here */
+        virtual_inas[i] = ina;
+    }
+    const bool started = queried != 0u && recomp_live_transport_qos_start(slot, virtual_inas, queried);
+    const uint32_t qos = live_qos_handle(slot);
     uint8_t buffer[LIVE_QOS_BYTES];
     memset(buffer, 0, sizeof buffer);
     memcpy(buffer, &queried, sizeof queried);
-    /* +4 stays zero: the service has no outstanding probe. */
-    for (uint32_t i = 0u; i < queried; ++i) {
-        const uint32_t entry = 8u + i * LIVE_QOS_ENTRY_BYTES;
-        buffer[entry + LIVE_QOS_FLAGS] = 1u; /* complete, no error */
-        const uint16_t rtt = LIVE_QOS_DEFAULT_RTT_MS;
-        memcpy(buffer + entry + LIVE_QOS_MEDIAN_RTT, &rtt, sizeof rtt);
-    }
-    const uint32_t qos = live_qos_handle(slot);
+    const uint32_t pending = started ? queried : 0u;
+    memcpy(buffer + 4u, &pending, sizeof pending);
     live_store(qos, buffer, sizeof buffer);
-    live_qos_used[slot] = true;
+    live_qos_slots[slot].guest = qos;
+    live_qos_slots[slot].count = queried;
+    live_qos_slots[slot].started = started;
+    live_qos_slots[slot].done = !started;
+    if (started) {
+        live_qos_refresh(slot);
+    } else {
+        /* No transport (or no addresses): the shipped figure, as before. */
+        RecompLiveQosEntry fallback;
+        memset(&fallback, 0, sizeof fallback);
+        fallback.state = RECOMP_LIVE_QOS_FALLBACK;
+        for (uint32_t i = 0u; i < queried; ++i) live_qos_write_entry(qos, i, &fallback);
+    }
     live_set_u32(handle_out, qos);
     kernel_return(12u, 0u);
 }
@@ -1909,12 +2018,26 @@ static void live_qos_release(void)
     const uint32_t qos = kernel_arg(1);
     const int slot = live_qos_slot(qos);
     if (slot >= 0) {
+        recomp_live_transport_qos_stop((unsigned)slot);
         uint8_t zero[LIVE_QOS_BYTES];
         memset(zero, 0, sizeof zero);
         live_store(qos, zero, sizeof zero);
-        live_qos_used[slot] = false;
+        memset(&live_qos_slots[slot], 0, sizeof live_qos_slots[slot]);
     }
     kernel_return(1u, 0u);
+}
+
+/* Once per frame, after the transport has heard the socket: copy each live
+   handle's settled entries and its pending count. A settled handle is left
+   alone unless a rollback rewind put a pending count back in it, since
+   rewriting it every frame would mark its pages dirty in every save. */
+static void live_qos_pump(void)
+{
+    for (unsigned i = 0u; i < LIVE_QOS_HANDLES; ++i) {
+        if (live_qos_slots[i].guest == 0u) continue;
+        if (live_qos_slots[i].done && live_u32(live_qos_slots[i].guest + 4u) == 0u) continue;
+        live_qos_refresh(i);
+    }
 }
 
 static void live_title_xnaddr(void)
@@ -1966,6 +2089,7 @@ void recomp_live_pump(uint64_t now_ms)
     if (backend == NULL) return;
     live_pump_detached();
     if (backend->tick != NULL) backend->tick(backend->self, now_ms);
+    live_qos_pump();
 }
 
 /* The transport work package's live_transport.c defines the real lookup. Until
@@ -2007,6 +2131,56 @@ __attribute__((weak)) void recomp_live_transport_forget(uint32_t virtual_ina)
 {
     (void)virtual_ina;
 }
+#endif
+
+/* The QoS probes live in the transport too. Without it there is nothing to
+   measure, and live_qos_lookup keeps the shipped 50 ms. */
+#if defined(_MSC_VER)
+#if defined(_M_IX86)
+#pragma comment(linker, "/alternatename:_recomp_live_transport_qos_start=_recomp_live_transport_qos_start_unbound")
+#pragma comment(linker, "/alternatename:_recomp_live_transport_qos_results=_recomp_live_transport_qos_results_unbound")
+#pragma comment(linker, "/alternatename:_recomp_live_transport_qos_stop=_recomp_live_transport_qos_stop_unbound")
+#else
+#pragma comment(linker, "/alternatename:recomp_live_transport_qos_start=recomp_live_transport_qos_start_unbound")
+#pragma comment(linker, "/alternatename:recomp_live_transport_qos_results=recomp_live_transport_qos_results_unbound")
+#pragma comment(linker, "/alternatename:recomp_live_transport_qos_stop=recomp_live_transport_qos_stop_unbound")
+#endif
+bool recomp_live_transport_qos_start_unbound(unsigned slot, const uint32_t *virtual_inas, uint32_t count)
+{
+    (void)slot;
+    (void)virtual_inas;
+    (void)count;
+    return false;
+}
+uint32_t recomp_live_transport_qos_results_unbound(unsigned slot, RecompLiveQosEntry *out, uint32_t capacity,
+    bool *done)
+{
+    (void)slot;
+    (void)out;
+    (void)capacity;
+    if (done != NULL) *done = true;
+    return 0u;
+}
+void recomp_live_transport_qos_stop_unbound(unsigned slot) { (void)slot; }
+#else
+__attribute__((weak)) bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas,
+    uint32_t count)
+{
+    (void)slot;
+    (void)virtual_inas;
+    (void)count;
+    return false;
+}
+__attribute__((weak)) uint32_t recomp_live_transport_qos_results(unsigned slot, RecompLiveQosEntry *out,
+    uint32_t capacity, bool *done)
+{
+    (void)slot;
+    (void)out;
+    (void)capacity;
+    if (done != NULL) *done = true;
+    return 0u;
+}
+__attribute__((weak)) void recomp_live_transport_qos_stop(unsigned slot) { (void)slot; }
 #endif
 
 RecompFunction recomp_live_lookup(uint32_t guest_address)
