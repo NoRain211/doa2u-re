@@ -137,6 +137,8 @@ class UpdateTest(unittest.TestCase):
                     mock.patch.object(update, "ROOT", Path(folder).resolve()), \
                     mock.patch.object(update.Ranges, "BLOCK", 4096):
                 (update.ROOT / "big.bin").write_bytes(big)
+                # The install must match the ZIP's mode too (writestr records 0o600), or it is a changed entry.
+                (update.ROOT / "big.bin").chmod(hashes["DOA2U-2/big.bin"][1])
                 body, listing = manifest(listed) if listed else (b"", None)
                 served = []
 
