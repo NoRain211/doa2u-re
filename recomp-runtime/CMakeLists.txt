@@ -623,8 +623,9 @@ if(WIN32 OR SDL3_FOUND)
     target_link_libraries(recomp_texture_pack_test PRIVATE recomp_texture_pack)
     recomp_use_sdl3(recomp_texture_pack_test)
     add_test(NAME recomp-runtime-texture-pack COMMAND recomp_texture_pack_test)
-    # The PlayStation button art and its private key mapping.
-    add_executable(recomp_playstation_buttons_test playstation_buttons_test.cpp)
+    # The PlayStation button art and its private key mapping. The PNG reader
+    # needs the swizzle helper d3d_texture_model.c also holds.
+    add_executable(recomp_playstation_buttons_test playstation_buttons_test.cpp d3d_texture_model.c)
     target_link_libraries(recomp_playstation_buttons_test PRIVATE recomp_texture_pack)
     recomp_use_sdl3(recomp_playstation_buttons_test)
     add_test(NAME recomp-runtime-playstation-buttons COMMAND recomp_playstation_buttons_test)

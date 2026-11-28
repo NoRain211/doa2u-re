@@ -56,6 +56,10 @@ uint64_t recomp_texture_pack_key(uint32_t format_byte, uint32_t width, uint32_t 
    not load is not tried again this session. */
 bool recomp_texture_pack_find(uint64_t key, RecompTexturePackImage &out);
 
+/* Reads a PNG into level 0, B8G8R8A8 rows and generate_mips; false with a
+   message on stderr when it cannot. The runtime's own art uses this too. */
+bool recomp_texture_pack_read_png(const std::string &path, RecompTexturePackImage &out);
+
 /* The presenter could not create the replacement found for key: use the guest
    texture for the rest of the session. */
 void recomp_texture_pack_reject(uint64_t key);

@@ -2,6 +2,7 @@
 #include "playstation_buttons.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -17,13 +18,41 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr int kSamples = 4; // per axis; smooths the discs and their symbols
-
 enum class Glyph {
-    Cross, Circle, Square, Triangle, L1, R1, L2, R2,
+    Cross, Circle, Square, Triangle, L1, R1, L2, R2, Count,
+};
+
+constexpr size_t kGlyphCount = static_cast<size_t>(Glyph::Count);
+
+/* The art files' names in the glyphs folder: Kenney's Input Prompts pack,
+   PlayStation Series, Default. Each is a 64x64 PNG with straight alpha. */
+const char *glyphFile(Glyph glyph)
+{
+    switch (glyph) {
+    case Glyph::Cross: return "playstation_button_color_cross.png";
+    case Glyph::Circle: return "playstation_button_color_circle.png";
+    case Glyph::Square: return "playstation_button_color_square.png";
+    case Glyph::Triangle: return "playstation_button_color_triangle.png";
+    case Glyph::L1: return "playstation_trigger_l1.png";
+    case Glyph::R1: return "playstation_trigger_r1.png";
+    case Glyph::L2: return "playstation_trigger_l2.png";
+    case Glyph::R2: return "playstation_trigger_r2.png";
+    default: return "";
+    }
+}
+
+/* One glyph's BGRA pixels, straight alpha, as the pack ships them. */
+struct GlyphArt {
+    uint32_t width = 0u;
+    uint32_t height = 0u;
+    std::vector<uint8_t> bgra;
+    bool loaded() const { return width != 0u && height != 0u && !bgra.empty(); }
 };
 
 std::unordered_map<uint64_t, std::vector<Glyph>> rules;
+std::array<GlyphArt, kGlyphCount> art;
+std::array<bool, kGlyphCount> warned;
+std::string glyphsFolder;
 std::atomic<bool> playstation{false};
 
 /* The game's 64x32 prompts: A/B, X/Y, and L/R. These are texture hashes, not
@@ -67,173 +96,85 @@ bool parseGlyph(const std::string &name, Glyph &glyph)
     return true;
 }
 
-bool shoulder(Glyph glyph)
+void loadArt(const std::string &folder)
 {
-    return glyph == Glyph::L1 || glyph == Glyph::R1 || glyph == Glyph::L2 || glyph == Glyph::R2;
-}
-
-const char *shoulderText(Glyph glyph)
-{
-    switch (glyph) {
-    case Glyph::L1: return "L1";
-    case Glyph::R1: return "R1";
-    case Glyph::L2: return "L2";
-    default: return "R2";
-    }
-}
-
-/* ---- Drawing --------------------------------------------------------- */
-
-struct Rgb { float r, g, b; };
-
-Rgb discColour(Glyph glyph)
-{
-    switch (glyph) {
-    case Glyph::Cross: return {0.18f, 0.42f, 0.84f}; // PlayStation blue
-    case Glyph::Circle: return {0.84f, 0.23f, 0.23f}; // red
-    case Glyph::Square: return {0.78f, 0.35f, 0.78f}; // pink
-    case Glyph::Triangle: return {0.26f, 0.70f, 0.29f}; // green
-    default: return {0.62f, 0.64f, 0.68f}; // the shoulder buttons' grey
-    }
-}
-
-float clamp01(float value)
-{
-    return value < 0.0f ? 0.0f : value > 1.0f ? 1.0f : value;
-}
-
-/* The symbol's mask, in the disc's pixel space: dx and dy from its centre. */
-bool symbolMask(Glyph glyph, float dx, float dy, float radius)
-{
-    const float distance = std::sqrt(dx * dx + dy * dy);
-    switch (glyph) {
-    case Glyph::Cross: {
-        const float diagonal = 0.70710678f;
-        const float u = std::fabs(dx + dy) * diagonal, v = std::fabs(dx - dy) * diagonal;
-        return distance < 0.62f * radius && (u < 0.15f * radius || v < 0.15f * radius);
-    }
-    case Glyph::Circle:
-        return std::fabs(distance - 0.42f * radius) < 0.08f * radius;
-    case Glyph::Square: {
-        const float edge = std::max(std::fabs(dx), std::fabs(dy));
-        return edge > 0.28f * radius && edge < 0.44f * radius;
-    }
-    case Glyph::Triangle: {
-        /* Pointing up: the edge opposite each vertex faces away from it. */
-        const float reach = 0.56f * radius, band = 0.09f * radius;
-        const float normals[3][2] = {{0.0f, -1.0f}, {0.86602540f, 0.5f}, {-0.86602540f, 0.5f}};
-        float nearest = -reach;
-        bool inside = true;
-        for (unsigned i = 0u; i < 3u; ++i) {
-            const float edge = dx * normals[i][0] + dy * normals[i][1] - reach * 0.5f;
-            inside = inside && edge < 0.0f;
-            nearest = std::max(nearest, edge);
+    for (size_t i = 0u; i < kGlyphCount; ++i) {
+        art[i] = {};
+        warned[i] = false;
+        const fs::path path = fs::u8path(folder) / glyphFile(static_cast<Glyph>(i));
+        std::error_code error;
+        if (!fs::is_regular_file(path, error)) continue;
+        RecompTexturePackImage image;
+        if (!recomp_texture_pack_read_png(path.u8string(), image) || image.levels.empty() ||
+            image.width == 0u || image.height == 0u || image.width > 256u || image.height > 256u) {
+            continue;
         }
-        return inside && nearest > -band;
-    }
-    default:
-        return false;
+        art[i].width = image.width;
+        art[i].height = image.height;
+        art[i].bgra = std::move(image.levels.front().bytes);
     }
 }
 
-/* A 3x5 font for the shoulder buttons' labels. */
-struct TinyGlyph { char c; uint8_t rows[5]; };
-const TinyGlyph kTiny[] = {
-    {'L', {0x4u, 0x4u, 0x4u, 0x4u, 0x7u}},
-    {'R', {0x6u, 0x5u, 0x6u, 0x5u, 0x5u}},
-    {'1', {0x2u, 0x6u, 0x2u, 0x2u, 0x7u}},
-    {'2', {0x6u, 0x1u, 0x2u, 0x4u, 0x7u}},
-};
-
-bool tinyRow(char c, unsigned row, uint8_t &bitsOut)
+/* Writes art into a square box inside the texture's cell, resampled by area:
+   each destination texel averages the source texels it covers. */
+void drawCell(std::vector<uint8_t> &pixels, uint32_t textureWidth, uint32_t textureHeight,
+    const GlyphArt &glyph, uint32_t cellLeft, uint32_t cellWidth)
 {
-    for (const TinyGlyph &glyph : kTiny) {
-        if (glyph.c == c) {
-            bitsOut = glyph.rows[row];
-            return true;
-        }
-    }
-    return false;
-}
+    const uint32_t box = std::min(cellWidth, textureHeight);
+    if (box == 0u) return;
+    const uint32_t boxLeft = cellLeft + (cellWidth - box) / 2u;
+    const uint32_t boxTop = (textureHeight - box) / 2u;
+    const double scaleX = static_cast<double>(glyph.width) / box;
+    const double scaleY = static_cast<double>(glyph.height) / box;
 
-/* The shoulder label's mask: two 3x5 characters centred in the disc. */
-bool textMask(const char *text, float dx, float dy, float radius)
-{
-    const int count = static_cast<int>(std::strlen(text));
-    const int units = count * 4 - 1;
-    int scale = static_cast<int>(radius * 1.1f / 5.0f);
-    if (scale < 1) scale = 1;
-    const float width = static_cast<float>(units * scale), height = static_cast<float>(5 * scale);
-    const float x = dx + width * 0.5f, y = dy + height * 0.5f;
-    if (x < 0.0f || y < 0.0f || x >= width || y >= height) return false;
-    const int column = static_cast<int>(x) / scale, row = static_cast<int>(y) / scale;
-    const int index = column / 4;
-    if (index >= count || column % 4 == 3) return false;
-    uint8_t bits = 0u;
-    return tinyRow(text[index], static_cast<unsigned>(row), bits) &&
-        (bits & (0x4u >> (column % 4))) != 0u;
-}
-
-/* One 4x4-sample point of a glyph's cell: its colour and coverage. */
-struct Sample { float r, g, b, a; };
-
-Sample shade(Glyph glyph, float dx, float dy, float radius)
-{
-    const float distance = std::sqrt(dx * dx + dy * dy);
-    const float coverage = clamp01(radius - distance + 0.5f);
-    if (coverage <= 0.0f) return {0.0f, 0.0f, 0.0f, 0.0f};
-    const float falloff = std::sqrt(clamp01(1.0f - distance * distance / (radius * radius)));
-    float light = 0.58f + 0.42f * falloff;
-    if (dx + dy < -0.35f * radius) light += 0.12f; // a highlight at the top left
-    light = std::min(light, 1.0f);
-    Rgb colour = discColour(glyph);
-    if (shoulder(glyph) ? textMask(shoulderText(glyph), dx, dy, radius)
-                        : symbolMask(glyph, dx, dy, radius)) {
-        colour = {0.94f, 0.94f, 0.94f};
-        light = 1.0f;
-    }
-    return {colour.r * light, colour.g * light, colour.b * light, coverage};
-}
-
-/* Draws one glyph centred at (cx, cy) with the given radius into B8G8R8A8 rows. */
-void drawGlyph(std::vector<uint8_t> &pixels, uint32_t width, uint32_t height,
-    float cx, float cy, float radius, Glyph glyph)
-{
-    const int left = std::max(0, static_cast<int>(cx - radius) - 1);
-    const int right = std::min(static_cast<int>(width), static_cast<int>(cx + radius) + 2);
-    const int top = std::max(0, static_cast<int>(cy - radius) - 1);
-    const int bottom = std::min(static_cast<int>(height), static_cast<int>(cy + radius) + 2);
-    for (int y = top; y < bottom; ++y) {
-        for (int x = left; x < right; ++x) {
-            float red = 0.0f, green = 0.0f, blue = 0.0f, alpha = 0.0f;
-            for (int sy = 0; sy < kSamples; ++sy) {
-                for (int sx = 0; sx < kSamples; ++sx) {
-                    const float dx = static_cast<float>(x) + (sx + 0.5f) / kSamples - cx;
-                    const float dy = static_cast<float>(y) + (sy + 0.5f) / kSamples - cy;
-                    const Sample sample = shade(glyph, dx, dy, radius);
-                    red += sample.r * sample.a;
-                    green += sample.g * sample.a;
-                    blue += sample.b * sample.a;
-                    alpha += sample.a;
+    for (uint32_t y = 0u; y < box; ++y) {
+        const double top = y, bottom = y + 1.0;
+        const double sourceTop = top * scaleY, sourceBottom = bottom * scaleY;
+        const uint32_t firstRow = static_cast<uint32_t>(sourceTop);
+        const uint32_t lastRow = std::min(glyph.height, static_cast<uint32_t>(sourceBottom) + 1u);
+        for (uint32_t x = 0u; x < box; ++x) {
+            const double left = x, right = x + 1.0;
+            const double sourceLeft = left * scaleX, sourceRight = right * scaleX;
+            const uint32_t firstColumn = static_cast<uint32_t>(sourceLeft);
+            const uint32_t lastColumn = std::min(glyph.width, static_cast<uint32_t>(sourceRight) + 1u);
+            double weight = 0.0, alpha = 0.0, red = 0.0, green = 0.0, blue = 0.0;
+            for (uint32_t sourceY = firstRow; sourceY < lastRow; ++sourceY) {
+                const double rowWeight = std::min(sourceY + 1.0, sourceBottom) -
+                    std::max(static_cast<double>(sourceY), sourceTop);
+                if (rowWeight <= 0.0) continue;
+                for (uint32_t sourceX = firstColumn; sourceX < lastColumn; ++sourceX) {
+                    const double columnWeight = std::min(sourceX + 1.0, sourceRight) -
+                        std::max(static_cast<double>(sourceX), sourceLeft);
+                    if (columnWeight <= 0.0) continue;
+                    const size_t at = (static_cast<size_t>(sourceY) * glyph.width + sourceX) * 4u;
+                    const double texelAlpha = glyph.bgra[at + 3u] / 255.0;
+                    const double texelWeight = rowWeight * columnWeight;
+                    weight += texelWeight;
+                    alpha += texelAlpha * texelWeight;
+                    red += glyph.bgra[at + 2u] / 255.0 * texelAlpha * texelWeight;
+                    green += glyph.bgra[at + 1u] / 255.0 * texelAlpha * texelWeight;
+                    blue += glyph.bgra[at + 0u] / 255.0 * texelAlpha * texelWeight;
                 }
             }
-            if (alpha <= 0.0f) continue;
-            const float divisor = alpha;
-            const size_t at = (static_cast<size_t>(y) * width + static_cast<size_t>(x)) * 4u;
-            pixels[at + 0u] = static_cast<uint8_t>(std::lround(clamp01(blue / divisor) * 255.0f));
-            pixels[at + 1u] = static_cast<uint8_t>(std::lround(clamp01(green / divisor) * 255.0f));
-            pixels[at + 2u] = static_cast<uint8_t>(std::lround(clamp01(red / divisor) * 255.0f));
-            pixels[at + 3u] = static_cast<uint8_t>(std::lround(clamp01(alpha / (kSamples * kSamples)) * 255.0f));
+            if (weight <= 0.0 || alpha <= 0.0) continue;
+            const size_t at = (static_cast<size_t>(boxTop + y) * textureWidth + boxLeft + x) * 4u;
+            pixels[at + 0u] = static_cast<uint8_t>(std::lround(std::min(1.0, blue / alpha) * 255.0));
+            pixels[at + 1u] = static_cast<uint8_t>(std::lround(std::min(1.0, green / alpha) * 255.0));
+            pixels[at + 2u] = static_cast<uint8_t>(std::lround(std::min(1.0, red / alpha) * 255.0));
+            pixels[at + 3u] = static_cast<uint8_t>(std::lround(std::min(1.0, alpha / weight) * 255.0));
         }
     }
 }
 
 } // namespace
 
-void recomp_playstation_buttons_configure(const std::string &textures_folder)
+void recomp_playstation_buttons_configure(const std::string &textures_folder,
+    const std::string &art_folder)
 {
     rules.clear();
     addBuiltInRules();
+    glyphsFolder = art_folder;
+    loadArt(art_folder);
     const fs::path path = fs::u8path(textures_folder) / "playstation-buttons.txt";
     std::ifstream file(path, std::ios::binary);
     if (!file) return;
@@ -299,18 +240,28 @@ bool recomp_playstation_buttons_image(uint64_t key, uint32_t width, uint32_t hei
     const auto rule = rules.find(key);
     if (rule == rules.end()) return false;
 
+    /* All or nothing: a key whose art is missing keeps the game's own prompt
+       rather than showing an Xbox icon beside a PlayStation one. */
+    for (Glyph glyph : rule->second) {
+        const size_t index = static_cast<size_t>(glyph);
+        if (art[index].loaded()) continue;
+        if (!warned[index]) {
+            warned[index] = true;
+            std::fprintf(stderr, "recomp PlayStation buttons: %s is missing; the game's own prompt stays\n",
+                (fs::u8path(glyphsFolder) / glyphFile(glyph)).u8string().c_str());
+        }
+        return false;
+    }
+
     RecompTexturePackLevel level;
     level.width = width;
     level.height = height;
     level.pitch = width * 4u;
     level.bytes.assign(static_cast<size_t>(width) * height * 4u, 0u);
     const unsigned count = static_cast<unsigned>(rule->second.size());
-    const float radius = std::min(static_cast<float>(width) / count, static_cast<float>(height)) * 0.44f;
-    for (unsigned i = 0u; i < count; ++i) {
-        const float cx = static_cast<float>(width) * (i + 0.5f) / count;
-        const float cy = static_cast<float>(height) * 0.5f;
-        drawGlyph(level.bytes, width, height, cx, cy, radius, rule->second[i]);
-    }
+    const uint32_t cellWidth = width / count;
+    for (unsigned i = 0u; i < count; ++i)
+        drawCell(level.bytes, width, height, art[static_cast<size_t>(rule->second[i])], i * cellWidth, cellWidth);
     out = {};
     out.format = RECOMP_TEXTURE_PACK_BGRA8;
     out.width = width;

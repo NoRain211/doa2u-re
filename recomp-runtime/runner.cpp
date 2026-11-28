@@ -248,6 +248,14 @@ static std::string textureFolder()
     return (std::filesystem::u8path(privateFolder()).parent_path() / "textures").u8string();
 }
 
+/* The PlayStation button art (playstation_buttons.h) the runtime ships, beside
+   private/ so the launchers find the same files. */
+static std::string glyphFolder()
+{
+    return (std::filesystem::u8path(privateFolder()).parent_path() / "assets" / "glyphs" / "playstation")
+        .u8string();
+}
+
 static void installPcSettings(bool online)
 {
     const char *path = std::getenv("RECOMP_LAUNCHER_SETTINGS");
@@ -741,7 +749,7 @@ int main(int argc, char **argv)
     recomp_disc_root_path = discRoot.c_str();
     static const std::string netplayDigest = installMods(discRoot);
     recomp_texture_pack_configure(textureFolder());
-    recomp_playstation_buttons_configure(textureFolder());
+    recomp_playstation_buttons_configure(textureFolder(), glyphFolder());
     recomp_netplay_session_init({discPath, netplayDigest.c_str(), &inputPulses, scriptedInputOnly, guestRam});
     recomp_netplay_session_start_live();
     bootGuest();
