@@ -86,7 +86,7 @@ static void live_round_start(void)
     memset(recomp_memory(FIGHTER_BONE_MATRICES, FIGHTER_BONE_BYTES), 0, FIGHTER_BONE_BYTES);
     if (recomp_game_live_fight_pair(&local, &opponent)) recomp_live_round_started(opponent);
     else
-        fprintf(stderr, "recomp live: the session slot table names no two fighters; "
+        fprintf(stderr, "recomp live: the session names no lockstep fighter pair; "
             "the game keeps its own lockstep\n");
 }
 

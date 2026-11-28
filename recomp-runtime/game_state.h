@@ -19,14 +19,22 @@ extern "C" {
    at the end of a match, so menus and saves run in lockstep, which never
    rewinds. */
 bool recomp_game_round_live(void);
-/* A Live match's two fighters, from the session's slot table (g_session_players
-   0xf192a8): slots 0 and 1 hold the fighters, each member's sockaddr at +0x14
-   with sin_addr at +0x18, and the local member is the one whose XUID is the
-   logged-on user's (g_online_users 0xf1cba8, +0) or that is marked at +0x2c.
-   Writes their virtual addresses (network order) to local and opponent when
-   not NULL. False when the table does not name two fighters, cannot tell the
-   local one, or gives both the same address (neither side could order the two
-   players); the caller then keeps the game's own lockstep. */
+/* A Live match's two fighters. In a session the game's own lockstep picks them
+   (g_lockstep_player0_id/player1_id, 0xf1a190/0xf1a198, valid while bit 0 of
+   g_online_lockstep_flags 0xf0a548 is set), so a 3+ player lobby's fighters
+   need not be the first two session slots: each participant XUID is resolved
+   through the session slot table (g_session_player_record_ptrs 0xf192a8,
+   count at 0xf099ec) to that member's sockaddr at +0x14 with sin_addr at
+   +0x18. The local fighter is the one whose XUID is the local player's
+   (g_local_xuid 0xf191f4); a player who is neither participant is a
+   spectator and gets no pair, as does a flagged pair the runner cannot
+   resolve. While bit 0 is clear, as the game does, slots 0 and 1 are the
+   fighters, where the local member is the one
+   whose XUID is the logged-on user's (g_online_users 0xf1cba8, +0) or that is
+   marked at +0x2c. Writes the fighters' virtual addresses (network order) to
+   local and opponent when not NULL. False when no pair can be named, cannot
+   tell the local one, or gives both the same address (neither side could
+   order the two players); the caller then keeps the game's own lockstep. */
 bool recomp_game_live_fight_pair(uint32_t *local, uint32_t *opponent);
 
 #ifdef __cplusplus

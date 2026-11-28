@@ -390,9 +390,22 @@ static void test_stop_lockstep(void)
     CHECK(recomp_runtime.registers.esp == 0x1004u); /* kernel_call_guest restores ESP */
 }
 
-/* The session player records: g_session_players 0xf192a8, records at 0xf0a5a0,
-   sockaddr sin_addr at +0x18, XUID at +0, the local mark at +0x2c. */
-enum { RECORD_BYTES = 0x30, RECORD_A = 0x00f0a5a0u, RECORD_B = 0x00f0a5d0u, USERS = 0x00f1cba8u };
+/* The session player records: g_session_player_record_ptrs 0xf192a8, records
+   at g_session_player_records 0xf0a5a0, sockaddr sin_addr at +0x18, XUID at
+   +0, the local mark at +0x2c. */
+enum {
+    RECORD_BYTES = 0x30,
+    RECORD_A = 0x00f0a5a0u,
+    RECORD_B = 0x00f0a5d0u,
+    RECORD_C = 0x00f0a600u,
+    RECORD_D = 0x00f0a630u,
+    USERS = 0x00f1cba8u,
+    PLAYER_COUNT = 0x00f099ecu,
+    LOCAL_XUID = 0x00f191f4u,
+    LOCKSTEP_FLAGS = 0x00f0a548u,
+    LOCKSTEP_PLAYER0 = 0x00f1a190u,
+    LOCKSTEP_PLAYER1 = 0x00f1a198u,
+};
 
 static void set_member(uint32_t record, uint64_t xuid, uint32_t ina, bool local_mark)
 {
@@ -455,6 +468,114 @@ static void test_fight_pair(void)
     CHECK(!recomp_game_live_fight_pair(&local, &opponent));
 }
 
+static void set_slot(uint32_t slot, uint32_t record)
+{
+    memcpy(recomp_memory(0x00f192a8u + 4u * slot, 4u), &record, 4u);
+}
+
+static void set_slot_count(uint32_t count)
+{
+    memcpy(recomp_memory(PLAYER_COUNT, 4u), &count, 4u);
+}
+
+static void set_local_xuid(uint64_t xuid)
+{
+    memcpy(recomp_memory(LOCAL_XUID, 8u), &xuid, 8u);
+}
+
+static void set_lockstep_pair(uint64_t first, uint64_t second)
+{
+    memcpy(recomp_memory(LOCKSTEP_PLAYER0, 8u), &first, 8u);
+    memcpy(recomp_memory(LOCKSTEP_PLAYER1, 8u), &second, 8u);
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 1u;
+}
+
+/* In a 3+ player session the game's own lockstep participants (their XUIDs in
+   g_lockstep_player0_id/player1_id, valid while bit 0 of
+   g_online_lockstep_flags is set) name the fighters; session slots 0 and 1
+   need not be them. */
+static void test_fight_pair_lockstep(void)
+{
+    const uint64_t spectator = 0x0009000000000001ull, other = 0x0009000000000002ull;
+    const uint64_t first = 0x0009000000000003ull, local_fighter = 0x0009000000000004ull;
+    const uint32_t spectator_ina = ina(10u, 0u, 0u, 1u), other_ina = ina(10u, 0u, 0u, 2u);
+    const uint32_t first_ina = ina(10u, 0u, 0u, 3u), local_ina = ina(10u, 0u, 0u, 4u);
+    uint32_t local = 0u, opponent = 0u;
+
+    reset_guest();
+    set_slot_count(4u);
+    set_slot(0u, RECORD_A);
+    set_slot(1u, RECORD_B);
+    set_slot(2u, RECORD_C);
+    set_slot(3u, RECORD_D);
+    /* Slot 0 carries the legacy local mark but is only a spectator. */
+    set_member(RECORD_A, spectator, spectator_ina, true);
+    set_member(RECORD_B, other, other_ina, false);
+    set_member(RECORD_C, first, first_ina, false);
+    set_member(RECORD_D, local_fighter, local_ina, false);
+    set_local_xuid(local_fighter);
+    set_lockstep_pair(first, local_fighter);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == local_ina);
+    CHECK(opponent == first_ina);
+
+    /* From the other fighter's seat the two swap. */
+    set_local_xuid(first);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == first_ina);
+    CHECK(opponent == local_ina);
+
+    /* A spectator is neither participant: no pair, and no fallback to the
+       slots, even with the legacy local mark in slot 0. */
+    set_local_xuid(spectator);
+    CHECK(!recomp_game_live_fight_pair(&local, &opponent));
+
+    /* Without the lockstep pair a 3+ player session uses slots 0 and 1, as
+       online_get_local_player_slot does: from the fighter marked in slot 1 it
+       pairs with slot 0, and from a spectator, marked in neither slot, it
+       names no pair. */
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 0u;
+    set_member(RECORD_A, first, first_ina, false);
+    set_member(RECORD_B, local_fighter, local_ina, true);
+    set_member(RECORD_C, spectator, spectator_ina, false);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == local_ina);
+    CHECK(opponent == first_ina);
+    set_member(RECORD_B, local_fighter, local_ina, false);
+    set_member(RECORD_C, spectator, spectator_ina, true);
+    CHECK(!recomp_game_live_fight_pair(&local, &opponent));
+
+    /* One participant is no longer in the table: no pair either, even though
+       the slots alone would pair (slot 1 is marked local). */
+    set_member(RECORD_B, local_fighter, local_ina, true);
+    set_member(RECORD_C, spectator, spectator_ina, false);
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 0u;
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 1u;
+    set_lockstep_pair(other, 0x0009000000000009ull);
+    set_local_xuid(other);
+    CHECK(!recomp_game_live_fight_pair(&local, &opponent));
+
+    /* A two-player session with a usable lockstep pair resolves it the same
+       way, and without one keeps the slot fallback. */
+    reset_guest();
+    set_slot_count(2u);
+    set_member(RECORD_A, spectator, spectator_ina, false);
+    set_member(RECORD_B, other, other_ina, false);
+    set_slots(RECORD_A, RECORD_B);
+    set_local_xuid(other);
+    set_lockstep_pair(spectator, other);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == other_ina);
+    CHECK(opponent == spectator_ina);
+    *recomp_memory(LOCKSTEP_FLAGS, 1u) = 0u;
+    set_member(RECORD_A, spectator, spectator_ina, true);
+    set_member(RECORD_B, other, other_ina, false);
+    CHECK(recomp_game_live_fight_pair(&local, &opponent));
+    CHECK(local == spectator_ina);
+    CHECK(opponent == other_ina);
+}
+
 static void test_round_start(void)
 {
     const uint64_t me = 0x0009000000000001ull, other = 0x0009000000000002ull;
@@ -506,6 +627,7 @@ int main(void)
     test_request_stop();
     test_stop_lockstep();
     test_fight_pair();
+    test_fight_pair_lockstep();
     test_round_start();
     if (failures != 0) {
         fprintf(stderr, "live_fight_test: %d failure(s)\n", failures);
