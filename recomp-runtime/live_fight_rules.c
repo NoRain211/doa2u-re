@@ -54,7 +54,13 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
        shape, which the fight never reads back: camera_setup_view_cone's copy
        of the camera (16:9 frames it from elsewhere), its field of view and
        view cone, the D3D world, view and projection matrices and a
-       view-projection one, and the music track.
+       view-projection one, and the music track. Each side's pause menu is
+       local too: g_pause_menu_player (0x878390, the side whose menu is open)
+       and g_pause_menu_open (0x87ae02) are written by the pause poll
+       (pause_menu_poll 0xdbb90 -> pause_menu_open 0xdbb50) and read only by
+       the menu (pause_menu_page_update 0xdb400), the HUD and draw code, never
+       by a fight update, so a pause on one side alone leaves both fights
+       identical.
        Also what the title and menu demo scenes leave behind (marked "demo"):
        their manager's state (0x87d578-0x87d644, 0x87f2b0-0x87f51c; the scene
        is picked at random) and the fight state their fights write and a Live
@@ -76,6 +82,7 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
         {0x00877e9cu, 0x00877ea0u}, /* g_view_half_tan_y */
         {0x00877ea4u, 0x00877ea8u}, {0x00877eb0u, 0x00877ef0u}, /* the world matrix */
         {0x00877ef4u, 0x00877ef8u}, {0x00878300u, 0x00878304u}, /* g_view_half_sin_y */
+        {0x00878390u, 0x00878391u}, /* g_pause_menu_player */
         {0x0087839cu, 0x008783a0u}, /* g_view_half_cos_y */
         {0x008783a4u, 0x008783a8u}, {0x008783e0u, 0x008783e1u}, {0x008783e8u, 0x008783ecu},
         /* demo: copies of each fighter's position that stage effects read */
@@ -85,7 +92,8 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
         {0x00879bf4u, 0x00879bfcu}, /* g_view_half_tan_x, the field of view */
         {0x00879c00u, 0x00879c04u}, {0x00879c10u, 0x00879c50u}, /* the view matrix */
         {0x0087a900u, 0x0087a940u}, /* a view-projection matrix */
-        {0x0087ad6cu, 0x0087ad70u}, {0x0087ae1cu, 0x0087ae2cu},
+        {0x0087ad6cu, 0x0087ad70u}, {0x0087ae02u, 0x0087ae03u}, /* g_pause_menu_open */
+        {0x0087ae1cu, 0x0087ae2cu},
         {0x0087af5cu, 0x0087af78u}, {0x0087af88u, 0x0087af8cu}, /* demo: fighter 2's record */
         {0x0087bfa0u, 0x0087c7a0u}, /* demo */
         {0x0087cfacu, 0x0087cfb0u},

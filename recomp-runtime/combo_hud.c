@@ -51,7 +51,7 @@ enum {
     CRITICAL_ALLOWS = 0x00df3c70u,
     CRITICAL_TAKEN = 0x00df38d8u,
     SPRITE_FLIP = 0x008a09a0u,
-    DEMO_FLAG = 0x0087ae02u,
+    PAUSE_MENU_OPEN = 0x0087ae02u, /* g_pause_menu_open */
     TEXTURE_PAGES = 0x0067ce78u,     /* per group: 8-byte entries, texture first */
 
     ATTACK_DAMAGE = 0x001159f0u,     /* adds an attack's damage to a side's pending damage */
@@ -280,7 +280,7 @@ static void draw_damage(uint32_t scratch, unsigned side)
     put32(SPRITE_SCALE, *recomp_memory_u32(COUNTER_SCALE));
     put16(ORIGIN_X, 0u);
     put16(ORIGIN_Y, 0x220u);
-    *recomp_memory(SPRITE_MODE, 1u) = *recomp_memory(DEMO_FLAG, 1u) == 1u ? 4u : 2u;
+    *recomp_memory(SPRITE_MODE, 1u) = *recomp_memory(PAUSE_MENU_OPEN, 1u) == 1u ? 4u : 2u;
     const unsigned value = damage > 9999u ? 9999u : damage;
     const unsigned digits = value >= 1000u ? 4u : value >= 100u ? 3u : value >= 10u ? 2u : 1u;
     unsigned rest = value;
