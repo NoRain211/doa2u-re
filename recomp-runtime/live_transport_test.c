@@ -1158,6 +1158,26 @@ int main(void)
     recomp_live_transport_forget(0u);
     check("a logoff forgets the newest peer", !recomp_live_transport_reachable(newest_ina));
 
+    /* A paired peer forgotten before its path opens has left: no reply, not
+       the 50 ms a never-paired search result keeps. */
+    {
+        const uint32_t leaving_ina = 0x0a000060u;
+        memset(&intro, 0, sizeof intro);
+        intro.virtual_ina = leaving_ina;
+        intro.public_address = htonl(INADDR_LOOPBACK);
+        intro.public_port = htons(9u); /* nobody answers its punches */
+        memcpy(intro.token, PAIR_TOKEN, sizeof intro.token);
+        recomp_live_transport_peer(&intro);
+        RecompLiveQosEntry qos[1];
+        bool qos_done = false;
+        check("qos starts on a punching peer", recomp_live_transport_qos_start(0u, &leaving_ina, 1u));
+        recomp_live_transport_forget(leaving_ina);
+        recomp_live_transport_pump(netplay_now_ms());
+        check("a paired peer forgotten before its path is a no-reply entry",
+            recomp_live_transport_qos_results(0u, qos, 1u, &qos_done) == 1u &&
+            qos[0].state == RECOMP_LIVE_QOS_NO_REPLY && qos[0].rtt_med_ms == 0xffffu && qos_done);
+    }
+
     /* A datagram that fails the token check is not the peer being alive: the
        stalest peer, not the one an impostor named, is what a full table gives
        up. */

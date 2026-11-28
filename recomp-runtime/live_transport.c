@@ -154,6 +154,7 @@ typedef struct LiveQosPeer {
     uint64_t path_ms;     /* a peer with no route is given up here */
     uint64_t deadline_ms; /* the window closes here once probing starts */
     bool started;
+    bool paired;          /* a peer existed at the start: losing it is a no-reply */
     uint16_t rtt_min_ms;
     uint16_t rtt_med_ms;
 } LiveQosPeer;
@@ -809,9 +810,10 @@ static void qos_tick(uint64_t now)
             const bool path = peer != NULL && peer->introduced && (peer->relay || peer->connected);
             if (!entry->started) {
                 /* Never paired with this runner: a search result. Empty bars on
-                   every listed host would read as a bad line, not an unknown one. */
+                   every listed host would read as a bad line, not an unknown one.
+                   A peer forgotten since the start has left. */
                 if (peer == NULL) {
-                    qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
+                    qos_finish(entry, entry->paired ? RECOMP_LIVE_QOS_NO_REPLY : RECOMP_LIVE_QOS_FALLBACK);
                     continue;
                 }
                 if (entry->path_ms == 0u) entry->path_ms = now + LIVE_QOS_PATH_MS;
@@ -878,6 +880,7 @@ bool recomp_live_transport_qos_start(unsigned slot, const uint32_t *virtual_inas
     for (unsigned i = 0u; i < count; ++i) {
         request->peers[i].virtual_ina = virtual_inas[i];
         request->peers[i].state = RECOMP_LIVE_QOS_PENDING;
+        request->peers[i].paired = virtual_inas[i] != 0u && peer_find(virtual_inas[i]) != NULL;
     }
     return true;
 }
