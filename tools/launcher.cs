@@ -244,10 +244,12 @@ static class SdlPad
     [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
     static extern void SDL_UpdateGamepads();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern IntPtr LoadLibrary(string path);
-    // Bind SDL3.dll from this launcher's folder only, never the current directory or PATH;
-    // the imports above then resolve to this module.
-    static readonly bool Loaded = LoadLibrary(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SDL3.dll")) != IntPtr.Zero;
+    static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
+    // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32: SDL3.dll and what it imports come
+    // from this launcher's folder and System32, never the current directory or PATH. The imports above
+    // then resolve to this module; a missing or wrong-architecture DLL just keeps the Xbox labels.
+    static readonly bool Loaded = LoadLibraryEx(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SDL3.dll"),
+        IntPtr.Zero, 0x00000100 | 0x00000800) != IntPtr.Zero;
     static bool started;
     // True when the first gamepad is a PlayStation one, as tools/launcher_sdl.cpp reads it.
     public static bool PlayStation()
@@ -414,8 +416,10 @@ class LauncherForm : Form
     {
         try
         {
+            // GDI+ reads a stream-backed image lazily, so copy it before the file closes.
             using (FileStream file = File.OpenRead(Path.Combine(Game.Root, "assets", "glyphs", "playstation", name + ".png")))
-                return Image.FromStream(file);
+            using (Image image = Image.FromStream(file))
+                return new Bitmap(image);
         }
         catch (Exception) { return null; }
     }
@@ -695,7 +699,6 @@ class LauncherForm : Form
         try { playstationPad = SdlPad.PlayStation(); }
         catch (DllNotFoundException) { playstationPad = false; }
         catch (EntryPointNotFoundException) { playstationPad = false; }
-        catch (BadImageFormatException) { playstationPad = false; }
         return playstationPad;
     }
 
