@@ -14,7 +14,7 @@ extern "C" {
    16,384. Callers must stop every host thread that writes guest RAM (guest
    threads, host read workers) around init, save and load. */
 enum { RECOMP_SNAPSHOT_PAGE_SIZE = 0x1000u };
-enum { RECOMP_SNAPSHOT_HASH_RANGES = 64u };
+enum { RECOMP_SNAPSHOT_HASH_RANGES = 96u };
 
 /* Guest RAM offsets [start, stop). */
 typedef struct RecompRamRange {

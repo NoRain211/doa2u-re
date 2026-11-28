@@ -362,6 +362,21 @@ RAM hashed, the first live round failed its first check after the HUD
 appeared, at frame 1,500, and both sides' guest RAM at that frame differed in
 15 bytes, all of them HUD colours. SyncTest and the dumps still compare them.
 
+The title and menu demo scenes run real fights with up to four fighters, and
+leave what they wrote in the fight block. A runner that sat on the attract
+demo started a Live single battle against a fresh one with different bone
+matrices, copies of fighter positions, matrix rows and the demo manager's own
+state, and failed the frame-30 check; two fresh runners matched through frame
+1,200 at the same speed, and two runners that had both watched the demo
+failed on one word their last scenes left. Each match's round start
+(`battle_online_round_start`, `0xd1000`) now zeroes all four fighters' bone
+matrices before the session's first save, so both sides start from the same
+bones and the bones the fight writes stay checked. The match load
+(`battle_start_fight`, `0xce050`) would be earlier, but the program reaches it
+by a direct tail call that the manual lookup never sees. The rest of what the demo leaves, each span where those runners'
+dumps differed, is left out of the hash; the bytes between them that the
+fight reads stay in.
+
 Two scripted runners on one machine at input delay 0 played six live rounds
 in 15,600 frames, about 10,400 of them with the rollback window open, and
 every check matched. After the first, a check took 0.01 to 0.06 ms, and

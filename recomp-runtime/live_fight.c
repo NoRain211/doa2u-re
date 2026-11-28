@@ -22,6 +22,13 @@
      handshake. Letting it run keeps the game's session messages; the session
      starts on the first frame boundary after it returns, so both sides begin
      from the released state.
+     The title and menu demo scenes (their manager at 0x87f534) run real
+     fights with up to four fighters and leave their poses in
+     g_fighter_bone_matrices; a fight writes only the bones its own models
+     have, so each side would start with what its last demo scene left. The
+     four banks are zeroed here, before the session's first save. (The match
+     load, battle_start_fight 0xce050, would be the natural place, but the
+     program reaches it by a direct tail call that no lookup sees.)
    - online_lockstep_request_stop 0x293980 (cdecl) asks the game's lockstep to
      stop at the match end. In a session the request rides this side's next
      session pad and both sides reset the lockstep on that frame, so the stop
@@ -38,6 +45,8 @@ enum {
     LOCKSTEP_STALLED = 0x00f0a540u, /* g_lockstep_stalled */
     LOCKSTEP_BATCH = 0x00f0a560u,   /* g_lockstep_batch */
     LOCKSTEP_RESET = 0x002936a0u,   /* online_lockstep_reset */
+    FIGHTER_BONE_MATRICES = 0x00875c20u, /* g_fighter_bone_matrices: 4 fighters, 32 bones */
+    FIGHTER_BONE_BYTES = 4u * 0x800u,
 };
 
 /* The program's own bodies, which every hook falls back to. */
@@ -74,6 +83,7 @@ static void live_round_start(void)
     /* Aborted (the peer left or the handshake failed): there is no fight to
        roll back, so leave the game to its own session messages. */
     if (recomp_runtime.registers.eax != 0u) return;
+    memset(recomp_memory(FIGHTER_BONE_MATRICES, FIGHTER_BONE_BYTES), 0, FIGHTER_BONE_BYTES);
     if (recomp_game_live_fight_pair(&local, &opponent)) recomp_live_round_started(opponent);
     else
         fprintf(stderr, "recomp live: the session slot table names no two fighters; "
