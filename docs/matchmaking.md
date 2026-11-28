@@ -407,7 +407,9 @@ an admin page (`live_ranking_page_update` `0x2b7110`) read every row of 35 to
 38 and 43 to 46, added up stats 0..29 (each character's picks, then its wins)
 and uploaded the totals as its own row. The server builds that row itself on
 every `LEADERS` ask for one of these boards: XUID 0, rank 1, stats 0..29 as
-32-bit sums of every account's row on the matching source board, stat 30 the
+32-bit sums of every account's row on the matching source board (each row
+adds at most 65,535 per stat, so one account cannot swamp the page; the sums
+are kept until that board is written), stat 30 the
 packed date and -2 the decimal `YYYYMMDDhhmmss` time, both in UTC, as
 `live_ranking_page_upload_own_row` (`0x2b6140`) wrote them. The game writes
 43 and one of 44 to 46 at each match's end

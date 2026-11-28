@@ -134,6 +134,7 @@ RECORD_BOARDS = frozenset({7, 8} | set(range(15, 31)))
 # 0x2b7110), so the server builds that row itself on each read.
 SUMMED_BOARDS = {31: 35, 32: 36, 33: 37, 34: 38, 39: 43, 40: 44, 41: 45, 42: 46}
 SUMMED_STATS = 30  # 0..14 the times each character was picked, 15..29 its wins
+SUMMED_ROW_CAP = 0xFFFF  # one row's count at most, so one account cannot swamp every player's totals
 STAT_DATE = 30  # the summed row's date, packed as (year<<16 | month<<8 | day)<<32 | hour<<16 | minute
 STAT_RATING = 0xFFFE  # -2, XONLINE_STAT_RATING: the score a board ranks by (ranking_write_stats_board 0x297e60)
 STAT_READ_BODY = struct.Struct(">IIB")  # request, board, count
@@ -387,6 +388,7 @@ class Matchmaker:
         self.live_pairs = {}  # CONNECT pairs, by frozenset of two XUIDs, and when last used
         self.met = {}  # CONNECT pairs and when both first connected, which allows writing each other's stats
         self.rankings = {}  # each board's sorted ranking and XUID -> rank, until the board is written
+        self.summed = {}  # a summed board's source board -> its totals, until that board is written
         self.live_counts = {}  # Live packets per address since the last sweep
         self.connect_counts = {}  # CONNECTs per address since the last sweep
         self.account_counts, self.minute = {}, None  # new accounts each address registered this minute
@@ -638,6 +640,7 @@ class Matchmaker:
                 if not rows:
                     del self.stats_by_board[board]
             self.rankings.pop(board, None)
+            self.summed.pop(board, None)
         for key in [key for key in self.live_pairs if xuid in key]:
             del self.live_pairs[key]
         self.met = {key: when for key, when in self.met.items() if xuid not in key}
@@ -1062,6 +1065,7 @@ class Matchmaker:
         self.stats_by_board.setdefault(board, set()).add(xuid)
         self.boards_of.setdefault(xuid, set()).add(board)
         self.rankings.pop(board, None)
+        self.summed.pop(board, None)
         self.dirty = True
         return self.done(req, HRESULT_OK, sender, nonce)
 
@@ -1160,15 +1164,18 @@ class Matchmaker:
         added up, dated now as the admin page dated its upload
         (live_ranking_page_upload_own_row 0x2b6140). Every rank past 1 is empty."""
         source = SUMMED_BOARDS[board]
-        totals = [0] * SUMMED_STATS
-        for xuid in self.stats_by_board.get(source, ()):
-            stats = self.stats.get((source, xuid), {})
-            if xuid not in self.accounts:
-                continue
-            for stat_id in range(SUMMED_STATS):
-                kind, value = stats.get(stat_id, (1, 0))
-                if kind == 1 and value > 0:
-                    totals[stat_id] += value
+        totals = self.summed.get(source)
+        if totals is None:
+            totals = [0] * SUMMED_STATS
+            for xuid in self.stats_by_board.get(source, ()):
+                stats = self.stats.get((source, xuid), {})
+                if xuid not in self.accounts:
+                    continue
+                for stat_id in range(SUMMED_STATS):
+                    kind, value = stats.get(stat_id, (1, 0))
+                    if kind == 1 and value > 0:
+                        totals[stat_id] += min(value, SUMMED_ROW_CAP)
+            self.summed[source] = totals
         total = 1 if any(totals) else 0
         if total == 0 or max(first, 1) != 1:
             return STATROW_BODY.pack(req, HRESULT_OK, 0, 0, total, 0, padded(b"", 16), 0, 0)

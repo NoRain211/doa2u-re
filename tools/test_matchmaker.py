@@ -848,6 +848,9 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(read(40)[1][1], (1, 6))  # NTSC-U sums its own board only
         self.assertEqual(read(39, first=2)[0][3:5], (0, 1))  # no rank past 1
         self.assertEqual(read(41)[0][3:5], (0, 0))  # nothing to sum is an empty board
+        # A new row counts at the next read, and no row adds more than SUMMED_ROW_CAP.
+        self.send(live(mm.STAT_WRITE, write_body(self.next_request(), 43, C, ((2, 1, 1 << 40),))), C_AT, 2.0)
+        self.assertEqual(read(39)[1][2], (1, mm.SUMMED_ROW_CAP))
 
     def test_a_player_with_no_record_reads_as_no_data(self):
         self.online()
