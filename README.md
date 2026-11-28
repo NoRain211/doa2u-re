@@ -190,9 +190,10 @@ keeps running.
   are left as the game draws them.
 - **Sharper menus.** Both renderers redraw the game's 32-bit 2D art (menus,
   fonts, the HUD) at four times its size with xBRZ the first time each piece is
-  shown, so it stays smooth at high resolutions; the Vulkan renderer also
-  redraws 8-bit alpha art, which Direct3D 11 samples differently and leaves
-  as-is. `RECOMP_UI_UPSCALE=0` turns it off.
+  shown, so it stays smooth at high resolutions. The redraw runs beside the
+  game, so a piece shows at its own size for a few frames first. The Vulkan
+  renderer also redraws 8-bit alpha art, which Direct3D 11 samples differently
+  and leaves as-is. `RECOMP_UI_UPSCALE=0` turns it off.
 - **Saves.** Your profile and unlocks save to `private\play-disc`; every
   character and costume is offered unless you choose **Earn** on the
   launcher's **GAMEPLAY** page. Your profile only ever saves what you have

@@ -51,6 +51,65 @@ int main()
     expect("threads", recomp_texture_upscale(noise.data(), w, h, 3u, out) && out.size() == single.size() * 4u &&
         std::memcmp(out.data(), single.data(), out.size()) == 0);
 
+    /* The upscaler's thread gives the same picture; a cancelled job, or one
+       already taken, gives nothing. */
+    {
+        RecompTextureUpscaler upscaler;
+        const uint64_t first = upscaler.submit(noise, w, h, 3u);
+        const uint64_t dropped = upscaler.submit(noise, w, h, 3u);
+        const uint64_t failed = upscaler.submit(std::vector<uint8_t>(4u), 1u, 1u, 7u);
+        upscaler.cancel(dropped);
+        upscaler.wait();
+        std::vector<uint8_t> larger;
+        expect("job ids", first != 0u && dropped != 0u && failed != 0u && first != dropped && dropped != failed);
+        expect("thread picture", upscaler.take(first, larger) && larger.size() == single.size() * 4u &&
+            std::memcmp(larger.data(), single.data(), larger.size()) == 0);
+        expect("taken once", !upscaler.take(first, larger));
+        expect("cancelled", !upscaler.take(dropped, larger));
+        expect("failed job", upscaler.take(failed, larger) && larger.empty());
+        upscaler.cancel(0u);
+        upscaler.cancel(first);
+        // Jobs still queued when the upscaler goes are dropped.
+        for (int i = 0; i < 4; ++i) upscaler.submit(noise, w, h, 3u);
+    }
+
+    /* Finished copies past the cap drop the oldest: it finishes with no
+       pixels, so its art stays plain. */
+    {
+        RecompTextureUpscaler upscaler(RecompTextureUpscaler::kQueueBytes, single.size() * 4u * 2u);
+        uint64_t jobs[3];
+        for (uint64_t &job : jobs) {
+            job = upscaler.submit(noise, w, h, 3u);
+            upscaler.wait();
+        }
+        std::vector<uint8_t> larger;
+        expect("done cap drops oldest", upscaler.take(jobs[0], larger) && larger.empty());
+        expect("done cap keeps newer", upscaler.take(jobs[1], larger) && larger.size() == single.size() * 4u &&
+            upscaler.take(jobs[2], larger) && larger.size() == single.size() * 4u);
+        // Taking frees room: the next copy is kept.
+        const uint64_t next = upscaler.submit(noise, w, h, 3u);
+        upscaler.wait();
+        expect("done cap after take", upscaler.take(next, larger) && larger.size() == single.size() * 4u);
+    }
+
+    /* Waiting jobs past the cap drop the oldest, and every job still finishes:
+       none waits forever. The newest always runs. */
+    {
+        RecompTextureUpscaler upscaler(noise.size(), RecompTextureUpscaler::kDoneBytes);
+        uint64_t jobs[12];
+        for (uint64_t &job : jobs) job = upscaler.submit(noise, w, h, 3u);
+        upscaler.wait();
+        std::vector<uint8_t> larger;
+        bool all_finished = true;
+        bool newest_kept = false;
+        for (uint64_t job : jobs) {
+            if (!upscaler.take(job, larger)) all_finished = false;
+            else if (job == jobs[11]) newest_kept = larger.size() == single.size() * 4u;
+        }
+        expect("queue cap finishes every job", all_finished);
+        expect("queue cap keeps the newest", newest_kept);
+    }
+
     if (failures == 0) std::printf("texture upscale: all tests passed\n");
     return failures == 0 ? 0 : 1;
 }

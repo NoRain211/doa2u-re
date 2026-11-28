@@ -192,6 +192,7 @@ struct TextureEntry {
     uint8_t palette[kPaletteBytes]{};
     uint64_t fingerprint = 0u;
     uint32_t scale = 1u;  // texture_upscale.h: the 2D art's redrawn copy
+    uint64_t upscale_job = 0u;  // while that copy is drawn, texture is the plain one
     SDL_GPUTexture *texture = nullptr;
 };
 
@@ -416,6 +417,7 @@ struct RecompD3dPresenter {
     std::unordered_multimap<uint32_t, uint32_t> texture_index;
     uint32_t texture_count = 0u;
     uint32_t next_texture_slot = 0u;
+    RecompTextureUpscaler upscaler;
     // Textures replaced while queued draws still bind them; released after the next flush.
     std::vector<SDL_GPUTexture *> retired_textures;
 
@@ -707,6 +709,8 @@ void resolveMain(RecompD3dPresenter *presenter)
 
 void unindexTexture(RecompD3dPresenter *presenter, uint32_t slot)
 {
+    presenter->upscaler.cancel(presenter->textures[slot].upscale_job);
+    presenter->textures[slot].upscale_job = 0u;
     const auto range = presenter->texture_index.equal_range(presenter->textures[slot].data);
     for (auto it = range.first; it != range.second; ++it) {
         if (it->second == slot) {
@@ -1142,6 +1146,27 @@ void countDrawTexture(const RecompD3dPresenterDrawCommand &draw, bool sampled)
     }
 }
 
+/* Swaps in a texture's xBRZ copy once the upscaler has drawn it. The copy keeps
+   a mip chain, so art drawn smaller than it stays smooth. */
+void swapUpscaled(RecompD3dPresenter *presenter, TextureEntry &entry)
+{
+    std::vector<uint8_t> larger;
+    if (!presenter->upscaler.take(entry.upscale_job, larger)) return;
+    entry.upscale_job = 0u;
+    const uint32_t width = entry.width * entry.scale, height = entry.height * entry.scale;
+    SDL_GPUTexture *texture = larger.empty() ? nullptr : createTexture(presenter, SDL_GPU_TEXTURETYPE_2D,
+        SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+        width, height, 1u, mipLevels(width, height));
+    if (texture == nullptr) return;
+    if (!uploadTexture(presenter, texture, larger.data(), static_cast<uint32_t>(larger.size()), 0u, width, height)) {
+        SDL_ReleaseGPUTexture(presenter->device, texture);
+        return;
+    }
+    SDL_GenerateMipmapsForGPUTexture(commandBuffer(presenter), texture);
+    retireTexture(presenter, entry.texture);  // queued draws still sample the plain one
+    entry.texture = texture;
+}
+
 /* 2D draws (pretransformed vertices: menus, fonts, the HUD) may take a copy
    of their texture redrawn larger by texture_upscale.cpp; only 32-bit
    swizzled art qualifies (A8R8G8B8, P8 and A8 unpack to BGRA). */
@@ -1243,6 +1268,7 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
                 uploadTexture(presenter, entry.texture, packed.data(),
                     static_cast<uint32_t>(packed.size()), 0u, desc.width, desc.height);
             }
+            if (entry.upscale_job != 0u) swapUpscaled(presenter, entry);
             return entry.texture;
         }
     }
@@ -1265,6 +1291,7 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
                 draw.texture_bytes, level0, palettized ? draw.palette_bytes : nullptr);
     }
 
+    uint64_t upscale_job = 0u;
     const auto storeTexture = [&](SDL_GPUTexture *created) -> SDL_GPUTexture * {
         // ponytail: FIFO eviction; track recent use if upload churn is costly.
         const uint32_t slot = presenter->next_texture_slot;
@@ -1283,6 +1310,7 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
         if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
         entry.fingerprint = fingerprint;
         entry.scale = scale;
+        entry.upscale_job = upscale_job;
         entry.texture = created;
         presenter->texture_index.emplace(desc.data, slot);
         return created;
@@ -1398,28 +1426,11 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
         if (!decodeLevel(0u, unpacked, level_width, level_height)) return nullptr;
     }
 
-    std::vector<uint8_t> upscaled;
-    const bool larger = levels == 1u && scale > 1u &&
-        unpacked.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
-        recomp_texture_upscale(unpacked.data(), desc.width, desc.height, scale, upscaled);
-    uint32_t larger_levels = 1u;
-    if (larger) {
-        while ((std::max(desc.width, desc.height) * scale >> larger_levels) != 0u) ++larger_levels;
-    }
-    // The larger copy keeps a mip chain, so art drawn smaller than it stays smooth.
-    SDL_GPUTexture *texture = larger
-        ? createTexture(presenter, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
-            SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
-            desc.width * scale, desc.height * scale, 1u, larger_levels)
-        : createTexture(presenter, volume ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D, format,
-            SDL_GPU_TEXTUREUSAGE_SAMPLER, desc.width, desc.height, volume ? desc.volume_depth : 1u, levels);
+    SDL_GPUTexture *texture = createTexture(presenter, volume ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D,
+        format, SDL_GPU_TEXTUREUSAGE_SAMPLER, desc.width, desc.height, volume ? desc.volume_depth : 1u, levels);
     if (texture == nullptr) return nullptr;
     bool uploaded = true;
-    if (larger) {
-        uploaded = uploadTexture(presenter, texture, upscaled.data(), static_cast<uint32_t>(upscaled.size()),
-            0u, desc.width * scale, desc.height * scale);
-        if (uploaded && larger_levels > 1u) SDL_GenerateMipmapsForGPUTexture(commandBuffer(presenter), texture);
-    } else if (compressed) {
+    if (compressed) {
         const uint32_t block_bytes = desc.format_byte == RECOMP_D3D_TEXTURE_FORMAT_DXT1 ? 8u : 16u;
         uint32_t width = desc.width, height = desc.height, offset = 0u;
         for (uint32_t level = 0u; level < levels && uploaded; ++level) {
@@ -1446,7 +1457,8 @@ SDL_GPUTexture *lookupTexture(RecompD3dPresenter *presenter, const RecompD3dPres
         SDL_ReleaseGPUTexture(presenter->device, texture);
         return nullptr;
     }
-
+    if (levels == 1u && scale > 1u && unpacked.size() == static_cast<size_t>(desc.width) * desc.height * 4u)
+        upscale_job = presenter->upscaler.submit(std::move(unpacked), desc.width, desc.height, scale);
     return storeTexture(texture);
 }
 

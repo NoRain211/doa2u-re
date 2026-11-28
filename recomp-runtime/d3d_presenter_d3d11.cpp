@@ -199,6 +199,7 @@ struct TextureEntry {
     uint8_t palette[kPaletteBytes];
     uint64_t fingerprint;
     uint32_t scale;  // texture_upscale.h: the 2D art's redrawn copy
+    uint64_t upscale_job;  // while that copy is drawn, view is the plain texture
     ID3D11ShaderResourceView *view;
 };
 
@@ -403,6 +404,7 @@ struct RecompD3dPresenter {
     std::unordered_multimap<uint32_t, uint32_t> texture_index; // guest address -> slot
     uint32_t texture_count = 0u;
     uint32_t next_texture_slot = 0u;
+    RecompTextureUpscaler upscaler;
     std::vector<RenderTargetEntry> render_targets;
     std::vector<DepthTargetEntry> depth_targets;
     uint64_t target_bytes = 0u;
@@ -946,6 +948,8 @@ void releaseGraphics(RecompD3dPresenter *presenter, bool keep_device = false)
     for (uint32_t i = 0u; i < presenter->texture_count; ++i) {
         TextureEntry &entry = presenter->textures[i];
 
+        presenter->upscaler.cancel(entry.upscale_job);
+        entry.upscale_job = 0u;
         releaseCom(entry.view);
         entry.used = false;
     }
@@ -2756,6 +2760,8 @@ ID3D11SamplerState *lookupDrawSampler(RecompD3dPresenter *presenter,
 
 void unindexTexture(RecompD3dPresenter *presenter, uint32_t slot)
 {
+    presenter->upscaler.cancel(presenter->textures[slot].upscale_job);
+    presenter->textures[slot].upscale_job = 0u;
     const auto range = presenter->texture_index.equal_range(presenter->textures[slot].data);
     for (auto it = range.first; it != range.second; ++it) {
         if (it->second == slot) {
@@ -2765,6 +2771,36 @@ void unindexTexture(RecompD3dPresenter *presenter, uint32_t slot)
     }
 }
 
+
+/* Swaps in a texture's xBRZ copy once the upscaler has drawn it. The copy keeps
+   a mip chain, so art drawn smaller than it stays smooth; its mips are
+   generated, so it is a render target too. */
+void swapUpscaled(RecompD3dPresenter *presenter, TextureEntry &entry)
+{
+    std::vector<uint8_t> larger;
+    if (!presenter->upscaler.take(entry.upscale_job, larger)) return;
+    entry.upscale_job = 0u;
+    if (larger.empty()) return;
+    D3D11_TEXTURE2D_DESC texture_desc{};
+    texture_desc.Width = entry.width * entry.scale;
+    texture_desc.Height = entry.height * entry.scale;
+    texture_desc.ArraySize = 1u;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1u;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    texture_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    ID3D11Texture2D *created = nullptr;
+    if (FAILED(presenter->device->CreateTexture2D(&texture_desc, nullptr, &created))) return;
+    presenter->context->UpdateSubresource(created, 0u, nullptr, larger.data(), texture_desc.Width * 4u, 0u);
+    ID3D11ShaderResourceView *view = nullptr;
+    const HRESULT view_result = presenter->device->CreateShaderResourceView(created, nullptr, &view);
+    releaseCom(created);
+    if (FAILED(view_result) || view == nullptr) return;
+    presenter->context->GenerateMips(view);
+    releaseCom(entry.view);
+    entry.view = view;
+}
 
 /* 2D draws (pretransformed vertices: menus, fonts, the HUD) may take a copy
    of their texture redrawn larger by texture_upscale.cpp, as the Vulkan
@@ -2880,6 +2916,7 @@ ID3D11ShaderResourceView *lookupTexture(
                     resource, 0u, nullptr, draw.texture_bytes, desc.pitch, 0u);
                 releaseCom(resource);
             }
+            if (entry.upscale_job != 0u) swapUpscaled(presenter, entry);
             return entry.view;
         }
     }
@@ -2912,6 +2949,7 @@ ID3D11ShaderResourceView *lookupTexture(
                 draw.texture_bytes, level0, palettized ? draw.palette_bytes : nullptr);
     }
 
+    uint64_t upscale_job = 0u;
     const auto storeTexture = [&](ID3D11ShaderResourceView *view) -> ID3D11ShaderResourceView * {
         // ponytail: FIFO eviction; track recent use if upload churn is costly.
         const uint32_t slot = presenter->next_texture_slot;
@@ -2933,10 +2971,13 @@ ID3D11ShaderResourceView *lookupTexture(
         if (palettized) std::memcpy(entry.palette, draw.palette_bytes, kPaletteBytes);
         entry.fingerprint = fingerprint;
         entry.scale = scale;
+        entry.upscale_job = upscale_job;
         entry.view = view;
         try {
             presenter->texture_index.emplace(desc.data, slot);
         } catch (const std::bad_alloc &) {
+            presenter->upscaler.cancel(entry.upscale_job);
+            entry.upscale_job = 0u;
             releaseCom(entry.view);
             entry.used = false;
             return nullptr;
@@ -3088,27 +3129,12 @@ ID3D11ShaderResourceView *lookupTexture(
         }
     }
 
-    /* The larger copy keeps a mip chain, so art drawn smaller than it stays
-       smooth; its mips are generated, so it is a render target too. */
-    std::vector<uint8_t> upscaled;
+    /* The 2D art's larger copy is drawn on the upscaler's thread; this plain
+       texture stands in for it until swapUpscaled. */
     const bool larger = scale > 1u && !volume && initial.pSysMem == unswizzled.data() &&
-        unswizzled.size() == static_cast<size_t>(desc.width) * desc.height * 4u &&
-        recomp_texture_upscale(unswizzled.data(), desc.width, desc.height, scale, upscaled);
+        unswizzled.size() == static_cast<size_t>(desc.width) * desc.height * 4u;
     ID3D11Resource *texture = nullptr;
-    if (larger) {
-        texture_desc.Width = desc.width * scale;
-        texture_desc.Height = desc.height * scale;
-        texture_desc.MipLevels = 0u;
-        texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        texture_desc.Usage = D3D11_USAGE_DEFAULT;
-        texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-        texture_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
-        ID3D11Texture2D *created = nullptr;
-        if (FAILED(presenter->device->CreateTexture2D(&texture_desc, nullptr, &created))) return nullptr;
-        presenter->context->UpdateSubresource(created, 0u, nullptr, upscaled.data(),
-            texture_desc.Width * 4u, 0u);
-        texture = created;
-    } else if (volume) {
+    if (volume) {
         D3D11_TEXTURE3D_DESC volume_desc{};
         volume_desc.Width = desc.width;
         volume_desc.Height = desc.height;
@@ -3133,7 +3159,7 @@ ID3D11ShaderResourceView *lookupTexture(
     if (FAILED(view_result)) {
         return nullptr;
     }
-    if (larger) presenter->context->GenerateMips(view);
+    if (larger) upscale_job = presenter->upscaler.submit(std::move(unswizzled), desc.width, desc.height, scale);
 
     return storeTexture(view);
 }
@@ -5399,6 +5425,11 @@ RecompD3dPresenterError d3d_backend_release_memory(
 void d3d_backend_join_precompile(RecompD3dPresenter *presenter)
 {
     if (presenter->precompile.joinable()) presenter->precompile.join();
+}
+
+void d3d_backend_wait_upscales(RecompD3dPresenter *presenter)
+{
+    presenter->upscaler.wait();
 }
 
 RecompD3dPresenterError d3d_backend_destroy(

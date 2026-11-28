@@ -28,6 +28,9 @@ RecompD3dPresenterError d3d_backend_destroy(RecompD3dPresenter **presenter);
 unsigned d3d_backend_draw_shader_count(RecompD3dPresenter *presenter);
 /* For tests: waits for the boot precompile to finish, where destroy would stop it. */
 void d3d_backend_join_precompile(RecompD3dPresenter *presenter);
+/* For tests: waits until the 2D art queued for xBRZ is drawn; the next draw of
+   each piece then swaps its larger copy in. */
+void d3d_backend_wait_upscales(RecompD3dPresenter *presenter);
 /* Compiles every boot shader this run may use into RECOMP_SHADER_CACHE, with no
    window and no GPU device: tools/build_game.py runs it after a build so the
    first launch finds them cached. Returns how many compiled. */
