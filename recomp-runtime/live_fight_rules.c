@@ -68,7 +68,7 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
        Sorted, inside kept. */
     static const RecompRamRange own[] = {
         {0x00877c24u, 0x00877c28u}, {0x00877c6cu, 0x00877c70u}, /* g_view_half_sin_x */
-        {0x00877c7au, 0x00877c94u}, /* demo */
+        {0x00877c78u, 0x00877c94u}, /* demo */
         {0x00877c96u, 0x00877c97u}, {0x00877ca4u, 0x00877ca6u}, /* demo */
         {0x00877cb8u, 0x00877e98u}, /* demo */
         {0x00877e9cu, 0x00877ea0u}, /* g_view_half_tan_y */
