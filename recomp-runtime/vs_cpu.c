@@ -126,8 +126,12 @@ static void handoff(void)
     for (uint32_t side = 0u; side < 2u; ++side)
         for (uint32_t i = 0u; i < 2u; ++i) picks[side][i] = *pick_at(side, i);
     const uint32_t profile = *recomp_memory_u32(PROFILE);
-    uint8_t difficulty = profile != 0u ? *byte_at(profile) : 1u;
-    if (difficulty >= DIFFICULTIES) difficulty = DIFFICULTIES - 1u;
+    const uint8_t difficulty = profile != 0u ? *byte_at(profile) : 0xffu;
+    if (difficulty >= DIFFICULTIES) {
+        fprintf(stderr, "recomp vs cpu: no difficulty (profile 0x%08x, %u); the CPU level stays %u\n",
+            profile, difficulty, *byte_at(CPU_LEVEL));
+        return;
+    }
     *byte_at(CPU_LEVEL) = *byte_at(STORY_LEVELS + difficulty * STORY_BOUTS + LEVEL_BOUT);
 }
 

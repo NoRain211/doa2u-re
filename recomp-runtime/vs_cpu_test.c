@@ -122,6 +122,14 @@ int main(void)
     call(0x000d87c0u);
     expect("versus fight", seen_game == 5u && *b(GAME_MODE) == 5u && *u(SELECTED_MODE) == 5u &&
         *b(PLAYERS) == 1u && *b(CPU_LEVEL) == 10u + 2u * 11u + 4u);
+
+    /* A difficulty out of range leaves the CPU level as it was. */
+    *b(OPTIONS) = 4u;
+    *b(CPU_LEVEL) = 3u;
+    *u(SELECTED_MODE) = 6u;
+    *b(GAME_MODE) = 9u;
+    call(0x000d87c0u);
+    expect("bad difficulty", *b(PLAYERS) == 1u && *b(CPU_LEVEL) == 3u);
     *b(HANDOFF_PENDING) = 0u;
 
     /* AGAIN: the flag is 0 and the CPU side has another fighter. */

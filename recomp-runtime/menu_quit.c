@@ -137,7 +137,7 @@ static const recomp_utf16 *const VERSUS_HELP[6] = {
     u"Fight a friend, or the CPU with one controller.",
     u"Fight a friend, or the CPU with one controller.",
     u"Affronter un ami, ou le CPU avec une seule manette.",
-    u"Gegen einen Freund kämpfen, oder mit einem Controller gegen die CPU.",
+    u"Gegen einen Freund k\u00e4mpfen, oder mit einem Controller gegen die CPU.",
     u"Sfida un amico, o la CPU con un solo controller.",
     u"Lucha contra un amigo, o contra la CPU con un solo mando.",
 };
