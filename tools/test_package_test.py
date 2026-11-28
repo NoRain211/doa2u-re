@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import ast
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -60,9 +62,29 @@ class ReleaseSelectionTest(unittest.TestCase):
         # build_game.py --disassemble reads it.
         self.assertTrue(shipped("tools/doa2u/seed_functions.json", "windows"))
 
+    def test_windows_sdl3_dll_sits_beside_the_launcher(self):
+        # NOTICE names SDL3's license on every platform, so every ZIP carries it.
+        self.assertTrue(shipped("recomp-runtime/licenses/SDL3.txt", "windows"))
+        self.assertTrue(shipped("recomp-runtime/licenses/SDL3.txt", "linux"))
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "sdl3.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr(package_test.SDL3[2] + "lib/x64/SDL3.dll", b"dll")
+            out = Path(folder) / "package.zip"
+            with mock.patch.object(package_test, "download", return_value=source), \
+                    zipfile.ZipFile(out, "w") as package:
+                package_test.bundle_file(package, "DOA2U-1/", *package_test.SDL3, "lib/x64/SDL3.dll")
+            with zipfile.ZipFile(out) as package:
+                self.assertEqual(package.read("DOA2U-1/SDL3.dll"), b"dll")
+
     def test_prebuilt_launcher_entry_is_executable(self):
         info = package_test.executable("DOA2U-1/tools/artifacts/launcher-linux-x86_64")
         self.assertEqual((info.external_attr >> 16) & 0o777, 0o755)
+
+    def test_every_release_ships_the_playstation_glyphs(self):
+        # The game menus and every launcher draw these; a dropped PNG loses the prompts.
+        for platform in PLATFORM_FILES:
+            self.assertTrue(shipped("assets/glyphs/playstation/playstation_button_color_cross.png", platform), platform)
 
     def test_developer_notes_stay_out(self):
         for path in ("AGENTS.md", "CONTEXT.md", "README.md", "docs/bring-up.md", "tools/test_run_game.py"):

@@ -23,7 +23,7 @@ DEV_FILES = {"AGENTS.md", "CONTEXT.md", "README.md", ".gitattributes", ".gitigno
              "private/README.md", "tools/package_test.py", "tools/public_export.py",
              "tools/doa2u/function_status.json", "tools/build_linux_launcher.sh", "tools/matchmaker.py", "tools/matchmaker.service", SUBMODULE}
 DEV_PREFIXES = (".github/", "docs/", "tools/test_", "tools/doa2u/ghidra/")
-# Files one platform family alone builds or runs; recomp-runtime/CMakeLists.txt picks backends by WIN32.
+# Files one platform family alone builds, runs or redistributes; recomp-runtime/CMakeLists.txt picks backends by WIN32.
 WINDOWS_ONLY = {"tools/launcher.cs", "tools/voice_editor.cs", "tools/jukebox_editor.cs", *(f"recomp-runtime/{name}" for name in (
     "audio_output_xaudio2.cpp", "audio_output_xaudio2_test.cpp", "audio_output_xaudio2_host_test.cpp",
     "audio_xtalk_xapo.cpp", "audio_xtalk_xapo.h", "audio_capture_xapo.cpp", "audio_capture_xapo.h",
@@ -40,6 +40,9 @@ PLATFORM_FILES = {"windows": WINDOWS_ONLY,
 # The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its GAME page builds on a
 # machine with no compiler (a stock Steam Deck).
 LINUX_LAUNCHER = "launcher-linux-x86_64"
+# The PlayStation button glyphs the runtime and every launcher draw, from Kenney's CC0 Input
+# Prompts pack. Every ZIP builds one of those, so every ZIP carries them.
+GLYPHS = "assets/glyphs/playstation/"
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
 # and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")
@@ -63,6 +66,10 @@ WHEELS = [("https://files.pythonhosted.org/packages/70/39/2138d890a8e827636b9de9
            "9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c", "")]
 CMAKE = ("https://github.com/Kitware/CMake/releases/download/v4.4.5/cmake-4.4.5-windows-x86_64.zip",
          "326c826486d46a23cf9d5a1c9ee3a567d427bdd02c4a34071937a2a675cff004", "cmake-4.4.5-windows-x86_64/")
+# SDL3's official VC build: Launcher.exe loads SDL3.dll beside itself to name a PlayStation pad's
+# buttons. The runner's own copy comes from recomp-runtime/CMakeLists.txt.
+SDL3 = ("https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-devel-3.4.16-VC.zip",
+        "1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de", "SDL3-3.4.16/")
 # ZIP name suffix and README for each platform; macOS and Linux build extract-xiso themselves.
 PLATFORMS = {"windows": ("", "docs/test-release.md"),
              "macos": ("-macOS", "docs/test-release-macos.md"),
@@ -102,20 +109,29 @@ def git(*args, cwd=ROOT):
     return subprocess.check_output(["git", *args], cwd=cwd)
 
 
-def bundle(package, prefix, url, digest, top, skip=()):
-    """Copy a pinned upstream ZIP's folder top, minus paths starting with skip, into the package at prefix.
-
-    Downloads the ZIP once into ARTIFACTS."""
+def download(url, digest):
+    """A pinned upstream ZIP, downloaded once into ARTIFACTS."""
     cached = ARTIFACTS / "downloads" / digest
     if not cached.is_file() or sha256(cached) != digest:
         cached.parent.mkdir(parents=True, exist_ok=True)
         cached.unlink(missing_ok=True)
         fetch_verified(url, digest, cached, url.rsplit("/", 1)[1])
-    with zipfile.ZipFile(cached) as source:
+    return cached
+
+
+def bundle(package, prefix, url, digest, top, skip=()):
+    """Copy a pinned upstream ZIP's folder top, minus paths starting with skip, into the package at prefix."""
+    with zipfile.ZipFile(download(url, digest)) as source:
         for info in source.infolist():
             path = info.filename[len(top):]
             if info.filename.startswith(top) and not info.is_dir() and not path.startswith(skip):
                 package.writestr(prefix + path, source.read(info))
+
+
+def bundle_file(package, prefix, url, digest, top, member):
+    """Copy one file of a pinned upstream ZIP into the package at prefix, under its own name."""
+    with zipfile.ZipFile(download(url, digest)) as source:
+        package.writestr(prefix + member.rsplit("/", 1)[-1], source.read(top + member))
 
 
 def shipped(path, platform):
@@ -123,6 +139,9 @@ def shipped(path, platform):
     # Players' texture packs and dumps sit beside the launcher; a release never carries them.
     if path.startswith("textures/"):
         return False
+    # The runtime and both launchers load these from beside the launcher at run time.
+    if path.startswith(GLYPHS):
+        return True
     if path in PLATFORM_FILES[platform]:
         return True
     if any(path in files for files in PLATFORM_FILES.values()):
@@ -225,6 +244,9 @@ def main():
                 build_jukebox_editor(Path(launchers))
                 for exe in (*LAUNCHERS, JUKEBOX_EDITOR):
                     package.write(Path(launchers) / exe, f"{name}/{exe}")
+            # Launcher.exe reads a PlayStation pad's type through SDL3.dll beside itself; the build's runner
+            # is copied its own SDL3.dll by recomp-runtime/CMakeLists.txt.
+            bundle_file(package, f"{name}/", *SDL3, "lib/x64/SDL3.dll")
         if linux:
             package.writestr(executable(f"{name}/tools/artifacts/{LINUX_LAUNCHER}"), (ARTIFACTS / LINUX_LAUNCHER).read_bytes())
         package.write(ARTIFACTS / artifacts[2], f"{name}/private/{artifacts[2]}")

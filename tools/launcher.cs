@@ -226,6 +226,50 @@ static class Pad
     }
 }
 
+// PlayStation pads through SDL3, whose DLL the release puts beside this launcher.
+static class SdlPad
+{
+    // SDL_INIT_GAMEPAD, and SDL_GamepadType's PS3, PS4 and PS5 values (SDL_gamepad.h).
+    const uint InitGamepad = 0x2000;
+    const int TypePs3 = 4, TypePs4 = 5, TypePs5 = 6;
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    static extern bool SDL_Init(uint flags);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern IntPtr SDL_GetGamepads(out int count);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern int SDL_GetGamepadTypeForID(int instanceId);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern void SDL_free(IntPtr memory);
+    [DllImport("SDL3.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern void SDL_UpdateGamepads();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
+    // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32: SDL3.dll and what it imports come
+    // from this launcher's folder and System32, never the current directory or PATH. The imports above
+    // then resolve to this module; a missing or wrong-architecture DLL just keeps the Xbox labels.
+    static readonly bool Loaded = LoadLibraryEx(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SDL3.dll"),
+        IntPtr.Zero, 0x00000100 | 0x00000800) != IntPtr.Zero;
+    static bool started;
+    // True when the first gamepad is a PlayStation one, as tools/launcher_sdl.cpp reads it.
+    public static bool PlayStation()
+    {
+        if (!Loaded) return false;
+        if (!started) started = SDL_Init(InitGamepad);
+        if (!started) return false;
+        SDL_UpdateGamepads(); // no event loop here, so this is what notices hotplugged pads
+        int count;
+        IntPtr ids = SDL_GetGamepads(out count);
+        if (ids == IntPtr.Zero) return false;
+        try
+        {
+            int type = count > 0 ? SDL_GetGamepadTypeForID(Marshal.ReadInt32(ids)) : 0;
+            return type == TypePs3 || type == TypePs4 || type == TypePs5;
+        }
+        finally { SDL_free(ids); }
+    }
+}
+
 // Updates the install from the newest GitHub release ZIP through tools\update.py, which the other launchers share.
 // The ZIP's VERSION file says what is installed; a source checkout has none and is never updated.
 static class Updater
@@ -314,6 +358,15 @@ class LauncherForm : Form
     readonly Timer padTimer = new Timer { Interval = 50 };
     int padHeld;
     DateTime padRepeat = DateTime.MaxValue;
+    // The top bar's prompts show a PlayStation pad's glyphs; SDL is asked at most once a second.
+    bool playstationPad;
+    DateTime padTypeChecked = DateTime.MinValue;
+    // The prompts' art from assets\glyphs\playstation beside the launcher, as the game and the
+    // SDL launcher use it; a missing file keeps that prompt spelled out.
+    readonly Image crossGlyph = Glyph("playstation_button_color_cross");
+    readonly Image circleGlyph = Glyph("playstation_button_color_circle");
+    readonly Image l1Glyph = Glyph("playstation_trigger_l1");
+    readonly Image r1Glyph = Glyph("playstation_trigger_r1");
     Point? drag;
     RectangleF[] tabs, values;
     RectangleF discord;
@@ -358,6 +411,18 @@ class LauncherForm : Form
     readonly StringFormat wrap = new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit };
 
     static int Nearest(int h) { return Math.Max(0, Heights.Count(x => x <= h) - 1); }
+    // One prompt glyph, read at run time so the art never enters the exe; null when it is missing.
+    static Image Glyph(string name)
+    {
+        try
+        {
+            // GDI+ reads a stream-backed image lazily, so copy it before the file closes.
+            using (FileStream file = File.OpenRead(Path.Combine(Game.Root, "assets", "glyphs", "playstation", name + ".png")))
+            using (Image image = Image.FromStream(file))
+                return new Bitmap(image);
+        }
+        catch (Exception) { return null; }
+    }
     static Row Choice(string label, string info, string[] names, bool second, int fallback)
     {
         return new Row { Label = label, Info = info, Names = names, Index = second ? 1 : 0, Default = fallback };
@@ -626,6 +691,17 @@ class LauncherForm : Form
         catch (Win32Exception) { notice = "No browser opened; visit " + DiscordUrl; }
     }
 
+    // A launcher without SDL3.dll, or an SDL3 old enough to lack these calls, keeps the Xbox names.
+    bool PlayStationPad()
+    {
+        if (DateTime.UtcNow - padTypeChecked < TimeSpan.FromSeconds(1)) return playstationPad;
+        padTypeChecked = DateTime.UtcNow;
+        try { playstationPad = SdlPad.PlayStation(); }
+        catch (DllNotFoundException) { playstationPad = false; }
+        catch (EntryPointNotFoundException) { playstationPad = false; }
+        return playstationPad;
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
@@ -672,16 +748,41 @@ class LauncherForm : Form
         }
         discord = DrawDiscordBadge(g, cx - 12, TopH / 2f);
         float x = discord.X - 16;
-        foreach (var hint in new[] { new[] { "B", "BACK" }, new[] { "A", "SELECT" }, new[] { "", "CHANGE" }, new[] { "LB/RB", "PAGE" } })
+        // A PlayStation pad shows Cross, Circle and L1/R1 art; without the files the names stay.
+        bool ps = PlayStationPad();
+        bool shoulders = ps && l1Glyph != null && r1Glyph != null;
+        string[] labels = { "BACK", "SELECT", "CHANGE", "PAGE" };
+        string[] names = { ps ? "CIRCLE" : "B", ps ? "CROSS" : "A", "", ps ? "L1/R1" : "LB/RB" };
+        Image[] firstGlyphs = { ps ? circleGlyph : null, ps ? crossGlyph : null, null, shoulders ? l1Glyph : null };
+        Image[] secondGlyphs = { null, null, null, shoulders ? r1Glyph : null };
+        for (int i = 0; i < labels.Length; i++)
         {
-            float textW = g.MeasureString(hint[1], smallFont).Width;
+            float textW = g.MeasureString(labels[i], smallFont).Width;
             x -= textW;
-            g.DrawString(hint[1], smallFont, new SolidBrush(muted), new RectangleF(x, 0, textW + 4, TopH), near);
-            float w = hint[0] == "" ? 26 : hint[0].Length > 1 ? g.MeasureString(hint[0], smallFont).Width + 8 : 20;
-            x -= w + 6;
-            g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
-            if (hint[0] == "") { Arrow(g, x + 11, TopH / 2, -1, 0, dark); Arrow(g, x + 15, TopH / 2, 1, 0, dark); }
-            else g.DrawString(hint[0], smallFont, new SolidBrush(dark), new RectangleF(x, TopH / 2 - 10, w, 20), center);
+            g.DrawString(labels[i], smallFont, new SolidBrush(muted), new RectangleF(x, 0, textW + 4, TopH), near);
+            x -= 6;
+            if (names[i] == "")
+            {
+                x -= 26;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, 26, 20));
+                Arrow(g, x + 11, TopH / 2, -1, 0, dark);
+                Arrow(g, x + 15, TopH / 2, 1, 0, dark);
+            }
+            else if (firstGlyphs[i] != null)
+            {
+                float w = secondGlyphs[i] == null ? 26 : 44;
+                x -= w;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
+                g.DrawImage(firstGlyphs[i], x + 5, TopH / 2 - 8, 16, 16);
+                if (secondGlyphs[i] != null) g.DrawImage(secondGlyphs[i], x + 23, TopH / 2 - 8, 16, 16);
+            }
+            else
+            {
+                float w = names[i].Length > 1 ? g.MeasureString(names[i], smallFont).Width + 8 : 20;
+                x -= w;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
+                g.DrawString(names[i], smallFont, new SolidBrush(dark), new RectangleF(x, TopH / 2 - 10, w, 20), center);
+            }
             x -= 16;
         }
 
