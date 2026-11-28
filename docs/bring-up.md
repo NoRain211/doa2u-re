@@ -1001,8 +1001,11 @@ Q/W are White/Black and E/R are the triggers. Keyboard input requires window
 focus. A PlayStation pad (SDL3's PS3, PS4 or PS5 type) names its own buttons
 on the screens this runtime draws: Cross, Circle, Square, Triangle, L1, R1,
 L2, R2, Select/Share/Create and Start/Options. The menus' Xbox prompts become
-Cross/Circle, Square/Triangle and L1/R1 art for the game's 64x32 textures;
-textures/playstation-buttons.txt adds keys for other resolutions. The
+Cross/Circle, Square/Triangle and L1/R1 art for the game's 64x32 textures,
+composed at the guest size from the CC0 Kenney Input Prompts glyphs in
+`assets/glyphs/playstation` (see NOTICE); the launchers' hint bars draw the
+same files. textures/playstation-buttons.txt adds keys for other resolutions.
+A missing glyph file leaves that prompt as the game drew it, and the
 settings files keep the Xbox names. Options, Controller, Rebind opens the
 game's Button Config screen on the keys and host pad buttons
 (`button_config.c`, `rebind.cpp`), which
