@@ -61,9 +61,10 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
        fight's first frames do not: copies of fighter positions, vectors,
        matrix rows and the last scene's partner record and winner.
        Two sides with different menu histories differ there from frame 0; a
-       fresh runner holds zeros in that fight state. Each run is a span where two runners'
-       desync dumps differed; the bytes in between that the fight reads
-       (0x877c94-0x877cb8, 0x87d498-0x87d49d, 0x87d5a4, 0x87d63c) stay in.
+       fresh runner holds zeros in that fight state. Each run is a span where
+       two runners' desync dumps differed; the bytes in between that the fight
+       reads (0x877c94-0x877cb8, 0x87d498-0x87d49d, 0x87d5a4, 0x87d63c) stay
+       in.
        Sorted, inside kept. */
     static const RecompRamRange own[] = {
         {0x00877c24u, 0x00877c28u}, {0x00877c6cu, 0x00877c70u}, /* g_view_half_sin_x */
