@@ -400,6 +400,23 @@ game showed as "unable to renew your best record". The ask without a pivot
 lists the same rows as before, so an older client sees no change. Other
 boards get no such row, so their pages do not list a player with 0 points.
 
+The character usage and win rate pages read only rank 1 of boards 31 to 34
+and 39 to 42 (all regions, NTSC-U, Japan and the rest;
+`live_ranking_page_decode_rows` `0x2b6740`). No player writes them: on Live
+an admin page (`live_ranking_page_update` `0x2b7110`) read every row of 35 to
+38 and 43 to 46, added up stats 0..29 (each character's picks, then its wins)
+and uploaded the totals as its own row. The server builds that row itself on
+every `LEADERS` ask for one of these boards: XUID 0, rank 1, stats 0..29 as
+32-bit sums of every account's row on the matching source board (each row
+adds at most 65,535 per stat, so one account cannot swamp the page; the sums
+are kept until that board is written), stat 30 the
+packed date and -2 the decimal `YYYYMMDDhhmmss` time, both in UTC, as
+`live_ranking_page_upload_own_row` (`0x2b6140`) wrote them. The game writes
+43 and one of 44 to 46 at each match's end
+(`ranking_write_character_stats_board`); nothing writes 35 to 38, so 31 to 34
+stay empty. A board with nothing to add up answers total 0, and an ask past
+rank 1 gets no row.
+
 Board 47 is the reliability board (`ranking_write_reliability_board`
 `0x2979b0`): ids 0..3 and 8 are set, and ids 4..7 read four globals that
 `ranking_profile_state_init` (`0x298190`) copies from a second argument its
