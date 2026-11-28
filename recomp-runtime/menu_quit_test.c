@@ -239,11 +239,13 @@ int main(void)
     expect("quit mode", hook(0x001343d0u, &ctx, 1u) == QUIT_MODE);
     *recomp_memory(MENU + 0x120u, 1u) = 2u;
     expect("game modes", hook(0x001343d0u, &ctx, 1u) == 5u);
-    const uint32_t mode = QUIT_MODE, other_mode = 3u;
+    const uint32_t mode = QUIT_MODE, other_mode = 3u, versus_mode = 5u;
     const uint32_t help = hook(0x001345c0u, &mode, 1u);
-    uint32_t german = 0u;
+    uint32_t german = 0u, english = 0u;
     expect("help", help == RECOMP_RUNNER_TEXT_QUIT && hook(0x001345c0u, &other_mode, 1u) == 0x95u &&
         recomp_runner_text_lookup(help, 3u, &german) && rd16(german) == 'D');
+    expect("versus help", hook(0x001345c0u, &versus_mode, 1u) == RECOMP_RUNNER_TEXT_VERSUS &&
+        recomp_runner_text_lookup(RECOMP_RUNNER_TEXT_VERSUS, 1u, &english) && rd16(english) == 'F');
 
     /* Fewer unlocked: Quit Game follows the listed ones. */
     unlocked = 12u;

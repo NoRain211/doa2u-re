@@ -58,6 +58,7 @@ enum {
        plays the "not available" sound for anything but 2. Mode 0x13 is in
        that table, always 2, no entry's, and the switch does nothing for it. */
     QUIT_MODE = 0x13,
+    VERSUS_MODE = 5,
     OPTIONS_MODE = 0x0a,
     MENU_CONTEXT = 0x00df5698u,     /* +0x120: the carousel position */
     SOUND_CONFIRM = 0x24, SOUND_CANCEL = 0x29,
@@ -128,6 +129,17 @@ static const recomp_utf16 *const PC_HELP[6] = {
     u"Das sind die Grafik-, Audio- und Spieleinstellungen f\u00fcr diesen PC.",
     u"Impostazioni grafiche, audio e di gioco di questo PC.",
     u"Opciones de gr\u00e1ficos, audio y juego de este PC.",
+};
+
+/* Versus takes one controller too, against the CPU (vs_cpu.c), so its line
+   replaces the game's "You need at least two controllers." */
+static const recomp_utf16 *const VERSUS_HELP[6] = {
+    u"Fight a friend, or the CPU with one controller.",
+    u"Fight a friend, or the CPU with one controller.",
+    u"Affronter un ami, ou le CPU avec une seule manette.",
+    u"Gegen einen Freund k\u00e4mpfen, oder mit einem Controller gegen die CPU.",
+    u"Sfida un amico, o la CPU con un solo controller.",
+    u"Lucha contra un amigo, o contra la CPU con un solo mando.",
 };
 
 /* ---- State -------------------------------------------------------- */
@@ -372,6 +384,7 @@ void recomp_menu_quit_install(void)
         write_picture(pictures[i], i == 0u ? 1.0f : 0.75f, recomp_quit_icon_draw);
     }
     recomp_runner_text_set(RECOMP_RUNNER_TEXT_QUIT, HELP);
+    recomp_runner_text_set(RECOMP_RUNNER_TEXT_VERSUS, VERSUS_HELP);
 
     pc_entry = 0u;
     pc_position = -1;
@@ -497,6 +510,7 @@ static void menu_help(void)
 {
     const int position = clamped(*recomp_memory(MENU_CONTEXT + 0x120u, 1u));
     if (kernel_arg(1u) == QUIT_MODE) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_QUIT);
+    else if (kernel_arg(1u) == VERSUS_MODE) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_VERSUS);
     else if (pc_position >= 0 && position == pc_position) kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_PC_MENU);
     else if (jukebox_position >= 0 && position == jukebox_position)
         kernel_return_caller_cleanup(RECOMP_RUNNER_TEXT_JUKEBOX);
