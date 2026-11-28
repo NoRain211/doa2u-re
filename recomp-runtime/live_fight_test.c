@@ -175,7 +175,7 @@ static void test_hash_ranges(void)
         {0x00876050u, false}, {0x00877c9cu, false}, {0x0087d498u, false}, {0x0087d49du, false},
         {0x0087d5a4u, false}, {0x0087d63cu, false}, {0x0087f51du, false},
         {0x008785f0u, true}, {0x00877c78u, true}, {0x00877cd8u, true}, {0x0087d128u, true}, {0x0087d23au, true},
-        {0x0087d324u, true}, {0x0087d32eu, true}, {0x0087d3b5u, true}, {0x0087d3b7u, false},
+        {0x0087d324u, true}, {0x0087d32eu, true}, {0x0087d3b5u, true}, {0x0087d3b7u, false}, {0x0087d35au, true}, {0x0087f450u, true},
         {0x0087d580u, true}, {0x0087f2b0u, true}, {0x0087f50cu, true}, {0x0087bfa0u, true},
     };
     for (size_t p = 0u; p < sizeof probes / sizeof *probes; ++p) {

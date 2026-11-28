@@ -56,15 +56,17 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
        view cone, the D3D world, view and projection matrices and a
        view-projection one, and the music track.
        Also what the title and menu demo scenes leave behind (marked "demo"):
-       their manager's state (0x87d578-0x87d642, 0x87f2b0-0x87f51c; the scene
+       their manager's state (0x87d578-0x87d644, 0x87f2b0-0x87f51c; the scene
        is picked at random) and the fight state their fights write and a Live
        fight's first frames do not: copies of fighter positions, vectors,
        matrix rows and the last scene's partner record and winner.
        Two sides with different menu histories differ there from frame 0; a
        fresh runner holds zeros in that fight state. Each run is a span where
-       two runners' desync dumps differed; the bytes in between that the fight
-       reads (0x877c94-0x877cb8, 0x87d498-0x87d49d, 0x87d5a4, 0x87d63c) stay
-       in.
+       two runners' desync dumps differed, rounded out to whole dwords (each
+       scene leaves different values, so different bytes of a field differ)
+       unless that would take in a byte the fight or the select screen reads;
+       those bytes (0x877c94-0x877cb8, 0x87d3b7, 0x87d498-0x87d49d, 0x87d5a4,
+       0x87d63c, 0x87f51d) stay in.
        Sorted, inside kept. */
     static const RecompRamRange own[] = {
         {0x00877c24u, 0x00877c28u}, {0x00877c6cu, 0x00877c70u}, /* g_view_half_sin_x */
@@ -84,24 +86,24 @@ size_t recomp_live_hash_ignored(RecompRamRange *ignored, size_t capacity)
         {0x00879c00u, 0x00879c04u}, {0x00879c10u, 0x00879c50u}, /* the view matrix */
         {0x0087a900u, 0x0087a940u}, /* a view-projection matrix */
         {0x0087ad6cu, 0x0087ad70u}, {0x0087ae1cu, 0x0087ae2cu},
-        {0x0087af5cu, 0x0087af78u}, {0x0087af8au, 0x0087af8cu}, /* demo: fighter 2's record */
+        {0x0087af5cu, 0x0087af78u}, {0x0087af88u, 0x0087af8cu}, /* demo: fighter 2's record */
         {0x0087bfa0u, 0x0087c7a0u}, /* demo */
         {0x0087cfacu, 0x0087cfb0u},
         {0x0087d03cu, 0x0087d04cu}, {0x0087d068u, 0x0087d078u}, /* demo */
         {0x0087d128u, 0x0087d208u}, /* demo: matrix rows */
         {0x0087d214u, 0x0087d224u}, {0x0087d228u, 0x0087d22cu}, /* g_view_half_cos_x */
-        {0x0087d23au, 0x0087d23bu}, /* demo: g_match_winner_side */
+        {0x0087d238u, 0x0087d23cu}, /* demo: g_match_winner_side */
         {0x0087d320u, 0x0087d340u}, /* demo: four fighters' bone weight lists */
-        {0x0087d344u, 0x0087d35au}, /* demo */
+        {0x0087d344u, 0x0087d35cu}, /* demo */
         {0x0087d360u, 0x0087d3a0u}, /* the projection matrix */
         {0x0087d3a4u, 0x0087d3a8u}, {0x0087d3b4u, 0x0087d3b6u}, /* demo */
         {0x0087d3f4u, 0x0087d3f8u},
-        {0x0087d40bu, 0x0087d40cu}, {0x0087d413u, 0x0087d448u}, {0x0087d450u, 0x0087d480u}, /* demo */
-        {0x0087d488u, 0x0087d48cu}, {0x0087d49eu, 0x0087d49fu}, /* demo */
-        {0x0087d49fu, 0x0087d4a0u}, {0x0087d4e0u, 0x0087d550u}, /* demo */
-        {0x0087d578u, 0x0087d5a2u}, {0x0087d5a9u, 0x0087d5dcu}, /* demo: the scene manager */
-        {0x0087d618u, 0x0087d63au}, {0x0087d640u, 0x0087d642u}, /* demo */
-        {0x0087f2b0u, 0x0087f442u}, {0x0087f4d8u, 0x0087f51cu}, /* demo: the scene manager */
+        {0x0087d408u, 0x0087d40cu}, {0x0087d410u, 0x0087d448u}, {0x0087d450u, 0x0087d480u}, /* demo */
+        {0x0087d488u, 0x0087d48cu}, {0x0087d49eu, 0x0087d4a0u}, /* demo */
+        {0x0087d4e0u, 0x0087d550u}, /* demo */
+        {0x0087d578u, 0x0087d5a4u}, {0x0087d5a8u, 0x0087d5dcu}, /* demo: the scene manager */
+        {0x0087d618u, 0x0087d63cu}, {0x0087d640u, 0x0087d644u}, /* demo */
+        {0x0087f2b0u, 0x0087f51cu}, /* demo: the scene manager */
         {0x0087f538u, 0x0087f539u}, /* the music track */
     };
     const size_t kept_count = sizeof kept / sizeof *kept, own_count = sizeof own / sizeof *own;
