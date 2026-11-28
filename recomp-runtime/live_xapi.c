@@ -1868,8 +1868,9 @@ static void live_qos_listen(void) { kernel_return(5u, 0u); }
    game datagrams use and answers asynchronously; this file copies the
    entries into the guest handle as they settle. A target runner that cannot
    answer the probes is the shipped 50 ms (an old runner, or a peer still
-   opening its path); an address with no route at all is the console's
-   no-reply entry, complete with wRtt 0xffff and no bars. apxna (argument 2)
+   opening its path), and so is a search result, which has no route; a peer
+   forgotten mid-request is the console's no-reply entry, complete with wRtt
+   0xffff and no bars. apxna (argument 2)
    is the array of XNADDR pointers the game builds from the search records or
    the session players. */
 static uint32_t live_qos_handle(unsigned slot)

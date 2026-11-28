@@ -705,8 +705,8 @@ int main(void)
         recomp_live_transport_pump(qos_t0);
         check("qos probes are pending", recomp_live_transport_qos_results(0u, qos, 2u, &qos_done) == 2u &&
             qos[0].state == RECOMP_LIVE_QOS_PENDING && !qos_done);
-        check("an address with no route is a no-reply entry", qos[1].state == RECOMP_LIVE_QOS_NO_REPLY &&
-            qos[1].probes_sent == 0u && qos[1].rtt_med_ms == 0xffffu);
+        check("an address never paired keeps the shipped 50 ms", qos[1].state == RECOMP_LIVE_QOS_FALLBACK &&
+            qos[1].probes_sent == 0u && qos[1].rtt_min_ms == 50u && qos[1].rtt_med_ms == 50u);
         for (unsigned i = 0u; i < 5u; ++i) {
             if (i != 0u) recomp_live_transport_pump(qos_t0 + (uint64_t)i * 100u);
             size = read_socket(peer_socket, packet, sizeof packet, &source, 1000u);

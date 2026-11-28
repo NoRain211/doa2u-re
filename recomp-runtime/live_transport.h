@@ -75,14 +75,15 @@ int recomp_live_transport_guest_receive(uint8_t *data, size_t capacity, uint32_t
    probes each address's peer on the route its game datagrams use, so a
    direct pairing measures the direct path and a relayed one the relay. A
    peer's runner that predates the probes ignores them, and the entry falls
-   back to the shipped 50 ms; an address with no route is the console's
-   no-reply entry (complete, wRtt 0xffff). */
+   back to the shipped 50 ms, as does an address never paired (a search
+   result). A peer forgotten mid-request is the console's no-reply entry
+   (complete, wRtt 0xffff). */
 enum { RECOMP_LIVE_QOS_SLOTS = 8, RECOMP_LIVE_QOS_PROBES = 5 };
 typedef enum RecompLiveQosState {
     RECOMP_LIVE_QOS_PENDING = 0,
     RECOMP_LIVE_QOS_ANSWERED = 1, /* the peer's runner answered the probes */
-    RECOMP_LIVE_QOS_NO_REPLY = 2, /* no route to the address at all */
-    RECOMP_LIVE_QOS_FALLBACK = 3, /* a route, but no answer: the 50 ms default */
+    RECOMP_LIVE_QOS_NO_REPLY = 2, /* the peer was forgotten mid-request */
+    RECOMP_LIVE_QOS_FALLBACK = 3, /* no answer, or never paired: the 50 ms default */
 } RecompLiveQosState;
 typedef struct RecompLiveQosEntry {
     uint16_t rtt_min_ms;      /* 0 until the entry settles */

@@ -808,8 +808,10 @@ static void qos_tick(uint64_t now)
             LivePeer *peer = peer_find(entry->virtual_ina);
             const bool path = peer != NULL && peer->introduced && (peer->relay || peer->connected);
             if (!entry->started) {
-                if (peer == NULL) { /* never paired with this runner: a search result */
-                    qos_finish(entry, RECOMP_LIVE_QOS_NO_REPLY);
+                /* Never paired with this runner: a search result. Empty bars on
+                   every listed host would read as a bad line, not an unknown one. */
+                if (peer == NULL) {
+                    qos_finish(entry, RECOMP_LIVE_QOS_FALLBACK);
                     continue;
                 }
                 if (entry->path_ms == 0u) entry->path_ms = now + LIVE_QOS_PATH_MS;

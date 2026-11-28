@@ -497,8 +497,8 @@ after it began. An address in place of a name needs no lookup.
 - A search result carries no round-trip figure, and the matchmaker reveals no
   endpoint before CONNECT, so a runner cannot measure a listed host's
   latency. The game still asks for it, so each search entry reports the
-  console's no-reply shape (no bars, sorted last) rather than a made-up
-  figure. Measuring it needs a matchmaker kind that forwards a small ping to
+  shipped 50 ms (three bars); empty bars on every host would read as a bad
+  line rather than an unknown one. Measuring it needs a matchmaker kind that forwards a small ping to
   the listed host and its answer back; the host would then learn the
   searcher's endpoint, as it already does on CONNECT, unless the server
   measures the round trip itself and puts it in RESULT.

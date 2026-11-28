@@ -102,8 +102,8 @@ replaces them at the API boundary, like the D3D8 and DirectSound adapters:
   them without passing them to its game, so the minimum and median round
   trip and the sent/received counts are measured on the path a fight would
   use. A peer that does not answer (an older runner, or one still opening
-  its path) keeps the shipped 50 ms; an address with no route at all is the
-  console's no-reply entry. Probes are at most one per 100 ms and are not
+  its path) keeps the shipped 50 ms, as does a search result; a peer
+  forgotten mid-request is the console's no-reply entry. Probes are at most one per 100 ms and are not
   sent while a rollback session is bound.
 - The guest's `recvfrom` passes only datagrams shaped as the game's own
   senders build them (`recomp_live_game_datagram_ok`): each type's exact
@@ -144,10 +144,10 @@ game's own lockstep works.
   the session bars and the lockstep delay follow the real path. The result's
   sent and received probe counts carry the loss, but the game reads only the
   median and the flags. An old runner that ignores probes keeps the shipped
-  50 ms. A search result has no route
-  and the matchmaker carries no search-time QoS, so its entry is the
-  console's no-reply (no bars, sorted last) until the matchmaker forwards a
-  ping to a listed host ([matchmaking](matchmaking.md#not-done-yet)). The
+  50 ms. A search result has no route and the matchmaker carries no
+  search-time QoS, so it also shows the shipped 50 ms (three bars) until the
+  matchmaker forwards a ping to a listed host
+  ([matchmaking](matchmaking.md#not-done-yet)). The
   game turns the median into its own delay batches and clamps them to 2..7:
   50 ms gives the shipped 3, 20 ms gives 2, and 167 ms or more gives 7, so a
   measurement never needs another clamp here. Rollback replaces the fight's
