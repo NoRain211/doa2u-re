@@ -65,7 +65,7 @@ the lobby have been played, and fights use rollback netcode; friends and
 rankings have only been tested without the game. Both players need this same
 release built from the same disc; players of other builds do not see each
 other's sessions. Versus is the game's own again: two controllers on one
-machine. On Windows, allow the game through the firewall when asked.
+machine, or one controller against the CPU. On Windows, allow the game through the firewall when asked.
 
 What the server sees: nothing is sent until you open DOA ONLINE. Logging on
 sends the server your IP address and port, the account's ID, the build's

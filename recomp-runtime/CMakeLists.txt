@@ -296,6 +296,8 @@ add_executable(recomp_unlock_profile_test unlock_profile.c unlock_profile_test.c
 add_test(NAME recomp-runtime-unlock-profile COMMAND recomp_unlock_profile_test)
 add_executable(recomp_story_roster_test story_roster.c story_roster_test.c)
 add_test(NAME recomp-runtime-story-roster COMMAND recomp_story_roster_test)
+add_executable(recomp_vs_cpu_test vs_cpu.c vs_cpu_test.c)
+add_test(NAME recomp-runtime-vs-cpu COMMAND recomp_vs_cpu_test)
 add_executable(recomp_pc_settings_test pc_settings.c button_config.c runner_assets.c d3d_texture_model.c pc_settings_test.c)
 add_test(NAME recomp-runtime-pc-settings COMMAND recomp_pc_settings_test)
 add_executable(recomp_menu_quit_test menu_quit.c quit_icon.c quit_prompt.c runner_assets.c d3d_texture_model.c
@@ -889,7 +891,7 @@ if(RECOMP_PROGRAM_DIR)
         hit_voice.c ko_replay.c
         unlock_profile.c pc_settings.c button_config.c
         pc_settings_store.cpp settings_file.cpp runner_assets.c menu_quit.c quit_icon.c jukebox.c
-        story_roster.c
+        story_roster.c vs_cpu.c
         netplay_profile.cpp netplay_session.cpp game_state.c overlay.c
         live_client.c live_identity.c live_bridge.cpp
         free_camera.c free_camera_adapter.c scene_freeze.c scene_freeze_adapter.c quit_prompt.c

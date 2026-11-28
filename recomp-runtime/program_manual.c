@@ -6,6 +6,7 @@
 #include "d3d8_draw_adapter.h"
 #include "combo_hud.h"
 #include "story_roster.h"
+#include "vs_cpu.h"
 #include "hit_voice.h"
 #include "ko_replay.h"
 #include "cpu_costume.h"
@@ -279,5 +280,7 @@ RecompFunction recomp_lookup_manual(uint32_t guest_address)
     if (function == NULL) function = recomp_runner_assets_lookup_manual(guest_address);
     /* Hitomi and Bayman among story mode's random opponents (story_roster.c). */
     if (function == NULL) function = recomp_story_roster_lookup_manual(guest_address);
+    /* Versus against the CPU with one controller (vs_cpu.c). */
+    if (function == NULL) function = recomp_vs_cpu_lookup_manual(guest_address);
     return function;
 }

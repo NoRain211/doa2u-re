@@ -931,6 +931,35 @@ leave it off, and so does a logon to DOA ONLINE until the player leaves.
 The hook is routed whenever it may be wanted and checks the setting itself,
 so PC Settings can switch it while the game runs.
 
+Versus takes one controller too, against the CPU (`vs_cpu.c`, issue #116).
+Retail greys Versus out with fewer than two pads (`0x134570` sets frontend
+mode 5's slot at `0xdf5d70` from the pads connected) and its Normal/Tag
+confirm (`0x1389f0`) refuses one pad. Sparring (frontend mode 6, game mode 9)
+already lets one pad pick both fighters, and its partner side has no human
+flag (`0x87ae30`, side blocks `0x94` apart; only `0xd8f60` sets it, per joined
+pad), so the fight runs that side on the CPU. With one pad and Normal chosen,
+Versus confirms as Sparring; the character and stage selects are Sparring's
+under Versus's banner (`0xa3ee0`, a draw callback that switches on the
+frontend mode `0xdf57b4`: sprite `0x70025` for Versus, `0x70027` for
+Sparring). The frontend's hand-off (`0xd87c0`, which copies game mode
+`0x878392` to the battle's `0x87cfa0`) gets game mode 5 back, so the fight
+keeps Versus's rounds, time and win tally. The hand-off sets the player flag
+`0x8783a8` to 0 for one human, and with 0 the round's end runs the arcade
+ladder, so it is set to Versus's 1. The game then leaves the CPU level
+(`0x87d0d4`) alone; it comes from Story's level table (`0x692438`, 11 bouts per
+difficulty) at the Options difficulty and the fifth bout: 1, 5, 6 and 7 from
+Easy to Very Hard. After a fight, CHARACTER enters the character select
+(`0x138e10`) as Sparring again. AGAIN restarts the fight without the frontend:
+the post-match menu leaves the flag at 0, the CPU side holds another fighter,
+and the fight setup (`0xce050`, reached by a tail jump, so it cannot be hooked)
+calls `0xc6690` while the flag is 0; that call now restores the flag and the
+hand-off's characters and costumes (side block +1 and +2). Tag still needs two
+pads, as Sparring's tag select picks three fighters. The menu's help line for
+Versus is the runner's own (`menu_quit.c`). Played with one scripted pad:
+the menu, Normal, both picks, stage select, CPU fights, AGAIN, CHARACTER, Back
+to the main menu, and Sparring unchanged. Two-pad Versus, Tag, MAIN MENU from
+the post-match menu and a human win were not played.
+
 PC SETTINGS (`pc_settings.c`) is a page of the game's Options menu that the
 main menu's PC SETTINGS entry opens alone. The menu
 (`frontend_options_menu_update`, `0x11cfc0`) keeps a cursor per depth at

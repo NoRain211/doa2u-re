@@ -76,7 +76,7 @@ typedef uint_least16_t recomp_utf16;
 /* Message numbers for 0x6a3e0, past every number the game uses. */
 enum { RECOMP_RUNNER_TEXT_PC = 0x7000, RECOMP_RUNNER_TEXT_BUTTON_CONFIG = 0x7180, RECOMP_RUNNER_TEXT_QUIT = 0x7200,
     RECOMP_RUNNER_TEXT_JUKEBOX = 0x7201, RECOMP_RUNNER_TEXT_JUKEBOX_HELP = 0x7202,
-    RECOMP_RUNNER_TEXT_PC_MENU = 0x7203 };
+    RECOMP_RUNNER_TEXT_PC_MENU = 0x7203, RECOMP_RUNNER_TEXT_VERSUS = 0x7204 };
 /* A message's text per game language (Japanese, English, French, German,
    Italian, Spanish), copied into guest memory. */
 void recomp_runner_text_set(uint32_t number, const recomp_utf16 *const text[6]);

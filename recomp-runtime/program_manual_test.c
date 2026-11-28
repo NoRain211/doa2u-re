@@ -186,6 +186,11 @@ RecompFunction recomp_story_roster_lookup_manual(uint32_t address)
     (void)address;
     return NULL;
 }
+RecompFunction recomp_vs_cpu_lookup_manual(uint32_t address)
+{
+    (void)address;
+    return NULL;
+}
 RecompFunction recomp_runner_assets_lookup_manual(uint32_t address)
 {
     (void)address;
