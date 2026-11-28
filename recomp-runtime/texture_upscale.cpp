@@ -63,13 +63,26 @@ RecompTextureUpscaler::~RecompTextureUpscaler()
     if (thread_.joinable()) thread_.join();
 }
 
+void RecompTextureUpscaler::trimDone()
+{
+    // Oldest first; dropped and failed jobs hold no pixels and are kept.
+    for (auto it = done_.begin(); done_bytes_ > done_cap_ && it != done_.end(); ++it) {
+        done_bytes_ -= it->second.size();
+        std::vector<uint8_t>().swap(it->second);
+    }
+}
+
 void RecompTextureUpscaler::finish(Job &job, unsigned threads)
 {
     std::vector<uint8_t> larger;
     if (!recomp_texture_upscale(job.bgra.data(), job.width, job.height, job.factor, larger, threads) ||
         larger.size() != job.bgra.size() * job.factor * job.factor) larger.clear();
     std::lock_guard<std::mutex> guard(lock_);
-    if (running_ == job.id) done_[job.id] = std::move(larger);
+    if (running_ == job.id) {
+        done_bytes_ += larger.size();
+        done_[job.id] = std::move(larger);
+        trimDone();
+    }
     running_ = 0u;
 }
 
@@ -90,7 +103,14 @@ uint64_t RecompTextureUpscaler::submit(std::vector<uint8_t> bgra, uint32_t width
             return job.id;
         }
     }
+    // Past the cap, the oldest waiting jobs finish now with no pixels.
+    while (!queue_.empty() && queue_bytes_ + job.bgra.size() > queue_cap_) {
+        queue_bytes_ -= queue_.front().bgra.size();
+        done_.emplace(queue_.front().id, std::vector<uint8_t>());
+        queue_.pop_front();
+    }
     const uint64_t id = job.id;
+    queue_bytes_ += job.bgra.size();
     queue_.push_back(std::move(job));
     guard.unlock();
     wake_.notify_one();
@@ -102,6 +122,7 @@ bool RecompTextureUpscaler::take(uint64_t job, std::vector<uint8_t> &out)
     std::lock_guard<std::mutex> guard(lock_);
     const auto found = done_.find(job);
     if (found == done_.end()) return false;
+    done_bytes_ -= found->second.size();
     out = std::move(found->second);
     done_.erase(found);
     return true;
@@ -113,9 +134,14 @@ void RecompTextureUpscaler::cancel(uint64_t job)
     {
         std::lock_guard<std::mutex> guard(lock_);
         if (running_ == job) running_ = 0u;
-        done_.erase(job);
+        const auto found = done_.find(job);
+        if (found != done_.end()) {
+            done_bytes_ -= found->second.size();
+            done_.erase(found);
+        }
         for (auto it = queue_.begin(); it != queue_.end(); ++it) {
             if (it->id == job) {
+                queue_bytes_ -= it->bgra.size();
                 queue_.erase(it);
                 break;
             }
@@ -139,6 +165,7 @@ void RecompTextureUpscaler::run()
         if (stop_) return;
         Job job = std::move(queue_.front());
         queue_.pop_front();
+        queue_bytes_ -= job.bgra.size();
         running_ = job.id;
         guard.unlock();
         finish(job, threads);
