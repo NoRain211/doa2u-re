@@ -6,6 +6,7 @@
 #include "adx_decoder.h"
 #include "audio_output.h"
 #include "dsound_buffer_adapter.h"
+#include "input_host_win32.h"
 #include "kernel_abi.h"
 #include "mod_loader.h"
 #include "runner_assets.h"
@@ -1295,15 +1296,23 @@ const char *recomp_jukebox_help(unsigned row)
     static char help[160];
     if (page.note[0] != '\0') return page.note;
     const Album *album = &albums[page.album];
+    const char *confirm = recomp_input_host_binding_label(RECOMP_INPUT_BIND_A);
+    if (confirm == NULL) confirm = "A";
     switch (row) {
     case ROW_ALBUM: return "Choose DOA2U's music, or DOA3's and DOA4's from your discs.";
     case ROW_TRACK:
         if (album->count == 0u) return "Import this game's disc in Launcher.exe to add its music.";
-        snprintf(help, sizeof help, "Track %u of %u. Press A to play or stop it.", page.track + 1u, album->count);
+        snprintf(help, sizeof help, "Track %u of %u. Press %s to play or stop it.",
+            page.track + 1u, album->count, confirm);
         return help;
     case ROW_MODE: return "Repeat One loops a track; Play All and Shuffle move on.";
-    case ROW_TARGET: return "Choose the game's music to change, then press A to give it this track.";
-    case ROW_ASSIGNED: return "What the music above plays. Press A to put its own track back.";
+    case ROW_TARGET:
+        snprintf(help, sizeof help, "Choose the game's music to change, then press %s to give it this track.",
+            confirm);
+        return help;
+    case ROW_ASSIGNED:
+        snprintf(help, sizeof help, "What the music above plays. Press %s to put its own track back.", confirm);
+        return help;
     default: return "";
     }
 }

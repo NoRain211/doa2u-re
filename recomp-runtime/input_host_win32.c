@@ -92,7 +92,8 @@ static bool trace_enabled(void)
 
 /* Host pad buttons a binding can take, named as private/controller.json
    spells them, in any case. SDL names face buttons by position,
-   so Cross/Circle/Square/Triangle are A/B/X/Y. */
+   so Cross/Circle/Square/Triangle are A/B/X/Y in that file; on screen a
+   PlayStation pad names its own buttons (recomp_input_host_source_label). */
 enum {
     PAD_A, PAD_B, PAD_X, PAD_Y, PAD_BACK, PAD_START, PAD_LB, PAD_RB, PAD_LT, PAD_RT, PAD_LS, PAD_RS,
     PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT, PAD_MISC, PAD_P1, PAD_P2, PAD_P3, PAD_P4, PAD_TOUCHPAD, PAD_SOURCES
@@ -150,6 +151,81 @@ const char *recomp_input_host_source_name(bool pad, int source)
     for (size_t i = 0; i < sizeof named_keys / sizeof named_keys[0]; ++i)
         if (named_keys[i].key == source) return named_keys[i].name;
     return NULL;
+}
+
+/* The pad the menus speak for: port 0's, else the first connected. */
+static SDL_Gamepad *active_pad(void)
+{
+    for (uint32_t port = 0u; port < RECOMP_INPUT_PORT_COUNT; ++port)
+        if (pads[port] != NULL) return pads[port];
+    return NULL;
+}
+
+static SDL_GamepadType active_pad_type(void)
+{
+#ifdef RECOMP_INPUT_TEST_PAD_TYPE
+    /* input_host_win32_test's virtual pads carry no PS3/PS4/PS5 identity. */
+    const char *fake = getenv("RECOMP_TEST_PAD_TYPE");
+    if (fake != NULL) {
+        if (strcmp(fake, "ps3") == 0) return SDL_GAMEPAD_TYPE_PS3;
+        if (strcmp(fake, "ps4") == 0) return SDL_GAMEPAD_TYPE_PS4;
+        if (strcmp(fake, "ps5") == 0) return SDL_GAMEPAD_TYPE_PS5;
+        if (strcmp(fake, "xbox") == 0) return SDL_GAMEPAD_TYPE_XBOX360;
+    }
+#endif
+    SDL_Gamepad *pad = active_pad();
+    return pad != NULL ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN;
+}
+
+bool recomp_input_host_playstation_pad(void)
+{
+    switch (active_pad_type()) {
+    case SDL_GAMEPAD_TYPE_PS3:
+    case SDL_GAMEPAD_TYPE_PS4:
+    case SDL_GAMEPAD_TYPE_PS5:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* A PlayStation button's name on screen. LS, RS, the d-pad and the paddles
+   keep the names private/controller.json uses. */
+static const char *playstation_source_name(int source)
+{
+    switch (source) {
+    case PAD_A: return "Cross";
+    case PAD_B: return "Circle";
+    case PAD_X: return "Square";
+    case PAD_Y: return "Triangle";
+    case PAD_BACK:
+        /* Each pad family prints its own Back button. */
+        switch (active_pad_type()) {
+        case SDL_GAMEPAD_TYPE_PS3: return "Select";
+        case SDL_GAMEPAD_TYPE_PS4: return "Share";
+        case SDL_GAMEPAD_TYPE_PS5: return "Create";
+        default: return pad_sources[PAD_BACK].name;
+        }
+    case PAD_START:
+        return active_pad_type() == SDL_GAMEPAD_TYPE_PS3 ? "Start" : "Options";
+    case PAD_LB: return "L1";
+    case PAD_RB: return "R1";
+    case PAD_LT: return "L2";
+    case PAD_RT: return "R2";
+    default: return source >= 0 && source < PAD_SOURCES ? pad_sources[source].name : NULL;
+    }
+}
+
+const char *recomp_input_host_source_label(bool pad, int source)
+{
+    if (pad && recomp_input_host_playstation_pad()) return playstation_source_name(source);
+    return recomp_input_host_source_name(pad, source);
+}
+
+const char *recomp_input_host_binding_label(unsigned binding)
+{
+    if (binding >= RECOMP_INPUT_BIND_COUNT) return NULL;
+    return recomp_input_host_source_label(true, recomp_input_host_bound(binding, true));
 }
 
 int recomp_input_host_source(bool pad, const char *name)

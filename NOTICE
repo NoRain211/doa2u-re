@@ -66,6 +66,12 @@ author's MAME linking exception. The build fetches PPSSPP's copy
 whose files carry their notices, and patches out PPSSPP's own configuration
 header with recomp-runtime/xbrz_patch.cmake.
 
+The PlayStation button glyphs in assets/glyphs/playstation are from Kenney's
+Input Prompts pack, version 1.5A (kenney.nl/assets/input-prompts), by Kenney
+(www.kenney.nl), under Creative Commons Zero (CC0). Only the glyphs the
+runtime and the launchers draw are included, and their license text is in
+assets/glyphs/playstation/LICENSE.txt.
+
 The texture pack's key, file naming and DDS header in
 recomp-runtime/texture_pack.cpp are copied from XboxXBE-Recomp's texture
 dumper (gpu::texturedumper in sdk/runtime/gpu/texturedumper.cpp and gpu::Hash

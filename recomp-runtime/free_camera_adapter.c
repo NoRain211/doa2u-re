@@ -256,13 +256,23 @@ static void hint_panel(void)
         if (state.started)
             recomp_overlay_add_line(&text, "Camera %u%s", (state.object - CAMERA_FIRST) / CAMERA_STRIDE + 1u,
                 recomp_scene_freeze_active() ? "   Frozen" : "   Running");
-        recomp_overlay_set_hint(&text, state.controller_hints > 0
-            ? "Sticks fly  LT/RT down/up  A fast  B slow\n"
-              "X camera  Y reset  D-pad left fighter\n"
-              "Start freeze  RB step  LB hide  D-pad right screenshot  R3 off"
-            : "WASD fly  Q/E down/up  arrows or right-drag look  Z/X zoom\n"
-              "Shift fast  Ctrl slow  C camera  R reset  \\ fighter\n"
-              "P freeze  . step  H hide  F12 screenshot  F1 off");
+        if (state.controller_hints <= 0) {
+            recomp_overlay_set_hint(&text, "WASD fly  Q/E down/up  arrows or right-drag look  Z/X zoom\n"
+                "Shift fast  Ctrl slow  C camera  R reset  \\ fighter\n"
+                "P freeze  . step  H hide  F12 screenshot  F1 off");
+        } else if (recomp_input_host_playstation_pad()) {
+            const char *start = recomp_input_host_binding_label(RECOMP_INPUT_BIND_START);
+            char hint[192];
+            snprintf(hint, sizeof hint, "Sticks fly  L2/R2 down/up  Cross fast  Circle slow\n"
+                "Square camera  Triangle reset  D-pad left fighter\n"
+                "%s freeze  R1 step  L1 hide  D-pad right screenshot  R3 off",
+                start != NULL ? start : "Options");
+            recomp_overlay_set_hint(&text, hint);
+        } else {
+            recomp_overlay_set_hint(&text, "Sticks fly  LT/RT down/up  A fast  B slow\n"
+                "X camera  Y reset  D-pad left fighter\n"
+                "Start freeze  RB step  LB hide  D-pad right screenshot  R3 off");
+        }
     }
     recomp_overlay_publish(RECOMP_OVERLAY_FREE_CAMERA, &text);
 }

@@ -563,6 +563,11 @@ State &state()
 
 }  // namespace
 
+bool recomp_texture_pack_read_png(const std::string &path, RecompTexturePackImage &out)
+{
+    return readPng(fs::u8path(path), out);
+}
+
 void recomp_texture_pack_configure(const std::string &textures_folder)
 {
     State &s = state();

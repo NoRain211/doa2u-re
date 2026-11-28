@@ -40,6 +40,9 @@ PLATFORM_FILES = {"windows": WINDOWS_ONLY,
 # The Linux ZIP's prebuilt launcher, from tools/build_linux_launcher.sh, so its GAME page builds on a
 # machine with no compiler (a stock Steam Deck).
 LINUX_LAUNCHER = "launcher-linux-x86_64"
+# The PlayStation button glyphs the runtime and every launcher draw, from Kenney's CC0 Input
+# Prompts pack. Every ZIP builds one of those, so every ZIP carries them.
+GLYPHS = "assets/glyphs/playstation/"
 # The build runs only the lifter's Python lift (tools.recomp, which loads tools.disasm and tools.xbe_parser
 # and copies its register-model header beside the program).
 LIFTER_DIRS = ("tools/recomp/", "tools/disasm/", "tools/xbe_parser/")
@@ -123,6 +126,9 @@ def shipped(path, platform):
     # Players' texture packs and dumps sit beside the launcher; a release never carries them.
     if path.startswith("textures/"):
         return False
+    # The runtime and both launchers load these from beside the launcher at run time.
+    if path.startswith(GLYPHS):
+        return True
     if path in PLATFORM_FILES[platform]:
         return True
     if any(path in files for files in PLATFORM_FILES.values()):

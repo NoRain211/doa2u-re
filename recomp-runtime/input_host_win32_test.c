@@ -19,6 +19,17 @@ static int pad_source(const char *name)
     return -1;
 }
 
+/* SDL's virtual pads carry no PS3/PS4/PS5 identity; input_host_win32.c reads
+   this in its test build only. */
+static void set_pad_type(const char *type)
+{
+#ifdef _WIN32
+    _putenv_s("RECOMP_TEST_PAD_TYPE", type);
+#else
+    setenv("RECOMP_TEST_PAD_TYPE", type, 1);
+#endif
+}
+
 static uint32_t rumbled[2];
 
 static bool SDLCALL record_rumble(void *userdata, Uint16 low, Uint16 high)
@@ -158,6 +169,38 @@ int main(int argc, char **argv)
     CHECK(recomp_input_host_sample(0u, &pad));
     CHECK(!recomp_input_host_sample(1u, &pad));
     CHECK(recomp_input_host_pad_connected(0u) && !recomp_input_host_pad_connected(1u));
+
+    /* A PlayStation pad shows its own button names; the settings files and
+       the binding calls keep the Xbox ones. */
+    set_pad_type("xbox");
+    CHECK(!recomp_input_host_playstation_pad());
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("A")), "A") == 0);
+    set_pad_type("ps3");
+    CHECK(recomp_input_host_playstation_pad());
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("Back")), "Select") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("Start")), "Start") == 0);
+    set_pad_type("ps4");
+    CHECK(recomp_input_host_playstation_pad());
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("A")), "Cross") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("B")), "Circle") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("X")), "Square") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("Y")), "Triangle") == 0);
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("LB")), "L1") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("RB")), "R1") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("LT")), "L2") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("RT")), "R2") == 0);
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("Back")), "Share") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("Start")), "Options") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("LS")), "LS") == 0);
+    CHECK(strcmp(recomp_input_host_binding_label(RECOMP_INPUT_BIND_A), "Cross") == 0);
+    CHECK(recomp_input_host_source(true, "Cross") == -1 &&
+        recomp_input_host_source(true, "A") == pad_source("A"));
+    set_pad_type("ps5");
+    CHECK(strcmp(recomp_input_host_source_label(true, pad_source("Back")), "Create") == 0 &&
+        strcmp(recomp_input_host_source_label(true, pad_source("Start")), "Options") == 0);
+    set_pad_type("xbox");
+    CHECK(strcmp(recomp_input_host_binding_label(RECOMP_INPUT_BIND_A), "A") == 0);
+
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_SOUTH, true);
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_NORTH, true);
     SDL_SetJoystickVirtualButton(first, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, true);

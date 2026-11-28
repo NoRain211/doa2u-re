@@ -10,6 +10,7 @@
 #include "input_keyboard_win32.h"
 #include "overlay_d3d11.h"
 #include "screenshot.h"
+#include "playstation_buttons.h"
 #include "texture_pack.h"
 #include "texture_upscale.h"
 #include "widescreen.h"
@@ -2902,7 +2903,8 @@ ID3D11ShaderResourceView *lookupTexture(
 
     /* The key is only worth hashing when a pack can change the result. */
     uint64_t pack_key = 0u;
-    if ((recomp_texture_pack_replacing() || recomp_texture_pack_dumping()) &&
+    if ((recomp_texture_pack_replacing() || recomp_texture_pack_dumping() ||
+            recomp_playstation_buttons_replacing()) &&
         !volume && !desc.linear && !desc.depth &&
         !desc.render_target && (!palettized || draw.palette_bytes != nullptr)) {
         const uint32_t level0 =
@@ -2945,11 +2947,13 @@ ID3D11ShaderResourceView *lookupTexture(
     };
 
     /* A replacement image wins over the guest copy and over xBRZ. A PNG gets
-       a generated host mip chain; a DDS keeps the levels it carries. */
+       a generated host mip chain; a DDS keeps the levels it carries. A
+       PlayStation pad's built-in button art stands in when no pack image does. */
     if (pack_key != 0u) {
         RecompTexturePackImage replacement;
-        if (recomp_texture_pack_find(pack_key, replacement) && !replacement.levels.empty() &&
-            replacement.width != 0u && replacement.height != 0u) {
+        if (!recomp_texture_pack_find(pack_key, replacement))
+            recomp_playstation_buttons_image(pack_key, desc.width, desc.height, replacement);
+        if (!replacement.levels.empty() && replacement.width != 0u && replacement.height != 0u) {
             DXGI_FORMAT replacement_format = DXGI_FORMAT_UNKNOWN;
             switch (replacement.format) {
             case RECOMP_TEXTURE_PACK_BGRA8: replacement_format = DXGI_FORMAT_B8G8R8A8_UNORM; break;

@@ -246,6 +246,7 @@ static const char *host_bound(unsigned binding, bool pad)
 {
     return binding == RECOMP_INPUT_BIND_A ? (pad ? "LB" : "Space") : "W";
 }
+static const char *host_label(unsigned binding, bool pad) { return host_bound(binding, pad); }
 static void host_listen(unsigned binding, bool pad) { ++rebinds; listened = binding; listened_pad = pad; }
 static bool host_listening(void) { return listening_now; }
 static void host_reset(bool pad) { reset_pad = pad; }
@@ -283,7 +284,7 @@ int main(void)
     make_layout();
     const uint8_t choices[RECOMP_PC_SETTING_COUNT] = {2, 5, 1, 0, 0, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1};
     const RecompPcSettingsHost host = {host_changed, host_closed, NULL};
-    const RecompButtonConfigHost rebind = {host_bound, host_listen, host_listening, host_reset, host_rebind_closed};
+    const RecompButtonConfigHost rebind = {host_bound, host_label, host_listen, host_listening, host_reset, host_rebind_closed};
     recomp_runner_assets_reset();
     recomp_pc_settings_install(&host, choices);
     recomp_button_config_install(&rebind);

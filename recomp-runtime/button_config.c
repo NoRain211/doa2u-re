@@ -40,6 +40,7 @@ enum {
     PLATE_X = 0x252, PLATE_Y = 0x58, PLATE_STEP = 0x22, PLATE_TOP = 0x4d, ICON_X = 500,
     LIST_X = 0xa1, LIST_Y = 0x6b, LIST_STEP = 0x1e,
     NAME_CHARS = 16,
+    HELP_CHARS = 96,
     SPRITE_PLATE = 0x019a0006u, SPRITE_ICONS = 0x019a0009u, SPRITE_ICONS_END = 0x019a0019u,
     SPRITE_ARROW_LEFT = 0x019a0020u, SPRITE_ARROW_RIGHT = 0x019a0021u,
     SPRITE_TYPE_A = 0x019a0000u, SPRITE_FREE = 0x019a0004u, SPRITE_LIST_ARROW = 0x019a0005u,
@@ -136,6 +137,9 @@ static bool drawing_list;          /* ... and its left list's */
 static bool drawing_labels;        /* the Controller page's labels are being drawn */
 static uint32_t plate_set;         /* guest u16: 0 the eight buttons, 1 the d-pad, Start and Back */
 static uint32_t plate_names;       /* guest UTF-16, NAME_CHARS per plate */
+static uint32_t help_text;         /* guest UTF-16, HELP_PLATES with the pad's own button name */
+
+static void update_rebind_help(void);
 
 /* ---- Guest helpers --------------------------------------------------- */
 
@@ -164,6 +168,7 @@ void recomp_button_config_install(const RecompButtonConfigHost *with)
     controller_layout = recomp_runner_alloc(28u * CONTROLLER_RECORDS + 4u, 4u);
     plate_set = recomp_runner_alloc(2u, 4u);
     plate_names = recomp_runner_alloc(2u * NAME_CHARS * PLATES, 4u);
+    help_text = recomp_runner_alloc(2u * HELP_CHARS, 4u);
 
     /* Page 4's rows, Default's again 26 lower as row 4, then its two values. */
     for (unsigned record = 0u; record < CONTROLLER_RECORDS; ++record) {
@@ -193,6 +198,9 @@ void recomp_button_config_install(const RecompButtonConfigHost *with)
         for (unsigned l = 0u; l < 6u; ++l) text[l] = texts[l >= 2u ? l - 1u : 0u][m];
         recomp_runner_text_set(RECOMP_RUNNER_TEXT_BUTTON_CONFIG + m, text);
     }
+    /* The plate help names the device's own confirm button; the draw rewrites
+       this buffer as it changes language or from the keyboard to a pad. */
+    recomp_runner_text_set_address(RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_HELPS + HELP_PLATES, help_text);
 }
 
 /* ---- The Controller page's row --------------------------------------- */
@@ -254,8 +262,9 @@ unsigned recomp_button_config_help(uint16_t page, uint16_t row, uint32_t args[3]
     } else if (rebinding && (page == DEVICE_PAGE || page == PLATE_PAGE)) {
         args[0] = 0u;
         args[1] = 0u;
-        return RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_HELPS +
-            (page == DEVICE_PAGE ? HELP_DEVICES : host.listening() ? HELP_LISTEN : HELP_PLATES);
+        const unsigned help = page == DEVICE_PAGE ? HELP_DEVICES : host.listening() ? HELP_LISTEN : HELP_PLATES;
+        if (help == HELP_PLATES) update_rebind_help();
+        return RECOMP_RUNNER_TEXT_BUTTON_CONFIG + MSG_HELPS + help;
     }
     return 0u;
 }
@@ -277,6 +286,30 @@ static unsigned plate_binding(unsigned row) { return row < PLATES ? PLATE_BINDIN
 /* The plate row a Button Config sprite or text at y belongs to; PLATES for none. */
 static unsigned plate_row(uint32_t y) { return y >= PLATE_TOP && (y - PLATE_TOP) / PLATE_STEP < PLATES ? (y - PLATE_TOP) / PLATE_STEP : PLATES; }
 
+/* The plate help's "A: ..." names the confirm button in each language; a
+   PlayStation pad prints its own name there. The keyboard's line stays as
+   the game has it. */
+static void update_rebind_help(void)
+{
+    const unsigned language = game_language();
+    const RebindText *t = &REBIND_LANGUAGES[language >= 2u && language <= 5u ? language - 1u : 0u];
+    const recomp_utf16 *source = t->helps[HELP_PLATES];
+    unsigned out = 0u;
+    bool substituted = false;
+    if (pad_device() && host.label != NULL) {
+        const char *label = host.label(RECOMP_INPUT_BIND_A, true);
+        if (label != NULL) {
+            substituted = true;
+            for (; *label != '\0' && out + 1u < HELP_CHARS; ++label)
+                set_u16(help_text + 2u * out++, (uint8_t)*label);
+        }
+    }
+    if (substituted && source[0] == (recomp_utf16)'A') ++source;
+    for (unsigned i = 0u; source[i] != 0u && out + 1u < HELP_CHARS; ++i)
+        set_u16(help_text + 2u * out++, source[i]);
+    set_u16(help_text + 2u * out, 0u);
+}
+
 static void draw_text(uint32_t text, uint32_t x, uint32_t y, uint32_t fade, uint32_t brightness, uint32_t align)
 {
     const uint32_t args[8] = {text, x, y, 3u, fade, brightness, align, 0x3f59999au};
@@ -287,7 +320,8 @@ static void draw_text(uint32_t text, uint32_t x, uint32_t y, uint32_t fade, uint
 static uint32_t plate_name(unsigned row, unsigned binding)
 {
     const uint32_t text = plate_names + 2u * NAME_CHARS * row;
-    const char *name = host.bound(binding, pad_device());
+    const bool pad = pad_device();
+    const char *name = host.label != NULL ? host.label(binding, pad) : host.bound(binding, pad);
     if (name == NULL) name = "-";
     unsigned i = 0u;
     for (; name[i] != '\0' && i + 1u < NAME_CHARS; ++i) set_u16(text + 2u * i, (uint8_t)name[i]);

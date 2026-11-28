@@ -64,6 +64,11 @@ class ReleaseSelectionTest(unittest.TestCase):
         info = package_test.executable("DOA2U-1/tools/artifacts/launcher-linux-x86_64")
         self.assertEqual((info.external_attr >> 16) & 0o777, 0o755)
 
+    def test_every_release_ships_the_playstation_glyphs(self):
+        # The game menus and every launcher draw these; a dropped PNG loses the prompts.
+        for platform in PLATFORM_FILES:
+            self.assertTrue(shipped("assets/glyphs/playstation/playstation_button_color_cross.png", platform), platform)
+
     def test_developer_notes_stay_out(self):
         for path in ("AGENTS.md", "CONTEXT.md", "README.md", "docs/bring-up.md", "tools/test_run_game.py"):
             self.assertFalse(shipped(path, "windows"), path)

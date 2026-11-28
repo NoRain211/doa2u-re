@@ -96,8 +96,38 @@ struct Settings {
 };
 
 struct Color { Uint8 r, g, b; };
+
+// True when the first open gamepad is a PlayStation one: the top bar's prompts
+// then show its own button glyphs.
+bool playstationPad()
+{
+    int count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    bool playstation = false;
+    for (int i = 0; ids != nullptr && i < count; ++i) {
+        SDL_Gamepad *pad = SDL_GetGamepadFromID(ids[i]);
+        if (pad == nullptr) continue;
+        const SDL_GamepadType type = SDL_GetGamepadType(pad);
+        playstation = type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 ||
+            type == SDL_GAMEPAD_TYPE_PS5;
+        break;
+    }
+    SDL_free(ids);
+    return playstation;
+}
 constexpr Color kDark{42, 29, 21}, kWhite{243, 238, 232}, kSand{241, 197, 143};
 constexpr Color kMuted{191, 178, 165}, kGold{232, 191, 138}, kBar{13, 10, 9};
+
+// A PlayStation prompt glyph from assets/glyphs/playstation beside the launcher, which the
+// runtime uses too; null when the file is missing.
+SDL_Texture *loadGlyph(SDL_Renderer *renderer, const std::string &root, const char *name)
+{
+    SDL_Surface *picture = SDL_LoadPNG((root + "/assets/glyphs/playstation/" + name + ".png").c_str());
+    if (picture == nullptr) return nullptr;
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, picture);
+    SDL_DestroySurface(picture);
+    return texture;
+}
 
 // Reads the flat object launcher.cs, launcher_macos.swift and this file write.
 bool jsonValue(const std::string &text, const char *key, std::string &value)
@@ -348,6 +378,9 @@ std::vector<std::string> wrap(const std::string &value)
 struct Launcher {
     SDL_Renderer *renderer = nullptr;
     SDL_Texture *background = nullptr;
+    // The PlayStation prompts' art (assets/glyphs/playstation, beside the launcher). A missing
+    // file keeps that prompt spelled out, so the launcher works from a bare checkout.
+    SDL_Texture *cross = nullptr, *circle = nullptr, *l1 = nullptr, *r1 = nullptr;
     int choice[ITEM_COUNT] = {};
     // menu is the chosen page. The focus is on its row cursor while in_page, else on the tab strip.
     int menu = kGamePage, row = 0;
@@ -705,6 +738,35 @@ struct Launcher {
         text(x, y, value, {214, 216, 217}, scale);
     }
 
+    // A top-bar prompt's action name, right of its plate.
+    void promptLabel(float &x, float y, const char *action)
+    {
+        x -= SDL_strlen(action) * 8;
+        text(x, y, action, kMuted);
+    }
+
+    // The plate a prompt's button sits in: its gamepad glyphs when the art loaded, else the
+    // debug font's spelled-out name.
+    void promptPlate(float &x, float y, const char *name, SDL_Texture *first, SDL_Texture *second = nullptr)
+    {
+        if (first == nullptr) {
+            const float w = static_cast<float>(SDL_strlen(name) * 8 + 8);
+            x -= w + 6;
+            fill({x, y - 2, w, 12}, {242, 227, 207});
+            text(x + 4, y, name, kDark);
+            return;
+        }
+        const float w = second == nullptr ? 20.0f : 34.0f;
+        x -= w + 6;
+        fill({x, y - 4, w, 16}, {242, 227, 207});
+        SDL_FRect at{x + 4, y - 2, 12, 12};
+        SDL_RenderTexture(renderer, first, nullptr, &at);
+        if (second != nullptr) {
+            at.x = x + 18;
+            SDL_RenderTexture(renderer, second, nullptr, &at);
+        }
+    }
+
     void draw()
     {
         SDL_SetRenderDrawColor(renderer, 74, 60, 51, 255);
@@ -718,19 +780,25 @@ struct Launcher {
         }
 
         // Top bar: title and build state on the left, button prompts on the right. The short title
-        // leaves the prompts room beside "NOT BUILT YET - UPDATE".
+        // leaves the prompts room beside "NOT BUILT YET - UPDATE". A PlayStation pad shows Cross,
+        // Circle and L1/R1 art; without the files those prompts keep their names.
         text(kSide, (kTopH - 8) / 2, std::string("DOA2U - ") + (built ? "READY TO PLAY" : "NOT BUILT YET")
             + (pending.empty() ? "" : " - UPDATE"), kMuted);
+        const bool ps = playstationPad();
+        const bool shoulders = ps && l1 != nullptr && r1 != nullptr;
+        const float y = (kTopH - 8) / 2;
         float x = kWidth - kSide;
-        for (const auto &hint : {std::pair<const char *, const char *>{"B", "BACK"}, {"A", "SELECT"}, {"<>", "CHANGE"}, {"LB/RB", "PAGE"}}) {
-            x -= SDL_strlen(hint.second) * 8;
-            text(x, (kTopH - 8) / 2, hint.second, kMuted);
-            const float w = static_cast<float>(SDL_strlen(hint.first) * 8 + 8);
-            x -= w + 6;
-            fill({x, (kTopH - 12) / 2, w, 12}, {242, 227, 207});
-            text(x + 4, (kTopH - 8) / 2, hint.first, kDark);
-            x -= 16;
-        }
+        promptLabel(x, y, "BACK");
+        promptPlate(x, y, ps ? "CIRCLE" : "B", ps ? circle : nullptr);
+        x -= 16;
+        promptLabel(x, y, "SELECT");
+        promptPlate(x, y, ps ? "CROSS" : "A", ps ? cross : nullptr);
+        x -= 16;
+        promptLabel(x, y, "CHANGE");
+        promptPlate(x, y, "<>", nullptr);
+        x -= 16;
+        promptLabel(x, y, "PAGE");
+        promptPlate(x, y, ps ? "L1/R1" : "LB/RB", shoulders ? l1 : nullptr, shoulders ? r1 : nullptr);
 
         // Logo in the sky at the right, as in launcher.cs.
         chrome(kWidth - kSide - 32 - 14 - 13 * 16, 56, "DEAD OR ALIVE", 2);
@@ -851,6 +919,11 @@ int main(int argc, char **argv)
             break;
         }
     }
+    // The PlayStation prompts' art, beside the launcher as in a release.
+    launcher.cross = loadGlyph(launcher.renderer, root, "playstation_button_color_cross");
+    launcher.circle = loadGlyph(launcher.renderer, root, "playstation_button_color_circle");
+    launcher.l1 = loadGlyph(launcher.renderer, root, "playstation_trigger_l1");
+    launcher.r1 = loadGlyph(launcher.renderer, root, "playstation_trigger_r1");
 
     const int nearest = static_cast<int>(std::upper_bound(std::begin(kHeights), std::end(kHeights),
         settings.height) - std::begin(kHeights)) - 1;
@@ -1027,6 +1100,8 @@ int main(int argc, char **argv)
         }
     }
     SDL_DestroyTexture(launcher.background);
+    for (SDL_Texture *glyph : {launcher.cross, launcher.circle, launcher.l1, launcher.r1})
+        if (glyph != nullptr) SDL_DestroyTexture(glyph);
     launcher.stopBuild(); // a second exit request while a build ran
     // Only a check can still be running here; stop it rather than leave it behind.
     if (launcher.update != nullptr) {
