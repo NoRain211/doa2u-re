@@ -50,7 +50,7 @@ struct GlyphArt {
 
 std::unordered_map<uint64_t, std::vector<Glyph>> rules;
 std::array<GlyphArt, kGlyphCount> art;
-std::array<bool, kGlyphCount> warned;
+std::array<std::atomic<bool>, kGlyphCount> warned{};
 std::string glyphsFolder;
 std::atomic<bool> playstation{false};
 
@@ -99,7 +99,7 @@ void loadArt(const std::string &folder)
 {
     for (size_t i = 0u; i < kGlyphCount; ++i) {
         art[i] = {};
-        warned[i] = false;
+        warned[i].store(false, std::memory_order_relaxed);
         const fs::path path = fs::u8path(folder) / glyphFile(static_cast<Glyph>(i));
         std::error_code error;
         if (!fs::is_regular_file(path, error)) continue;
@@ -244,8 +244,7 @@ bool recomp_playstation_buttons_image(uint64_t key, uint32_t width, uint32_t hei
     for (Glyph glyph : rule->second) {
         const size_t index = static_cast<size_t>(glyph);
         if (art[index].loaded()) continue;
-        if (!warned[index]) {
-            warned[index] = true;
+        if (!warned[index].exchange(true, std::memory_order_relaxed)) {
             std::fprintf(stderr, "recomp PlayStation buttons: %s is missing; the game's own prompt stays\n",
                 (fs::u8path(glyphsFolder) / glyphFile(glyph)).u8string().c_str());
         }
