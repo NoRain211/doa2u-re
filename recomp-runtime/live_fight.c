@@ -26,6 +26,12 @@
      stop at the match end. In a session the request rides this side's next
      session pad and both sides reset the lockstep on that frame, so the stop
      lands on the same frame on both sides.
+   - battle_start_fight 0xce050 (battle state 0) loads each match once. The
+     title and menu demo scenes (their manager at 0x87f534) run real fights
+     with up to four fighters and leave their poses in
+     g_fighter_bone_matrices; a fight writes only the bones its own models
+     have, so each side would start with what its last demo scene left. The
+     four banks are zeroed first, which is what a freshly booted runner has.
 
    The pads' guest state: g_pad_state 0xa94a70 holds
    0x30-byte pads, slot 5 the local and slot 6 the remote fighter. */
@@ -38,12 +44,15 @@ enum {
     LOCKSTEP_STALLED = 0x00f0a540u, /* g_lockstep_stalled */
     LOCKSTEP_BATCH = 0x00f0a560u,   /* g_lockstep_batch */
     LOCKSTEP_RESET = 0x002936a0u,   /* online_lockstep_reset */
+    FIGHTER_BONE_MATRICES = 0x00875c20u, /* g_fighter_bone_matrices: 4 fighters, 32 bones */
+    FIGHTER_BONE_BYTES = 4u * 0x800u,
 };
 
 /* The program's own bodies, which every hook falls back to. */
 extern void sub_00298930(void); /* online_lockstep_frame */
 extern void sub_000D1000(void); /* battle_online_round_start */
 extern void sub_00293980(void); /* online_lockstep_request_stop */
+extern void sub_000CE050(void); /* battle_start_fight */
 
 /* Both sides, at the start of the session frame whose pads carry the stop. */
 void recomp_live_stop_lockstep(void)
@@ -80,6 +89,12 @@ static void live_round_start(void)
             "the game keeps its own lockstep\n");
 }
 
+static void live_battle_start_fight(void)
+{
+    memset(recomp_memory(FIGHTER_BONE_MATRICES, FIGHTER_BONE_BYTES), 0, FIGHTER_BONE_BYTES);
+    sub_000CE050();
+}
+
 static void live_request_stop(void)
 {
     if (!recomp_live_rollback_active()) {
@@ -97,6 +112,7 @@ RecompFunction recomp_live_fight_lookup(uint32_t guest_address)
     case 0x00298930u: return live_lockstep_frame;
     case 0x000d1000u: return live_round_start;
     case 0x00293980u: return live_request_stop;
+    case 0x000ce050u: return live_battle_start_fight;
     default: return NULL;
     }
 }

@@ -34,6 +34,8 @@ static uint8_t pad_ram[0x10000];
 static uint8_t session_ram[0x20000];
 /* The guest stack kernel_call_guest pushes a return address onto. */
 static uint8_t stack_ram[0x1000];
+/* 0x875c20..0x877c20: g_fighter_bone_matrices, and a byte on each side. */
+static uint8_t bone_ram[0x2002];
 
 RecompRuntime recomp_runtime;
 uint8_t *recomp_fast_ram;
@@ -43,6 +45,7 @@ uint8_t *recomp_memory(uint32_t address, size_t width)
     if (address >= 0x00a90000u && address + width <= 0x00aa0000u) return pad_ram + (address - 0x00a90000u);
     if (address >= 0x00f00000u && address + width <= 0x00f20000u) return session_ram + (address - 0x00f00000u);
     if (address >= 0x00001000u && address + width <= 0x00002000u) return stack_ram + (address - 0x1000u);
+    if (address >= 0x00875c1fu && address + width <= 0x00877c21u) return bone_ram + (address - 0x00875c1fu);
     fprintf(stderr, "live_fight_test: guest address %08x+%zu is not in the test's pages\n", address, width);
     abort();
 }
@@ -83,6 +86,14 @@ void sub_000D1000(void)
     recomp_runtime.registers.eax = round_start_eax;
 }
 void sub_00293980(void) { ++original_stop_calls; }
+static unsigned original_fight_starts;
+static bool bones_clear_at_start;
+void sub_000CE050(void)
+{
+    ++original_fight_starts;
+    bones_clear_at_start = true;
+    for (size_t i = 1u; i <= 0x2000u; ++i) bones_clear_at_start = bones_clear_at_start && bone_ram[i] == 0u;
+}
 
 void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const char *member, int line)
 {
@@ -161,12 +172,18 @@ static void test_hash_ranges(void)
         if (!inside) outside += ignored[i].stop - ignored[i].start;
     }
     CHECK(outside + kept_bytes == RECOMP_XBOX_RAM_SIZE);
-    /* Frames since boot, and what a player's widescreen and 5.1 choices change,
-       stay out; the fighters and the random numbers stay in. */
+    /* Frames since boot, what a player's widescreen and 5.1 choices change and
+       what the menu demo scenes leave behind stay out; the fighters, their
+       bones, the round timer, the match's life and tag settings, the bytes the
+       fight reads beside the demo's state, and the random numbers stay in. */
     static const struct { uint32_t address; bool skipped; } probes[] = {
         {0x0087d56cu, true}, {0x00877c6cu, true}, {0x00879bf8u, true}, {0x00879c10u, true},
         {0x0087a93cu, true}, {0x0087d360u, true}, {0x0087d39cu, true}, {0x0087f538u, true},
         {0x00863a8cu, false}, {0x0087f539u, false}, {0x008a3968u, false}, {0x008a5768u, false},
+        {0x00876050u, false}, {0x00877c9cu, false}, {0x0087d498u, false}, {0x0087d49du, false},
+        {0x0087d5a4u, false}, {0x0087d63cu, false}, {0x0087f51du, false},
+        {0x008785f0u, true}, {0x00877cd8u, true}, {0x0087d128u, true}, {0x0087d23au, true},
+        {0x0087d580u, true}, {0x0087f2b0u, true}, {0x0087f50cu, true}, {0x0087bfa0u, true},
     };
     for (size_t p = 0u; p < sizeof probes / sizeof *probes; ++p) {
         bool skipped = false;
@@ -296,11 +313,28 @@ static void test_lookup(void)
     CHECK(recomp_live_fight_lookup(0x00298930u) == NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) == NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) == NULL);
+    CHECK(recomp_live_fight_lookup(0x000ce050u) == NULL);
     live_on = true;
     CHECK(recomp_live_fight_lookup(0x00298930u) != NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) != NULL);
+    CHECK(recomp_live_fight_lookup(0x000ce050u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00298931u) == NULL);
+}
+
+/* A match's load zeroes all four fighters' bones before the game's own body
+   runs, and nothing beside them. */
+static void test_fight_start(void)
+{
+    live_on = true;
+    memset(bone_ram, 0xa5, sizeof bone_ram);
+    const RecompFunction start = recomp_live_fight_lookup(0x000ce050u);
+    CHECK(start != NULL);
+    if (start == NULL) return;
+    start();
+    CHECK(original_fight_starts == 1u);
+    CHECK(bones_clear_at_start);
+    CHECK(bone_ram[0] == 0xa5u && bone_ram[0x2001] == 0xa5u);
 }
 
 static void test_lockstep_frame(void)
@@ -484,6 +518,7 @@ int main(void)
     test_window();
     test_session_ends();
     test_lookup();
+    test_fight_start();
     test_lockstep_frame();
     test_request_stop();
     test_stop_lockstep();
