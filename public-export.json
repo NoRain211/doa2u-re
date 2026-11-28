@@ -13,6 +13,7 @@
     "LICENSE",
     "NOTICE",
     "README.md",
+    "assets/glyphs/playstation/**",
     "docs/building.md",
     "run_game.sh",
     "launcher.sh",
@@ -180,6 +181,61 @@
       "path": "tools/launcher-background.png",
       "sha256": "939853b9f76ae735cf5d646a7cb5f75fbcb8f6ad289b421353d263fa9c4af741",
       "reason": "The same backdrop center-cropped to 640x400, for the SDL launcher, which loads PNG but not JPEG. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_button_color_circle.png",
+      "sha256": "e69732b8abd1510fce1d3417202ca7cf48a551abc6f26b0c1fbe2b08d899b3f0",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_button_color_cross.png",
+      "sha256": "e574bf4fd03b60affb8a0fb3b902c7e7435edfce0f9db47c2a6061bd8694ac93",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_button_color_square.png",
+      "sha256": "ab302eefb2a75e84b9271ac10ca14e63d6251af75f31194264597d53b50dfc15",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_button_color_triangle.png",
+      "sha256": "d87755a284daabffa0dbe6c62cfbfd4581a632a00717c992da6780388cd092b5",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_trigger_l1.png",
+      "sha256": "17a323e995f7706a8237ef1db173a70f62b40585f6cb8a4557da05c92a4b8a94",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_trigger_l2.png",
+      "sha256": "add3292ad43a4562bfb8b2150feeb8356d85a8c0e01da946a40d80a85ebf2de8",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_trigger_r1.png",
+      "sha256": "4fcd174085f00fdf22b286966d47ff52b2eac065df57b16ac68306ebb5d519a0",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation_trigger_r2.png",
+      "sha256": "40549ef0e5162d51c5389ca97d1160adf77f5c41dd7d66e13c8dff22e6279f45",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation4_button_share.png",
+      "sha256": "245ffd6e66246ef75a033d0c7cdfb8c409f8ec70dad6d9b72373df72d88e0e10",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation5_button_create.png",
+      "sha256": "1f3ff845c9c69149cf4f6b962fc522db7f21d33ddcda4619f5035070a24fcc46",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
+    },
+    {
+      "path": "assets/glyphs/playstation/playstation5_button_options.png",
+      "sha256": "330360b4eb9f62799521a01a8c95c9ca0ef31bf9ab235fd551fe0c35a0e973f3",
+      "reason": "Kenney Input Prompts glyph, CC0. Update the hash with the file."
     }
   ]
 }
