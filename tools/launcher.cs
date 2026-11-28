@@ -356,9 +356,15 @@ class LauncherForm : Form
     readonly Timer padTimer = new Timer { Interval = 50 };
     int padHeld;
     DateTime padRepeat = DateTime.MaxValue;
-    // The top bar's prompts name a PlayStation pad; SDL is asked at most once a second.
+    // The top bar's prompts show a PlayStation pad's glyphs; SDL is asked at most once a second.
     bool playstationPad;
     DateTime padTypeChecked = DateTime.MinValue;
+    // The prompts' art from assets\glyphs\playstation beside the launcher, as the game and the
+    // SDL launcher use it; a missing file keeps that prompt spelled out.
+    readonly Image crossGlyph = Glyph("playstation_button_color_cross");
+    readonly Image circleGlyph = Glyph("playstation_button_color_circle");
+    readonly Image l1Glyph = Glyph("playstation_trigger_l1");
+    readonly Image r1Glyph = Glyph("playstation_trigger_r1");
     Point? drag;
     RectangleF[] tabs, values;
     RectangleF discord;
@@ -403,6 +409,16 @@ class LauncherForm : Form
     readonly StringFormat wrap = new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit };
 
     static int Nearest(int h) { return Math.Max(0, Heights.Count(x => x <= h) - 1); }
+    // One prompt glyph, read at run time so the art never enters the exe; null when it is missing.
+    static Image Glyph(string name)
+    {
+        try
+        {
+            using (FileStream file = File.OpenRead(Path.Combine(Game.Root, "assets", "glyphs", "playstation", name + ".png")))
+                return Image.FromStream(file);
+        }
+        catch (Exception) { return null; }
+    }
     static Row Choice(string label, string info, string[] names, bool second, int fallback)
     {
         return new Row { Label = label, Info = info, Names = names, Index = second ? 1 : 0, Default = fallback };
@@ -729,19 +745,41 @@ class LauncherForm : Form
         }
         discord = DrawDiscordBadge(g, cx - 12, TopH / 2f);
         float x = discord.X - 16;
+        // A PlayStation pad shows Cross, Circle and L1/R1 art; without the files the names stay.
         bool ps = PlayStationPad();
-        foreach (var hint in new[] {
-            new[] { ps ? "CIRCLE" : "B", "BACK" }, new[] { ps ? "CROSS" : "A", "SELECT" },
-            new[] { "", "CHANGE" }, new[] { ps ? "L1/R1" : "LB/RB", "PAGE" } })
+        bool shoulders = ps && l1Glyph != null && r1Glyph != null;
+        string[] labels = { "BACK", "SELECT", "CHANGE", "PAGE" };
+        string[] names = { ps ? "CIRCLE" : "B", ps ? "CROSS" : "A", "", ps ? "L1/R1" : "LB/RB" };
+        Image[] firstGlyphs = { ps ? circleGlyph : null, ps ? crossGlyph : null, null, shoulders ? l1Glyph : null };
+        Image[] secondGlyphs = { null, null, null, shoulders ? r1Glyph : null };
+        for (int i = 0; i < labels.Length; i++)
         {
-            float textW = g.MeasureString(hint[1], smallFont).Width;
+            float textW = g.MeasureString(labels[i], smallFont).Width;
             x -= textW;
-            g.DrawString(hint[1], smallFont, new SolidBrush(muted), new RectangleF(x, 0, textW + 4, TopH), near);
-            float w = hint[0] == "" ? 26 : hint[0].Length > 1 ? g.MeasureString(hint[0], smallFont).Width + 8 : 20;
-            x -= w + 6;
-            g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
-            if (hint[0] == "") { Arrow(g, x + 11, TopH / 2, -1, 0, dark); Arrow(g, x + 15, TopH / 2, 1, 0, dark); }
-            else g.DrawString(hint[0], smallFont, new SolidBrush(dark), new RectangleF(x, TopH / 2 - 10, w, 20), center);
+            g.DrawString(labels[i], smallFont, new SolidBrush(muted), new RectangleF(x, 0, textW + 4, TopH), near);
+            x -= 6;
+            if (names[i] == "")
+            {
+                x -= 26;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, 26, 20));
+                Arrow(g, x + 11, TopH / 2, -1, 0, dark);
+                Arrow(g, x + 15, TopH / 2, 1, 0, dark);
+            }
+            else if (firstGlyphs[i] != null)
+            {
+                float w = secondGlyphs[i] == null ? 26 : 44;
+                x -= w;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
+                g.DrawImage(firstGlyphs[i], x + 5, TopH / 2 - 8, 16, 16);
+                if (secondGlyphs[i] != null) g.DrawImage(secondGlyphs[i], x + 23, TopH / 2 - 8, 16, 16);
+            }
+            else
+            {
+                float w = names[i].Length > 1 ? g.MeasureString(names[i], smallFont).Width + 8 : 20;
+                x -= w;
+                g.FillPath(new SolidBrush(Rgb(242, 227, 207)), Pill(x, TopH / 2 - 10, w, 20));
+                g.DrawString(names[i], smallFont, new SolidBrush(dark), new RectangleF(x, TopH / 2 - 10, w, 20), center);
+            }
             x -= 16;
         }
 
