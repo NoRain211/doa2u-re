@@ -22,16 +22,17 @@
      handshake. Letting it run keeps the game's session messages; the session
      starts on the first frame boundary after it returns, so both sides begin
      from the released state.
+     The title and menu demo scenes (their manager at 0x87f534) run real
+     fights with up to four fighters and leave their poses in
+     g_fighter_bone_matrices; a fight writes only the bones its own models
+     have, so each side would start with what its last demo scene left. The
+     four banks are zeroed here, before the session's first save. (The match
+     load, battle_start_fight 0xce050, would be the natural place, but the
+     program reaches it by a direct tail call that no lookup sees.)
    - online_lockstep_request_stop 0x293980 (cdecl) asks the game's lockstep to
      stop at the match end. In a session the request rides this side's next
      session pad and both sides reset the lockstep on that frame, so the stop
      lands on the same frame on both sides.
-   - battle_start_fight 0xce050 (battle state 0) loads each match once. The
-     title and menu demo scenes (their manager at 0x87f534) run real fights
-     with up to four fighters and leave their poses in
-     g_fighter_bone_matrices; a fight writes only the bones its own models
-     have, so each side would start with what its last demo scene left. The
-     four banks are zeroed first, which is what a freshly booted runner has.
 
    The pads' guest state: g_pad_state 0xa94a70 holds
    0x30-byte pads, slot 5 the local and slot 6 the remote fighter. */
@@ -52,7 +53,6 @@ enum {
 extern void sub_00298930(void); /* online_lockstep_frame */
 extern void sub_000D1000(void); /* battle_online_round_start */
 extern void sub_00293980(void); /* online_lockstep_request_stop */
-extern void sub_000CE050(void); /* battle_start_fight */
 
 /* Both sides, at the start of the session frame whose pads carry the stop. */
 void recomp_live_stop_lockstep(void)
@@ -83,16 +83,11 @@ static void live_round_start(void)
     /* Aborted (the peer left or the handshake failed): there is no fight to
        roll back, so leave the game to its own session messages. */
     if (recomp_runtime.registers.eax != 0u) return;
+    memset(recomp_memory(FIGHTER_BONE_MATRICES, FIGHTER_BONE_BYTES), 0, FIGHTER_BONE_BYTES);
     if (recomp_game_live_fight_pair(&local, &opponent)) recomp_live_round_started(opponent);
     else
         fprintf(stderr, "recomp live: the session slot table names no two fighters; "
             "the game keeps its own lockstep\n");
-}
-
-static void live_battle_start_fight(void)
-{
-    memset(recomp_memory(FIGHTER_BONE_MATRICES, FIGHTER_BONE_BYTES), 0, FIGHTER_BONE_BYTES);
-    sub_000CE050();
 }
 
 static void live_request_stop(void)
@@ -112,7 +107,6 @@ RecompFunction recomp_live_fight_lookup(uint32_t guest_address)
     case 0x00298930u: return live_lockstep_frame;
     case 0x000d1000u: return live_round_start;
     case 0x00293980u: return live_request_stop;
-    case 0x000ce050u: return live_battle_start_fight;
     default: return NULL;
     }
 }

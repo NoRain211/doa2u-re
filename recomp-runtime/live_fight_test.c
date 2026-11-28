@@ -86,14 +86,6 @@ void sub_000D1000(void)
     recomp_runtime.registers.eax = round_start_eax;
 }
 void sub_00293980(void) { ++original_stop_calls; }
-static unsigned original_fight_starts;
-static bool bones_clear_at_start;
-void sub_000CE050(void)
-{
-    ++original_fight_starts;
-    bones_clear_at_start = true;
-    for (size_t i = 1u; i <= 0x2000u; ++i) bones_clear_at_start = bones_clear_at_start && bone_ram[i] == 0u;
-}
 
 void recomp_dispatch_indirect_site(uint32_t address, uint32_t saved_esp, const char *member, int line)
 {
@@ -313,28 +305,11 @@ static void test_lookup(void)
     CHECK(recomp_live_fight_lookup(0x00298930u) == NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) == NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) == NULL);
-    CHECK(recomp_live_fight_lookup(0x000ce050u) == NULL);
     live_on = true;
     CHECK(recomp_live_fight_lookup(0x00298930u) != NULL);
     CHECK(recomp_live_fight_lookup(0x000d1000u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00293980u) != NULL);
-    CHECK(recomp_live_fight_lookup(0x000ce050u) != NULL);
     CHECK(recomp_live_fight_lookup(0x00298931u) == NULL);
-}
-
-/* A match's load zeroes all four fighters' bones before the game's own body
-   runs, and nothing beside them. */
-static void test_fight_start(void)
-{
-    live_on = true;
-    memset(bone_ram, 0xa5, sizeof bone_ram);
-    const RecompFunction start = recomp_live_fight_lookup(0x000ce050u);
-    CHECK(start != NULL);
-    if (start == NULL) return;
-    start();
-    CHECK(original_fight_starts == 1u);
-    CHECK(bones_clear_at_start);
-    CHECK(bone_ram[0] == 0xa5u && bone_ram[0x2001] == 0xa5u);
 }
 
 static void test_lockstep_frame(void)
@@ -494,20 +469,28 @@ static void test_round_start(void)
     CHECK(round_start != NULL);
     if (round_start == NULL) return;
 
-    /* The game's handshake runs first, then the session is asked for with the
+    /* The game's handshake runs first, then all four fighters' bones are
+       zeroed, and nothing beside them, and the session is asked for with the
        other fighter's address. */
+    memset(bone_ram, 0xa5, sizeof bone_ram);
     round_start_eax = 0u;
     session_active = false;
     round_start();
     CHECK(original_round_starts == 1u);
     CHECK(round_starts == 1u);
     CHECK(started_opponent == their_ina);
+    bool bones_clear = true;
+    for (size_t i = 1u; i <= 0x2000u; ++i) bones_clear = bones_clear && bone_ram[i] == 0u;
+    CHECK(bones_clear);
+    CHECK(bone_ram[0] == 0xa5u && bone_ram[0x2001] == 0xa5u);
 
-    /* An aborted handshake starts nothing. */
+    /* An aborted handshake starts nothing and leaves the bones. */
+    memset(bone_ram, 0xa5, sizeof bone_ram);
     round_start_eax = 1u;
     round_start();
     CHECK(original_round_starts == 2u);
     CHECK(round_starts == 1u);
+    CHECK(bone_ram[1] == 0xa5u);
 }
 
 int main(void)
@@ -518,7 +501,6 @@ int main(void)
     test_window();
     test_session_ends();
     test_lookup();
-    test_fight_start();
     test_lockstep_frame();
     test_request_stop();
     test_stop_lockstep();

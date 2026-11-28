@@ -368,10 +368,12 @@ demo started a Live single battle against a fresh one with different bone
 matrices, copies of fighter positions, matrix rows and the demo manager's own
 state, and failed the frame-30 check; two fresh runners matched through frame
 1,200 at the same speed, and two runners that had both watched the demo
-failed on one word their last scenes left. Each match's load
-(`battle_start_fight`, `0xce050`) now zeroes all four fighters' bone matrices
-first, which is what a fresh runner holds, so the bones the fight writes stay
-checked. The rest of what the demo leaves, each span where those runners'
+failed on one word their last scenes left. Each match's round start
+(`battle_online_round_start`, `0xd1000`) now zeroes all four fighters' bone
+matrices before the session's first save, so both sides start from the same
+bones and the bones the fight writes stay checked. The match load
+(`battle_start_fight`, `0xce050`) would be earlier, but the program reaches it
+by a direct tail call that the manual lookup never sees. The rest of what the demo leaves, each span where those runners'
 dumps differed, is left out of the hash; the bytes between them that the
 fight reads stay in.
 
