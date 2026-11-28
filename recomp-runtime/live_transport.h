@@ -87,6 +87,10 @@ void recomp_live_transport_unbind_rollback(void);
    drop the game's own lockstep packets (type 9) while a session runs. */
 void recomp_live_transport_session_begin(void);
 void recomp_live_transport_session_end(void);
+/* The other player left or went quiet: queue the game's own leave datagram
+   (type 17) from that player, so its session handler ends the fight instead of
+   the game waiting on a lockstep that player no longer sends. */
+void recomp_live_transport_session_leave(uint32_t virtual_ina);
 
 #ifdef __cplusplus
 }

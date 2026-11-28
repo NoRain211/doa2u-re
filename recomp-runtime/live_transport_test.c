@@ -394,6 +394,8 @@ static void check_game_datagrams(void)
     memset(d, 0, sizeof d);
     check("an empty type 3 passes", (d[2] = 3u, recomp_live_game_datagram_ok(d, 3u)));
     check("a type 3 with a body is dropped", !recomp_live_game_datagram_ok(d, 4u));
+    check("a type 17 leave passes", (d[2] = 17u, recomp_live_game_datagram_ok(d, 3u)));
+    check("a type 17 leave with a body is dropped", !recomp_live_game_datagram_ok(d, 4u));
     check("a header alone is dropped", !recomp_live_game_datagram_ok(d, 2u));
     check("type 4 has no handler", (d[2] = 4u, !recomp_live_game_datagram_ok(d, 3u)));
     check("type 22 has no handler", (d[2] = 22u, !recomp_live_game_datagram_ok(d, 3u)));
@@ -470,6 +472,25 @@ static void check_game_datagrams(void)
     check("a settings answer passes", recomp_live_game_datagram_ok(d, 0x15u + 0x16u));
     d[0x13] = 0x15u;
     check("a settings answer of another size is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
+    /* Requests: the game sends the payload its builder at that index writes
+       (0 while it has nothing to say, 0x14 for a fighter, 0x54 plus its
+       stage's state for match settings), and the peer's handler rewrites it. */
+    d[3] = 6u;
+    d[0x13] = 0u;
+    check("an empty character-select request passes", recomp_live_game_datagram_ok(d, 0x15u));
+    d[0x13] = 0x14u;
+    check("a character-select request passes", recomp_live_game_datagram_ok(d, 0x15u + 0x14u));
+    d[0x13] = 0x15u;
+    check("a character-select request of another size is dropped", !recomp_live_game_datagram_ok(d, 0x15u + 0x15u));
+    d[3] = 10u;
+    d[0x13] = 0x54u;
+    check("a match-settings request passes", recomp_live_game_datagram_ok(d, 0x15u + 0x54u));
+    d[0x13] = 0x54u + 0x1du;
+    check("a match-settings request with its stage's state passes",
+        recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1du));
+    d[0x13] = 0x54u + 0x1eu;
+    check("a match-settings request past 0x1d bytes is dropped",
+        !recomp_live_game_datagram_ok(d, 0x15u + 0x54u + 0x1eu));
 
     /* Type 9: the batch that starts lockstep names frames and delay. */
     memset(d, 0, sizeof d);
@@ -779,8 +800,15 @@ int main(void)
     rollback_hidden = true;
     check("a new session does not replay the last one", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     rollback_hidden = false;
+    /* What the game has not read yet outlives the session: after a KO its own
+       lockstep reads what the other side sent. */
+    size = (int)guest_wire(packet, ina_b, port_1000, (const uint8_t *)"ended", 5u);
+    send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+    recomp_live_transport_pump(netplay_now_ms());
     recomp_live_transport_session_end();
     rollback_active = false;
+    check("a session end keeps what the game has not read", guest_read(data, sizeof data, &from_ina, &from_port) == 5 &&
+        memcmp(data, "ended", 5u) == 0);
 
     /* --- the relay: introduced relayed, a relayed packet, and the fallback --- */
     memset(&intro, 0, sizeof intro);
@@ -932,6 +960,29 @@ int main(void)
     send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
     recomp_netplay_receive(&net, &session);
     check("the peer's goodbye crosses the route", net.peer_left);
+    /* One still in the socket when the next session begins belongs to the last. */
+    send_socket(peer_socket, &client_endpoint, packet, (size_t)size);
+    spin_ms(20u);
+    recomp_live_transport_session_begin();
+    net.peer_left = false;
+    recomp_netplay_receive(&net, &session);
+    check("a new session drops the last one's goodbye still in the socket", !net.peer_left);
+    /* This side's leave crosses more than once, so one lost datagram does not
+       leave the other player waiting for the 15 s timeout. */
+    recomp_netplay_send_goodbye(&net);
+    unsigned goodbyes = 0u;
+    for (;;) {
+        size = read_socket(peer_socket, packet, sizeof packet, &source, 50u);
+        if (size <= 0) break;
+        uint32_t goodbye_ina = 0u;
+        uint16_t goodbye_port = 0u;
+        const uint8_t *body = NULL;
+        size_t body_size = 0u;
+        if (parse_guest(packet, (size_t)size, &goodbye_ina, &goodbye_port, &body, &body_size) &&
+            body_size == sizeof goodbye && memcmp(body, goodbye, sizeof goodbye) == 0)
+            ++goodbyes;
+    }
+    check("a leave crosses more than once", goodbyes >= 3u);
     recomp_live_transport_unbind_rollback();
     /* A goodbye that arrives after this side's session ended belongs to no session and
        must not reach the game's recvfrom as one of its own datagrams. */
@@ -940,6 +991,17 @@ int main(void)
     check("a late goodbye is not handed to the game", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
     check("no session without an opponent", !recomp_live_transport_bind_rollback(ina_b, NULL));
     check("no session without a net", !recomp_live_transport_bind_rollback(0u, &net));
+
+    /* A session that ended under the game queues the game's own leave datagram
+       (type 17, no body) from the opponent, so its type-3/17 handler ends the
+       session and the fight's pages leave instead of waiting on a lockstep
+       that will never come. */
+    recomp_live_transport_session_leave(ina_b);
+    check("the leave is the game's type 17 from the opponent",
+        guest_read(data, sizeof data, &from_ina, &from_port) == 3 && data[0] == 1u && data[1] == 0u &&
+        data[2] == 17u && from_ina == ina_b && from_port == port_1000);
+    recomp_live_transport_session_leave(0u);
+    check("no leave names no player", guest_read(data, sizeof data, &from_ina, &from_port) < 0);
 
     /* --- the guest's winsock and XNet thunks --- */
     check("closesocket", call(recomp_live_transport_lookup(0x00381024u), args, 1u) == 0u);
